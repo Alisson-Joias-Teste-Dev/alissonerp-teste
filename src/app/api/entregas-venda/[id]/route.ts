@@ -170,6 +170,14 @@ export async function GET(
 
   const e = entrega[0];
 
+  // REGRA DE SEGURANÇA (Blindagem 2026-06): códigos A/B mascarados para todos
+  // exceto admin/desenvolvedor — o código chega ao cliente/motoboy só por
+  // WhatsApp. O drawer mostra a máscara; admin pode revelar (podeVerCodigos).
+  // IMPACTO SE REMOVIDO: operador vê o código e confirma entrega sem o
+  // cliente estar presente (burla o sistema de dois códigos).
+  const podeVerCodigos = ["admin", "desenvolvedor"].includes(usuario.role as string);
+  const mascarar = (c: unknown) => (c ? "••••••" : null);
+
   // Monta o objeto de resposta com conversão de NUMERIC e junção dos itens
   // REGRA DE NEGÓCIO: campos NUMERIC vêm como string do PostgreSQL;
   // converter com Number() para o frontend manipular como número nativo.
@@ -178,8 +186,8 @@ export async function GET(
     id: Number(e.id),
     venda_id: Number(e.venda_id),
     codigo_entrega: e.codigo_entrega,
-    codigo_cliente: e.codigo_cliente,
-    codigo_motoboy: e.codigo_motoboy,
+    codigo_cliente: podeVerCodigos ? e.codigo_cliente : mascarar(e.codigo_cliente),
+    codigo_motoboy: podeVerCodigos ? e.codigo_motoboy : mascarar(e.codigo_motoboy),
     tipo: e.tipo,
     forma_entrega: e.forma_entrega,
     situacao: e.situacao,

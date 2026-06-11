@@ -89,6 +89,47 @@ export async function requireVendaOwnership(
 }
 
 /**
+ * REGRA DE NEGÓCIO (acesso a entregas de venda — Blindagem 2026-06):
+ * O QUE: garante que `user` pode operar sobre a entrega `entregaId`.
+ *   - Roles full (admin/dev/diretor/gerentes) passam direto.
+ *   - Consultora: somente se for dona da venda da entrega (vendedor_id dela).
+ *   - Motoboy: somente se for o motoboy DESIGNADO para esta entrega
+ *     (e apenas quando `permitirMotoboy=true` — usado na confirmação por código).
+ * POR QUE: antes QUALQUER usuário autenticado criava/confirmava/concluía
+ *   entregas de qualquer venda — vetor direto de baixa de estoque indevida.
+ * IMPACTO SE ALTERADO: remover esta checagem reabre a falha crítica C1 da
+ *   análise docs/analise-vendas-entregas-2026-06.md (mínimo privilégio §0.1).
+ */
+export async function requireEntregaVendaAccess(
+  user: AuthUser,
+  entregaId: number,
+  opts: { permitirMotoboy?: boolean } = {},
+): Promise<{ venda_id: number; motoboy_id: string | null }> {
+  const [row] = await sql<{ venda_id: number; motoboy_id: string | null }[]>`
+    SELECT venda_id, motoboy_id
+      FROM alissonerp.entregas_venda
+     WHERE id = ${entregaId}
+     LIMIT 1
+  `;
+  if (!row) throw new NotFoundError("Entrega nao encontrada");
+  if (isVendasFullAccess(user.role)) return row;
+
+  // Motoboy designado pode confirmar a própria entrega (código do cliente no app)
+  if (opts.permitirMotoboy && user.role === "motoboy") {
+    if (row.motoboy_id && row.motoboy_id === user.id) return row;
+    throw new ForbiddenError("Motoboy só opera entregas designadas a ele");
+  }
+
+  // Consultora: precisa ser dona da venda
+  if (user.role === "consultora") {
+    await requireVendaOwnership(user, Number(row.venda_id));
+    return row;
+  }
+
+  throw new ForbiddenError("Sem permissao para esta entrega");
+}
+
+/**
  * Idem para orcamento, mas a ownership eh por `usuario_id UUID` (FK auth.users),
  * nao por vendedor_id (apesar da tabela ter ambos).
  */

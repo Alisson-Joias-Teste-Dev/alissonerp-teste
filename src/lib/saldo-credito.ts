@@ -86,14 +86,25 @@ export async function debitarSaldo(
 
 /**
  * Credita valor de volta ao saldo (quando cliente paga o A Receber).
+ *
+ * REGRA DE NEGÓCIO (Blindagem 2026-06): aceita transação externa opcional
+ * (`txClient`) para participar da MESMA transação do chamador — ex.: a
+ * confirmação de pagamento credita o saldo e baixa contas_receber de forma
+ * atômica (tudo ou nada). Sem txClient, abre transação própria (compatível
+ * com os chamadores antigos).
+ * IMPACTO SE ALTERADO: sem o suporte a txClient, a devolução de crédito pode
+ * persistir mesmo quando o resto da confirmação falha (estado inconsistente).
  */
 export async function creditarSaldo(
   valor: number,
   vendaId: number,
   pagamentoId: number | null,
   userId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  txClient?: any,
 ): Promise<SaldoResult> {
-  return sql.begin(async (tx: any) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const executar = async (tx: any): Promise<SaldoResult> => {
     const [row] = await tx`
       SELECT valor FROM alissonerp.configuracoes_sistema
       WHERE chave = 'saldo_gerente_atual'
@@ -117,7 +128,11 @@ export async function creditarSaldo(
     `;
 
     return { saldo_antes: saldoAntes, saldo_depois: saldoDepois };
-  }) as Promise<SaldoResult>;
+  };
+
+  if (txClient) return executar(txClient);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return sql.begin(async (tx: any) => executar(tx)) as Promise<SaldoResult>;
 }
 
 /**

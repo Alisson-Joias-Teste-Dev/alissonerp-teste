@@ -319,7 +319,7 @@ export async function solicitarAprovacaoDevolucao(
     mensagem: descricao,
     remetenteId: userId,
     link: `/devolucoes/${id}`,
-  }).catch(() => {});
+  }).catch((e) => console.error("[devolucoes] best-effort falhou (notificação):", e));
 
   return result;
 }
@@ -360,7 +360,7 @@ export async function processarAprovacaoDevolucao(
       mensagem: motivo ?? "Devolucao rejeitada",
       remetenteId: aprovadorId,
       link: `/devolucoes/${dev.id}`,
-    }).catch(() => {});
+    }).catch((e) => console.error("[devolucoes] best-effort falhou (notificação):", e));
 
     return { ok: true, devolucao_id: dev.id, status: "rejeitado" };
   }
@@ -380,7 +380,7 @@ export async function processarAprovacaoDevolucao(
     mensagem: "Devolucao aprovada. Inspecione os itens e conclua.",
     remetenteId: aprovadorId,
     link: `/devolucoes/${dev.id}`,
-  }).catch(() => {});
+  }).catch((e) => console.error("[devolucoes] best-effort falhou (notificação):", e));
 
   return { ok: true, devolucao_id: dev.id, status: "aprovado" };
 }
@@ -478,7 +478,7 @@ export async function concluirDevolucao(
         INSERT INTO alissonerp.estoque_comercial_config (produto_id, ativo, estoque_minimo)
         VALUES (${it.produto_id}, true, 0)
         ON CONFLICT (produto_id) DO UPDATE SET ativo = true
-      `.catch(() => {});
+      `.catch((e) => console.error("[devolucoes] best-effort falhou (notificação):", e));
       acoes.push(`entrada estoque produto ${it.produto_id} qtd ${qtd}`);
     } else if (it.condicao === "garantia") {
       acoes.push(`item ${it.id} marcado como garantia (integracao com ordem separada)`);

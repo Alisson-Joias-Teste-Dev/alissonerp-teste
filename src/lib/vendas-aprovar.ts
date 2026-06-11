@@ -633,7 +633,7 @@ export async function approveVenda(
     await sql`
       INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
       VALUES ('approveVenda_bloqueado', ${JSON.stringify({ vendaId, userId, motivo: "desconto_pendente" })}::text::jsonb, 409, 'desconto >${approveVendaThreshold}% sem aprovação')
-    `.catch(() => {});
+    `.catch((e) => console.error("[approveVenda] webhook_log falhou:", e));
     throw new Error(`Venda tem desconto acima de ${approveVendaThreshold}% aguardando aprovação. Solicite aprovação de desconto antes de prosseguir.`);
   }
 

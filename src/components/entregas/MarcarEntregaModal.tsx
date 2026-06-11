@@ -38,6 +38,7 @@ import {
   Clock,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
+import { useErrorStore } from "@/stores/errorStore";
 
 // ── Paleta (idêntica ao CrediarioClient) ────────────────────────────────────────
 const C = {
@@ -979,7 +980,9 @@ export default function MarcarEntregaModal({
       await apiFetch(
         `/api/entregas-venda/${codigosGerados.entrega.id}/cancelar`,
         { method: "POST" },
-      ).catch(() => {});
+        // Pitfall §3: se o auto-cancelamento falhar, a entrega fica órfã na
+        // lista — o operador precisa saber para cancelar manualmente.
+      ).catch(() => useErrorStore.getState().push("Não foi possível cancelar a entrega automaticamente — cancele manualmente na lista de entregas.", { level: "warning" }));
     }
     if (codigosGerados) {
       onSuccess(codigosGerados.entrega);

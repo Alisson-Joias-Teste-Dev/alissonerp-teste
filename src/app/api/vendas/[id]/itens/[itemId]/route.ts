@@ -7,6 +7,7 @@ import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { zodError } from "@/lib/schemas/common";
 import { isFullAccess } from "@/lib/roles";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { logAudit } from "@/lib/audit";
 
 const ItemVendaPatchSchema = z.object({
   quantidade: z.coerce.number().optional(),
@@ -67,7 +68,8 @@ export async function PATCH(
   }
 
   const [item] = await sql`
-    SELECT id FROM alissonerp.itens_venda_erp WHERE id = ${iId} AND venda_id = ${vendaId}
+    SELECT id, quantidade, pct_desconto, preco_unitario, total_item
+    FROM alissonerp.itens_venda_erp WHERE id = ${iId} AND venda_id = ${vendaId}
   `;
   if (!item) return NextResponse.json({ error: "Item não encontrado" }, { status: 404 });
 
@@ -123,16 +125,36 @@ export async function PATCH(
             updated_at            = NOW()
         WHERE id = ${vendaId}
       `;
-      // Cancela tarefa de desconto pendente, se houver
-      await sql`
-        UPDATE alissonerp.tarefas
-        SET status = 'cancelado', updated_at = NOW()
-        WHERE venda_id = ${vendaId}
-          AND status = 'aguardando_aprovacao'
-          AND tags @> ARRAY['aprovacao_desconto']::text[]
-      `.catch(() => {});
+      // Cancela tarefa de desconto pendente, se houver.
+      // Blindagem 2026-06: falha aqui não pode ser silenciosa — é logada.
+      try {
+        await sql`
+          UPDATE alissonerp.tarefas
+          SET status = 'cancelado', updated_at = NOW()
+          WHERE venda_id = ${vendaId}
+            AND status = 'aguardando_aprovacao'
+            AND tags @> ARRAY['aprovacao_desconto']::text[]
+        `;
+      } catch (err) {
+        console.error(`[itens PATCH] Falha ao cancelar tarefa de desconto (venda ${vendaId}):`, err);
+      }
     }
   }
+
+  // Rastreabilidade §0.1: registra a edição do item (valores antes/depois)
+  await logAudit(sql, {
+    tabela: "itens_venda_erp",
+    operacao: "UPDATE",
+    registro_id: iId,
+    usuario_id: user.id,
+    dados_antes: {
+      quantidade: Number(item.quantidade),
+      pct_desconto: Number(item.pct_desconto),
+      preco_unitario: Number(item.preco_unitario),
+      total_item: Number(item.total_item),
+    },
+    dados_depois: Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)),
+  });
 
   return NextResponse.json({ ok: true });
 }
@@ -169,10 +191,29 @@ export async function DELETE(
     throw e;
   }
 
+  // Captura o item antes de deletar para a trilha de auditoria
+  const [itemDel] = await sql`
+    SELECT nome_produto, sku, quantidade, total_item
+    FROM alissonerp.itens_venda_erp WHERE id = ${iId} AND venda_id = ${vendaId}
+  `;
+
   await sql`
     DELETE FROM alissonerp.itens_venda_erp
     WHERE id = ${iId} AND venda_id = ${vendaId}
   `;
+
+  // Rastreabilidade §0.1: remoção de item é operação sensível (mexe em totais
+  // e libera reserva de estoque via trigger) — registra quem removeu o quê.
+  await logAudit(sql, {
+    tabela: "itens_venda_erp",
+    operacao: "DELETE",
+    registro_id: iId,
+    usuario_id: user.id,
+    dados_antes: itemDel
+      ? { nome_produto: itemDel.nome_produto, sku: itemDel.sku, quantidade: Number(itemDel.quantidade), total_item: Number(itemDel.total_item) }
+      : null,
+    dados_depois: null,
+  });
 
   return NextResponse.json({ ok: true });
 }

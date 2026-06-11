@@ -1076,6 +1076,19 @@ export async function confirmarEntrega(
     );
   }
 
+  // REGRA DE NEGÓCIO (Blindagem 2026-06 — migration 295): limite de tentativas.
+  // O QUE: 5 erros de código bloqueiam a entrega até gerente/admin desbloquear.
+  // POR QUE: sem limite, dá para adivinhar o código de 6 dígitos por força
+  // bruta e confirmar a entrega sem o cliente presente.
+  // IMPACTO SE REMOVIDO: o sistema de dois códigos perde a proteção principal.
+  const MAX_TENTATIVAS_CODIGO = 5;
+  if (entrega.codigo_bloqueado_em) {
+    throw new Error(
+      `Entrega ${entrega.codigo_entrega} bloqueada por excesso de tentativas de código. ` +
+        `Peça a um gerente para desbloquear.`,
+    );
+  }
+
   // Verificar se o código corresponde a algum dos códigos de verificação
   // REGRA: códigos são comparados como strings, sem trim ou formatação
   const matchMotoboy =
@@ -1085,7 +1098,39 @@ export async function confirmarEntrega(
   const matchCliente = entrega.codigo_cliente === codigo;
 
   if (!matchMotoboy && !matchCliente) {
-    throw new Error("Código inválido");
+    // Tentativa errada: incrementa o contador de forma atômica e bloqueia
+    // na 5ª falha. O UPDATE com RETURNING evita corrida entre tentativas
+    // simultâneas (cada uma conta uma vez).
+    const [tent] = await sql`
+      UPDATE alissonerp.entregas_venda
+      SET tentativas_codigo = tentativas_codigo + 1,
+          codigo_bloqueado_em = CASE
+            WHEN tentativas_codigo + 1 >= ${MAX_TENTATIVAS_CODIGO} THEN now()
+            ELSE codigo_bloqueado_em
+          END,
+          updated_at = now()
+      WHERE id = ${entregaId}
+      RETURNING tentativas_codigo, codigo_bloqueado_em
+    `;
+    await logAudit(sql, {
+      tabela: "entregas_venda",
+      operacao: "UPDATE",
+      registro_id: entregaId,
+      usuario_id: usuarioId,
+      dados_antes: null,
+      dados_depois: {
+        evento: "tentativa_codigo_invalida",
+        tentativas: Number(tent?.tentativas_codigo ?? 0),
+        bloqueada: !!tent?.codigo_bloqueado_em,
+      },
+    });
+    if (tent?.codigo_bloqueado_em) {
+      throw new Error(
+        `Código inválido. Entrega bloqueada após ${MAX_TENTATIVAS_CODIGO} tentativas — peça a um gerente para desbloquear.`,
+      );
+    }
+    const restantes = MAX_TENTATIVAS_CODIGO - Number(tent?.tentativas_codigo ?? 0);
+    throw new Error(`Código inválido. ${restantes} tentativa(s) restante(s) antes do bloqueio.`);
   }
 
   // ── Pré-validação: ordens de reposição pendentes ──────────────────────────
@@ -1116,6 +1161,14 @@ export async function confirmarEntrega(
   const resultado = await sql.begin(async (tx: DbSql) => {
     let etapa: "retirada_loja" | "entrega_cliente";
     let novaSituacao: string;
+
+    // Código correto: zera o contador de tentativas (migration 295) para que
+    // erros antigos não somem com futuros (ex.: código B ok, depois código A).
+    await tx`
+      UPDATE alissonerp.entregas_venda
+      SET tentativas_codigo = 0
+      WHERE id = ${entregaId} AND tentativas_codigo > 0
+    `;
 
     // CÓDIGO B — Motoboy retirou na loja
     if (matchMotoboy) {

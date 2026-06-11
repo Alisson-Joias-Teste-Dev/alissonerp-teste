@@ -1,8 +1,43 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 11/06/2026 — Versão: v2.60.4 <!-- Revisado 11/06/2026 -->
+> 📋 Última atualização automática: 11/06/2026 — Versão: v2.61.0 <!-- Revisado 11/06/2026 -->
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## feat(vendas/entregas): Blindagem do módulo — Etapa 1 da refatoração (v2.61.0)
+
+**Contexto:** primeira etapa da refatoração do módulo de vendas/entregas (plano aprovado
+em 11/06/2026), corrigindo os achados críticos da análise pente fino
+(`docs/analise-vendas-entregas-2026-06.md`). Sem mudança de regra de negócio.
+
+**Correções de segurança e integridade:**
+- **C1 — Rotas de entrega fechadas:** POST `/api/entregas-venda`, `[id]/confirmar`,
+  `[id]/cancelar` e PATCH `/api/entrega/[entregaId]` agora exigem role real
+  (novo helper `requireEntregaVendaAccess` em `src/lib/auth-vendas.ts`: roles de vendas
+  full, consultora dona da venda, motoboy designado só confirma a própria entrega).
+- **C3 — Confirmação de pagamento atômica:** `pagamentos/[pagId]/confirmar` roda em
+  `sql.begin()` com `FOR UPDATE` (anti dupla confirmação). `creditarSaldo()` aceita
+  transação externa (`txClient`). Falha = rollback total + erro visível.
+- **C4 — Auditoria (`logAudit`):** PATCH de vendas, cancelar venda, aprovar desconto,
+  confirmar pagamento, editar/remover item, preparações de entrega e tentativas/
+  desbloqueio de código agora registram quem/o quê/quando em `alissonerp.audit_log`.
+- **M1 — Fim dos catches silenciosos:** `aprovar-desconto` virou transação única;
+  best-effort de notificações/webhooks agora loga erro; front usa `useErrorStore`
+  (NovaVendaClientV2, VendaDetalheClient, MarcarEntregaModal, FreteAvulsoModal).
+- **M2 — PATCH de vendas:** erros de regra (STOCK_NEGATIVE etc.) → 409; resto → 500
+  via `internalError` (antes tudo virava 409 com mensagem crua do banco).
+- **Códigos A/B não vazam mais:** respostas de GET/POST de entregas saem mascaradas
+  (`••••••`) para todos exceto admin/desenvolvedor — código só chega por WhatsApp.
+- **Migration 295:** `tentativas_codigo` + `codigo_bloqueado_em` em `entregas_venda` —
+  5 códigos errados bloqueiam a confirmação; desbloqueio só por gerente/admin via
+  nova rota POST `/api/entregas-venda/[id]/desbloquear-codigo` (com auditoria).
+
+**Backup prévio (Etapa 0):** tag `v2.60.4-pre-refatoracao-vendas` + branch
+`backup-pre-refatoracao-vendas-2026-06` no origin; dump completo de produção
+(280 MB) restaurado no banco de teste para a fase de testes.
+
+`npx tsc --noEmit` limpo. Migration 295 ainda NÃO aplicada em produção (vai junto
+com o pacote da refatoração, após testes no banco de teste e aval do Jonathan).
 
 ## fix(ligacao): "Disponível" do Ouro 24k passa a usar o pote (depósito 1) (v2.60.4)
 

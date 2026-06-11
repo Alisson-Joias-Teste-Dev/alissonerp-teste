@@ -19,6 +19,7 @@ import { createClient } from "@/lib/supabase/client";
 // REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
 // Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos frontends.
 import { isServicoRodioProduto, descricaoItemComBaseRodio, calcularPreviewRodioPorSkuBase, getPctRodio, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
+import { useErrorStore } from "@/stores/errorStore";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -641,7 +642,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         }
         setGateways(lista);
       }
-    }).catch(() => {});
+      // Pitfall §3: erro de carga não pode ser silencioso — sem a lista de
+      // gateways o pagamento por cartão/PIX fica limitado ao default.
+    }).catch(() => useErrorStore.getState().push("Erro ao carregar gateways de pagamento", { level: "warning" }));
   }, []);
   const formasPagamento = [...gateways.map(g => g.nome), ...FORMAS_FIXAS];
 
@@ -699,8 +702,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [validacaoSvcFoto, setValidacaoSvcFoto] = useState<{ match: boolean; mensagem: string } | null>(null);
 
   // Load commission tables on mount
+  // Pitfall §3: falha aqui afeta o CÁLCULO DA COMISSÃO dos itens — a
+  // consultora precisa saber que a tabela de faixas não carregou.
   useEffect(() => {
-    fetch("/api/vendas/faixas-comissao").then(r => r.json()).then(setFaixas).catch(() => {});
+    fetch("/api/vendas/faixas-comissao").then(r => r.json()).then(setFaixas)
+      .catch(() => useErrorStore.getState().push("Erro ao carregar faixas de comissão — comissões podem sair zeradas. Recarregue a página.", { level: "warning" }));
   }, []);
 
 

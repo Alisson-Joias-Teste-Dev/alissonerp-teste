@@ -12,6 +12,7 @@ import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { orcamentoFichaToDados, nomeItemOrdem } from "@/lib/orcamento-ficha-to-dados";
 import { isMasterAdmin } from "@/lib/master-admin";
 import { solicitarAprovacaoEntregaSemPagamento, vendaTemExcecaoEntregaAprovada } from "@/lib/entrega-sem-pagamento";
+import { logAudit } from "@/lib/audit";
 
 const toNum = (v: unknown) => (v === null || v === undefined ? v : Number(v));
 
@@ -982,6 +983,26 @@ export async function PATCH(
       `;
     }
 
+    // Rastreabilidade §0.1 (Blindagem 2026-06 — correção C4): registra QUEM
+    // alterou a venda e QUAIS campos mudaram. Transições de situacao também
+    // ficam em vendas_transicoes (trigger), mas alterações de campos só aqui.
+    {
+      const camposAlterados: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(body)) {
+        if (v !== undefined && k !== "client_updated_at") camposAlterados[k] = v;
+      }
+      if (Object.keys(camposAlterados).length > 0) {
+        await logAudit(sql, {
+          tabela: "vendas_erp",
+          operacao: "UPDATE",
+          registro_id: vendaId,
+          usuario_id: user.id,
+          dados_antes: { situacao: venda.situacao },
+          dados_depois: camposAlterados,
+        });
+      }
+    }
+
     // ── Sync alterações com Tiny se venda já aprovada e tem pedido Tiny ─────────
     if (!body.situacao && venda.situacao === "aprovado") {
       const [vendaSync] = await sql`
@@ -1212,9 +1233,18 @@ export async function PATCH(
       ...(tinyErroWarning ? { tiny_warning: tinyErroWarning } : {}),
     });
   } catch (e) {
-    // Captura erros de triggers do banco (STOCK_NEGATIVE, ENTREGA_BLOCKED, etc.)
-    // e devolve como JSON para o frontend não quebrar com Unexpected end of JSON input.
-    const msg = e instanceof Error ? e.message : "Erro interno ao salvar venda";
-    return NextResponse.json({ error: msg }, { status: 409 });
+    // REGRA DE NEGÓCIO (Blindagem 2026-06 — correção M2): erros de REGRA vindos
+    // de triggers do banco (STOCK_NEGATIVE, ENTREGA_BLOCKED, TRANSICAO_INVALIDA)
+    // são conflito de negócio → 409 com a mensagem para o usuário.
+    // Qualquer OUTRO erro é falha interna → 500 via internalError (loga o stack
+    // e devolve mensagem genérica, sem vazar detalhes do banco).
+    // IMPACTO SE ALTERADO: voltar ao catch-all 409 mascara erros reais como
+    // "conflito" e expõe mensagens cruas do banco ao usuário.
+    const msg = e instanceof Error ? e.message : "";
+    const ERROS_DE_REGRA = ["STOCK_NEGATIVE", "ENTREGA_BLOCKED", "TRANSICAO", "reposição", "reposicao"];
+    if (ERROS_DE_REGRA.some((m) => msg.includes(m))) {
+      return NextResponse.json({ error: msg }, { status: 409 });
+    }
+    return internalError(`[PATCH /api/vendas/${vendaId}]`, e, "Erro interno ao salvar venda. Tente novamente.");
   }
 }

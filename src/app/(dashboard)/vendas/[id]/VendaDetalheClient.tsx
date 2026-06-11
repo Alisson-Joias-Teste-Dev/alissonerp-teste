@@ -588,7 +588,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         }
         setGateways(lista);
       }
-    }).catch(() => {});
+      // Pitfall §3: erro de carga não pode ser silencioso
+    }).catch(() => useErrorStore.getState().push("Erro ao carregar gateways de pagamento", { level: "warning" }));
   }, []);
 
   // ── PagamentoForm payments ──────────────────────────────────────────────────

@@ -28,10 +28,10 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import sql from "@/lib/db";
-import { createServerSupabase } from "@/lib/supabase/server";
 import { confirmarEntrega } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
+import { authOr401, ForbiddenError } from "@/lib/auth-server";
+import { requireEntregaVendaAccess, NotFoundError } from "@/lib/auth-vendas";
 
 // Schema de validação do body
 // REGRA DE NEGÓCIO: código de verificação obrigatório. foto_base64 é opcional
@@ -48,20 +48,27 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const supabase = await createServerSupabase();
-  const { data } = await supabase.auth.getUser();
-  const user = data.user;
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
 
   const { id } = await params;
   const entregaId = Number(id);
   if (isNaN(entregaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  // Verifica se o usuário existe no ERP (qualquer role autenticada pode confirmar)
-  const [usuario] = await sql`
-    SELECT id FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
-  `;
-  if (!usuario) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  // REGRA DE NEGÓCIO (Blindagem 2026-06): confirmar entrega exige permissão real:
+  //   - roles de vendas (admin/dev/diretor/gerentes) — operador do balcão;
+  //   - consultora dona da venda;
+  //   - motoboy DESIGNADO desta entrega (confirma o código A do cliente no app).
+  // POR QUE: antes qualquer usuário autenticado confirmava qualquer entrega,
+  // dando baixa de estoque indevida (falha C1 da análise).
+  // IMPACTO SE REMOVIDO: volta o buraco de segurança e a baixa por engano.
+  try {
+    await requireEntregaVendaAccess(user, entregaId, { permitirMotoboy: true });
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   // Validação do body
   let raw: unknown;

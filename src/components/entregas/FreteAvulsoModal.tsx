@@ -14,6 +14,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { X, Loader2, CheckCircle, Bike, MapPin, AlignLeft, User } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
+import { useErrorStore } from "@/stores/errorStore";
 
 const C = {
   esmeralda: "#184036",
@@ -82,7 +83,8 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado }: Props) {
     if (!isOpen) return;
     apiFetch<Motoboy[]>("/api/entregas-venda/motoboys")
       .then(d => setMotoboys(Array.isArray(d) ? d : []))
-      .catch(() => {});
+      // Pitfall §3: sem a lista de motoboys o frete avulso não pode ser criado
+      .catch(() => useErrorStore.getState().push("Erro ao carregar lista de motoboys", { level: "warning" }));
   }, [isOpen]);
 
   // Busca de contato com debounce
