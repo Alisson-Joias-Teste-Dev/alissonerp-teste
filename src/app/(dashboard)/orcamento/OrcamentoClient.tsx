@@ -4004,6 +4004,7 @@ function FichaAlianca({
     <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: C.cremeBorder }}>
       <h4 className="text-[10px] font-bold uppercase tracking-wider" style={{ color: C.esmeralda }}>{titulo}</h4>
       <Linha k={L("modelo")}        v={labelDoModelo(profile)} />
+      <Linha k="Interior"           v={profile === ProfileType.Anatomica || profile === ProfileType.BoleadaDouble ? "Boleada" : "Reta"} />
       <Linha k={L("aro")}           v={`${ringSize.size} (Ø ${ringSize.diameter.toFixed(2)}mm)`} />
       <Linha k={L("largura")}       v={`${params.width.toFixed(2)} mm`} />
       <Linha k={L("espessura")}     v={`${params.height.toFixed(2)} mm`} />
