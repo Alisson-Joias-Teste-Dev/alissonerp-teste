@@ -212,6 +212,7 @@ export async function POST(req: NextRequest) {
   }
 
   const ouro24kLigaId = await getParametroNumber(PARAM.OURO_24K_LIGA_INSUMO_ID);
+  const almoxarifadoId = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
 
   // Calcular pesos (com pureza)
   const pureza_decimal      = Math.min(Math.max(pureza, 0), 100) / 100;
@@ -219,13 +220,17 @@ export async function POST(req: NextRequest) {
   const peso_18k_esperado   = Number((ouro_puro_real / teor).toFixed(3));
   const peso_liga_calculado = Number((peso_18k_esperado - peso_24k).toFixed(3));
 
-  // Verificar saldo Ouro 24k no pote
+  // REGRA DE NEGÓCIO (§3): a ligação consome do POTE = depósito ID=1 (Almoxarifado Central).
+  // O saldo tem que vir de vw_saldo_estoque filtrado nesse depósito (SUM(saldo)), NÃO do total
+  // global. vw_detalhe_pote soma TODOS os depósitos (inclui operadores), e um operador negativo
+  // derrubava o "Disponível" — mostrando/bloqueando menos ouro do que o pote realmente tem.
+  // IMPACTO se voltar ao total global: tela engana e o backend bloqueia ligações válidas.
   const [saldo24kRow] = await sql`
-    SELECT COALESCE(saldo_real, 0)::numeric AS saldo_real
-    FROM alissonerp.vw_detalhe_pote
-    WHERE insumo_id = ${ouro24kLigaId}
+    SELECT COALESCE(SUM(saldo), 0)::numeric AS saldo
+    FROM alissonerp.vw_saldo_estoque
+    WHERE insumo_id = ${ouro24kLigaId} AND deposito_id = ${almoxarifadoId}
   `;
-  const saldo24k = Number((saldo24kRow as any)?.saldo_real ?? 0);
+  const saldo24k = Number((saldo24kRow as any)?.saldo ?? 0);
   if (peso_24k > saldo24k) {
     return NextResponse.json(
       { error: `Saldo insuficiente de Ouro 24k. Saldo: ${saldo24k.toFixed(3)}g, Solicitado: ${peso_24k}g` },
@@ -233,13 +238,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Verificar saldo da liga no pote
+  // Verificar saldo da liga no pote (mesma regra: depósito 1)
   const [saldoLigaRow] = await sql`
-    SELECT COALESCE(saldo_real, 0)::numeric AS saldo_real
-    FROM alissonerp.vw_detalhe_pote
-    WHERE insumo_id = ${liga_insumo_id}
+    SELECT COALESCE(SUM(saldo), 0)::numeric AS saldo
+    FROM alissonerp.vw_saldo_estoque
+    WHERE insumo_id = ${liga_insumo_id} AND deposito_id = ${almoxarifadoId}
   `;
-  const saldoLiga = Number((saldoLigaRow as any)?.saldo_real ?? 0);
+  const saldoLiga = Number((saldoLigaRow as any)?.saldo ?? 0);
   if (peso_liga_calculado > saldoLiga) {
     return NextResponse.json(
       { error: `Saldo insuficiente de ${liga_nome}. Saldo: ${saldoLiga.toFixed(3)}g, Necessário: ${peso_liga_calculado.toFixed(3)}g` },
@@ -280,22 +285,24 @@ export async function POST(req: NextRequest) {
       `;
 
       // Reconfere saldo DENTRO da transação (autoritativo) — pode ter mudado entre a
-      // checagem inicial e o upload da foto. Se faltar, aborta a transação inteira.
+      // checagem inicial e o upload da foto. Mesma regra §3: saldo do POTE (depósito 1).
       const [s24] = await tx`
-        SELECT COALESCE(saldo_real, 0)::numeric AS saldo_real
-        FROM alissonerp.vw_detalhe_pote WHERE insumo_id = ${ouro24kLigaId}
+        SELECT COALESCE(SUM(saldo), 0)::numeric AS saldo
+        FROM alissonerp.vw_saldo_estoque
+        WHERE insumo_id = ${ouro24kLigaId} AND deposito_id = ${almoxarifadoId}
       `;
-      const saldo24kTx = Number((s24 as any)?.saldo_real ?? 0);
+      const saldo24kTx = Number((s24 as any)?.saldo ?? 0);
       if (peso_24k > saldo24kTx) {
         saldoErro = `Saldo insuficiente de Ouro 24k. Saldo: ${saldo24kTx.toFixed(3)}g, Solicitado: ${peso_24k}g`;
         throw new Error("SALDO_INSUFICIENTE");
       }
 
       const [sLiga] = await tx`
-        SELECT COALESCE(saldo_real, 0)::numeric AS saldo_real
-        FROM alissonerp.vw_detalhe_pote WHERE insumo_id = ${liga_insumo_id}
+        SELECT COALESCE(SUM(saldo), 0)::numeric AS saldo
+        FROM alissonerp.vw_saldo_estoque
+        WHERE insumo_id = ${liga_insumo_id} AND deposito_id = ${almoxarifadoId}
       `;
-      const saldoLigaTx = Number((sLiga as any)?.saldo_real ?? 0);
+      const saldoLigaTx = Number((sLiga as any)?.saldo ?? 0);
       if (peso_liga_calculado > saldoLigaTx) {
         saldoErro = `Saldo insuficiente de ${liga_nome}. Saldo: ${saldoLigaTx.toFixed(3)}g, Necessário: ${peso_liga_calculado.toFixed(3)}g`;
         throw new Error("SALDO_INSUFICIENTE");
