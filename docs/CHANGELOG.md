@@ -27,12 +27,13 @@ para 'Na Entrega'); `src/app/api/vendas/[id]/cobrar-entrega/route.ts` (nova); `s
 entrega-venda.ts` (bloqueio no fluxo do motoboy); `NovaVendaClientV2.tsx` ('Na Entrega'
 como forma selecionável).
 
+**UI:** botão "Cobrar na entrega" na tela de detalhe da venda (VendaDetalheClient) — no
+pagamento 'Na Entrega' pendente, abre o seletor de forma real (Dinheiro/Pix/Cartão) e
+chama a rota /cobrar-entrega. 'Na Entrega' deixa de cair no "Confirmar" genérico.
+
 **Teste E2E (docs/teste-e2e-vendas.sql, 18 asserções PASS):** ciclo completo + Na Entrega
 (pendente não gera conta a receber; cobrar na entrega cria a conta PAGA; cobrança não muda
 status; após cobrar, entrega conclui). `tsc` limpo; suíte sem falha nova.
-
-**⚠️ Pendente (UI):** falta o BOTÃO "Cobrar na entrega" na tela de entrega/detalhe da
-venda (a rota backend já existe). Sem ele, a cobrança só via API.
 
 ## feat(vendas): Etapa 3 — celular obrigatório + WhatsApp do desenvolvedor (v2.64.0)
 

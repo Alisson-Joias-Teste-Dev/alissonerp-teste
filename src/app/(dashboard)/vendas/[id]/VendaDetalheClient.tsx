@@ -525,6 +525,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
   // ── Manual MP inline (pagamento pendente na venda) ──────────────────────────
   const [mpManualPagId, setMpManualPagId] = useState<number | null>(null);
+  // Etapa 4 — qual pagamento 'Na Entrega' está abrindo o seletor de forma p/ cobrar
+  const [cobrarPagId, setCobrarPagId] = useState<number | null>(null);
   const [mpManualPagIdValue, setMpManualPagIdValue] = useState("");
   const [mpManualPagLoading, setMpManualPagLoading] = useState(false);
   const [mpManualPagMsg, setMpManualPagMsg] = useState<{ text: string; ok: boolean } | null>(null);
@@ -1430,6 +1432,30 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       await load();
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao remover pagamento"); }
     finally { setUpdating(false); }
+  }
+
+  // Etapa 4 (Pagamento na Entrega): registra a forma REAL usada pelo cliente na
+  // entrega. Confirma o saldo 'Na Entrega' e baixa a conta a receber (gatilho 297),
+  // destravando a entrega ("não entrega sem pagar").
+  async function cobrarEntrega(forma: string) {
+    if (!venda) return;
+    setUpdating(true);
+    setSaveErr("");
+    try {
+      const res = await fetch(`/api/vendas/${venda.id}/cobrar-entrega`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forma }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      setCobrarPagId(null);
+      await load();
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Erro ao cobrar na entrega");
+    } finally {
+      setUpdating(false);
+    }
   }
 
   async function confirmarPagamento(pagId: number, forma?: string) {
@@ -3104,6 +3130,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                 const sc = PAG_STATUS_COLOR[pag.status] ?? PAG_STATUS_COLOR.pendente;
                 const temLiquido = pag.valor_liquido != null && pag.valor_liquido > 0;
                 const isAReceber = pag.forma === "A Receber";
+                const isNaEntrega = pag.forma === "Na Entrega";
                 const isPix = pag.forma === "Pix";
                 const isCartao = pag.forma === "Cartão de Crédito";
                 const creditoAprovado = isAReceber && creditoFoiAprovado;
@@ -3200,8 +3227,34 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                           )
                         )}
 
+                        {/* Na Entrega pendente → cobrar com a forma real (Etapa 4) */}
+                        {isNaEntrega && pag.status === "pendente" &&
+                          (isFullAccess || ["gerente_loja", "diretor", "consultora"].includes(role)) && (
+                          cobrarPagId === pag.id ? (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {["Dinheiro", "Pix", "Cartão de Crédito", "Cartão de Débito"].map(f => (
+                                <button key={f} onClick={() => cobrarEntrega(f)} disabled={updating}
+                                  className="text-[11px] px-2 py-1 rounded-lg font-medium disabled:opacity-50"
+                                  style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                                  {f}
+                                </button>
+                              ))}
+                              <button onClick={() => setCobrarPagId(null)} disabled={updating}
+                                className="text-[11px] px-2 py-1 rounded-lg" style={{ color: "#9CA3AF" }}>
+                                cancelar
+                              </button>
+                            </div>
+                          ) : (
+                            <button onClick={() => { setCobrarPagId(pag.id); setSaveErr(""); }} disabled={updating}
+                              className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-50"
+                              style={{ backgroundColor: "#D97706", color: "#fff" }}>
+                              Cobrar na entrega
+                            </button>
+                          )
+                        )}
+
                         {/* Outros pagamentos pendentes → confirmar manual */}
-                        {!isAReceber && pag.forma !== "Manual (MP)" && !isPix && !isCartao && pag.status === "pendente" &&
+                        {!isAReceber && !isNaEntrega && pag.forma !== "Manual (MP)" && !isPix && !isCartao && pag.status === "pendente" &&
                           (isFullAccess || ["gerente_loja", "diretor"].includes(role)) && (
                           <button onClick={() => confirmarPagamento(pag.id, pag.forma)} disabled={updating}
                             className="text-xs px-2 py-1 rounded-lg font-medium disabled:opacity-50"
