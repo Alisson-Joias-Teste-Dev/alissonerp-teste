@@ -2742,19 +2742,6 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                               Upgrade
                             </span>
                           )}
-                          {/* Quanto deste item já foi entregue (Jonathan 12/06) */}
-                          {(() => {
-                            const ent = item.id ? entregaPorItem.get(item.id) : undefined;
-                            if (!ent || ent.qtdEntregue <= 0) return null;
-                            const completo = ent.saldoPendente <= 0;
-                            return (
-                              <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full align-middle"
-                                style={{ backgroundColor: completo ? "#D1FAE5" : "#DBEAFE", color: completo ? "#065F46" : "#1E40AF" }}
-                                title={`${ent.qtdEntregue} de ${ent.qtdVendida} entregue(s)`}>
-                                {completo ? "Entregue" : `Entregue ${ent.qtdEntregue}/${ent.qtdVendida}`}
-                              </span>
-                            );
-                          })()}
                         </td>
                         <td className="px-2 py-2 font-mono" style={{ color: "#6B7280" }}>{item.sku}</td>
                         <td className="px-2 py-2 text-center tabular-nums" style={{ color: "#374151" }}>
@@ -2763,6 +2750,20 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                               onBlur={e => handleUpdateItem(item.id!, "quantidade", e.target.value)}
                               className="w-12 border rounded px-1 py-0.5 text-xs text-center outline-none" style={{ borderColor: C.cremeBorder }} />
                           ) : item.quantidade}
+                          {/* Quanto deste item já foi entregue (Jonathan 12/06) — na coluna
+                              Qtde porque a do nome tem truncate e escondia o badge. */}
+                          {(() => {
+                            const ent = item.id ? entregaPorItem.get(item.id) : undefined;
+                            if (!ent || ent.qtdEntregue <= 0) return null;
+                            const completo = ent.saldoPendente <= 0;
+                            return (
+                              <div className="mt-1 text-[9px] font-semibold px-1.5 py-0.5 rounded-full inline-block whitespace-nowrap"
+                                style={{ backgroundColor: completo ? "#D1FAE5" : "#DBEAFE", color: completo ? "#065F46" : "#1E40AF" }}
+                                title={`${ent.qtdEntregue} de ${ent.qtdVendida} entregue(s)`}>
+                                {completo ? "✓ entregue" : `entregue ${ent.qtdEntregue}/${ent.qtdVendida}`}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-2 py-2" style={{ color: "#9CA3AF" }}>{item.unidade ?? "un"}</td>
                         <td className="px-2 py-2 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
