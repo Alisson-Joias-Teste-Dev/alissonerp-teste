@@ -1,6 +1,17 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.2 <!-- Revisado 12/06/2026 -->
+> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.3 <!-- Revisado 12/06/2026 -->
+
+## fix(vendas): baixa da conta a receber também na aprovação (v2.65.3, migration 299)
+
+Bug achado no teste do Jonathan (venda 15458 no PDV): a regra "pagou → conta a receber
+paga na hora" (297) só disparava quando o PAGAMENTO era confirmado. No PDV o fluxo normal
+é lançar o dinheiro com a venda ainda em RASCUNHO e só DEPOIS aprovar — aí o 297 pulava
+(ignora rascunho) e a aprovação não re-disparava. Resultado: venda paga ficava com conta
+a receber 'pendente'. Migration 299: helper `fn_venda_criar_cr_quitada` + novo gatilho na
+mudança de situacao da venda (dispara a baixa ao sair de rascunho). Agora a baixa cobre os
+dois casos (pagou antes OU depois de aprovar). Testado no homolog; conta da venda 15458
+corrigida para 'pago'.
 
 ## fix(entregas): bloqueio de reposição pendente antes de gerar o código (v2.65.2)
 

@@ -23,7 +23,7 @@ Se o homolog for re-restaurado do dump de prod, REAPLICAR o disable.
 | 2 — Novos status (fim do concluído) | ✅ FEITO (v2.62.0 + v2.63.0). Migrations 296+297 no TESTE. Código refatorado, trava ligada, baixa-na-hora, ponte de volta desligada. tsc limpo, 0 falha nova. Commitado em homolog (PAROU — sem main). Aguarda teste do Jonathan. |
 | 3 — Celular obrigatório + códigos | ✅ FEITO (v2.64.0). Celular obrigatório p/ aprovar (approveVenda); WhatsApp do desenvolvedor (fallback quando código não chega ao cliente) + campo em Config›Integrações. Sem migration. Teste E2E 13/13 PASS. tsc limpo, 0 falha nova. Commitado em homolog — aguarda teste do Jonathan. |
 | 4 — Pagamento na entrega | ✅ FEITO (v2.65.0/.1): forma 'Na Entrega', aprovação direta, rota /cobrar-entrega + botão na tela de detalhe, bloqueio "não entrega sem pagar", opção no front. E2E 18/18. |
-| 5 — Testes + subida | 🟡 Bateria automática FEITA (E2E 18/18 + tsc + suíte sem falha nova). Bug achado no teste: trava de códigos barrava RETIRADA na loja → corrigido (migration 298). Falta o TESTE MANUAL do Jonathan no homolog → depois subir main (migrations 295/296/297/298 em produção só após o aval). |
+| 5 — Testes + subida | 🟡 Teste manual do Jonathan em andamento no homolog. Bugs achados e corrigidos: trava de códigos barrava retirada (298); conta a receber ficava pendente em venda paga no PDV (299). Migrations p/ produção: 295/296/297/298/299 — só após o aval. |
 
 ## Decisões do Jonathan (NÃO re-perguntar)
 - Status: rascunho → aprovado → em_rota → entregue (+cancelado). SEM concluído/enviado novos.
