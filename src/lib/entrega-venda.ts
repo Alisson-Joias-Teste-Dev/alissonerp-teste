@@ -636,13 +636,17 @@ export async function criarEntrega(
   // (não gera código à toa). Antes a checagem só rodava na CONFIRMAÇÃO, depois
   // do código já criado — o atendente perdia tempo e gerava código inútil.
   // IMPACTO SE REMOVIDO: volta a só barrar na confirmação, com código já gerado.
+  // Critério: ordem de reposição cujo STATUS de produção ainda não é 'concluido'
+  // e que não foi cancelada (situacao). Pega também a ordem 'em_andamento' (peça
+  // em produção, ainda não pronta) — o critério antigo (só situacao criado/rascunho)
+  // deixava a 'em_andamento' passar. Igual ao que o botão "Marcar Entrega" checa.
   const [reposAbertas] = await sql`
     SELECT COUNT(*)::integer AS total
     FROM alissonerp.ordens o
     WHERE o.venda_id = ${params.vendaId}
-      AND o.tipo_ordem = 'reposicao_venda'
-      AND o.situacao IN ('criado', 'rascunho')
-      AND o.status  != 'concluido'
+      AND o.tipo_ordem IN ('reposicao_venda', 'reposicao_loja')
+      AND o.status <> 'concluido'
+      AND (o.situacao IS NULL OR o.situacao <> 'cancelado')
   `;
   if (Number(reposAbertas.total) > 0) {
     throw new Error(

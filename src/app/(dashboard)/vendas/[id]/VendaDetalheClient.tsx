@@ -1985,6 +1985,18 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
 
   const situacaoStyle = SITUACAO_COLOR[venda.situacao] ?? SITUACAO_COLOR.rascunho;
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
+
+  // REGRA DE NEGÓCIO (12/06 — Jonathan): venda com ordem de reposição (sob
+  // encomenda) ainda NÃO concluída não pode ser entregue — a peça não está
+  // pronta. Bloqueia o botão "Marcar Entrega" antes mesmo de abrir o modal/gerar
+  // código. 'concluido'/'cancelado' liberam (peça pronta ou ordem descartada).
+  // IMPACTO SE REMOVIDO: dá pra montar entrega de venda cuja reposição ainda está
+  // em produção (o backend ainda barra, mas só ao confirmar — UX ruim).
+  const reposicaoPendente = (venda.ordens ?? []).find(
+    (o) => (o.tipo_ordem === "reposicao_venda" || o.tipo_ordem === "reposicao_loja")
+      && o.status !== "concluido" && o.status !== "cancelado",
+  );
+
   const podeCancelar =
     (isFullAccess && !["cancelado", "concluido", "entregue"].includes(venda.situacao)) ||
     (role === "consultora" && venda.situacao === "rascunho");
@@ -3986,10 +3998,18 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                 Abre o modal de entrega parcial/total com códigos de verificação.
                 Visível apenas quando a venda já foi enviada, seguindo o fluxo:
                 rascunho → aprovado (Salvar/Marcar Enviado) → enviado (Marcar Entrega). */}
-            {["aprovado", "enviado"].includes(venda.situacao) && (
+            {["aprovado", "enviado", "em_rota"].includes(venda.situacao) && (
               <button
-                onClick={() => setShowMarcarEntrega(true)}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
+                onClick={() => {
+                  if (reposicaoPendente) {
+                    setSaveErr(`Conclua ou cancele a ordem de reposição ${reposicaoPendente.numero_ordem} (${reposicaoPendente.status}) antes de marcar a entrega.`);
+                    return;
+                  }
+                  setShowMarcarEntrega(true);
+                }}
+                disabled={!!reposicaoPendente}
+                title={reposicaoPendente ? `Ordem de reposição ${reposicaoPendente.numero_ordem} ainda não concluída` : undefined}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: C.esmeralda, color: C.creme }}
               >
                 <PackageCheck size={16} />
