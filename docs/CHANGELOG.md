@@ -1,6 +1,17 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.5 <!-- Revisado 12/06/2026 -->
+> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.6 <!-- Revisado 12/06/2026 -->
+
+## fix(entregas): bloqueio de reposição por STATUS da ordem (v2.65.6, migration 301)
+
+Jonathan: o bloqueio de entrega por ordem de reposição deve usar o STATUS de produção
+(`alissonerp.ordens.status`), não a situacao. O critério antigo (situacao IN criado/
+rascunho) deixava passar uma ordem 'criado' + 'em_andamento' (peça ainda em produção).
+Agora os 3 pontos usam o mesmo critério — bloqueia enquanto `status NOT IN ('concluido',
+'cancelado')` (aguardando/em_andamento bloqueiam): botão "Marcar Entrega" (desabilita +
+mostra a ordem), criarEntrega (montar) e confirmarEntrega, e o gatilho
+fn_estoque_comercial_entrega_venda (migration 301, último guard). Testado: reposição
+em_andamento bloqueia; ao concluir, libera. Também passou a cobrir 'reposicao_loja'.
 
 ## fix(compras): pedra solta x joia com pedra na compra comercial (v2.65.5)
 
