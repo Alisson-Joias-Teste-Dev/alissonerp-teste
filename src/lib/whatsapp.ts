@@ -97,9 +97,12 @@ export async function enviarCodigoWhatsAppDetalhado(
   }
 
   const mensagem =
-    `Olá ${nome}! Segue o código para retirada do seu pedido na Alisson Joias:\n\n` +
+    `Olá, ${nome}!\n\n` +
+    `Seu pedido já está disponível para retirada na Alisson Joias.\n\n` +
+    `Código de retirada:\n` +
     `🔐 *${codigo}*\n\n` +
-    `Informe este código ao atendente no momento da retirada.`;
+    `Apresente este código ao atendente no momento da retirada.\n\n` +
+    `Esta é uma mensagem automática. Em caso de dúvidas, entre em contato com sua consultora.`;
 
   try {
     const url = `${API_URL}/message/sendText/${INSTANCE_ID}`;
@@ -202,18 +205,11 @@ export async function enviarCodigoClienteEmRota(
   nome: string,
 ): Promise<EnviarCodigoWhatsAppResult> {
   const mensagem =
-    `Prezado(a) ${nome},\n\n` +
-    `Seu pedido foi cuidadosamente preparado e já está a caminho.\n\n` +
-    `Para assegurar uma experiência de entrega exclusiva e totalmente segura, ` +
-    `utilize o código abaixo no momento do recebimento:\n\n` +
-    `🔐 *Código de Confirmação: ${codigo}*\n\n` +
-    `Solicitamos que este código seja informado apenas ao nosso entregador autorizado. ` +
-    `A entrega será concluída somente após a validação do código, ` +
-    `garantindo a proteção de sua compra.\n\n` +
-    `Agradecemos por escolher a Alisson Joias. ` +
-    `É uma satisfação fazer parte de momentos especiais.\n\n` +
-    `Cordialmente,\n` +
-    `Equipe Alisson Joias`;
+    `Olá, ${nome}!\n\n` +
+    `Seu pedido está em rota de entrega.\n\n` +
+    `Para garantir a segurança no recebimento de suas joias, informe o código abaixo ao portador:\n\n` +
+    `🔐 *${codigo}*\n\n` +
+    `Esta é uma mensagem automática. Em caso de dúvidas, entre em contato com sua consultora.`;
 
   return enviarMensagemWhatsApp(telefone, mensagem, nome);
 }
@@ -232,14 +228,10 @@ export async function enviarConfirmacaoEntregaConcluida(
   nome: string,
 ): Promise<EnviarCodigoWhatsAppResult> {
   const mensagem =
-    `✨ *Entrega Concluída*\n\n` +
-    `Prezado(a) ${nome},\n\n` +
-    `Sua joia foi entregue com sucesso e a experiência de compra foi finalizada.\n\n` +
-    `Agradecemos por escolher a Alisson Joias. ` +
-    `É uma honra participar de momentos que merecem ser eternizados.\n\n` +
-    `Caso necessite de qualquer suporte, nossa equipe estará sempre à disposição.\n\n` +
-    `Atenciosamente,\n` +
-    `Equipe Alisson Joias`;
+    `Olá, ${nome}!\n\n` +
+    `Registramos a entrega do seu pedido com sucesso.\n\n` +
+    `Agradecemos pela confiança em nosso trabalho e esperamos que sua experiência com a Alisson Joias seja tão especial quanto a joia escolhida.\n\n` +
+    `Esta é uma mensagem automática. Em caso de dúvidas, entre em contato com sua consultora.`;
 
   return enviarMensagemWhatsApp(telefone, mensagem, nome);
 }
