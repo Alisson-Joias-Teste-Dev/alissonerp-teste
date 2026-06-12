@@ -761,22 +761,35 @@ export default function MarcarEntregaModal({
           qtdVendida: number;
           qtdEntregue: number;
           saldoPendente: number;
+          bloqueadoReposicao?: boolean;
         }>;
       }>(`/api/entregas-venda/saldo-pendente?venda_id=${vendaId}`);
 
-      const itens: ItemPendente[] = (data.itens ?? []).map((r) => ({
-        itemVendaId: r.itemVendaId,
-        nomeProduto: r.nomeProduto,
-        sku: r.sku,
-        qtdVendida: r.qtdVendida,
-        saldoPendente: r.saldoPendente,
-      }));
+      const todosPendentes = data.itens ?? [];
+      // REGRA (12/06 — Jonathan): item cujo produto está em reposição aberta NÃO
+      // entra na entrega (espera a reposição). Só os itens prontos aparecem.
+      const bloqueados = todosPendentes.filter((r) => r.bloqueadoReposicao);
+      const itens: ItemPendente[] = todosPendentes
+        .filter((r) => !r.bloqueadoReposicao)
+        .map((r) => ({
+          itemVendaId: r.itemVendaId,
+          nomeProduto: r.nomeProduto,
+          sku: r.sku,
+          qtdVendida: r.qtdVendida,
+          saldoPendente: r.saldoPendente,
+        }));
 
       setPendentes(itens);
 
-      // Nenhum item pendente = tudo já foi entregue (não deixa montar nova entrega)
+      // Sem item entregável: ou tudo já entregue, ou o que falta aguarda reposição.
+      // (Quando HÁ itens prontos, os bloqueados só não aparecem — sem erro, pra
+      // não travar o envio dos prontos.)
       if (itens.length === 0) {
-        setErroPendentes("Todos os itens desta venda já foram entregues.");
+        setErroPendentes(
+          bloqueados.length > 0
+            ? `Os itens pendentes aguardam reposição (ex.: "${bloqueados[0].nomeProduto}"). Conclua a reposição para entregá-los.`
+            : "Todos os itens desta venda já foram entregues.",
+        );
       }
 
       // Pré-popula itens no modo parcial (todos selecionados por padrão), já

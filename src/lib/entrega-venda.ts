@@ -494,6 +494,59 @@ export async function calcularSaldoPendente(
   }));
 }
 
+export interface BloqueioReposicao {
+  produtosBloqueados: number[];   // produtos com reposição aberta → não entregar ainda
+  bloqueioVendaInteira: boolean;  // reposição aberta SEM produto identificável → trava tudo
+  ordensAbertas: string[];        // números das ordens abertas (para a mensagem)
+}
+
+/**
+ * Bloqueio de entrega POR ITEM por causa de reposição (sob encomenda).
+ *
+ * REGRA DE NEGÓCIO (12/06 — Jonathan): a reposição (item vendido como pronta
+ * entrega mas que faltou no estoque) trava só A ENTREGA DAQUELE ITEM, não a venda
+ * inteira — assim o cliente leva os itens prontos e espera só o da reposição.
+ * O vínculo item↔reposição é pelo PRODUTO do item da própria ordem
+ * (alissonerp.itens_ordem.produto_id), que cobre ~81% das reposições. Quando a
+ * ordem aberta não tem produto identificável, cai no seguro: bloqueia a venda
+ * inteira (bloqueioVendaInteira=true).
+ *
+ * IMPACTO SE REMOVIDO: volta a travar a venda toda por causa de um item em
+ * reposição, prendendo os itens prontos.
+ */
+export async function calcularBloqueioReposicao(
+  db: DbSql,
+  vendaId: number,
+): Promise<BloqueioReposicao> {
+  const rows = await db`
+    SELECT o.numero_ordem,
+           array_remove(array_agg(DISTINCT io.produto_id), NULL) AS produtos
+    FROM alissonerp.ordens o
+    LEFT JOIN alissonerp.itens_ordem io ON io.ordem_id = o.id
+    WHERE o.venda_id = ${vendaId}
+      AND o.tipo_ordem IN ('reposicao_venda', 'reposicao_loja')
+      AND o.status NOT IN ('concluido', 'cancelado')
+    GROUP BY o.id, o.numero_ordem
+  `;
+  const produtos = new Set<number>();
+  const ordens = new Set<string>();
+  let vendaInteira = false;
+  for (const r of rows as Array<{ numero_ordem: string; produtos: number[] | null }>) {
+    ordens.add(String(r.numero_ordem));
+    const ps = (r.produtos ?? []).map(Number).filter((n) => !Number.isNaN(n));
+    if (ps.length === 0) {
+      vendaInteira = true; // ordem aberta sem produto → não dá pra saber o item → trava tudo
+    } else {
+      ps.forEach((p) => produtos.add(p));
+    }
+  }
+  return {
+    produtosBloqueados: Array.from(produtos),
+    bloqueioVendaInteira: vendaInteira,
+    ordensAbertas: Array.from(ordens),
+  };
+}
+
 // ─── 4. Criação de Entrega ────────────────────────────────────────────────────
 
 /**
@@ -637,29 +690,35 @@ export async function criarEntrega(
     );
   }
 
-  // 6. Ordens de reposição pendentes — BLOQUEIA ANTES de gerar o código.
-  // REGRA DE NEGÓCIO (ajuste 12/06 — Jonathan): se a venda tem ordem de
-  // reposição (sob encomenda) ainda não concluída, nem deixa MONTAR a entrega
-  // (não gera código à toa). Antes a checagem só rodava na CONFIRMAÇÃO, depois
-  // do código já criado — o atendente perdia tempo e gerava código inútil.
-  // IMPACTO SE REMOVIDO: volta a só barrar na confirmação, com código já gerado.
-  // Critério: ordem de reposição cujo STATUS de produção (alissonerp.ordens.status)
-  // ainda não é 'concluido' nem 'cancelado'. Pega 'aguardando' e 'em_andamento'
-  // (peça ainda em produção). 'concluido' = pronta; 'cancelado' = descartada →
-  // liberam. Mesma regra do botão "Marcar Entrega". (Antes olhava a situacao e
-  // deixava a 'em_andamento' passar.)
-  const [reposAbertas] = await sql`
-    SELECT COUNT(*)::integer AS total
-    FROM alissonerp.ordens o
-    WHERE o.venda_id = ${params.vendaId}
-      AND o.tipo_ordem IN ('reposicao_venda', 'reposicao_loja')
-      AND o.status NOT IN ('concluido', 'cancelado')
-  `;
-  if (Number(reposAbertas.total) > 0) {
+  // 6. Reposição — bloqueio POR ITEM, ANTES de gerar o código (12/06 — Jonathan).
+  // Só barra o item cujo produto está numa ordem de reposição aberta; os itens
+  // prontos (estoque) podem ser entregues (entrega parcial). Reposição aberta sem
+  // produto identificável cai no seguro: bloqueia a venda inteira. O critério da
+  // ordem é STATUS NOT IN ('concluido','cancelado') — pega aguardando/em_andamento.
+  // IMPACTO SE REMOVIDO: volta a travar a venda toda, prendendo o item pronto.
+  const bloqueio = await calcularBloqueioReposicao(sql, params.vendaId);
+  if (bloqueio.bloqueioVendaInteira) {
     throw new Error(
-      `Venda possui ${reposAbertas.total} ordem(ns) de reposição pendente(s). ` +
-        `Conclua ou cancele antes de montar a entrega.`,
+      `Venda possui reposição aberta (${bloqueio.ordensAbertas.join(", ")}) sem item ` +
+        `identificado. Conclua ou cancele a reposição antes de entregar.`,
     );
+  }
+  if (bloqueio.produtosBloqueados.length > 0) {
+    const itemIds = params.itens.map((i) => i.itemVendaId);
+    const itensEntrega = (await sql`
+      SELECT ive.id, ive.produto_id, ive.nome_produto
+      FROM alissonerp.itens_venda_erp ive
+      WHERE ive.id = ANY(${itemIds})
+    `) as Array<{ produto_id: number | null; nome_produto: string }>;
+    const bloqueados = itensEntrega.filter(
+      (it) => it.produto_id != null && bloqueio.produtosBloqueados.includes(Number(it.produto_id)),
+    );
+    if (bloqueados.length > 0) {
+      throw new Error(
+        `O item "${bloqueados[0].nome_produto}" depende de reposição ainda não concluída. ` +
+          `Entregue os itens prontos e deixe este para quando a reposição chegar.`,
+      );
+    }
   }
 
   // 7. Cálculo do frete
@@ -1280,26 +1339,34 @@ export async function confirmarEntrega(
     throw new Error(`Código inválido. ${restantes} tentativa(s) restante(s) antes do bloqueio.`);
   }
 
-  // ── Pré-validação: ordens de reposição pendentes ──────────────────────────
-  // REGRA DE NEGÓCIO: impede confirmar entrega se há reposição pendente,
-  // replicando a validação da trigger fn_estoque_comercial_entrega_venda
-  // mas com mensagem de erro clara antes de iniciar a transação pesada.
-  // POR QUE: a trigger do banco só dispara no UPDATE de vendas_erp setando
-  // situacao='entregue', que é o último passo. Se falhar lá, toda a transação
-  // (baixa estoque, atualização de entregas, etc) já rodou — desperdício e erro confuso.
-  // IMPACTO SE REMOVIDO: o erro volta a ser capturado apenas na trigger.
-  const [reposPendentes] = await sql`
-    SELECT COUNT(*)::integer AS total
-    FROM alissonerp.ordens o
-    WHERE o.venda_id = ${Number(entrega.venda_id)}
-      AND o.tipo_ordem IN ('reposicao_venda', 'reposicao_loja')
-      AND o.status NOT IN ('concluido', 'cancelado')
-  `;
-
-  if (Number(reposPendentes.total) > 0) {
+  // ── Pré-validação: reposição POR ITEM ─────────────────────────────────────
+  // REGRA DE NEGÓCIO (12/06 — Jonathan): só barra a confirmação se ESTA entrega
+  // inclui um item cujo produto está em reposição aberta. Os itens prontos podem
+  // ser confirmados; o item da reposição espera. Reposição aberta sem produto
+  // identificável → bloqueia (seguro). Mensagem clara antes da transação pesada.
+  // IMPACTO SE REMOVIDO: o erro volta a ser capturado só na trigger do banco.
+  const bloqueioConf = await calcularBloqueioReposicao(sql, Number(entrega.venda_id));
+  if (bloqueioConf.bloqueioVendaInteira) {
     throw new Error(
-      `Entrega ${entrega.codigo_entrega} bloqueada: venda possui ${reposPendentes.total} ordem(ns) de reposição pendente(s). Conclua ou cancele antes de confirmar a entrega.`,
+      `Entrega ${entrega.codigo_entrega} bloqueada: reposição aberta (${bloqueioConf.ordensAbertas.join(", ")}) ` +
+        `sem item identificado. Conclua ou cancele a reposição antes de confirmar.`,
     );
+  }
+  if (bloqueioConf.produtosBloqueados.length > 0) {
+    const [itemBloqueado] = await sql`
+      SELECT ive.nome_produto
+      FROM alissonerp.entregas_venda_itens evi
+      JOIN alissonerp.itens_venda_erp ive ON ive.id = evi.item_venda_id
+      WHERE evi.entrega_id = ${entregaId}
+        AND ive.produto_id = ANY(${bloqueioConf.produtosBloqueados})
+      LIMIT 1
+    `;
+    if (itemBloqueado) {
+      throw new Error(
+        `Entrega ${entrega.codigo_entrega} bloqueada: o item "${itemBloqueado.nome_produto}" ` +
+          `depende de reposição ainda não concluída.`,
+      );
+    }
   }
 
   // ─── Transação atômica ──────────────────────────────────────────────────

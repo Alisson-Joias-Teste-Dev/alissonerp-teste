@@ -662,15 +662,16 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   // quando houve entrega PARCIAL (ex.: 1 de 2 já entregue). Decisão Jonathan 12/06:
   // o sistema precisa MOSTRAR o que já foi entregue.
   const [saldoEntrega, setSaldoEntrega] = useState<Array<{
-    itemVendaId: number; nomeProduto: string; qtdVendida: number; qtdEntregue: number; saldoPendente: number;
+    itemVendaId: number; nomeProduto: string; qtdVendida: number; qtdEntregue: number; saldoPendente: number; bloqueadoReposicao?: boolean;
   }>>([]);
+  const [bloqueioVendaInteira, setBloqueioVendaInteira] = useState(false);
   useEffect(() => {
-    if (!venda || !["aprovado", "enviado", "em_rota"].includes(venda.situacao)) { setSaldoEntrega([]); return; }
+    if (!venda || !["aprovado", "enviado", "em_rota"].includes(venda.situacao)) { setSaldoEntrega([]); setBloqueioVendaInteira(false); return; }
     let cancelado = false;
     (async () => {
       try {
         const res = await fetch(`/api/entregas-venda/saldo-pendente?venda_id=${vendaId}&todos=1`);
-        if (res.ok) { const d = await res.json(); if (!cancelado) setSaldoEntrega(d.itens ?? []); }
+        if (res.ok) { const d = await res.json(); if (!cancelado) { setSaldoEntrega(d.itens ?? []); setBloqueioVendaInteira(!!d.bloqueioVendaInteira); } }
       } catch { /* silencioso */ }
     })();
     return () => { cancelado = true; };
@@ -679,6 +680,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const faltamEntregar = saldoEntrega.reduce((s, i) => s + i.saldoPendente, 0);
   // Mapa item_venda_id → entrega (pra mostrar "X de Y entregue" em cada item)
   const entregaPorItem = new Map(saldoEntrega.map((i) => [i.itemVendaId, i]));
+  // Reposição por item: há item PRONTO para entregar (saldo > 0 e não bloqueado)?
+  const temItemEntregavel = saldoEntrega.some((i) => i.saldoPendente > 0 && !i.bloqueadoReposicao);
+  const itemReposicaoBloqueado = saldoEntrega.find((i) => i.saldoPendente > 0 && i.bloqueadoReposicao);
 
   // Realtime: recarrega quando desconto_aprovado_por ou situacao mudam
   useEffect(() => {
@@ -2008,17 +2012,10 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const situacaoStyle = SITUACAO_COLOR[venda.situacao] ?? SITUACAO_COLOR.rascunho;
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
 
-  // REGRA DE NEGÓCIO (12/06 — Jonathan): venda com ordem de reposição (sob
-  // encomenda) ainda NÃO concluída não pode ser entregue — a peça não está
-  // pronta. Bloqueia o botão "Marcar Entrega" antes mesmo de abrir o modal/gerar
-  // código. 'concluido'/'cancelado' liberam (peça pronta ou ordem descartada).
-  // IMPACTO SE REMOVIDO: dá pra montar entrega de venda cuja reposição ainda está
-  // em produção (o backend ainda barra, mas só ao confirmar — UX ruim).
-  const reposicaoPendente = (venda.ordens ?? []).find(
-    (o) => (o.tipo_ordem === "reposicao_venda" || o.tipo_ordem === "reposicao_loja")
-      && o.status !== "concluido" && o.status !== "cancelado",
-  );
-
+  // REGRA DE NEGÓCIO (12/06 — Jonathan): reposição bloqueia a entrega POR ITEM
+  // (ver temItemEntregavel/bloqueioVendaInteira acima, vindos do saldo-pendente):
+  // o item da reposição espera, mas os itens prontos podem ser entregues. A regra
+  // do botão "Marcar Entrega" usa essas flags.
   const podeCancelar =
     (isFullAccess && !["cancelado", "concluido", "entregue"].includes(venda.situacao)) ||
     (role === "consultora" && venda.situacao === "rascunho");
@@ -4044,14 +4041,21 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
             {["aprovado", "enviado", "em_rota"].includes(venda.situacao) && (
               <button
                 onClick={() => {
-                  if (reposicaoPendente) {
-                    setSaveErr(`Conclua ou cancele a ordem de reposição ${reposicaoPendente.numero_ordem} (${reposicaoPendente.status}) antes de marcar a entrega.`);
+                  // Reposição POR ITEM: só bloqueia se NÃO há nenhum item pronto.
+                  // Tendo item entregável, abre o modal (o item da reposição é
+                  // filtrado lá e no backend).
+                  if (bloqueioVendaInteira) {
+                    setSaveErr("Venda com reposição aberta sem item identificado. Conclua ou cancele a reposição antes de entregar.");
+                    return;
+                  }
+                  if (!temItemEntregavel && itemReposicaoBloqueado) {
+                    setSaveErr("Os itens pendentes aguardam reposição. Conclua a reposição para entregá-los.");
                     return;
                   }
                   setShowMarcarEntrega(true);
                 }}
-                disabled={!!reposicaoPendente}
-                title={reposicaoPendente ? `Ordem de reposição ${reposicaoPendente.numero_ordem} ainda não concluída` : undefined}
+                disabled={bloqueioVendaInteira || (saldoEntrega.length > 0 && !temItemEntregavel)}
+                title={itemReposicaoBloqueado ? `O item "${itemReposicaoBloqueado.nomeProduto}" aguarda reposição — os prontos podem ser entregues` : undefined}
                 className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: C.esmeralda, color: C.creme }}
               >

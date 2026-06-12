@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { calcularSaldoPendente } from "@/lib/entrega-venda";
+import { calcularBloqueioReposicao } from "@/lib/entrega-venda";
 
 /**
  * GET /api/entregas-venda/saldo-pendente?venda_id=X
@@ -37,25 +37,41 @@ export async function GET(req: NextRequest) {
   const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
   if (!usuario) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
 
-  if (todos) {
-    // Todos os itens da venda com a quantidade já entregue (até os 100% entregues).
-    const rows = await sql`
-      SELECT item_venda_id, nome_produto, sku, qtd_vendida, qtd_entregue, saldo_pendente
-      FROM alissonerp.vw_entregas_pendentes
-      WHERE venda_id = ${vendaId}
-      ORDER BY item_venda_id
-    `;
-    const itens = rows.map((r: Record<string, unknown>) => ({
+  // Reposição POR ITEM: quais produtos estão travados (reposição aberta).
+  const bloqueio = await calcularBloqueioReposicao(sql, vendaId);
+  const bloqueados = new Set(bloqueio.produtosBloqueados);
+
+  // todos=1 → todos os itens (inclui 100% entregues). Padrão → só saldo > 0.
+  const rows = todos
+    ? await sql`
+        SELECT item_venda_id, produto_id, nome_produto, sku, qtd_vendida, qtd_entregue, saldo_pendente
+        FROM alissonerp.vw_entregas_pendentes
+        WHERE venda_id = ${vendaId}
+        ORDER BY item_venda_id`
+    : await sql`
+        SELECT item_venda_id, produto_id, nome_produto, sku, qtd_vendida, qtd_entregue, saldo_pendente
+        FROM alissonerp.vw_entregas_pendentes
+        WHERE venda_id = ${vendaId} AND saldo_pendente > 0
+        ORDER BY item_venda_id`;
+
+  const itens = rows.map((r: Record<string, unknown>) => {
+    const produtoId = r.produto_id != null ? Number(r.produto_id) : null;
+    return {
       itemVendaId: Number(r.item_venda_id),
+      produtoId,
       nomeProduto: String(r.nome_produto ?? ""),
       sku: r.sku ? String(r.sku) : "",
       qtdVendida: Number(r.qtd_vendida),
       qtdEntregue: Number(r.qtd_entregue),
       saldoPendente: Number(r.saldo_pendente),
-    }));
-    return NextResponse.json({ itens });
-  }
+      // Item travado por reposição aberta (não pode entregar ainda)
+      bloqueadoReposicao: bloqueio.bloqueioVendaInteira || (produtoId != null && bloqueados.has(produtoId)),
+    };
+  });
 
-  const itens = await calcularSaldoPendente(vendaId);
-  return NextResponse.json({ itens });
+  return NextResponse.json({
+    itens,
+    bloqueioVendaInteira: bloqueio.bloqueioVendaInteira,
+    ordensReposicao: bloqueio.ordensAbertas,
+  });
 }

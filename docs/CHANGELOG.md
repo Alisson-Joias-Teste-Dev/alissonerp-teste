@@ -1,6 +1,21 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.9 <!-- Revisado 12/06/2026 -->
+> 📋 Última atualização automática: 12/06/2026 — Versão: v2.66.0 <!-- Revisado 12/06/2026 -->
+
+## feat(entregas): trava de reposição POR ITEM (v2.66.0)
+
+Jonathan: numa venda com item de pronta-entrega (anel) + item sob encomenda em reposição,
+o cliente não conseguia levar o anel — a trava era da venda inteira. Agora é POR ITEM:
+só o item cujo produto está em reposição aberta espera; os prontos podem ser entregues
+(entrega parcial). O vínculo item↔reposição é pelo PRODUTO do item da própria ordem
+(`alissonerp.itens_ordem.produto_id`) — cobre ~81% (138/171), bem mais que o campo
+`venda_item_ids` (31/171). Reposição aberta SEM produto identificável cai no seguro:
+bloqueia a venda inteira.
+- Helper `calcularBloqueioReposicao` + aplicado em criarEntrega (montar) e confirmarEntrega.
+- Rota saldo-pendente marca `bloqueadoReposicao` por item + `bloqueioVendaInteira`.
+- Modal: só oferece os itens prontos (o da reposição não entra); avisa se tudo está travado.
+- Botão "Marcar Entrega": liberado se há item pronto; bloqueado só se nada é entregável.
+Testado no banco (bloqueia produto certo / venda inteira quando sem produto); E2E 22/22; tsc limpo.
 
 ## fix(estoque): entrega parcial agora baixa o entregue e divide a reserva (v2.65.9)
 
