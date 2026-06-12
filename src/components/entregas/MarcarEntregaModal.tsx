@@ -749,65 +749,58 @@ export default function MarcarEntregaModal({
     setLoadingPendentes(true);
     setErroPendentes("");
     try {
-      // Buscar entregas existentes da venda para subtrair do saldo
+      // SALDO REAL por item (qtd vendida − já entregue em entregas não canceladas),
+      // direto da view vw_entregas_pendentes. Mostra só o que AINDA falta entregar
+      // (ex.: 1 de 2) — não deixa reentregar o que já foi entregue. Antes o modal
+      // estimava errado (usava a quantidade cheia da venda).
       const data = await apiFetch<{
-        items: Array<{
-          id: number;
-          situacao: string;
+        itens: Array<{
+          itemVendaId: number;
+          nomeProduto: string;
+          sku: string;
+          qtdVendida: number;
+          qtdEntregue: number;
+          saldoPendente: number;
         }>;
-      }>(`/api/entregas-venda?venda_id=${vendaId}&page=1&limit=500`);
+      }>(`/api/entregas-venda/saldo-pendente?venda_id=${vendaId}`);
 
-      // Se vendaItems foi fornecido pelo pai, usar os dados dele
-      if (vendaItems && vendaItems.length > 0) {
-        // Filtrar apenas entregas não canceladas para não contar itens de entrega cancelada
-        const entregasAtivas = data.items.filter(
-          (e) => e.situacao !== "cancelada",
-        );
+      const itens: ItemPendente[] = (data.itens ?? []).map((r) => ({
+        itemVendaId: r.itemVendaId,
+        nomeProduto: r.nomeProduto,
+        sku: r.sku,
+        qtdVendida: r.qtdVendida,
+        saldoPendente: r.saldoPendente,
+      }));
 
-        // Para ter o saldo exato, precisaríamos buscar os itens de cada entrega.
-        // Simplificação: se já existem entregas ativas, o backend vai validar.
-        // Para este modal, marcamos saldoPendente como a quantidade original
-        // e o backend rejeita se exceder.
-        const itens: ItemPendente[] = vendaItems.map((vi) => ({
-          itemVendaId: vi.id,
-          nomeProduto: vi.nomeProduto,
-          sku: vi.sku,
-          qtdVendida: vi.quantidade,
-          // Estimamos o saldo: se não houver entregas ativas, tudo está pendente
-          // Caso contrário, o backend validará o limite exato
-          saldoPendente: entregasAtivas.length === 0 ? vi.quantidade : vi.quantidade,
-        }));
+      setPendentes(itens);
 
-        setPendentes(itens);
-
-        // Pré-popula itens no modo parcial (todos selecionados por padrão)
-        setItensSelecionados(
-          itens
-            .filter((i) => i.saldoPendente > 0)
-            .map((i) => ({
-              itemVendaId: i.itemVendaId,
-              nomeProduto: i.nomeProduto,
-              sku: i.sku,
-              qtdVendida: i.qtdVendida,
-              saldoPendente: i.saldoPendente,
-              quantidade: String(i.saldoPendente),
-            })),
-        );
-      } else {
-        // Sem vendaItems, precisaríamos buscar da venda. O backend tem o endpoint
-        // de saldo pendente via GET /api/entregas-venda com venda_id, mas os itens
-        // da venda não vêm junto. Exibimos erro se não houver vendaItems.
-        setErroPendentes("Itens da venda não fornecidos.");
-        setPendentes([]);
+      // Nenhum item pendente = tudo já foi entregue (não deixa montar nova entrega)
+      if (itens.length === 0) {
+        setErroPendentes("Todos os itens desta venda já foram entregues.");
       }
+
+      // Pré-popula itens no modo parcial (todos selecionados por padrão), já
+      // limitados ao saldo pendente real.
+      setItensSelecionados(
+        itens
+          .filter((i) => i.saldoPendente > 0)
+          .map((i) => ({
+            itemVendaId: i.itemVendaId,
+            nomeProduto: i.nomeProduto,
+            sku: i.sku,
+            qtdVendida: i.qtdVendida,
+            saldoPendente: i.saldoPendente,
+            quantidade: String(i.saldoPendente),
+          })),
+      );
     } catch (e) {
       setErroPendentes(
-        e instanceof Error ? e.message : "Erro ao carregar entregas.",
+        e instanceof Error ? e.message : "Erro ao carregar saldo pendente.",
       );
     } finally {
       setLoadingPendentes(false);
     }
-  }, [vendaId, vendaItems]);
+  }, [vendaId]);
 
   // Carregar motoboys quando formaEntrega mudar para "motoboy"
   useEffect(() => {
