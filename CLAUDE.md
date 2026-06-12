@@ -3,7 +3,7 @@
 > **Todo agente DEVE ler este arquivo antes de qualquer task.**
 
 **Stack:** Next.js 16.1.6 | React 19 | PostgreSQL 15 (Supabase self-hosted) | TailwindCSS v4 | Zustand
-**Versao:** v2.30.7 | **Branch:** `homolog` (nunca main direto)
+**Versao:** v2.65.5 | **Branch:** `homolog` (nunca main direto)
 **Docs completos:** `docs/arquitetura.md` | **Changelog:** `docs/CHANGELOG.md`
 
 ---
@@ -122,6 +122,7 @@ Deposito = Operador (label "Deposito/Operador" na UI)
 Conclusao de lote (distribuicao): administrativa, ZERO movimentacoes_estoque
 Transferencia metal: foto + IA obrigatoria (tolerancia zero)
 peso_pedra_ct: salvar em quilates, trigger calcula gramas (1ct = 0.2g)
+tem_pedra_preciosa = joia COM pedra, NUNCA usar para classificar pedra solta — usar ehPedraSolta() de src/lib/compras-pedras.ts (categoria 'Pedras' OU produto_pedra_extras OU nome COMEÇA com nome de pedra; includes() no nome era o bug do AJ5079)
 camera mobile: navigator.mediaDevices undefined em HTTP — fallback input[type=file]
 movimentacoes_estoque.local_estoque_id: NOT NULL
 Estoque comercial: inserir item de venda CRIA RESERVA (nunca saida direta) — reserva vira saida ao APROVAR venda
