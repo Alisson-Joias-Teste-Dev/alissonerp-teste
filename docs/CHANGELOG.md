@@ -1,6 +1,19 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.8 <!-- Revisado 12/06/2026 -->
+> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.9 <!-- Revisado 12/06/2026 -->
+
+## fix(estoque): entrega parcial agora baixa o entregue e divide a reserva (v2.65.9)
+
+Jonathan (venda 15460, 2un, entrega parcial de 1): a reserva continuou com 2 e nenhuma
+saída foi gerada. Causa: a CRIAÇÃO da reserva olha `estoque_comercial_config.ativo`, mas a
+BAIXA (baixarEstoqueDaEntrega) olhava `controla_estoque` — critérios diferentes. 24 produtos
+têm ativo=true + controla_estoque=false → criam reserva mas a baixa pulava, deixando a
+reserva presa (qtd cheia, sem saída). Correção: a baixa passa a seguir a EXISTÊNCIA da
+reserva ativa (não a flag) — se há reserva, gera a saída do entregue e reduz a reserva ao
+saldo restante; item sem reserva (não controla estoque comercial) é pulado sem erro. Venda
+15460 corrigida no homolog (reserva 1 ativo + saída 1 efetivado).
+⚠️ Pendente: limpar as ~23 reservas órfãs restantes (entregas antigas desses 24 produtos)
+quando for pra produção.
 
 ## feat(entregas): mostra QUAL item já foi entregue (v2.65.8)
 
