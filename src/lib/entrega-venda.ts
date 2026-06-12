@@ -40,6 +40,7 @@ type DbSql = any;
 /** Item de saldo pendente para entrega, vindo da view vw_entregas_pendentes */
 export interface SaldoPendenteItem {
   itemVendaId: number;
+  produtoId: number | null;
   nomeProduto: string;
   sku: string;
   qtdVendida: number;
@@ -473,6 +474,7 @@ export async function calcularSaldoPendente(
   const rows = await sql`
     SELECT
       item_venda_id,
+      produto_id,
       nome_produto,
       sku,
       qtd_vendida,
@@ -486,6 +488,7 @@ export async function calcularSaldoPendente(
 
   return rows.map((r: Record<string, unknown>) => ({
     itemVendaId: Number(r.item_venda_id),
+    produtoId: r.produto_id != null ? Number(r.produto_id) : null,
     nomeProduto: String(r.nome_produto ?? ""),
     sku: r.sku ? String(r.sku) : "",
     qtdVendida: Number(r.qtd_vendida),
@@ -628,9 +631,26 @@ export async function criarEntrega(
   }
 
   const saldoMap = new Map<number, number>();
+  const produtoMap = new Map<number, number | null>();
+  const nomeMap = new Map<number, string>();
   for (const s of saldoPendente) {
     saldoMap.set(s.itemVendaId, s.saldoPendente);
+    produtoMap.set(s.itemVendaId, s.produtoId);
+    nomeMap.set(s.itemVendaId, s.nomeProduto);
   }
+
+  // Reposição POR ITEM (12/06 — Jonathan): produtos travados por reposição aberta.
+  // Usado para (a) rejeitar quem tentar entregar o item da reposição e (b) NÃO
+  // exigir esse item numa entrega 'total' (ele espera a reposição; os prontos saem).
+  // Reposição aberta SEM produto identificável → bloqueia a venda inteira (seguro).
+  const bloqueio = await calcularBloqueioReposicao(sql, params.vendaId);
+  if (bloqueio.bloqueioVendaInteira) {
+    throw new Error(
+      `Venda possui reposição aberta (${bloqueio.ordensAbertas.join(", ")}) sem item ` +
+        `identificado. Conclua ou cancele a reposição antes de entregar.`,
+    );
+  }
+  const produtosBloqueados = new Set(bloqueio.produtosBloqueados);
 
   // Valida cada item da entrega
   for (const item of params.itens) {
@@ -656,11 +676,25 @@ export async function criarEntrega(
           `${disponivel} disponível, ${item.quantidade} solicitado.`,
       );
     }
+
+    // Não deixa entregar item cujo produto está em reposição aberta
+    const prodItem = produtoMap.get(item.itemVendaId);
+    if (prodItem != null && produtosBloqueados.has(prodItem)) {
+      throw new Error(
+        `O item "${nomeMap.get(item.itemVendaId) ?? `#${item.itemVendaId}`}" depende de ` +
+          `reposição ainda não concluída. Entregue os itens prontos e deixe este ` +
+          `para quando a reposição chegar.`,
+      );
+    }
   }
 
-  // 4. Se tipo='total': todos os itens com saldo pendente devem ser cobertos integralmente
+  // 4. Se tipo='total': todos os itens com saldo pendente (EXCETO os travados por
+  //    reposição) devem ser cobertos integralmente.
   if (params.tipo === "total") {
     for (const s of saldoPendente) {
+      // Item da reposição não entra na exigência do 'total' — ele espera.
+      if (s.produtoId != null && produtosBloqueados.has(s.produtoId)) continue;
+
       const itemEntrega = params.itens.find(
         (i) => i.itemVendaId === s.itemVendaId,
       );
@@ -690,36 +724,8 @@ export async function criarEntrega(
     );
   }
 
-  // 6. Reposição — bloqueio POR ITEM, ANTES de gerar o código (12/06 — Jonathan).
-  // Só barra o item cujo produto está numa ordem de reposição aberta; os itens
-  // prontos (estoque) podem ser entregues (entrega parcial). Reposição aberta sem
-  // produto identificável cai no seguro: bloqueia a venda inteira. O critério da
-  // ordem é STATUS NOT IN ('concluido','cancelado') — pega aguardando/em_andamento.
-  // IMPACTO SE REMOVIDO: volta a travar a venda toda, prendendo o item pronto.
-  const bloqueio = await calcularBloqueioReposicao(sql, params.vendaId);
-  if (bloqueio.bloqueioVendaInteira) {
-    throw new Error(
-      `Venda possui reposição aberta (${bloqueio.ordensAbertas.join(", ")}) sem item ` +
-        `identificado. Conclua ou cancele a reposição antes de entregar.`,
-    );
-  }
-  if (bloqueio.produtosBloqueados.length > 0) {
-    const itemIds = params.itens.map((i) => i.itemVendaId);
-    const itensEntrega = (await sql`
-      SELECT ive.id, ive.produto_id, ive.nome_produto
-      FROM alissonerp.itens_venda_erp ive
-      WHERE ive.id = ANY(${itemIds})
-    `) as Array<{ produto_id: number | null; nome_produto: string }>;
-    const bloqueados = itensEntrega.filter(
-      (it) => it.produto_id != null && bloqueio.produtosBloqueados.includes(Number(it.produto_id)),
-    );
-    if (bloqueados.length > 0) {
-      throw new Error(
-        `O item "${bloqueados[0].nome_produto}" depende de reposição ainda não concluída. ` +
-          `Entregue os itens prontos e deixe este para quando a reposição chegar.`,
-      );
-    }
-  }
+  // (O bloqueio de reposição por item já foi aplicado acima, junto com a
+  //  validação de saldo dos itens e da entrega 'total'.)
 
   // 7. Cálculo do frete
   const regiao = params.regiao ?? null;

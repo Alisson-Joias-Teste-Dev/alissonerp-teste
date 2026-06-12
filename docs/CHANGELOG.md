@@ -1,6 +1,16 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 12/06/2026 — Versão: v2.66.0 <!-- Revisado 12/06/2026 -->
+> 📋 Última atualização automática: 12/06/2026 — Versão: v2.66.1 <!-- Revisado 12/06/2026 -->
+
+## fix(entregas): entrega "total" não exige o item da reposição (v2.66.1)
+
+Bug do v2.66.0 (Jonathan): com a trava por item, o modal parou de mandar o item em
+reposição numa entrega; mas a validação de tipo='total' do criarEntrega ainda exigia
+TODOS os pendentes → erro "Item X não foi informado". Correção: a checagem de 'total'
+(e o laço de validação de itens) agora **pula os itens cujo produto está em reposição
+aberta** — só os prontos são exigidos. `calcularSaldoPendente` passou a retornar
+`produtoId`. Validado no banco com cenário real (anel estoque + corrente reposição →
+entrega total só do anel passa); E2E 22/22; tsc limpo.
 
 ## feat(entregas): trava de reposição POR ITEM (v2.66.0)
 
