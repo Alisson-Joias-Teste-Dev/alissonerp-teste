@@ -1,6 +1,14 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.7 <!-- Revisado 12/06/2026 -->
+> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.8 <!-- Revisado 12/06/2026 -->
+
+## feat(entregas): mostra QUAL item já foi entregue (v2.65.8)
+
+Jonathan: "era bom informar qual item foi entregue". Na lista de produtos da venda, cada
+item agora mostra um badge "Entregue X/Y" (parcial, azul) ou "Entregue" (completo, verde),
+com tooltip "X de Y entregue(s)". A rota /api/entregas-venda/saldo-pendente ganhou
+`?todos=1` (retorna TODOS os itens com qtdEntregue, inclusive os 100% entregues, sem o
+filtro de saldo>0 usado pelo modal). tsc limpo.
 
 ## fix(entregas): entrega parcial — saldo real + indicador na tela (v2.65.7)
 

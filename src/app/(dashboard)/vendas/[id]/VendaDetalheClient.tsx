@@ -669,7 +669,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     let cancelado = false;
     (async () => {
       try {
-        const res = await fetch(`/api/entregas-venda/saldo-pendente?venda_id=${vendaId}`);
+        const res = await fetch(`/api/entregas-venda/saldo-pendente?venda_id=${vendaId}&todos=1`);
         if (res.ok) { const d = await res.json(); if (!cancelado) setSaldoEntrega(d.itens ?? []); }
       } catch { /* silencioso */ }
     })();
@@ -677,6 +677,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   }, [venda, vendaId]);
   const entregaParcialResumo = saldoEntrega.filter((i) => i.qtdEntregue > 0);
   const faltamEntregar = saldoEntrega.reduce((s, i) => s + i.saldoPendente, 0);
+  // Mapa item_venda_id → entrega (pra mostrar "X de Y entregue" em cada item)
+  const entregaPorItem = new Map(saldoEntrega.map((i) => [i.itemVendaId, i]));
 
   // Realtime: recarrega quando desconto_aprovado_por ou situacao mudam
   useEffect(() => {
@@ -2743,6 +2745,19 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                               Upgrade
                             </span>
                           )}
+                          {/* Quanto deste item já foi entregue (Jonathan 12/06) */}
+                          {(() => {
+                            const ent = item.id ? entregaPorItem.get(item.id) : undefined;
+                            if (!ent || ent.qtdEntregue <= 0) return null;
+                            const completo = ent.saldoPendente <= 0;
+                            return (
+                              <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full align-middle"
+                                style={{ backgroundColor: completo ? "#D1FAE5" : "#DBEAFE", color: completo ? "#065F46" : "#1E40AF" }}
+                                title={`${ent.qtdEntregue} de ${ent.qtdVendida} entregue(s)`}>
+                                {completo ? "Entregue" : `Entregue ${ent.qtdEntregue}/${ent.qtdVendida}`}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="px-2 py-2 font-mono" style={{ color: "#6B7280" }}>{item.sku}</td>
                         <td className="px-2 py-2 text-center tabular-nums" style={{ color: "#374151" }}>
