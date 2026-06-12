@@ -1,7 +1,18 @@
 # Refatoração Vendas/Entregas — Ponto de Retomada
 
-> Atualizado: 11/06/2026 (Fortaleza) · Branch: homolog · Etapa 2 commitada (v2.62.0)
+> Atualizado: 12/06/2026 (Fortaleza) · Branch: homolog · Etapas 2-4 commitadas (v2.62→v2.65.2)
 > Plano aprovado: ver conversa de 11/06 + `docs/analise-vendas-entregas-2026-06.md`
+
+## ⚙️ AMBIENTE — gatilhos http DESLIGADOS no banco do HOMOLOG (12/06, autorizado Jonathan)
+O banco do homolog (cloud.alisson.api.br:5435/postgres-homolog) NÃO tem a função `http_post`
+(extensão `http` não instalada nesse servidor; PRODUÇÃO tem). Os 9 gatilhos de notificação
+externa (n8n/Tiny/webhooks supabase) chamavam `http_post`/`http_get`/`http_header` e quebravam
+TODA mudança de status de venda (erro 42883). Foram DESLIGADOS só no homolog (ALTER TABLE …
+DISABLE TRIGGER): trg_notificar_n8n (vendas), notify_n8n_solicitacao_vale_troca, Webhook
+Contatos Tiny, trg_webhook_novo_produto, on_product_update, trg_notifica_estoque,
+trigger_nova_ordem (directus.ordens), webhook_estoque_insert/update_seguro (estoque).
+⚠️ NÃO replicar em produção — lá a extensão http existe e as notificações devem rodar.
+Se o homolog for re-restaurado do dump de prod, REAPLICAR o disable.
 
 ## Status das etapas
 
