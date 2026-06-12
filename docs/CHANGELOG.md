@@ -1,6 +1,18 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.6 <!-- Revisado 12/06/2026 -->
+> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.7 <!-- Revisado 12/06/2026 -->
+
+## fix(entregas): entrega parcial — saldo real + indicador na tela (v2.65.7)
+
+Jonathan (venda 15460, 2un do mesmo SKU, entrega parcial de 1): o modal "Marcar Entrega"
+mostrava o saldo CHEIO (2) e deixava tentar reentregar o já entregue — o cálculo era um
+ternário quebrado (ignorava o entregue). E a tela da venda não mostrava que parte já fora
+entregue.
+- Nova rota GET /api/entregas-venda/saldo-pendente (expõe vw_entregas_pendentes).
+- MarcarEntregaModal: usa o saldo REAL por item (qtd vendida − já entregue); mostra "1 de
+  2", input limitado a 1, avisa quando tudo já foi entregue.
+- VendaDetalheClient: badge "Entrega parcial — falta(m) N un." no cabeçalho, com tooltip
+  por item (X de Y entregue). O backend (criarEntrega) já rejeitava o excesso. tsc limpo.
 
 ## fix(entregas): bloqueio de reposição por STATUS da ordem (v2.65.6, migration 301)
 

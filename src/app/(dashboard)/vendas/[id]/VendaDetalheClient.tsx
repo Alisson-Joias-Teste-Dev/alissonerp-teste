@@ -658,6 +658,26 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
   useEffect(() => { load(); }, [load]);
 
+  // Saldo de entrega por item (qtd vendida − já entregue) — para mostrar na tela
+  // quando houve entrega PARCIAL (ex.: 1 de 2 já entregue). Decisão Jonathan 12/06:
+  // o sistema precisa MOSTRAR o que já foi entregue.
+  const [saldoEntrega, setSaldoEntrega] = useState<Array<{
+    itemVendaId: number; nomeProduto: string; qtdVendida: number; qtdEntregue: number; saldoPendente: number;
+  }>>([]);
+  useEffect(() => {
+    if (!venda || !["aprovado", "enviado", "em_rota"].includes(venda.situacao)) { setSaldoEntrega([]); return; }
+    let cancelado = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/entregas-venda/saldo-pendente?venda_id=${vendaId}`);
+        if (res.ok) { const d = await res.json(); if (!cancelado) setSaldoEntrega(d.itens ?? []); }
+      } catch { /* silencioso */ }
+    })();
+    return () => { cancelado = true; };
+  }, [venda, vendaId]);
+  const entregaParcialResumo = saldoEntrega.filter((i) => i.qtdEntregue > 0);
+  const faltamEntregar = saldoEntrega.reduce((s, i) => s + i.saldoPendente, 0);
+
   // Realtime: recarrega quando desconto_aprovado_por ou situacao mudam
   useEffect(() => {
     const supabase = createClient();
@@ -2067,6 +2087,14 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
                 style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
                 Entregue com pendência financeira
+              </span>
+            )}
+            {/* Entrega PARCIAL — mostra que parte já foi entregue (Jonathan 12/06) */}
+            {entregaParcialResumo.length > 0 && (
+              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                style={{ backgroundColor: "#DBEAFE", color: "#1E40AF" }}
+                title={entregaParcialResumo.map((i) => `${i.nomeProduto}: ${i.qtdEntregue} de ${i.qtdVendida} entregue(s)`).join("\n")}>
+                Entrega parcial — falta(m) {faltamEntregar} un.
               </span>
             )}
             {venda.tiny_pedido_id && (
