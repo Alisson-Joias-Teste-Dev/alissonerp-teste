@@ -538,6 +538,19 @@ export async function criarEntrega(
     );
   }
 
+  // Venda precisa estar APROVADA (ou já em rota) para montar a entrega.
+  // REGRA DE NEGÓCIO (ajuste 12/06 — Jonathan): não se monta entrega de venda
+  // em rascunho/não aprovada — barra ANTES de gerar o código. 'em_rota' é
+  // permitido para continuar entregas parciais já iniciadas.
+  // IMPACTO SE REMOVIDO: dá pra gerar código de entrega de venda que ainda nem
+  // foi aprovada (sem pagamento/ordem definidos).
+  if (venda.situacao !== "aprovado" && venda.situacao !== "em_rota") {
+    throw new Error(
+      `Venda ${venda.numero_venda ?? params.vendaId} precisa estar aprovada para montar a entrega ` +
+        `(situação atual: ${venda.situacao}).`,
+    );
+  }
+
   // 2. Validar que há itens para entregar
   if (!params.itens || params.itens.length === 0) {
     throw new Error(
