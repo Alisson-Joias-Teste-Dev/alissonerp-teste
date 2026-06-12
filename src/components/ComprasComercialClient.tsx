@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Loader2, Plus, Search, ShoppingCart } from "lucide-react";
 import { formatMoeda } from "@/lib/formatters";
-import { calcularCustoPorCtPedra, calcularQtdPecasPedra } from "@/lib/compras-pedras";
+import { calcularCustoPorCtPedra, calcularQtdPecasPedra, ehPedraSolta } from "@/lib/compras-pedras";
 
 // REGRA DE NEGOCIO:
 // - O que faz: orquestra o fluxo de compra comercial (criar, receber, concluir, itens).
@@ -52,6 +52,7 @@ interface ItemCompraComercial {
   qtd_exata?: number | null;
   produto_categoria?: string;
   tem_pedra_preciosa?: boolean;
+  tem_registro_pedra_extras?: boolean;
 }
 
 interface Local { id: number; nome: string }
@@ -66,6 +67,7 @@ interface ProdutoBusca {
   categoria_precificacao?: string;
   tem_pedra_preciosa?: boolean;
   peso_pedra_ct?: number;
+  tem_registro_pedra_extras?: boolean;
 }
 
 interface ProdutoSelecionadoMeta {
@@ -76,6 +78,7 @@ interface ProdutoSelecionadoMeta {
   categoria_precificacao?: string;
   tem_pedra_preciosa?: boolean;
   peso_pedra_ct?: number;
+  tem_registro_pedra_extras?: boolean;
 }
 
 function fmtDate(d?: string | null): string {
@@ -565,23 +568,12 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
   const [loadingAction, setLoadingAction] = useState(false);
 
   const bloqueada = compra.bloqueado || compra.situacao === "concluido";
-  const ehProdutoPedra = useMemo(() => {
-    const categoria = String(produtoSelecionadoMeta?.categoria ?? "").toLowerCase();
-    const categoriaPrecificacao = String(produtoSelecionadoMeta?.categoria_precificacao ?? "").toLowerCase();
-    const nome = String(produtoSelecionadoMeta?.nome ?? "").toLowerCase();
-    const pesoCt = Number(produtoSelecionadoMeta?.peso_pedra_ct ?? 0);
-    return (
-      categoria.startsWith("pedras") ||
-      categoriaPrecificacao.startsWith("pedras") ||
-      Boolean(produtoSelecionadoMeta?.tem_pedra_preciosa) ||
-      pesoCt > 0 ||
-      nome.includes("diamante") ||
-      nome.includes("zirc") ||
-      nome.includes("rubi") ||
-      nome.includes("esmeralda") ||
-      nome.includes("safira")
-    );
-  }, [produtoSelecionadoMeta]);
+  // REGRA DE NEGOCIO: classificacao pedra x joia centralizada em ehPedraSolta (src/lib/compras-pedras.ts).
+  // NUNCA usar tem_pedra_preciosa/categoria_precificacao/includes no nome — joia com pedra (ex: AJ5079) vira pedra.
+  const ehProdutoPedra = useMemo(
+    () => ehPedraSolta(produtoSelecionadoMeta ?? {}),
+    [produtoSelecionadoMeta]
+  );
 
   const loadItens = useCallback(async () => {
     const data = await fetch(`/api/compras-comercial/${compra.id}/itens`).then((r) => r.json());
@@ -756,8 +748,12 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
                 <td className="p-2">{i.produto_sku ?? "-"}</td>
                 <td className="p-2 text-right">
                   {(() => {
-                    const categoria = String(i.produto_categoria ?? "").toLowerCase();
-                    const ehPedra = categoria.startsWith("pedras") || Boolean(i.tem_pedra_preciosa);
+                    // REGRA DE NEGOCIO: mesmo criterio oficial da API (ehPedraSolta) para exibir qtd estimada so em pedra solta.
+                    const ehPedra = ehPedraSolta({
+                      categoria: i.produto_categoria,
+                      nome: i.produto_nome,
+                      tem_registro_pedra_extras: i.tem_registro_pedra_extras,
+                    });
                     if (!ehPedra) return Number(i.qtd).toFixed(2);
                     const qtdEst = Number(i.qtd ?? 0);
                     const qtdExata = Number(i.qtd_exata ?? 0);
@@ -841,6 +837,7 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
                             categoria_precificacao: p.categoria_precificacao,
                             tem_pedra_preciosa: p.tem_pedra_preciosa,
                             peso_pedra_ct: p.peso_pedra_ct,
+                            tem_registro_pedra_extras: p.tem_registro_pedra_extras,
                           });
                           setBuscaProduto(`${p.nome}${p.sku ? ` (${p.sku})` : ""}`);
                           // REGRA DE NEGOCIO:

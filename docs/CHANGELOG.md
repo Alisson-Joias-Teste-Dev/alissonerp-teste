@@ -1,6 +1,20 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.4 <!-- Revisado 12/06/2026 -->
+> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.5 <!-- Revisado 12/06/2026 -->
+
+## fix(compras): pedra solta x joia com pedra na compra comercial (v2.65.5)
+
+Bug reportado pelo Jonathan: AJ5079 ("Brinco Em Ouro Branco com Esmeralda e Diamantes")
+era tratado como PEDRA na ordem de compra comercial — o formulário pedia ct total + custo
+total em vez de quantidade + valor/g. A classificação usava sinais errados (flag
+`tem_pedra_preciosa` = joia COM pedra, 1.217 joias têm; nome CONTENDO "diamante"/"esmeralda"
+etc., 1.885 joias; `categoria_precificacao` que nunca vale "Pedras") e estava duplicada em
+4 lugares (API GET/POST de itens + 2 pontos do front). Agora centralizada em `ehPedraSolta()`
+(src/lib/compras-pedras.ts): categoria "Pedras" OU registro em produto_pedra_extras OU nome
+que COMEÇA com nome de pedra. Validado no banco: pega exatamente as 211 pedras soltas, zero
+joias. Nenhum item de compra já lançado foi gravado errado (0 afetados). Obs: ~25 pedras
+soltas estão sem categoria no cadastro (public.produtos, READONLY/Tiny) — ajuste manual
+sugerido, fora deste fix.
 
 ## fix(financeiro): conta a receber = saldo em aberto (v2.65.4, migration 300)
 

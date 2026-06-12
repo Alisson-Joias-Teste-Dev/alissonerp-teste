@@ -4,7 +4,7 @@ import sql from "@/lib/db";
 import { normalizeRow } from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { zodError } from "@/lib/schemas/common";
-import { calcularCustoPorCtPedra, calcularQtdPecasPedra } from "@/lib/compras-pedras";
+import { calcularCustoPorCtPedra, calcularQtdPecasPedra, ehPedraSolta } from "@/lib/compras-pedras";
 
 type Params = Promise<{ id: string }>;
 
@@ -35,7 +35,8 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
       p.categoria AS produto_categoria,
       p.categoria_precificacao AS produto_categoria_precificacao,
       p.tem_pedra_preciosa,
-      ppe.peso_ct AS peso_pedra_ct
+      ppe.peso_ct AS peso_pedra_ct,
+      (ppe.produto_id IS NOT NULL) AS tem_registro_pedra_extras
     FROM alissonerp.itens_compra_comercial ic
     JOIN public.produtos p ON p.id_produto = ic.produto_id
     LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
@@ -48,19 +49,15 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
   // - Por que: visualizacao operacional precisa mostrar estimativa e referencia no mesmo criterio da API.
   // - Impacto se alterado/removido: tela pode exibir quantidade divergente do calculo oficial.
   const rowsComEstimativa = rows.map((row) => {
-    const categoria = String((row as Record<string, unknown>).produto_categoria ?? "").toLowerCase();
-    const categoriaPrecificacao = String((row as Record<string, unknown>).produto_categoria_precificacao ?? "").toLowerCase();
-    const nomeProduto = String((row as Record<string, unknown>).produto_nome ?? "").toLowerCase();
-    const pesoPedraCt = Number((row as Record<string, unknown>).peso_pedra_ct ?? 0);
-    const ehPedra = categoria.startsWith("pedras")
-      || categoriaPrecificacao.startsWith("pedras")
-      || Boolean((row as Record<string, unknown>).tem_pedra_preciosa)
-      || pesoPedraCt > 0
-      || nomeProduto.includes("diamante")
-      || nomeProduto.includes("zirc")
-      || nomeProduto.includes("rubi")
-      || nomeProduto.includes("esmeralda")
-      || nomeProduto.includes("safira");
+    const r = row as Record<string, unknown>;
+    const pesoPedraCt = Number(r.peso_pedra_ct ?? 0);
+    // REGRA DE NEGOCIO: classificacao pedra x joia centralizada em ehPedraSolta (src/lib/compras-pedras.ts).
+    // NUNCA usar tem_pedra_preciosa/categoria_precificacao/includes no nome — joia com pedra (ex: AJ5079) vira pedra.
+    const ehPedra = ehPedraSolta({
+      categoria: r.produto_categoria as string | null,
+      nome: r.produto_nome as string | null,
+      tem_registro_pedra_extras: Boolean(r.tem_registro_pedra_extras),
+    });
     if (!ehPedra) return { ...row, qtd_exata: null };
     const qtdAtual = Number((row as Record<string, unknown>).qtd ?? 0);
     const pesoTotalCt = Number((row as Record<string, unknown>).peso_total ?? 0);
@@ -99,7 +96,8 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
   if (compra.bloqueado) return NextResponse.json({ error: "Compra bloqueada — não permite edição" }, { status: 409 });
 
   const [produto] = await sql`
-    SELECT p.id_produto, p.categoria, p.categoria_precificacao, p.nome, p.tem_pedra_preciosa, ppe.peso_ct AS peso_pedra_ct
+    SELECT p.id_produto, p.categoria, p.categoria_precificacao, p.nome, p.tem_pedra_preciosa, ppe.peso_ct AS peso_pedra_ct,
+      (ppe.produto_id IS NOT NULL) AS tem_registro_pedra_extras
     FROM public.produtos p
     LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
     WHERE p.id_produto = ${produto_id}
@@ -107,18 +105,13 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
   `;
   if (!produto) return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
 
-  const categoriaProduto = String(produto.categoria ?? "").toLowerCase();
-  const categoriaPrecificacaoProduto = String(produto.categoria_precificacao ?? "").toLowerCase();
-  const nomeProduto = String(produto.nome ?? "").toLowerCase();
-  const ehPedra = categoriaProduto.startsWith("pedras")
-    || categoriaPrecificacaoProduto.startsWith("pedras")
-    || Boolean(produto.tem_pedra_preciosa)
-    || Number(produto.peso_pedra_ct ?? 0) > 0
-    || nomeProduto.includes("diamante")
-    || nomeProduto.includes("zirc")
-    || nomeProduto.includes("rubi")
-    || nomeProduto.includes("esmeralda")
-    || nomeProduto.includes("safira");
+  // REGRA DE NEGOCIO: classificacao pedra x joia centralizada em ehPedraSolta (src/lib/compras-pedras.ts).
+  // NUNCA usar tem_pedra_preciosa/categoria_precificacao/includes no nome — joia com pedra (ex: AJ5079) vira pedra.
+  const ehPedra = ehPedraSolta({
+    categoria: produto.categoria,
+    nome: produto.nome,
+    tem_registro_pedra_extras: Boolean(produto.tem_registro_pedra_extras),
+  });
 
   let qtdFinal = Number(qtd ?? 0);
   let valorGramaFinal = Number(valor_grama ?? 0);
