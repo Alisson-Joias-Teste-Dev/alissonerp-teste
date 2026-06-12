@@ -617,7 +617,28 @@ export async function criarEntrega(
     );
   }
 
-  // 6. Cálculo do frete
+  // 6. Ordens de reposição pendentes — BLOQUEIA ANTES de gerar o código.
+  // REGRA DE NEGÓCIO (ajuste 12/06 — Jonathan): se a venda tem ordem de
+  // reposição (sob encomenda) ainda não concluída, nem deixa MONTAR a entrega
+  // (não gera código à toa). Antes a checagem só rodava na CONFIRMAÇÃO, depois
+  // do código já criado — o atendente perdia tempo e gerava código inútil.
+  // IMPACTO SE REMOVIDO: volta a só barrar na confirmação, com código já gerado.
+  const [reposAbertas] = await sql`
+    SELECT COUNT(*)::integer AS total
+    FROM alissonerp.ordens o
+    WHERE o.venda_id = ${params.vendaId}
+      AND o.tipo_ordem = 'reposicao_venda'
+      AND o.situacao IN ('criado', 'rascunho')
+      AND o.status  != 'concluido'
+  `;
+  if (Number(reposAbertas.total) > 0) {
+    throw new Error(
+      `Venda possui ${reposAbertas.total} ordem(ns) de reposição pendente(s). ` +
+        `Conclua ou cancele antes de montar a entrega.`,
+    );
+  }
+
+  // 7. Cálculo do frete
   const regiao = params.regiao ?? null;
   const freteMotoboyCalculado = regiao
     ? calcularValorMotoboy(regiao)

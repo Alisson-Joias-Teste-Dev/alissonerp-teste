@@ -1,6 +1,14 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 11/06/2026 — Versão: v2.65.0 <!-- Revisado 11/06/2026 -->
+> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.2 <!-- Revisado 12/06/2026 -->
+
+## fix(entregas): bloqueio de reposição pendente antes de gerar o código (v2.65.2)
+
+Ajuste de UX (Jonathan, durante o teste): a checagem de "venda com ordem de
+reposição pendente" agora roda no INÍCIO da criação da entrega (criarEntrega),
+ANTES de gerar o código — não deixa nem montar a entrega. Antes só barrava na
+CONFIRMAÇÃO, com o código já gerado (desperdício + erro confuso). A validação
+da confirmação continua como segunda camada.
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
 
