@@ -149,4 +149,53 @@ BEGIN
 END $$;
 ROLLBACK;
 
+\echo '====== CENARIO 6: Pix confirmado (PDV) -> aprovar -> CR pago ======'
+BEGIN;
+ALTER TABLE public.vendas DISABLE TRIGGER trg_notificar_n8n;
+DO $$
+DECLARE v_id INT; v_cr TEXT;
+BEGIN
+  INSERT INTO alissonerp.vendas_erp (numero_venda,cliente_id,vendedor_id,total_produtos,total_venda,situacao,created_by)
+  VALUES ('E2E-6',224,134,200,200,'rascunho','681f363c-9e67-48a9-bd5f-443edc8eb79e') RETURNING id INTO v_id;
+  INSERT INTO alissonerp.pagamentos_venda (venda_id,forma,valor,parcelas,status,data_confirmacao) VALUES (v_id,'Pix',200,1,'confirmado',NOW());
+  UPDATE alissonerp.vendas_erp SET situacao='aprovado' WHERE id=v_id;
+  SELECT situacao INTO v_cr FROM alissonerp.contas_receber WHERE venda_erp_id=v_id;
+  IF v_cr='pago' THEN RAISE NOTICE 'PASS 6.1 — Pix confirmado: conta a receber nasce PAGA na aprovacao'; ELSE RAISE EXCEPTION 'FALHA 6.1 — cr=%',COALESCE(v_cr,'(nenhuma)'); END IF;
+END $$;
+ROLLBACK;
+
+\echo '====== CENARIO 7: pagamento MISTO -> conta a receber so do saldo aberto ======'
+BEGIN;
+ALTER TABLE public.vendas DISABLE TRIGGER trg_notificar_n8n;
+DO $$
+DECLARE v_id INT; v_sit TEXT; v_val NUMERIC;
+BEGIN
+  INSERT INTO alissonerp.vendas_erp (numero_venda,cliente_id,vendedor_id,total_produtos,total_venda,situacao,created_by)
+  VALUES ('E2E-7',224,134,200,200,'rascunho','681f363c-9e67-48a9-bd5f-443edc8eb79e') RETURNING id INTO v_id;
+  INSERT INTO alissonerp.pagamentos_venda (venda_id,forma,valor,parcelas,status,data_confirmacao) VALUES (v_id,'Dinheiro',120,1,'confirmado',NOW());
+  INSERT INTO alissonerp.pagamentos_venda (venda_id,forma,valor,parcelas,status) VALUES (v_id,'A Receber',80,1,'pendente');
+  UPDATE alissonerp.vendas_erp SET situacao='aprovado' WHERE id=v_id;
+  UPDATE alissonerp.vendas_erp SET situacao='entregue' WHERE id=v_id;
+  SELECT situacao,valor INTO v_sit,v_val FROM alissonerp.contas_receber WHERE venda_erp_id=v_id;
+  IF v_sit='pendente' AND v_val=80 THEN RAISE NOTICE 'PASS 7.1 — misto (120 dinheiro + 80 a receber): conta a receber = R$80 (so o aberto)'; ELSE RAISE EXCEPTION 'FALHA 7.1 — situacao=% valor=% (esperado pendente 80)',v_sit,v_val; END IF;
+END $$;
+ROLLBACK;
+
+\echo '====== CENARIO 8: motoboy — aprovado -> em_rota -> entregue ======'
+BEGIN;
+ALTER TABLE public.vendas DISABLE TRIGGER trg_notificar_n8n;
+DO $$
+DECLARE v_id INT; v_sit TEXT;
+BEGIN
+  INSERT INTO alissonerp.vendas_erp (numero_venda,cliente_id,vendedor_id,total_produtos,total_venda,situacao,created_by)
+  VALUES ('E2E-8',224,134,150,150,'aprovado','681f363c-9e67-48a9-bd5f-443edc8eb79e') RETURNING id INTO v_id;
+  UPDATE alissonerp.vendas_erp SET situacao='em_rota' WHERE id=v_id;
+  SELECT situacao INTO v_sit FROM alissonerp.vendas_erp WHERE id=v_id;
+  IF v_sit='em_rota' THEN RAISE NOTICE 'PASS 8.1 — aprovado->em_rota (motoboy retirou)'; ELSE RAISE EXCEPTION 'FALHA 8.1'; END IF;
+  UPDATE alissonerp.vendas_erp SET situacao='entregue' WHERE id=v_id;
+  SELECT situacao INTO v_sit FROM alissonerp.vendas_erp WHERE id=v_id;
+  IF v_sit='entregue' THEN RAISE NOTICE 'PASS 8.2 — em_rota->entregue (cliente recebeu)'; ELSE RAISE EXCEPTION 'FALHA 8.2'; END IF;
+END $$;
+ROLLBACK;
+
 \echo '====== FIM DOS TESTES ======'

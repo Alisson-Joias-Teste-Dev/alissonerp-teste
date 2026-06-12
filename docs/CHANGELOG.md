@@ -1,6 +1,16 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.3 <!-- Revisado 12/06/2026 -->
+> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.4 <!-- Revisado 12/06/2026 -->
+
+## fix(financeiro): conta a receber = saldo em aberto (v2.65.4, migration 300)
+
+Achado na verificação proativa das formas de pagamento: numa venda MISTA (ex.: R$200 =
+R$120 à vista + R$80 a receber), a conta a receber nascia com o valor CHEIO (R$200),
+inflando o "a receber" — o cliente só deve R$80. Migration 300: o gatilho que cria a conta
+(`fn_venda_gerar_conta_receber` + versão on_insert) passa a usar o SALDO EM ABERTO
+(total − pagamentos confirmados). Venda totalmente paga → nada a receber (a baixa 'pago' é
+do 299); parcial/só a receber → conta só do aberto. Verificação completa (22 asserções E2E,
+incluindo Pix, A Receber, misto e motoboy): todas PASS.
 
 ## fix(vendas): baixa da conta a receber também na aprovação (v2.65.3, migration 299)
 
