@@ -1,6 +1,17 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.2 <!-- Revisado 13/06/2026 -->
+> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.3 <!-- Revisado 13/06/2026 -->
+
+## feat(ux): mensagens de erro operacional claras na entrega/venda (v2.66.3)
+
+Validação do módulo de vendas/entregas (Jonathan 13/06): confirmado que toda falha é
+**bloqueio de operação** (etapa não feita), nunca quebra. 6 cenários testados no banco
+(rollback): reposição não concluída, peça sem estoque, "Na Entrega" não paga, reabrir
+venda entregue, editar venda fechada, item em reposição — todos bloqueiam limpo.
+Achado: 4 mensagens chegavam cruas (prefixo técnico do banco). Novo `traduzErroOperacional`
+(em `src/lib/erros-operacionais.ts`), aplicado no `apiFetch`, troca os prefixos por texto
+claro antes de mostrar: `STOCK_NEGATIVE`, `ENTREGA_BLOCKED`, `NA_ENTREGA_PENDENTE`,
+`TRANSICAO_INVALIDA`. Aditivo (não muda regra). tsc limpo.
 
 ## feat(estoque): reposição concluída dá ENTRADA no estoque (v2.66.2, mig 302)
 
