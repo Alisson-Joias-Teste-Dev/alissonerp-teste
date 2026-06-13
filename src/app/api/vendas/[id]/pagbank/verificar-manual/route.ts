@@ -14,7 +14,8 @@
  *      - baixarContaReceber()
  *      - registrarComunicacaoRecebimento()
  *      - autoAprovarVendaRascunho()
- *      - autoConcluirVendaSeQuitada()
+ *      (fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda —
+ *       o status só muda na entrega)
  *   4. Retorna status da verificação
  *
  * Gateway: "PagBank Manual"
@@ -31,7 +32,6 @@ import {
   baixarContaReceber,
   registrarComunicacaoRecebimento,
   autoAprovarVendaRascunho,
-  autoConcluirVendaSeQuitada,
   buscarPagamentoAReceberPendente,
 } from "@/lib/baixa-credito";
 import { internalError } from "@/lib/api-error";
@@ -199,15 +199,12 @@ export async function POST(
     console.error("[verificar-manual-pb] Erro ao registrar comunicação:", err);
   }
 
-  // Auto-aprovar se rascunho com crédito
+  // Auto-aprovar se rascunho com crédito. Fluxo novo 06/2026: pagamento
+  // quitado NÃO conclui mais a venda (status só muda na entrega).
   let vendaAprovada = false;
   if (venda?.situacao === "rascunho") {
     vendaAprovada = await autoAprovarVendaRascunho(sql, vendaId, user.id);
   }
-
-  // Auto-concluir se todos pagos
-  let vendaConcluida = false;
-  vendaConcluida = await autoConcluirVendaSeQuitada(sql, vendaId, user.id);
 
   return NextResponse.json({
     ok: true,
@@ -216,7 +213,6 @@ export async function POST(
     pb_tipo: pbTipo,
     saldo_devolvido: saldoDevolvido,
     venda_aprovada: vendaAprovada,
-    venda_concluida: vendaConcluida,
     pagamento_confirmado: pagamentoId != null,
   });
 }

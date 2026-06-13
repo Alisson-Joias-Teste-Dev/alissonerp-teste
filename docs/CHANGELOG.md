@@ -1,6 +1,226 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 12/06/2026 — Versão: v2.65.5 <!-- Revisado 12/06/2026 -->
+> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.9 <!-- Revisado 13/06/2026 -->
+
+## fix(code-review): correções do pente fino antes de produção (v2.66.9)
+
+Code-review do módulo (Jonathan 13/06). O achado mais grave — "dobra de estoque"
+de um gatilho da migration 141 — foi **FALSO ALARME** (verificado no banco: o
+gatilho não existe; o teste empírico já dava +1, não +2). Os 6 bugs reais
+encontrados, todos corrigidos:
+
+1. **Caixa × venda cancelada (financeiro):** GET/POST de `caixa/motoboy` não
+   filtravam `v.situacao` → pagamento órfão de venda cancelada aparecia e podia
+   ser confirmado (entrava dinheiro de venda inexistente). Add `v.situacao <>
+   'cancelado'` nos dois.
+2. **Modal fechava no meio do envio:** `confirmar-pagamento` modal permitia
+   fechar (overlay/X) durante o POST → drawer não atualizava → re-clique → POST
+   duplicado. Trava o fechar enquanto `submetendo`.
+3. **Parse de moeda BR do Ouro:** `replace(",",".")` só trocava a 1ª vírgula e
+   não tirava o ponto de milhar → "2.500,00" virava NaN e o botão travava sem
+   explicação. Novo `parseBRL` (tira milhar, troca todas as vírgulas).
+4. **Concorrência (TOCTOU):** a leitura `FOR UPDATE` dos pendentes e a checagem de
+   duplicidade do `gateway_id` estavam FORA da transação (auto-commit) → trava
+   inútil. Movidas pra dentro do `begin`.
+5. **MP/PagBank com 2+ saldos "Na Entrega":** o `gateway_id` (índice UNIQUE
+   global) era gravado em todas as linhas → violava o índice → 500. Agora o ID
+   fica só na 1ª linha; as demais entram `confirmado` sem `gateway_id`.
+6. **Reposição: re-entrada após estorno (mig 302):** a idempotência checava
+   `status <> 'cancelado'` (status inexistente) → após estornar uma entrada não
+   deixava dar entrada de novo. Trocado por `status = 'efetivado'` (só entrada
+   ATIVA bloqueia). Testado em rollback: cria→idempotente→estorna→recria. ✅
+
+tsc limpo; migration 302 reaplicada no homolog.
+
+## chore(pente-fino): pagamento na entrega validado p/ produção + badge (v2.66.8)
+
+Pente fino do módulo de pagamento na entrega (Jonathan 13/06, pré-produção).
+Rastreado o status novo `aguard_conferencia` por todo o sistema:
+- **Comissão:** só conta `confirmado` → venda com pagamento do motoboy não gera
+  comissão até o caixa conferir. ✅ correto.
+- **Financeiro/caixa (KPIs, lista de baixa):** só conta `confirmado` → o
+  `aguard_conferencia` fica invisível até a conferência. ✅ correto, sem inflar.
+- **Tela da venda:** o badge mostrava o status cru. Corrigido: cor + rótulo
+  "aguard. conferência" (`PAG_STATUS_COLOR`/`PAG_STATUS_LABEL`).
+- **MP/PagBank:** lógica reusa o `verificar-manual` (provado); só falta o teste
+  com ID real na API (homolog não tem) — gap conhecido.
+- **Contas a receber:** duplo registro ADIADO por decisão do Jonathan (módulo não
+  está em uso; será resolvido junto com o financeiro depois).
+
+## feat(caixa): conferência do pagamento do motoboy — Etapa 2 (v2.66.7)
+
+Jonathan (13/06): Dinheiro/Ouro que o motoboy recebeu na rua ficam
+`aguard_conferencia` (Etapa 1). Agora o caixa confere e libera pro financeiro.
+- Rota `financeiro/caixa/motoboy` (GET lista os `aguard_conferencia` Dinheiro/Ouro
+  com venda/cliente/motoboy; POST confirma → status `confirmado`). Permissão
+  `podedarBaixaCaixa`.
+- `TabCaixa` (Financeiro › Caixa): seção nova **"Pagamentos do motoboy a conferir"**
+  no topo, com botão Confirmar por linha. Confirmou → entra no fluxo normal.
+- **Dinheiro:** confirmar dispara o gatilho existente `fn_venda_baixar_recebimento_pago`
+  (AFTER UPDATE) → entra na lista de baixa do caixa. **Ouro:** o gatilho de rastreio
+  (`fn_rastreio_pagamento_ouro`) é AFTER INSERT e NÃO pega o UPDATE — então a rota
+  insere o rastreio do cofre manualmente (sem mexer no gatilho, p/ não dobrar nas
+  vendas de loja). Sem migration.
+- Testado: back (rollback — Dinheiro cria CR; Ouro cria rastreio no cofre) + front
+  (confirmei no caixa → R$100 entrou na lista de baixa, venda no topo). tsc limpo.
+
+> ⚠️ PENDÊNCIA CONHECIDA (adiada por decisão do Jonathan 13/06 — contas a receber não
+> está em uso ainda): como a entrega ocorre com o pagamento ainda em
+> `aguard_conferencia`, o gatilho `fn_venda_gerar_conta_receber` (que só conta
+> `confirmado` como pago) cria uma **conta a receber** pelo valor — e a conferência do
+> caixa não baixa essa conta. Resultado: o valor aparece no caixa **E** em "a receber"
+> (duplo registro). Correção futura (Opção A): incluir `aguard_conferencia` no cálculo
+> de "pago" do gatilho (não cria a conta na entrega; vira paga na conferência).
+
+## feat(entregas): motoboy confirma pagamento na entrega — Etapa 1 (v2.66.6)
+
+Jonathan (13/06): o motoboy, na rua, confirma o pagamento "Na Entrega" ANTES de
+poder confirmar a entrega. No detalhe da entrega, tendo saldo "Na Entrega" pendente,
+"Confirmar Entrega" some e aparece "Confirmar Pagamento" (4 formas).
+- **Dinheiro/Ouro:** motoboy confirma (se responsabiliza) → status `aguard_conferencia`
+  (NÃO entra no financeiro ainda — gatilho de CR e de rastreio de ouro só disparam em
+  `confirmado`; entra na Etapa 2, conferência do caixa). Status curto porque
+  `pagamentos_venda.status` é varchar(20).
+- **Mercado Pago/PagBank:** motoboy digita o ID → o sistema VERIFICA NA API (reusa
+  `fetchPayment` / `buscarPedido`-`buscarCobranca`) → aprovado → `confirmado` (entra
+  no financeiro). Sem duplicar a verificação que já existe no PDV.
+- Confirmado o pagamento, some o "Na Entrega" pendente → a trava do Código A libera.
+- Sem migration (status é texto livre; nenhum schema novo — `pagamentos_venda` já tem
+  `gateway_id`, `ouro_*`, `source`, `caixa_baixa_id`).
+- Arquivos: rota `entregas-venda/[id]/confirmar-pagamento`; `na_entrega_pendente` no GET
+  do detalhe; `EntregaDetalheDrawer` + novo `ConfirmarPagamentoMotoboyModal`.
+- Testado: back (rollback — Dinheiro→aguard_conferencia, sem CR, libera entrega) e
+  front completo (motoboy → Confirmar Pagamento Dinheiro → Confirmar Entrega → venda
+  ENTREGUE; CR = 0). MP/PagBank: lógica reusada do PDV; verificação na API real precisa
+  de um ID válido (teste do Jonathan). tsc limpo.
+- **Falta:** Etapa 2 (botão "Confirmar pagamento do motoboy" no caixa p/ dinheiro/ouro);
+  Etapa 3 (troca) — depois.
+
+## feat(entregas): retirada com "Na Entrega" pendente exige cobrar antes (v2.66.5)
+
+Jonathan (13/06, pós-teste no front): na RETIRADA na loja, se há saldo "Na Entrega"
+pendente, o operador criava a entrega, batia na trava ao confirmar o Código A, fechava
+o diálogo pra ir cobrar — e a entrega era **cancelada** (regra: entrega sem código
+confirmado é cancelada ao fechar), obrigando a recriar. Agora `criarEntrega` barra
+ANTES de gerar o código quando forma='retirada' e há 'Na Entrega' pendente:
+"Cobre o pagamento na entrega (R$X) antes de marcar a retirada — use o botão 'Cobrar
+na entrega'." Não cria entrega que cancela sozinha. **Motoboy não muda** (cliente paga
+no endereço; trava continua no Código A). Testado no back (rollback: retirada barrada
+sem criar entrega, motoboy não barrado, cobra→passa) e no front (mensagem no modal,
+0 entregas criadas). tsc limpo.
+
+## fix(ux): tradutor de erro também no servidor (pente fino) (v2.66.4)
+
+Pente fino do módulo vendas/entregas (Jonathan 13/06). Achado: o tradutor da v2.66.3
+estava só no `apiFetch`, mas a tela de detalhe da venda (`VendaDetalheClient`) usa
+`fetch` cru — então `TRANSICAO_INVALIDA`/`STOCK_NEGATIVE`/`ENTREGA_BLOCKED` ainda
+apareciam crus ali. Correção: aplicar `traduzErroOperacional` **no servidor**, nos
+catches que emitem esses erros — `vendas/[id]/route.ts` (regra de negócio + aprovação)
+e `vendas/[id]/cobrar-entrega/route.ts`. Agora todo cliente (apiFetch ou fetch cru)
+recebe o texto claro. Idempotente. tsc limpo.
+Verificado também (sem mexer): entrada de reposição é idempotente pelos 2 caminhos
+(volta + botão); volta-concluída e ordem-concluída andam juntas (40/40, sem gap);
+baixa na entrega é idempotente e divide reserva; nenhuma ordem de reposição mista
+(produto+sem produto) existe. Sem outras pontas soltas.
+
+## feat(ux): mensagens de erro operacional claras na entrega/venda (v2.66.3)
+
+Validação do módulo de vendas/entregas (Jonathan 13/06): confirmado que toda falha é
+**bloqueio de operação** (etapa não feita), nunca quebra. 6 cenários testados no banco
+(rollback): reposição não concluída, peça sem estoque, "Na Entrega" não paga, reabrir
+venda entregue, editar venda fechada, item em reposição — todos bloqueiam limpo.
+Achado: 4 mensagens chegavam cruas (prefixo técnico do banco). Novo `traduzErroOperacional`
+(em `src/lib/erros-operacionais.ts`), aplicado no `apiFetch`, troca os prefixos por texto
+claro antes de mostrar: `STOCK_NEGATIVE`, `ENTREGA_BLOCKED`, `NA_ENTREGA_PENDENTE`,
+`TRANSICAO_INVALIDA`. Aditivo (não muda regra). tsc limpo.
+
+## feat(estoque): reposição concluída dá ENTRADA no estoque (v2.66.2, mig 302)
+
+Jonathan (13/06): reposição concluída não dava entrada da peça no estoque comercial →
+a entrega da venda quebrava com `STOCK_NEGATIVE` (caso C-2372 / item 90000764). Agora a
+peça entra no estoque quando o **protocolo de VOLTA** é concluído (fluxo normal) — e o
+**botão "Concluir pelo sistema"** (master) também dá a entrada, pois pula o protocolo de
+volta. Os dois usam a mesma função idempotente (não dobra).
+- `fn_reposicao_entrada_estoque(ordem, user)` — idempotente (1 entrada por ordem+produto);
+  só age em reposição; cria `movimentacoes_estoque_comercial` 'entrada' (almox. 2,
+  motivo `reposicao_entrada`, ref. ordens) → espelha no físico via `trg_mirror_movimento_to_sle`.
+- Gatilho `trg_reposicao_entrada_volta` (AFTER UPDATE em `protocolos`, volta→concluido).
+  NÃO toca `fn_concluir_protocolo` (no-touch) — segue o padrão dos `trg_concluir_conversao`.
+- `fn_mirror`: 1 branch aditivo — no físico a entrada de reposição rotula como
+  `producao_auto` (voucher_type válido por `chk_voucher_type_valid`; bug pego no teste).
+- Rota `concluir-sistema`: chama a função após concluir, na mesma transação.
+- Testado no banco (rollback): volta dá entrada; botão dá entrada; idempotência (2x→1);
+  entrega destrava; controle sem-entrada ainda dá STOCK_NEGATIVE. tsc limpo.
+- "Pra trás": Jonathan resolve clicando o botão nas ordens travadas (sem acerto manual no banco).
+
+## fix(entregas): entrega "total" não exige o item da reposição (v2.66.1)
+
+Bug do v2.66.0 (Jonathan): com a trava por item, o modal parou de mandar o item em
+reposição numa entrega; mas a validação de tipo='total' do criarEntrega ainda exigia
+TODOS os pendentes → erro "Item X não foi informado". Correção: a checagem de 'total'
+(e o laço de validação de itens) agora **pula os itens cujo produto está em reposição
+aberta** — só os prontos são exigidos. `calcularSaldoPendente` passou a retornar
+`produtoId`. Validado no banco com cenário real (anel estoque + corrente reposição →
+entrega total só do anel passa); E2E 22/22; tsc limpo.
+
+## feat(entregas): trava de reposição POR ITEM (v2.66.0)
+
+Jonathan: numa venda com item de pronta-entrega (anel) + item sob encomenda em reposição,
+o cliente não conseguia levar o anel — a trava era da venda inteira. Agora é POR ITEM:
+só o item cujo produto está em reposição aberta espera; os prontos podem ser entregues
+(entrega parcial). O vínculo item↔reposição é pelo PRODUTO do item da própria ordem
+(`alissonerp.itens_ordem.produto_id`) — cobre ~81% (138/171), bem mais que o campo
+`venda_item_ids` (31/171). Reposição aberta SEM produto identificável cai no seguro:
+bloqueia a venda inteira.
+- Helper `calcularBloqueioReposicao` + aplicado em criarEntrega (montar) e confirmarEntrega.
+- Rota saldo-pendente marca `bloqueadoReposicao` por item + `bloqueioVendaInteira`.
+- Modal: só oferece os itens prontos (o da reposição não entra); avisa se tudo está travado.
+- Botão "Marcar Entrega": liberado se há item pronto; bloqueado só se nada é entregável.
+Testado no banco (bloqueia produto certo / venda inteira quando sem produto); E2E 22/22; tsc limpo.
+
+## fix(estoque): entrega parcial agora baixa o entregue e divide a reserva (v2.65.9)
+
+Jonathan (venda 15460, 2un, entrega parcial de 1): a reserva continuou com 2 e nenhuma
+saída foi gerada. Causa: a CRIAÇÃO da reserva olha `estoque_comercial_config.ativo`, mas a
+BAIXA (baixarEstoqueDaEntrega) olhava `controla_estoque` — critérios diferentes. 24 produtos
+têm ativo=true + controla_estoque=false → criam reserva mas a baixa pulava, deixando a
+reserva presa (qtd cheia, sem saída). Correção: a baixa passa a seguir a EXISTÊNCIA da
+reserva ativa (não a flag) — se há reserva, gera a saída do entregue e reduz a reserva ao
+saldo restante; item sem reserva (não controla estoque comercial) é pulado sem erro. Venda
+15460 corrigida no homolog (reserva 1 ativo + saída 1 efetivado).
+⚠️ Pendente: limpar as ~23 reservas órfãs restantes (entregas antigas desses 24 produtos)
+quando for pra produção.
+
+## feat(entregas): mostra QUAL item já foi entregue (v2.65.8)
+
+Jonathan: "era bom informar qual item foi entregue". Na lista de produtos da venda, cada
+item agora mostra um badge "Entregue X/Y" (parcial, azul) ou "Entregue" (completo, verde),
+com tooltip "X de Y entregue(s)". A rota /api/entregas-venda/saldo-pendente ganhou
+`?todos=1` (retorna TODOS os itens com qtdEntregue, inclusive os 100% entregues, sem o
+filtro de saldo>0 usado pelo modal). tsc limpo.
+
+## fix(entregas): entrega parcial — saldo real + indicador na tela (v2.65.7)
+
+Jonathan (venda 15460, 2un do mesmo SKU, entrega parcial de 1): o modal "Marcar Entrega"
+mostrava o saldo CHEIO (2) e deixava tentar reentregar o já entregue — o cálculo era um
+ternário quebrado (ignorava o entregue). E a tela da venda não mostrava que parte já fora
+entregue.
+- Nova rota GET /api/entregas-venda/saldo-pendente (expõe vw_entregas_pendentes).
+- MarcarEntregaModal: usa o saldo REAL por item (qtd vendida − já entregue); mostra "1 de
+  2", input limitado a 1, avisa quando tudo já foi entregue.
+- VendaDetalheClient: badge "Entrega parcial — falta(m) N un." no cabeçalho, com tooltip
+  por item (X de Y entregue). O backend (criarEntrega) já rejeitava o excesso. tsc limpo.
+
+## fix(entregas): bloqueio de reposição por STATUS da ordem (v2.65.6, migration 301)
+
+Jonathan: o bloqueio de entrega por ordem de reposição deve usar o STATUS de produção
+(`alissonerp.ordens.status`), não a situacao. O critério antigo (situacao IN criado/
+rascunho) deixava passar uma ordem 'criado' + 'em_andamento' (peça ainda em produção).
+Agora os 3 pontos usam o mesmo critério — bloqueia enquanto `status NOT IN ('concluido',
+'cancelado')` (aguardando/em_andamento bloqueiam): botão "Marcar Entrega" (desabilita +
+mostra a ordem), criarEntrega (montar) e confirmarEntrega, e o gatilho
+fn_estoque_comercial_entrega_venda (migration 301, último guard). Testado: reposição
+em_andamento bloqueia; ao concluir, libera. Também passou a cobrir 'reposicao_loja'.
 
 ## fix(compras): pedra solta x joia com pedra na compra comercial (v2.65.5)
 
@@ -16,10 +236,219 @@ joias. Nenhum item de compra já lançado foi gravado errado (0 afetados). Obs: 
 soltas estão sem categoria no cadastro (public.produtos, READONLY/Tiny) — ajuste manual
 sugerido, fora deste fix.
 
-> Obs: este fix foi cherry-pickado direto na main (b7804a07); as versões v2.61.0–v2.65.4
-> seguem em teste na homolog e entram na main no próximo merge geral.
+## fix(financeiro): conta a receber = saldo em aberto (v2.65.4, migration 300)
+
+Achado na verificação proativa das formas de pagamento: numa venda MISTA (ex.: R$200 =
+R$120 à vista + R$80 a receber), a conta a receber nascia com o valor CHEIO (R$200),
+inflando o "a receber" — o cliente só deve R$80. Migration 300: o gatilho que cria a conta
+(`fn_venda_gerar_conta_receber` + versão on_insert) passa a usar o SALDO EM ABERTO
+(total − pagamentos confirmados). Venda totalmente paga → nada a receber (a baixa 'pago' é
+do 299); parcial/só a receber → conta só do aberto. Verificação completa (22 asserções E2E,
+incluindo Pix, A Receber, misto e motoboy): todas PASS.
+
+## fix(vendas): baixa da conta a receber também na aprovação (v2.65.3, migration 299)
+
+Bug achado no teste do Jonathan (venda 15458 no PDV): a regra "pagou → conta a receber
+paga na hora" (297) só disparava quando o PAGAMENTO era confirmado. No PDV o fluxo normal
+é lançar o dinheiro com a venda ainda em RASCUNHO e só DEPOIS aprovar — aí o 297 pulava
+(ignora rascunho) e a aprovação não re-disparava. Resultado: venda paga ficava com conta
+a receber 'pendente'. Migration 299: helper `fn_venda_criar_cr_quitada` + novo gatilho na
+mudança de situacao da venda (dispara a baixa ao sair de rascunho). Agora a baixa cobre os
+dois casos (pagou antes OU depois de aprovar). Testado no homolog; conta da venda 15458
+corrigida para 'pago'.
+
+## fix(entregas): bloqueio de reposição pendente antes de gerar o código (v2.65.2)
+
+Ajuste de UX (Jonathan, durante o teste): a checagem de "venda com ordem de
+reposição pendente" agora roda no INÍCIO da criação da entrega (criarEntrega),
+ANTES de gerar o código — não deixa nem montar a entrega. Antes só barrava na
+CONFIRMAÇÃO, com o código já gerado (desperdício + erro confuso). A validação
+da confirmação continua como segunda camada.
 
 > Regra: TODO push atualiza o CHANGELOG. Features = MINOR (v2.X.0), Fixes = PATCH (v2.9.X).
+
+## feat(vendas): Etapa 4 — Pagamento na Entrega (v2.65.0)
+
+**Contexto:** Etapa 4 da refatoração (decisões do Jonathan 11/06/2026). Nova forma de
+pagamento "Na Entrega" — o cliente paga parte (ou tudo) na hora que recebe a joia.
+Sem migration (forma é texto livre em pagamentos_venda; não tocou o schema public).
+
+**Regras (decisões do Jonathan):**
+- **Aprovar:** a consultora aprova DIRETO (sem gerente) quando confirmados + 'Na Entrega'
+  pendentes = total e não há outro pendente. O 'Na Entrega' pendente NÃO bloqueia a
+  aprovação (diferente de 'A Receber', que exige aprovação de crédito).
+- **Cobrança na entrega:** o atendente/motoboy registra a forma REAL usada (Dinheiro/Pix/
+  Cartão) — nova rota `POST /api/vendas/[id]/cobrar-entrega` confirma o 'Na Entrega' com
+  essa forma; o gatilho 297 baixa a conta a receber na hora.
+- **Não entrega sem pagar:** a entrega NÃO conclui enquanto houver 'Na Entrega' pendente,
+  tanto no PATCH `/api/vendas/[id]` (situacao='entregue') quanto no fluxo do motoboy
+  (`marcarVendaEntregueSeCompleta` lança NA_ENTREGA_PENDENTE). Sem exceção de gerente
+  para este caso.
+
+**Arquivos:** `src/app/api/vendas/[id]/route.ts` (guards de aprovação/entrega separados
+para 'Na Entrega'); `src/app/api/vendas/[id]/cobrar-entrega/route.ts` (nova); `src/lib/
+entrega-venda.ts` (bloqueio no fluxo do motoboy); `NovaVendaClientV2.tsx` ('Na Entrega'
+como forma selecionável).
+
+**UI:** botão "Cobrar na entrega" na tela de detalhe da venda (VendaDetalheClient) — no
+pagamento 'Na Entrega' pendente, abre o seletor de forma real (Dinheiro/Pix/Cartão) e
+chama a rota /cobrar-entrega. 'Na Entrega' deixa de cair no "Confirmar" genérico.
+
+**Teste E2E (docs/teste-e2e-vendas.sql, 18 asserções PASS):** ciclo completo + Na Entrega
+(pendente não gera conta a receber; cobrar na entrega cria a conta PAGA; cobrança não muda
+status; após cobrar, entrega conclui). `tsc` limpo; suíte sem falha nova.
+
+## feat(vendas): Etapa 3 — celular obrigatório + WhatsApp do desenvolvedor (v2.64.0)
+
+**Contexto:** Etapa 3 da refatoração vendas/entregas (decisões do Jonathan 11/06/2026).
+Sem migration — só código.
+
+**1) Celular obrigatório para aprovar a venda:** `approveVenda` (src/lib/vendas-aprovar.ts)
+agora bloqueia a aprovação se o cliente não tiver celular cadastrado. Regra: a partir da
+aprovação entra a entrega, e o código de retirada (Código A) vai por WhatsApp — sem
+celular o código não tem para onde ir. Telefone fixo NÃO conta. Como o PATCH
+`/api/vendas/[id]` (situacao='aprovado') delega ao `approveVenda` (Etapa 2), a regra vale
+para a tela e para os webhooks de pagamento.
+
+**2) WhatsApp do desenvolvedor (fallback de segurança):** quando o envio do código ao
+CLIENTE falha (número inválido, cliente sem WhatsApp, Evolution fora), o sistema manda o
+código + o motivo do erro para o WhatsApp do desenvolvedor — assim ninguém fica sem o
+código. Novo campo na aba **Configurações › Integrações** ("WhatsApp do desenvolvedor",
+chave `whatsapp_desenvolvedor`). Implementado em `src/lib/whatsapp.ts`
+(`enviarAvisoDesenvolvedor`) e `src/lib/entrega-venda.ts` (hooks nos pontos de envio do
+Código A — retirada e em_rota). Best-effort: se o número não estiver configurado, só pula.
+
+**Teste E2E (banco de teste, 13 asserções, todas PASS):** ciclo completo verificado —
+item cria reserva de estoque; reserva permanece na aprovação; pagamento total cria conta
+a receber JÁ paga na hora; pagamento não muda status; entrega mantém 'entregue' (não vira
+'concluido') e converte a reserva em saída de estoque; conta a receber não duplica; trava
+barra transição inválida (rascunho→entregue); estorno de entregue não desfaz a entrega
+(entregue→cancelado permitido); pagamento parcial não baixa, completar o total baixa.
+`tsc` limpo; suíte vitest sem falha nova vs HEAD.
+
+## feat(vendas): trava de status + baixa automática no pagamento (v2.63.0)
+
+**Contexto:** complemento da Etapa 2 (decisões do Jonathan em 11/06/2026). Migration
+297 aplicada SÓ no banco de TESTE — NÃO em produção.
+
+**1) Trava de status (rede de segurança no banco):** liga de fato a máquina de estados
+da venda — cria a tabela `vendas_transicoes` + o gatilho `trg_registrar_transicao_venda`
+(BEFORE UPDATE OF situacao). A migration 178 tinha criado a função mas o gatilho/tabela
+NUNCA foram aplicados em produção (função inerte). Transições permitidas mapeadas do
+código real (inclui a volta do estorno aprovado/em_rota → rascunho; mantém concluido/
+enviado como destino só p/ rota legado e histórico). **Entregue é ponto final:**
+entregue→rascunho é BLOQUEADO (decisão Jonathan); só entregue→cancelado/concluido.
+
+**2) Baixa automática no pagamento:** novo gatilho em `pagamentos_venda`
+(`fn_venda_baixar_recebimento_pago`): quando os pagamentos confirmados cobrem o total
+da venda (aprovada), cria a conta a receber JÁ como 'pago', na hora, SEM mexer no status
+da venda. Funciona em qualquer forma de pagamento. Guard anti-duplicata (não recria se já
+há CR não-cancelada; o trigger de entrega 296 também é guardado).
+
+**3) Estorno respeita o ponto final:** `estornarVenda` (vendas-aprovar.ts) não volta mais
+venda entregue/concluida para rascunho — registra a devolução do pagamento e cancela a
+CR, mas mantém o status (nova ação `mantida_terminal`). Sem isso, a trava recusaria o
+estorno de venda entregue.
+
+**4) Desligada a "ponte de volta" public.vendas → vendas_erp:** removidos os gatilhos
+`trg_sync_venda_insert_from_public` e `trg_sync_venda_update_from_public`. Decisão do
+Jonathan: `alissonerp.vendas_erp` é a ÚNICA fonte de verdade; o schema public (Evolury,
+SÓ histórico) não espelha mais de volta. **Bug que isso corrigiu:** o espelhamento
+ida-e-volta transformava toda venda 'entregue' em 'concluido' sozinha (em public.vendas
+'entregue' e 'concluido' usam o mesmo código 2, e a volta escolhia 'concluido') — então
+'entregue' nunca ficava. O espelhamento de IDA (erp → public) continua.
+
+Validado no banco de teste: pagar total → CR 'pago' + venda fica 'aprovado'; entregar →
+venda fica 'entregue' (não vira concluido) sem duplicar CR; trava barra transições
+inválidas; estorno de entregue não desfaz a entrega. `tsc` limpo; suíte vitest sem falha
+nova vs HEAD. Migration 297 NÃO aplicada em produção.
+
+## feat(vendas): Novo fluxo de status — Etapa 2 da refatoração (v2.62.0)
+
+**Contexto:** segunda etapa da refatoração vendas/entregas (plano aprovado em 11/06/2026).
+O fim natural da venda agora é a ENTREGA: `rascunho → aprovado → em_rota → entregue`
+(+ `cancelado`). Os status `concluido` e `enviado` foram APOSENTADOS — vendas antigas
+neles ficam intocadas (histórico), mas nenhuma venda nova transiciona PARA eles.
+
+**Banco (migration 296 — aplicada só no banco de TESTE, junto com a 295):**
+- `fn_registrar_transicao_venda`: nova máquina de estados (aprovado → em_rota | entregue
+  | cancelado; entregue/cancelado terminais; históricos podem sair, nunca receber).
+  ⚠️ ACHADO: a função existe em produção mas SEM trigger e SEM a tabela
+  `vendas_transicoes` — a máquina de estados nunca esteve ativa; quem controla o fluxo
+  é o código. Ativar (ou não) o trigger é decisão pendente do Jonathan.
+- `fn_venda_gerar_conta_receber`: dispara também em `entregue` (compat com
+  confirmado/concluido mantida).
+- `fn_proteger_itens_venda_fechada`: `entregue` agora também blinda itens.
+- `vw_dash_vendas_todas`: já tinha `em_rota` desde a 290 — sem mudança.
+
+**Backend — pagamento quitado NÃO conclui mais a venda (decisão Jonathan 11/06):**
+- `concluirVenda()` APOSENTADA (removida de `src/lib/vendas-aprovar.ts`) e
+  `autoConcluirVendaSeQuitada()` removida de `src/lib/baixa-credito.ts`.
+- Auto-conclusão removida de 16 pontos: webhooks MP (x2) e PagBank, checar-point e
+  verificar-manual (MP e PagBank), reconciliar-pendentes (MP e PagBank), crediário
+  (registrar-pagamento, verificar-mp, verificar-pagbank), pagamentos `[pagId]` e
+  `/confirmar`, solicitações de alteração (x2). Auto-APROVAR (rascunho + crédito)
+  continua em todos. Respostas trocam `venda_concluida` por `pagamento_quitado`.
+- PATCH `/api/vendas/[id]`: situações válidas agora `rascunho|aprovado|entregue|cancelado`;
+  aprovação DELEGADA ao `approveVenda()` (apagadas ~430 linhas inline de Tiny/ordem/cofre
+  duplicadas da lib). `criarOrdemDoOrcamento()` da lib atualizado para usar
+  `orcamentoFichaToDados`/`nomeItemOrdem` (ficha técnica completa — perfil/friso/canal/pedra).
+- Solicitações de alteração: alvo `concluido`/`enviado` agora retorna 409 (aposentados).
+
+**Comissões e relatórios — `em_rota` adicionado (mantendo status antigos):**
+`comissoes/elegiveis|resumo|fechamentos|gerar-maio`, `dashboard-comercial/analise-comissoes`
+(x2), `vendas/analise-frete`, `vendas/cliente/[id]/historico` (+ `entregue`),
+`financeiro/cofre-ouro/upgrades`.
+
+**Front:** VendaDetalheClient — mensagens "venda concluída" viraram "venda quitada"
+(lê `pagamento_quitado`/`todos_pagos`). Não havia botão "Concluir" (já não existia).
+
+**Banco de teste:** restore anterior estava corrompido (objetos antigos travaram
+contatos/leads/vendedores/auth.users). Recriado do zero com o dump de 11/06 —
+validado: `vendas_erp` 14.958, `auth.users` 29, 0 usuários órfãos, FKs ok.
+Migrations 295+296 aplicadas no teste; smoke test: aprovado→entregue cria CR ✔.
+
+**Testes:** `npx tsc --noEmit` limpo. Suíte vitest: ZERO falhas novas vs HEAD
+(7 testes do comportamento antigo atualizados p/ o fluxo novo; 1 falha pré-existente
+corrigida de brinde). ⚠️ A suíte já tinha ~105 falhas PRÉ-EXISTENTES no HEAD
+(não relacionadas a esta mudança) — pendência separada.
+
+Migrations 295/296 NÃO aplicadas em produção (aguardam Etapas 3-5 + testes + aval).
+
+## feat(vendas/entregas): Blindagem do módulo — Etapa 1 da refatoração (v2.61.0)
+
+**Contexto:** primeira etapa da refatoração do módulo de vendas/entregas (plano aprovado
+em 11/06/2026), corrigindo os achados críticos da análise pente fino
+(`docs/analise-vendas-entregas-2026-06.md`). Sem mudança de regra de negócio.
+
+**Correções de segurança e integridade:**
+- **C1 — Rotas de entrega fechadas:** POST `/api/entregas-venda`, `[id]/confirmar`,
+  `[id]/cancelar` e PATCH `/api/entrega/[entregaId]` agora exigem role real
+  (novo helper `requireEntregaVendaAccess` em `src/lib/auth-vendas.ts`: roles de vendas
+  full, consultora dona da venda, motoboy designado só confirma a própria entrega).
+- **C3 — Confirmação de pagamento atômica:** `pagamentos/[pagId]/confirmar` roda em
+  `sql.begin()` com `FOR UPDATE` (anti dupla confirmação). `creditarSaldo()` aceita
+  transação externa (`txClient`). Falha = rollback total + erro visível.
+- **C4 — Auditoria (`logAudit`):** PATCH de vendas, cancelar venda, aprovar desconto,
+  confirmar pagamento, editar/remover item, preparações de entrega e tentativas/
+  desbloqueio de código agora registram quem/o quê/quando em `alissonerp.audit_log`.
+- **M1 — Fim dos catches silenciosos:** `aprovar-desconto` virou transação única;
+  best-effort de notificações/webhooks agora loga erro; front usa `useErrorStore`
+  (NovaVendaClientV2, VendaDetalheClient, MarcarEntregaModal, FreteAvulsoModal).
+- **M2 — PATCH de vendas:** erros de regra (STOCK_NEGATIVE etc.) → 409; resto → 500
+  via `internalError` (antes tudo virava 409 com mensagem crua do banco).
+- **Códigos A/B não vazam mais:** respostas de GET/POST de entregas saem mascaradas
+  (`••••••`) para todos exceto admin/desenvolvedor — código só chega por WhatsApp.
+- **Migration 295:** `tentativas_codigo` + `codigo_bloqueado_em` em `entregas_venda` —
+  5 códigos errados bloqueiam a confirmação; desbloqueio só por gerente/admin via
+  nova rota POST `/api/entregas-venda/[id]/desbloquear-codigo` (com auditoria).
+
+**Backup prévio (Etapa 0):** tag `v2.60.4-pre-refatoracao-vendas` + branch
+`backup-pre-refatoracao-vendas-2026-06` no origin; dump completo de produção
+(280 MB) restaurado no banco de teste para a fase de testes.
+
+`npx tsc --noEmit` limpo. Migration 295 ainda NÃO aplicada em produção (vai junto
+com o pacote da refatoração, após testes no banco de teste e aval do Jonathan).
 
 ## fix(ligacao): "Disponível" do Ouro 24k passa a usar o pote (depósito 1) (v2.60.4)
 

@@ -196,7 +196,7 @@ async function criarTarefaAprovacao(
     mensagem: descricao,
     remetenteId: solicitanteId,
     link: `/tarefas?abrir=${tarefa.id}`,
-  }).catch(() => {});
+  }).catch((e) => console.error("[aprovacao-regras] notificação de tarefa falhou:", e));
 
   return tarefa.id;
 }

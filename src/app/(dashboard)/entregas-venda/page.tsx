@@ -35,7 +35,7 @@ const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_loja", "consultora"
 /** Item de entrega serializado para o client */
 export interface EntregaItem {
   id: number;
-  venda_id: number;
+  venda_id: number | null;
   codigo_entrega: string;
   tipo: string;
   situacao: string;
@@ -54,6 +54,8 @@ export interface EntregaItem {
   total_venda: number | null;
   cliente_nome: string | null;
   motoboy_nome: string | null;
+  is_avulso: boolean;
+  descricao_avulso: string | null;
 }
 
 /** Contagens para os cards de stats */
@@ -150,11 +152,14 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
         ev.created_at,
         ve.numero_venda,
         ve.total_venda,
-        c.nome AS cliente_nome,
-        mb.nome AS motoboy_nome
+        COALESCE(c.nome, ca.nome) AS cliente_nome,
+        mb.nome AS motoboy_nome,
+        ev.is_avulso,
+        ev.descricao_avulso
       FROM alissonerp.entregas_venda ev
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = ev.venda_id
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
+      LEFT JOIN public.contatos ca ON ca.id_contato = ev.contato_id
       LEFT JOIN alissonerp.motoboys mb ON mb.user_id = ev.motoboy_id
       WHERE 1=1
         ${whereVendedor}
@@ -200,7 +205,7 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
   // IMPACTO SE REMOVIDO: frontend recebe strings e formatações/cálculos quebram.
   const items: EntregaItem[] = itemsResult.map((r: Record<string, unknown>) => ({
     id:                          Number(r.id),
-    venda_id:                    Number(r.venda_id),
+    venda_id:                    r.venda_id != null ? Number(r.venda_id) : null,
     codigo_entrega:              String(r.codigo_entrega ?? ""),
     tipo:                        String(r.tipo ?? ""),
     situacao:                    String(r.situacao ?? ""),
@@ -219,6 +224,8 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     total_venda:                 r.total_venda ? Number(r.total_venda) : null,
     cliente_nome:                r.cliente_nome ? String(r.cliente_nome) : null,
     motoboy_nome:                r.motoboy_nome ? String(r.motoboy_nome) : null,
+    is_avulso:                   Boolean(r.is_avulso),
+    descricao_avulso:            r.descricao_avulso ? String(r.descricao_avulso) : null,
   }));
 
   return (

@@ -27,7 +27,7 @@
 
 import sql from "@/lib/db";
 import { logAudit } from "@/lib/audit";
-import { enviarCodigoWhatsAppDetalhado, enviarCodigoClienteEmRota, enviarConfirmacaoEntregaConcluida } from "@/lib/whatsapp";
+import { enviarCodigoWhatsAppDetalhado, enviarCodigoClienteEmRota, enviarConfirmacaoEntregaConcluida, enviarAvisoDesenvolvedor } from "@/lib/whatsapp";
 import { uploadFile } from "@/lib/storage";
 
 // O client transacional do pacote postgres não expõe call signature adequada
@@ -40,6 +40,7 @@ type DbSql = any;
 /** Item de saldo pendente para entrega, vindo da view vw_entregas_pendentes */
 export interface SaldoPendenteItem {
   itemVendaId: number;
+  produtoId: number | null;
   nomeProduto: string;
   sku: string;
   qtdVendida: number;
@@ -218,6 +219,19 @@ async function baixarEstoqueDaEntrega(
       FOR UPDATE
     `;
 
+    // REGRA DE NEGÓCIO (corrigido 12/06 — Jonathan): a baixa segue a EXISTÊNCIA
+    // da reserva, não a flag controla_estoque. A reserva é criada quando o produto
+    // tem estoque_comercial_config.ativo = true; se há reserva ativa, ela DEVE ser
+    // baixada (saída do entregue) e dividida (reserva do que falta). Antes a baixa
+    // pulava produtos com controla_estoque=false e a reserva ficava presa (qtd
+    // cheia, sem saída). Item sem nenhuma reserva ativa = produto que não controla
+    // estoque comercial → pula sem erro.
+    // IMPACTO SE REMOVIDO: volta a deixar reserva presa em produto ativo sem
+    // controla_estoque (saldo disponível errado, dupla reserva).
+    if (reservas.length === 0) {
+      continue;
+    }
+
     for (const reserva of reservas) {
       if (restanteParaBaixar <= 0) break;
 
@@ -318,6 +332,22 @@ async function marcarVendaEntregueSeCompleta(
   `;
 
   if (Number(pendencia.total) > 0) return false;
+
+  // ETAPA 4 (Pagamento na Entrega — decisão Jonathan 11/06): NÃO marca entregue
+  // enquanto houver saldo 'Na Entrega' pendente. O atendente/motoboy precisa
+  // registrar o pagamento real antes (rota POST /api/vendas/[id]/cobrar-entrega).
+  // IMPACTO SE REMOVIDO: joia sairia entregue sem o cliente ter pago o que ficou
+  // combinado para pagar na entrega.
+  const [naEntrega] = await tx`
+    SELECT COALESCE(SUM(valor), 0)::numeric AS total
+    FROM alissonerp.pagamentos_venda
+    WHERE venda_id = ${vendaId} AND forma = 'Na Entrega' AND status = 'pendente'
+  `;
+  if (Number(naEntrega.total) > 0) {
+    throw new Error(
+      `NA_ENTREGA_PENDENTE: registre o pagamento na entrega (R$${Number(naEntrega.total).toFixed(2)}) antes de concluir a entrega.`,
+    );
+  }
 
   await tx`
     UPDATE alissonerp.vendas_erp
@@ -450,6 +480,7 @@ export async function calcularSaldoPendente(
   const rows = await sql`
     SELECT
       item_venda_id,
+      produto_id,
       nome_produto,
       sku,
       qtd_vendida,
@@ -463,12 +494,66 @@ export async function calcularSaldoPendente(
 
   return rows.map((r: Record<string, unknown>) => ({
     itemVendaId: Number(r.item_venda_id),
+    produtoId: r.produto_id != null ? Number(r.produto_id) : null,
     nomeProduto: String(r.nome_produto ?? ""),
     sku: r.sku ? String(r.sku) : "",
     qtdVendida: Number(r.qtd_vendida),
     qtdEntregue: Number(r.qtd_entregue),
     saldoPendente: Number(r.saldo_pendente),
   }));
+}
+
+export interface BloqueioReposicao {
+  produtosBloqueados: number[];   // produtos com reposição aberta → não entregar ainda
+  bloqueioVendaInteira: boolean;  // reposição aberta SEM produto identificável → trava tudo
+  ordensAbertas: string[];        // números das ordens abertas (para a mensagem)
+}
+
+/**
+ * Bloqueio de entrega POR ITEM por causa de reposição (sob encomenda).
+ *
+ * REGRA DE NEGÓCIO (12/06 — Jonathan): a reposição (item vendido como pronta
+ * entrega mas que faltou no estoque) trava só A ENTREGA DAQUELE ITEM, não a venda
+ * inteira — assim o cliente leva os itens prontos e espera só o da reposição.
+ * O vínculo item↔reposição é pelo PRODUTO do item da própria ordem
+ * (alissonerp.itens_ordem.produto_id), que cobre ~81% das reposições. Quando a
+ * ordem aberta não tem produto identificável, cai no seguro: bloqueia a venda
+ * inteira (bloqueioVendaInteira=true).
+ *
+ * IMPACTO SE REMOVIDO: volta a travar a venda toda por causa de um item em
+ * reposição, prendendo os itens prontos.
+ */
+export async function calcularBloqueioReposicao(
+  db: DbSql,
+  vendaId: number,
+): Promise<BloqueioReposicao> {
+  const rows = await db`
+    SELECT o.numero_ordem,
+           array_remove(array_agg(DISTINCT io.produto_id), NULL) AS produtos
+    FROM alissonerp.ordens o
+    LEFT JOIN alissonerp.itens_ordem io ON io.ordem_id = o.id
+    WHERE o.venda_id = ${vendaId}
+      AND o.tipo_ordem IN ('reposicao_venda', 'reposicao_loja')
+      AND o.status NOT IN ('concluido', 'cancelado')
+    GROUP BY o.id, o.numero_ordem
+  `;
+  const produtos = new Set<number>();
+  const ordens = new Set<string>();
+  let vendaInteira = false;
+  for (const r of rows as Array<{ numero_ordem: string; produtos: number[] | null }>) {
+    ordens.add(String(r.numero_ordem));
+    const ps = (r.produtos ?? []).map(Number).filter((n) => !Number.isNaN(n));
+    if (ps.length === 0) {
+      vendaInteira = true; // ordem aberta sem produto → não dá pra saber o item → trava tudo
+    } else {
+      ps.forEach((p) => produtos.add(p));
+    }
+  }
+  return {
+    produtosBloqueados: Array.from(produtos),
+    bloqueioVendaInteira: vendaInteira,
+    ordensAbertas: Array.from(ordens),
+  };
 }
 
 // ─── 4. Criação de Entrega ────────────────────────────────────────────────────
@@ -522,6 +607,46 @@ export async function criarEntrega(
     );
   }
 
+  // Venda precisa estar APROVADA (ou já em rota) para montar a entrega.
+  // REGRA DE NEGÓCIO (ajuste 12/06 — Jonathan): não se monta entrega de venda
+  // em rascunho/não aprovada — barra ANTES de gerar o código. 'em_rota' é
+  // permitido para continuar entregas parciais já iniciadas.
+  // IMPACTO SE REMOVIDO: dá pra gerar código de entrega de venda que ainda nem
+  // foi aprovada (sem pagamento/ordem definidos).
+  if (venda.situacao !== "aprovado" && venda.situacao !== "em_rota") {
+    throw new Error(
+      `Venda ${venda.numero_venda ?? params.vendaId} precisa estar aprovada para montar a entrega ` +
+        `(situação atual: ${venda.situacao}).`,
+    );
+  }
+
+  // RETIRADA + "Na Entrega" pendente: cobrar ANTES de montar a entrega.
+  //
+  // REGRA DE NEGÓCIO (13/06 — Jonathan): na retirada na loja o cliente está
+  // presente e o código do cliente é confirmado na hora; se há saldo "Na Entrega"
+  // pendente, esse código seria barrado e a entrega recém-criada acabaria
+  // CANCELADA ao fechar (a entrega só sobrevive com código confirmado). Para não
+  // criar-e-cancelar à toa, barramos AQUI, antes de gerar o código: o atendente
+  // cobra primeiro (botão "Cobrar na entrega") e depois marca a retirada.
+  // Motoboy NÃO entra nessa regra: lá o cliente paga no endereço e a cobrança/
+  // Código A acontecem na entrega (a trava de "não entrega sem pagar" continua no
+  // Código A, em marcarVendaEntregueSeCompleta).
+  // IMPACTO SE REMOVIDO: volta a gerar entrega de retirada que cancela sozinha
+  // quando o operador vai cobrar o pagamento na entrega.
+  if (params.formaEntrega === "retirada") {
+    const [naEntrega] = await sql`
+      SELECT COALESCE(SUM(valor), 0)::numeric AS total
+      FROM alissonerp.pagamentos_venda
+      WHERE venda_id = ${params.vendaId} AND forma = 'Na Entrega' AND status = 'pendente'
+    `;
+    if (Number(naEntrega.total) > 0) {
+      throw new Error(
+        `Cobre o pagamento na entrega (R$${Number(naEntrega.total).toFixed(2)}) antes de marcar a retirada — ` +
+          `use o botão "Cobrar na entrega".`,
+      );
+    }
+  }
+
   // 2. Validar que há itens para entregar
   if (!params.itens || params.itens.length === 0) {
     throw new Error(
@@ -539,9 +664,26 @@ export async function criarEntrega(
   }
 
   const saldoMap = new Map<number, number>();
+  const produtoMap = new Map<number, number | null>();
+  const nomeMap = new Map<number, string>();
   for (const s of saldoPendente) {
     saldoMap.set(s.itemVendaId, s.saldoPendente);
+    produtoMap.set(s.itemVendaId, s.produtoId);
+    nomeMap.set(s.itemVendaId, s.nomeProduto);
   }
+
+  // Reposição POR ITEM (12/06 — Jonathan): produtos travados por reposição aberta.
+  // Usado para (a) rejeitar quem tentar entregar o item da reposição e (b) NÃO
+  // exigir esse item numa entrega 'total' (ele espera a reposição; os prontos saem).
+  // Reposição aberta SEM produto identificável → bloqueia a venda inteira (seguro).
+  const bloqueio = await calcularBloqueioReposicao(sql, params.vendaId);
+  if (bloqueio.bloqueioVendaInteira) {
+    throw new Error(
+      `Venda possui reposição aberta (${bloqueio.ordensAbertas.join(", ")}) sem item ` +
+        `identificado. Conclua ou cancele a reposição antes de entregar.`,
+    );
+  }
+  const produtosBloqueados = new Set(bloqueio.produtosBloqueados);
 
   // Valida cada item da entrega
   for (const item of params.itens) {
@@ -567,11 +709,25 @@ export async function criarEntrega(
           `${disponivel} disponível, ${item.quantidade} solicitado.`,
       );
     }
+
+    // Não deixa entregar item cujo produto está em reposição aberta
+    const prodItem = produtoMap.get(item.itemVendaId);
+    if (prodItem != null && produtosBloqueados.has(prodItem)) {
+      throw new Error(
+        `O item "${nomeMap.get(item.itemVendaId) ?? `#${item.itemVendaId}`}" depende de ` +
+          `reposição ainda não concluída. Entregue os itens prontos e deixe este ` +
+          `para quando a reposição chegar.`,
+      );
+    }
   }
 
-  // 4. Se tipo='total': todos os itens com saldo pendente devem ser cobertos integralmente
+  // 4. Se tipo='total': todos os itens com saldo pendente (EXCETO os travados por
+  //    reposição) devem ser cobertos integralmente.
   if (params.tipo === "total") {
     for (const s of saldoPendente) {
+      // Item da reposição não entra na exigência do 'total' — ele espera.
+      if (s.produtoId != null && produtosBloqueados.has(s.produtoId)) continue;
+
       const itemEntrega = params.itens.find(
         (i) => i.itemVendaId === s.itemVendaId,
       );
@@ -601,7 +757,10 @@ export async function criarEntrega(
     );
   }
 
-  // 6. Cálculo do frete
+  // (O bloqueio de reposição por item já foi aplicado acima, junto com a
+  //  validação de saldo dos itens e da entrega 'total'.)
+
+  // 7. Cálculo do frete
   const regiao = params.regiao ?? null;
   const freteMotoboyCalculado = regiao
     ? calcularValorMotoboy(regiao)
@@ -835,11 +994,70 @@ export async function criarEntrega(
 }
 
 /**
+ * Lê o WhatsApp do desenvolvedor configurado em configuracoes_secrets.
+ *
+ * REGRA DE NEGÓCIO (Etapa 3): número para onde vai o aviso quando o código não
+ * chega ao cliente. Configurado na aba Integrações (chave whatsapp_desenvolvedor).
+ * Retorna "" se não configurado (aí o aviso é só pulado, sem erro).
+ */
+async function lerWhatsappDesenvolvedor(): Promise<string> {
+  try {
+    const [row] = await sql`
+      SELECT valor_encrypted FROM alissonerp.configuracoes_secrets
+      WHERE chave = 'whatsapp_desenvolvedor'
+    `;
+    if (!row?.valor_encrypted) return "";
+    let v: string;
+    try { v = JSON.parse(row.valor_encrypted as string); } catch { v = String(row.valor_encrypted); }
+    return v.replace(/"/g, "").trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Avisa o desenvolvedor (via WhatsApp) quando o envio do código ao CLIENTE falha.
+ *
+ * REGRA DE NEGÓCIO (Etapa 3 — decisão Jonathan 11/06): código que não chegou ao
+ * cliente vai para o WhatsApp do desenvolvedor com o motivo do erro, pra ninguém
+ * ficar sem o código. Best-effort: se o número não estiver configurado ou o envio
+ * ao dev também falhar, apenas loga — nunca quebra a entrega.
+ */
+async function avisarDesenvolvedorFalhaCodigo(params: {
+  vendaId: number;
+  codigo: string;
+  tipoCodigo: string; // "Cliente (A)" | "Motoboy (B)"
+  clienteNome: string | null;
+  erro: string | null;
+}): Promise<void> {
+  try {
+    const numeroDev = await lerWhatsappDesenvolvedor();
+    if (!numeroDev) return; // não configurado → silencioso
+
+    const [v] = await sql`SELECT numero_venda FROM alissonerp.vendas_erp WHERE id = ${params.vendaId}`;
+    const numeroVenda = (v as { numero_venda?: string } | null)?.numero_venda ?? `#${params.vendaId}`;
+
+    const texto =
+      `⚠️ *Falha no envio do código ao cliente*\n\n` +
+      `Venda: ${numeroVenda}\n` +
+      `Cliente: ${params.clienteNome ?? "(sem nome)"}\n` +
+      `Código ${params.tipoCodigo}: *${params.codigo}*\n` +
+      `Motivo: ${params.erro ?? "desconhecido"}\n\n` +
+      `Repasse o código ao cliente manualmente ou corrija o WhatsApp do cadastro.`;
+
+    await enviarAvisoDesenvolvedor(numeroDev, texto);
+  } catch (err) {
+    console.error("[entrega-venda] Falha ao avisar desenvolvedor sobre código:", err);
+  }
+}
+
+/**
  * Tenta enviar o código de verificação via WhatsApp para o cliente da venda.
  *
  * REGRA DE NEGÓCIO: best-effort — se o cliente não tiver WhatsApp cadastrado
  * ou o envio falhar, a entrega continua válida. O frontend mostra o status
- * e permite reenviar ou cadastrar o número depois.
+ * e permite reenviar ou cadastrar o número depois. Etapa 3: quando falha, o
+ * código vai para o WhatsApp do desenvolvedor (avisarDesenvolvedorFalhaCodigo).
  *
  * O QUE: busca celular/nome do cliente via vendas_erp → contatos e chama
  * enviarCodigoWhatsApp(). Retorna status do envio.
@@ -869,6 +1087,11 @@ async function tentarEnviarWhatsApp(
     const numero: string = (row?.celular || row?.telefone || "").trim();
 
     if (!numero) {
+      // Cliente sem WhatsApp → avisa o desenvolvedor com o código
+      await avisarDesenvolvedorFalhaCodigo({
+        vendaId, codigo, tipoCodigo: "Cliente (A)",
+        clienteNome: nome || null, erro: "Cliente sem WhatsApp cadastrado",
+      });
       return {
         whatsappEnviado: false,
         whatsappErro: "Cliente sem WhatsApp cadastrado",
@@ -878,6 +1101,14 @@ async function tentarEnviarWhatsApp(
     }
 
     const envio = await enviarCodigoWhatsAppDetalhado(numero, codigo, nome);
+
+    // Etapa 3: se o envio ao cliente falhou, o código vai para o desenvolvedor
+    if (!envio.enviado) {
+      await avisarDesenvolvedorFalhaCodigo({
+        vendaId, codigo, tipoCodigo: "Cliente (A)",
+        clienteNome: nome || null, erro: envio.erro,
+      });
+    }
 
     return {
       whatsappEnviado: envio.enviado,
@@ -985,8 +1216,22 @@ async function tentarEnviarWhatsAppAoCliente(
     const nome = (row as { nome?: string } | null)?.nome ?? "Cliente";
     const numero = ((row as { celular?: string; telefone?: string } | null)?.celular ||
       (row as { celular?: string; telefone?: string } | null)?.telefone || "").trim();
-    if (!numero) return;
-    await enviarCodigoClienteEmRota(numero, codigo, nome);
+    if (!numero) {
+      // Cliente sem WhatsApp na hora de mandar o Código A → avisa o desenvolvedor
+      await avisarDesenvolvedorFalhaCodigo({
+        vendaId, codigo, tipoCodigo: "Cliente (A)",
+        clienteNome: (row as { nome?: string } | null)?.nome ?? null,
+        erro: "Cliente sem WhatsApp cadastrado",
+      });
+      return;
+    }
+    const envio = await enviarCodigoClienteEmRota(numero, codigo, nome);
+    // Etapa 3: falhou o envio ao cliente → código vai para o desenvolvedor
+    if (!envio.enviado) {
+      await avisarDesenvolvedorFalhaCodigo({
+        vendaId, codigo, tipoCodigo: "Cliente (A)", clienteNome: nome, erro: envio.erro,
+      });
+    }
   } catch (err) {
     console.error("[entrega-venda] Erro ao enviar Código A ao cliente:", err);
   }
@@ -1076,6 +1321,19 @@ export async function confirmarEntrega(
     );
   }
 
+  // REGRA DE NEGÓCIO (Blindagem 2026-06 — migration 295): limite de tentativas.
+  // O QUE: 5 erros de código bloqueiam a entrega até gerente/admin desbloquear.
+  // POR QUE: sem limite, dá para adivinhar o código de 6 dígitos por força
+  // bruta e confirmar a entrega sem o cliente presente.
+  // IMPACTO SE REMOVIDO: o sistema de dois códigos perde a proteção principal.
+  const MAX_TENTATIVAS_CODIGO = 5;
+  if (entrega.codigo_bloqueado_em) {
+    throw new Error(
+      `Entrega ${entrega.codigo_entrega} bloqueada por excesso de tentativas de código. ` +
+        `Peça a um gerente para desbloquear.`,
+    );
+  }
+
   // Verificar se o código corresponde a algum dos códigos de verificação
   // REGRA: códigos são comparados como strings, sem trim ou formatação
   const matchMotoboy =
@@ -1085,30 +1343,69 @@ export async function confirmarEntrega(
   const matchCliente = entrega.codigo_cliente === codigo;
 
   if (!matchMotoboy && !matchCliente) {
-    throw new Error("Código inválido");
+    // Tentativa errada: incrementa o contador de forma atômica e bloqueia
+    // na 5ª falha. O UPDATE com RETURNING evita corrida entre tentativas
+    // simultâneas (cada uma conta uma vez).
+    const [tent] = await sql`
+      UPDATE alissonerp.entregas_venda
+      SET tentativas_codigo = tentativas_codigo + 1,
+          codigo_bloqueado_em = CASE
+            WHEN tentativas_codigo + 1 >= ${MAX_TENTATIVAS_CODIGO} THEN now()
+            ELSE codigo_bloqueado_em
+          END,
+          updated_at = now()
+      WHERE id = ${entregaId}
+      RETURNING tentativas_codigo, codigo_bloqueado_em
+    `;
+    await logAudit(sql, {
+      tabela: "entregas_venda",
+      operacao: "UPDATE",
+      registro_id: entregaId,
+      usuario_id: usuarioId,
+      dados_antes: null,
+      dados_depois: {
+        evento: "tentativa_codigo_invalida",
+        tentativas: Number(tent?.tentativas_codigo ?? 0),
+        bloqueada: !!tent?.codigo_bloqueado_em,
+      },
+    });
+    if (tent?.codigo_bloqueado_em) {
+      throw new Error(
+        `Código inválido. Entrega bloqueada após ${MAX_TENTATIVAS_CODIGO} tentativas — peça a um gerente para desbloquear.`,
+      );
+    }
+    const restantes = MAX_TENTATIVAS_CODIGO - Number(tent?.tentativas_codigo ?? 0);
+    throw new Error(`Código inválido. ${restantes} tentativa(s) restante(s) antes do bloqueio.`);
   }
 
-  // ── Pré-validação: ordens de reposição pendentes ──────────────────────────
-  // REGRA DE NEGÓCIO: impede confirmar entrega se há reposição pendente,
-  // replicando a validação da trigger fn_estoque_comercial_entrega_venda
-  // mas com mensagem de erro clara antes de iniciar a transação pesada.
-  // POR QUE: a trigger do banco só dispara no UPDATE de vendas_erp setando
-  // situacao='entregue', que é o último passo. Se falhar lá, toda a transação
-  // (baixa estoque, atualização de entregas, etc) já rodou — desperdício e erro confuso.
-  // IMPACTO SE REMOVIDO: o erro volta a ser capturado apenas na trigger.
-  const [reposPendentes] = await sql`
-    SELECT COUNT(*)::integer AS total
-    FROM alissonerp.ordens o
-    WHERE o.venda_id = ${Number(entrega.venda_id)}
-      AND o.tipo_ordem = 'reposicao_venda'
-      AND o.situacao IN ('criado', 'rascunho')
-      AND o.status  != 'concluido'
-  `;
-
-  if (Number(reposPendentes.total) > 0) {
+  // ── Pré-validação: reposição POR ITEM ─────────────────────────────────────
+  // REGRA DE NEGÓCIO (12/06 — Jonathan): só barra a confirmação se ESTA entrega
+  // inclui um item cujo produto está em reposição aberta. Os itens prontos podem
+  // ser confirmados; o item da reposição espera. Reposição aberta sem produto
+  // identificável → bloqueia (seguro). Mensagem clara antes da transação pesada.
+  // IMPACTO SE REMOVIDO: o erro volta a ser capturado só na trigger do banco.
+  const bloqueioConf = await calcularBloqueioReposicao(sql, Number(entrega.venda_id));
+  if (bloqueioConf.bloqueioVendaInteira) {
     throw new Error(
-      `Entrega ${entrega.codigo_entrega} bloqueada: venda possui ${reposPendentes.total} ordem(ns) de reposição pendente(s). Conclua ou cancele antes de confirmar a entrega.`,
+      `Entrega ${entrega.codigo_entrega} bloqueada: reposição aberta (${bloqueioConf.ordensAbertas.join(", ")}) ` +
+        `sem item identificado. Conclua ou cancele a reposição antes de confirmar.`,
     );
+  }
+  if (bloqueioConf.produtosBloqueados.length > 0) {
+    const [itemBloqueado] = await sql`
+      SELECT ive.nome_produto
+      FROM alissonerp.entregas_venda_itens evi
+      JOIN alissonerp.itens_venda_erp ive ON ive.id = evi.item_venda_id
+      WHERE evi.entrega_id = ${entregaId}
+        AND ive.produto_id = ANY(${bloqueioConf.produtosBloqueados})
+      LIMIT 1
+    `;
+    if (itemBloqueado) {
+      throw new Error(
+        `Entrega ${entrega.codigo_entrega} bloqueada: o item "${itemBloqueado.nome_produto}" ` +
+          `depende de reposição ainda não concluída.`,
+      );
+    }
   }
 
   // ─── Transação atômica ──────────────────────────────────────────────────
@@ -1116,6 +1413,14 @@ export async function confirmarEntrega(
   const resultado = await sql.begin(async (tx: DbSql) => {
     let etapa: "retirada_loja" | "entrega_cliente";
     let novaSituacao: string;
+
+    // Código correto: zera o contador de tentativas (migration 295) para que
+    // erros antigos não somem com futuros (ex.: código B ok, depois código A).
+    await tx`
+      UPDATE alissonerp.entregas_venda
+      SET tentativas_codigo = 0
+      WHERE id = ${entregaId} AND tentativas_codigo > 0
+    `;
 
     // CÓDIGO B — Motoboy retirou na loja
     if (matchMotoboy) {
@@ -1642,4 +1947,251 @@ function montarMovimentacao(r: any): MovimentacaoFrete {
     descricao: r.descricao ? String(r.descricao) : null,
     createdAt: String(r.created_at),
   };
+}
+
+// ─── 10. Frete Avulso ─────────────────────────────────────────────────────────
+
+/**
+ * Parâmetros para criação de frete avulso (corrida sem venda vinculada).
+ * REGRA DE NEGÓCIO: avulso não tem venda, itens ou código de verificação.
+ * Motoboy e frete_cobrado são obrigatórios. Cliente e descrição são opcionais.
+ * IMPACTO SE ALTERADO: avulso sem motoboy não pode ser confirmado depois.
+ */
+export interface CriarFreteAvulsoParams {
+  motoboyId: string; // UUID — obrigatório
+  regiao: "fortaleza" | "fora_fortaleza" | "longe" | "correios";
+  freteCobrado: number;
+  freteMotoboyOverride?: number; // usado em longe/correios onde frete=0 e valor é negociado
+  descricaoAvulso?: string;
+  contatoId?: number;
+  observacoes?: string;
+}
+
+/** Resultado da criação de frete avulso */
+export interface FreteAvulso {
+  id: number;
+  codigoEntrega: string;
+  situacao: string;
+  regiao: string;
+  motoboyId: string;
+  freteCobrado: number;
+  freteMotoboy: number;
+  descricaoAvulso: string | null;
+  contatoId: number | null;
+  clienteNome: string | null;
+  observacoes: string | null;
+  createdAt: string;
+  motoboyNome: string | null;
+  motoboyTelefone: string | null;
+}
+
+/**
+ * Cria um frete avulso — corrida de motoboy sem venda vinculada.
+ *
+ * REGRA DE NEGÓCIO: frete avulso não tem itens, não tem código de verificação
+ * e não dispara WhatsApp. O motoboy confirma com botão simples no app.
+ * O valor do frete_motoboy é calculado pela região (igual às entregas normais)
+ * e entra no acerto financeiro do motoboy normalmente.
+ *
+ * O QUE: insere linha em entregas_venda com is_avulso=true, venda_id=NULL,
+ * codigo_cliente=NULL, codigo_motoboy=NULL e registra auditoria.
+ *
+ * POR QUE: reutiliza a infraestrutura de motoboys, saldo de frete e pagamento
+ * sem duplicar tabelas. A constraint chk_entrega_origem garante consistência.
+ *
+ * IMPACTO SE ALTERADO: avulsas confirmadas vão para pagamento de motoboys —
+ * não alterar frete_motoboy sem ajustar o acerto.
+ */
+export async function criarFreteAvulso(
+  params: CriarFreteAvulsoParams,
+  userId: string,
+): Promise<FreteAvulso> {
+  if (!params.motoboyId) {
+    throw new Error("Motoboy é obrigatório para frete avulso.");
+  }
+  if (params.freteCobrado < 0) {
+    throw new Error("Valor do frete não pode ser negativo.");
+  }
+
+  const freteBase = calcularValorMotoboy(params.regiao);
+  const freteMotoboy = freteBase > 0 ? freteBase : money(params.freteMotoboyOverride ?? 0);
+  const freteCobrado = money(params.freteCobrado);
+
+  const resultado = await sql.begin(async (tx: DbSql) => {
+    const codigoEntrega = await gerarCodigoEntrega(tx);
+
+    const [row] = await tx`
+      INSERT INTO alissonerp.entregas_venda (
+        is_avulso, venda_id,
+        contato_id, descricao_avulso,
+        codigo_entrega, codigo_cliente, codigo_motoboy,
+        tipo, forma_entrega, situacao, regiao,
+        motoboy_id, frete_cobrado, frete_motoboy,
+        aprovacao_frete_necessaria, observacoes,
+        created_by
+      ) VALUES (
+        true, NULL,
+        ${params.contatoId ?? null}, ${params.descricaoAvulso ?? null},
+        ${codigoEntrega}, NULL, NULL,
+        'total', 'motoboy', 'pendente', ${params.regiao},
+        ${params.motoboyId}::uuid, ${freteCobrado}, ${freteMotoboy},
+        false, ${params.observacoes ?? null},
+        ${userId}::uuid
+      )
+      RETURNING *
+    `;
+
+    const entregaId = Number(row.id);
+
+    // REGRA DE NEGÓCIO: saldo de frete da gerente também se aplica a avulsas.
+    // Avulso sempre consome saldo (o frete_motoboy é custo da loja).
+    // Se frete_cobrado > frete_motoboy: crédito (sobra).
+    // Se frete_cobrado < frete_motoboy: débito (déficit).
+    if (freteMotoboy > 0 || freteCobrado > 0) {
+      const diff = money(freteCobrado - freteMotoboy);
+      if (diff !== 0) {
+        const [gerente] = await tx`
+          SELECT id FROM alissonerp.usuarios
+          WHERE role = 'gerente_loja' AND ativo = true
+          ORDER BY created_at LIMIT 1
+        `;
+        const gerenteId = (gerente?.id as string) ?? userId;
+        const saldoAntes = await obterSaldoFreteGerenteNoTx(tx, gerenteId);
+
+        if (diff > 0) {
+          await tx`
+            INSERT INTO alissonerp.saldo_frete_gratis
+              (gerente_id, tipo, valor, saldo_antes, saldo_depois, entrega_id, venda_id, descricao, created_by)
+            VALUES
+              (${gerenteId}::uuid, 'credito', ${diff}, ${saldoAntes}, ${money(saldoAntes + diff)},
+               ${entregaId}, NULL,
+               ${`Frete avulso cobrado ${fmBRL(freteCobrado)} > motoboy ${fmBRL(freteMotoboy)}`},
+               ${userId}::uuid)
+          `;
+        } else {
+          const debito = Math.abs(diff);
+          await tx`
+            INSERT INTO alissonerp.saldo_frete_gratis
+              (gerente_id, tipo, valor, saldo_antes, saldo_depois, entrega_id, venda_id, descricao, created_by)
+            VALUES
+              (${gerenteId}::uuid, 'debito', ${debito}, ${saldoAntes}, ${money(saldoAntes - debito)},
+               ${entregaId}, NULL,
+               ${`Frete avulso cobrado ${fmBRL(freteCobrado)} < motoboy ${fmBRL(freteMotoboy)}`},
+               ${userId}::uuid)
+          `;
+        }
+      }
+    }
+
+    await logAudit(tx, {
+      tabela: "entregas_venda",
+      operacao: "INSERT",
+      registro_id: entregaId,
+      usuario_id: userId,
+      dados_depois: {
+        is_avulso: true,
+        codigo_entrega: codigoEntrega,
+        motoboy_id: params.motoboyId,
+        regiao: params.regiao,
+        frete_cobrado: freteCobrado,
+        frete_motoboy: freteMotoboy,
+        descricao_avulso: params.descricaoAvulso ?? null,
+      },
+    });
+
+    return row;
+  }) as Record<string, unknown>;
+
+  // Buscar nome/telefone do motoboy para retornar na resposta
+  const [motoboy] = await sql`
+    SELECT nome, telefone FROM alissonerp.motoboys
+    WHERE user_id = ${params.motoboyId}::uuid AND ativo = true LIMIT 1
+  `;
+
+  // Buscar nome do contato se informado
+  let clienteNome: string | null = null;
+  if (params.contatoId) {
+    const [contato] = await sql`
+      SELECT nome FROM public.contatos WHERE id_contato = ${params.contatoId} LIMIT 1
+    `;
+    clienteNome = contato?.nome ? String(contato.nome) : null;
+  }
+
+  return {
+    id: Number(resultado.id),
+    codigoEntrega: String(resultado.codigo_entrega),
+    situacao: String(resultado.situacao),
+    regiao: String(resultado.regiao),
+    motoboyId: String(resultado.motoboy_id),
+    freteCobrado: money(resultado.frete_cobrado),
+    freteMotoboy: money(resultado.frete_motoboy),
+    descricaoAvulso: resultado.descricao_avulso ? String(resultado.descricao_avulso) : null,
+    contatoId: resultado.contato_id ? Number(resultado.contato_id) : null,
+    clienteNome,
+    observacoes: resultado.observacoes ? String(resultado.observacoes) : null,
+    createdAt: String(resultado.created_at),
+    motoboyNome: motoboy?.nome ? String(motoboy.nome) : null,
+    motoboyTelefone: motoboy?.telefone ? String(motoboy.telefone) : null,
+  };
+}
+
+/**
+ * Confirma um frete avulso (sem código de verificação).
+ *
+ * REGRA DE NEGÓCIO: avulso não usa código A/B. O motoboy clica "Confirmar"
+ * no app e isso encerra a corrida. Apenas o motoboy dono da entrega ou
+ * admin/gerente podem confirmar.
+ *
+ * O QUE: valida que a entrega é avulsa e está pendente, depois atualiza
+ * situacao='confirmada' e data_entrega_realizada=now().
+ *
+ * IMPACTO SE ALTERADO: entrega confirmada entra no acerto do motoboy.
+ * Não duplicar confirmação (guard situacao='pendente').
+ */
+export async function confirmarFreteAvulso(
+  entregaId: number,
+  usuarioId: string,
+): Promise<void> {
+  const [entrega] = await sql`
+    SELECT id, situacao, codigo_entrega, is_avulso, motoboy_id
+    FROM alissonerp.entregas_venda
+    WHERE id = ${entregaId}
+  `;
+
+  if (!entrega) {
+    throw new Error(`Entrega ${entregaId} não encontrada.`);
+  }
+
+  if (!entrega.is_avulso) {
+    throw new Error("Esta rota é exclusiva para fretes avulsos.");
+  }
+
+  if (entrega.situacao === "confirmada") {
+    throw new Error(`Entrega ${entrega.codigo_entrega} já foi confirmada.`);
+  }
+
+  if (entrega.situacao === "cancelada") {
+    throw new Error(`Entrega ${entrega.codigo_entrega} está cancelada.`);
+  }
+
+  await sql.begin(async (tx: DbSql) => {
+    await tx`
+      UPDATE alissonerp.entregas_venda
+      SET
+        situacao = 'confirmada',
+        data_entrega_realizada = now(),
+        confirmado_por_motoboy_entrega = ${usuarioId}::uuid,
+        updated_at = now()
+      WHERE id = ${entregaId}
+    `;
+
+    await logAudit(tx, {
+      tabela: "entregas_venda",
+      operacao: "UPDATE",
+      registro_id: entregaId,
+      usuario_id: usuarioId,
+      dados_antes: { situacao: entrega.situacao },
+      dados_depois: { situacao: "confirmada", is_avulso: true },
+    });
+  });
 }

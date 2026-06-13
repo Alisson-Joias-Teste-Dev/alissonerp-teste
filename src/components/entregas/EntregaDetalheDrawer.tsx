@@ -46,7 +46,9 @@ import {
   Send,
   Camera,
   Phone,
+  Wallet,
 } from "lucide-react";
+import ConfirmarPagamentoMotoboyModal from "./ConfirmarPagamentoMotoboyModal";
 import { apiFetch } from "@/lib/apiFetch";
 import ConfirmarEntregaModal from "./ConfirmarEntregaModal";
 import CorreiosRastreioModal from "./CorreiosRastreioModal";
@@ -98,6 +100,7 @@ interface EntregaDetalhe {
   numero_venda: string | null;
   total_venda: number | null;
   venda_situacao: string | null;
+  na_entrega_pendente?: number;
   cliente_id: number | null;
   cliente_nome: string | null;
   cliente_celular: string | null;
@@ -133,6 +136,8 @@ interface EntregaDetalhe {
     sku: string;
   }>;
   itens_count: number;
+  is_avulso: boolean;
+  descricao_avulso: string | null;
 }
 
 // ── Props ───────────────────────────────────────────────────────────────────────
@@ -233,9 +238,15 @@ export default function EntregaDetalheDrawer({
 
   const [modalCorreios, setModalCorreios] = useState(false);
 
+  // Pagamento na entrega (motoboy confirma o pagamento antes de entregar)
+  const [modalPagamento, setModalPagamento] = useState(false);
+
   // Cancelamento
   const [cancelando, setCancelando] = useState(false);
   const [mostrarCancelarConfirm, setMostrarCancelarConfirm] = useState(false);
+
+  // Confirmação de frete avulso (sem código de verificação)
+  const [confirmandoAvulso, setConfirmandoAvulso] = useState(false);
 
   // Toggle visibilidade dos códigos (mascarados → completos)
   const [mostrarCodigos, setMostrarCodigos] = useState(false);
@@ -247,7 +258,7 @@ export default function EntregaDetalheDrawer({
   // REGRA DE SEGURANÇA: seção de códigos visível apenas para admin,
   // desenvolvedor e entregador (motoboy). Consultora, gerente etc
   // não precisam ver os códigos — só digitam o que o cliente informa.
-  const podeVerSecaoCodigos = podeVerCodigos || userRole === "entregador";
+  const podeVerSecaoCodigos = (podeVerCodigos || userRole === "entregador") && !detalhe?.is_avulso;
 
   // ── Carregar detalhe ────────────────────────────────────────────────────────
 
@@ -307,6 +318,22 @@ export default function EntregaDetalheDrawer({
     }
   }
 
+  /** Confirmar frete avulso (sem código — botão simples) */
+  async function handleConfirmarAvulso() {
+    if (!entregaId) return;
+    setConfirmandoAvulso(true);
+    try {
+      await apiFetch(`/api/entregas-venda/${entregaId}/confirmar-avulso`, {
+        method: "POST",
+      });
+      await carregar();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erro ao confirmar corrida.");
+    } finally {
+      setConfirmandoAvulso(false);
+    }
+  }
+
   /** Callback após confirmação ou rastreio bem-sucedidos */
   function handleRefresh() {
     void carregar();
@@ -321,16 +348,29 @@ export default function EntregaDetalheDrawer({
   const isRetirada = detalhe?.forma_entrega === "retirada";
   const isMotoboy = detalhe?.forma_entrega === "motoboy";
 
+  // REGRA DE NEGÓCIO (13/06 — Jonathan): pagamento na entrega. Se a venda tem saldo
+  // "Na Entrega" pendente, o motoboy precisa CONFIRMAR O PAGAMENTO antes de poder
+  // confirmar a entrega. Enquanto pendente, "Confirmar Entrega" some e aparece
+  // "Confirmar Pagamento". (A trava de banco no Código A continua existindo.)
+  const naEntregaPendente = Number(detalhe?.na_entrega_pendente ?? 0);
+  const temNaEntregaPendente = naEntregaPendente > 0.009;
+
   // Ações disponíveis
   const podeConfirmarRetirada =
-    isPendente && isRetirada;
+    isPendente && isRetirada && !detalhe?.is_avulso && !temNaEntregaPendente;
   const podeRegistrarSaida =
-    isPendente && isMotoboy && !detalhe?.data_saida;
+    isPendente && isMotoboy && !detalhe?.data_saida && !detalhe?.is_avulso;
   const podeCancelar = isPendente;
   const podeInformarCorreios =
-    !isCancelada;
+    !isCancelada && !detalhe?.is_avulso;
   const podeConfirmarEntregaCliente =
-    isPendente && isMotoboy && !!detalhe?.data_saida;
+    isPendente && isMotoboy && !!detalhe?.data_saida && !detalhe?.is_avulso && !temNaEntregaPendente;
+  // Pagamento na entrega: confirmar o pagamento antes da entrega (retirada OU motoboy já saído)
+  const podeConfirmarPagamento =
+    isPendente && temNaEntregaPendente && !detalhe?.is_avulso &&
+    (isRetirada || (isMotoboy && !!detalhe?.data_saida));
+  // Avulso confirma com botão simples, sem código nem registro de saída
+  const podeConfirmarAvulso = isPendente && !!detalhe?.is_avulso;
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -561,21 +601,28 @@ export default function EntregaDetalheDrawer({
                 >
                   Venda
                 </div>
-                <a
-                  href={`/vendas/${detalhe.venda_id}`}
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: C.esmeralda,
-                    textDecoration: "none",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 4,
-                  }}
-                >
-                  {detalhe.numero_venda ?? `#${detalhe.venda_id}`}
-                  <ExternalLink size={11} />
-                </a>
+                {detalhe.is_avulso ? (
+                  <span style={{
+                    fontSize: 12, fontWeight: 700, color: "#7c3aed",
+                    background: "#f3e8ff", padding: "2px 8px", borderRadius: 10,
+                  }}>Avulso</span>
+                ) : (
+                  <a
+                    href={`/vendas/${detalhe.venda_id}`}
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: C.esmeralda,
+                      textDecoration: "none",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    {detalhe.numero_venda ?? `#${detalhe.venda_id}`}
+                    <ExternalLink size={11} />
+                  </a>
+                )}
               </div>
               <div>
                 <div
@@ -769,7 +816,20 @@ export default function EntregaDetalheDrawer({
               </div>
             </div>
 
+            {/* ── Descrição (avulso) ──────────────────────────────────── */}
+            {detalhe.is_avulso && detalhe.descricao_avulso && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
+                <Bike size={13} /> Corrida Avulsa
+              </div>
+              <div style={{ padding: "10px 12px", borderRadius: 8, border: `1px solid #e9d5ff`, background: "#faf5ff", fontSize: 13, color: "#6b21a8" }}>
+                {detalhe.descricao_avulso}
+              </div>
+            </div>
+            )}
+
             {/* ── Itens ───────────────────────────────────────────────────── */}
+            {!detalhe.is_avulso && (
             <div style={{ marginBottom: 20 }}>
               <div
                 style={{
@@ -851,6 +911,7 @@ export default function EntregaDetalheDrawer({
                 ))}
               </div>
             </div>
+            )}
 
             {/* ── Transporte ───────────────────────────────────────────────── */}
             <div style={{ marginBottom: 20 }}>
@@ -1336,6 +1397,30 @@ export default function EntregaDetalheDrawer({
                 </button>
               )}
 
+              {/* Confirmar Pagamento na entrega (antes de liberar a entrega) */}
+              {podeConfirmarPagamento && (
+                <button
+                  onClick={() => setModalPagamento(true)}
+                  style={{
+                    padding: "10px 12px",
+                    background: "#D97706",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                  }}
+                >
+                  <Wallet size={14} />
+                  Confirmar Pagamento — R$ {naEntregaPendente.toFixed(2)}
+                </button>
+              )}
+
               {/* Confirmar Entrega ao Cliente (via motoboy, após saída) */}
               {podeConfirmarEntregaCliente && (
                 <button
@@ -1357,6 +1442,32 @@ export default function EntregaDetalheDrawer({
                 >
                   <CheckCircle size={14} />
                   Confirmar Entrega
+                </button>
+              )}
+
+              {/* Confirmar Corrida Avulsa (sem código) */}
+              {podeConfirmarAvulso && (
+                <button
+                  onClick={handleConfirmarAvulso}
+                  disabled={confirmandoAvulso}
+                  style={{
+                    padding: "10px 12px",
+                    background: C.verde,
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: confirmandoAvulso ? "not-allowed" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    opacity: confirmandoAvulso ? 0.6 : 1,
+                  }}
+                >
+                  <CheckCircle size={14} />
+                  {confirmandoAvulso ? "Confirmando..." : "Confirmar Entrega"}
                 </button>
               )}
 
@@ -1414,6 +1525,16 @@ export default function EntregaDetalheDrawer({
       </div>
 
       {/* ── Sub-modais ────────────────────────────────────────────────────── */}
+      {modalPagamento && entregaId && (
+        <ConfirmarPagamentoMotoboyModal
+          entregaId={entregaId}
+          valor={naEntregaPendente}
+          isOpen={modalPagamento}
+          onClose={() => setModalPagamento(false)}
+          onSuccess={handleRefresh}
+        />
+      )}
+
       {modalConfirmar.aberto && (
         <ConfirmarEntregaModal
           entregaId={modalConfirmar.entregaId}

@@ -17,7 +17,6 @@ import {
   baixarContaReceber,
   registrarComunicacaoRecebimento,
   autoAprovarVendaRascunho,
-  autoConcluirVendaSeQuitada,
   buscarPagamentoAReceberPendente,
 } from "@/lib/baixa-credito";
 
@@ -146,9 +145,9 @@ export async function POST() {
         }
       }
 
-      // Auto-aprovar e auto-concluir
+      // Auto-aprovar venda em rascunho com crédito. Fluxo novo 06/2026:
+      // pagamento quitado NÃO conclui mais a venda (status só muda na entrega).
       await autoAprovarVendaRascunho(sql, vendaId, user.id);
-      await autoConcluirVendaSeQuitada(sql, vendaId, user.id);
 
       confirmados++;
       detalhes.push({

@@ -41,6 +41,7 @@ import Paginacao from "@/components/ui/Paginacao";
 import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
 import MotoboyDrawer from "@/components/entregas/MotoboyDrawer";
 import PagarMotoboyModal from "@/components/entregas/PagarMotoboyModal";
+import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
 import type { EntregaItem, ContagensEntregas } from "./page";
 
 // ── Paleta ──────────────────────────────────────────────────────────────────────
@@ -246,6 +247,8 @@ export default function EntregasVendaClient({
   const [motoboyDrawerOpen, setMotoboyDrawerOpen] = useState(false);
   // Modal de pagamento em lote
   const [pagarMotoboyOpen, setPagarMotoboyOpen] = useState(false);
+  // Modal de frete avulso
+  const [freteAvulsoOpen, setFreteAvulsoOpen] = useState(false);
 
   // ── Saldo de frete grátis ──────────────────────────────────────────────────
   const [saldoFrete, setSaldoFrete] = useState<number | null>(null);
@@ -280,7 +283,7 @@ export default function EntregasVendaClient({
       const serialized = (data.items || []).map((r) => ({
         ...r,
         id:                          Number(r.id),
-        venda_id:                    Number(r.venda_id),
+        venda_id:                    r.venda_id != null ? Number(r.venda_id) : null,
         frete_cobrado:               Number(r.frete_cobrado ?? 0),
         frete_motoboy:               Number(r.frete_motoboy ?? 0),
         total_venda:                 r.total_venda ? Number(r.total_venda) : null,
@@ -454,7 +457,19 @@ export default function EntregasVendaClient({
               Logística — retirada, motoboy e correios
             </p>
           </div>
-          <div style={{ marginLeft: "auto" }}>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            <button
+              onClick={() => setFreteAvulsoOpen(true)}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "8px 14px", borderRadius: 8,
+                border: `1px solid ${C.esmeralda}`,
+                background: C.esmeralda, color: "#fff", fontSize: 13, fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              <Bike size={16} /> Frete Avulso
+            </button>
             <button
               onClick={() => setMotoboyDrawerOpen(true)}
               style={{
@@ -815,7 +830,16 @@ export default function EntregasVendaClient({
                         <td style={{
                           padding: "10px 14px", whiteSpace: "nowrap",
                         }}>
-                          {item.numero_venda ? (
+                          {item.is_avulso ? (
+                            <span style={{
+                              display: "inline-block",
+                              fontSize: 10, fontWeight: 700,
+                              padding: "2px 8px", borderRadius: 20,
+                              background: "#EDE9FE", color: "#6D28D9",
+                            }}>
+                              Avulso
+                            </span>
+                          ) : item.numero_venda ? (
                             <a
                               href={`/vendas/${item.venda_id}`}
                               onClick={e => e.stopPropagation()}
@@ -840,11 +864,16 @@ export default function EntregasVendaClient({
                           padding: "10px 14px", whiteSpace: "nowrap",
                           maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis",
                         }}>
-                          <span style={{
-                            color: "#1f2937", fontSize: 13,
-                          }}>
-                            {item.cliente_nome ?? "—"}
-                          </span>
+                          <div>
+                            <span style={{ color: "#1f2937", fontSize: 13 }}>
+                              {item.cliente_nome ?? "—"}
+                            </span>
+                            {item.is_avulso && item.descricao_avulso && (
+                              <div style={{ fontSize: 11, color: C.cinza, marginTop: 2 }}>
+                                {item.descricao_avulso}
+                              </div>
+                            )}
+                          </div>
                         </td>
 
                         {/* Status */}
@@ -988,6 +1017,13 @@ export default function EntregasVendaClient({
       <PagarMotoboyModal
         isOpen={pagarMotoboyOpen}
         onClose={() => setPagarMotoboyOpen(false)}
+      />
+
+      {/* ── Modal de Frete Avulso ──────────────────────────────────────────── */}
+      <FreteAvulsoModal
+        isOpen={freteAvulsoOpen}
+        onClose={() => setFreteAvulsoOpen(false)}
+        onCriado={() => { setFreteAvulsoOpen(false); router.refresh(); }}
       />
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

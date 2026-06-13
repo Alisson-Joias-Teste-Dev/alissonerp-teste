@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { estornarVenda, concluirVenda } from "@/lib/vendas-aprovar";
-import { approveVenda } from "@/lib/vendas-aprovar";
+import { estornarVenda, approveVenda } from "@/lib/vendas-aprovar";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { zodError } from "@/lib/schemas/common";
@@ -93,17 +92,13 @@ export async function PATCH(
         gateway_id       = COALESCE(${body.gateway_id ?? null}, gateway_id)
       WHERE id = ${pId}
     `;
-    // Auto-aprovar + auto-concluir se todos pagamentos confirmados
+    // Auto-aprovar venda em rascunho com crédito. Fluxo novo 06/2026:
+    // pagamento quitado NÃO conclui mais a venda (status só muda na entrega).
     try {
       const [pvenda] = await sql`
         SELECT v.situacao, v.aprovacao_credito_tipo
         FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
       `;
-      const [pendentes] = await sql`
-        SELECT COUNT(*)::int AS cnt FROM alissonerp.pagamentos_venda
-        WHERE venda_id = ${vendaId} AND status = 'pendente'
-      `;
-      const todosPagos = Number(pendentes.cnt) === 0;
 
       if (pvenda?.situacao === "rascunho" && pvenda?.aprovacao_credito_tipo) {
         const [outrosPend] = await sql`
@@ -114,15 +109,8 @@ export async function PATCH(
           await approveVenda(vendaId, user.id, { tinyBestEffort: true });
         }
       }
-
-      if (todosPagos) {
-        const [atual] = await sql`SELECT situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
-        if (atual?.situacao === "aprovado") {
-          await concluirVenda(vendaId, user.id, { tinyBestEffort: true });
-        }
-      }
     } catch (e) {
-      console.error(`[pagamentos/PATCH] auto-aprovar/concluir venda=${vendaId}:`, e);
+      console.error(`[pagamentos/PATCH] auto-aprovar venda=${vendaId}:`, e);
     }
   } else {
     await sql`

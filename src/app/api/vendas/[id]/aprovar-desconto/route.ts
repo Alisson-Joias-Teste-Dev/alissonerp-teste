@@ -3,6 +3,8 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { criarNotificacao } from "@/lib/notificacoes";
+import { logAudit } from "@/lib/audit";
+import { internalError } from "@/lib/api-error";
 
 // POST /api/vendas/[id]/aprovar-desconto
 // Admin/desenvolvedor aprova desconto acima do threshold diretamente da notificação.
@@ -34,53 +36,78 @@ export async function POST(
   `;
   if (!temDesconto?.tem) return NextResponse.json({ error: `Nenhum item com desconto acima de ${thresholdAprov}%` }, { status: 409 });
 
-  // Aprovar desconto
-  await sql`
-    UPDATE alissonerp.vendas_erp
-    SET desconto_aprovado_por = ${user.id}::uuid,
-        desconto_aprovado_em  = NOW(),
-        updated_at            = NOW()
-    WHERE id = ${vendaId}
-  `;
+  // REGRA DE NEGÓCIO (Blindagem 2026-06 — correção M1 da análise):
+  // O QUE: aprovação do desconto + conclusão da tarefa + limpeza do lock da
+  //   venda rodam em UMA transação, com auditoria. Antes eram 4 escritas com
+  //   .catch(() => {}) — a aprovação "dava certo" na tela mas a tarefa podia
+  //   ficar órfã no painel, sem ninguém saber.
+  // IMPACTO SE ALTERADO: voltar aos catches silenciosos recria tarefas órfãs
+  //   e quebra a rastreabilidade (§0.1).
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (sql as any).begin(async (tx: typeof sql) => {
+      await tx`
+        UPDATE alissonerp.vendas_erp
+        SET desconto_aprovado_por = ${user.id}::uuid,
+            desconto_aprovado_em  = NOW(),
+            updated_at            = NOW()
+        WHERE id = ${vendaId}
+      `;
 
-  // Concluir tarefa de aprovação pendente
-  if (venda.aprovacao_credito_tarefa_id) {
-    await sql`
-      UPDATE alissonerp.tarefas
-      SET status = 'concluida', updated_at = NOW()
-      WHERE id = ${venda.aprovacao_credito_tarefa_id}
-        AND status = 'aguardando_aprovacao'
-    `.catch(() => {});
-    await sql`
-      UPDATE alissonerp.aprovacoes_tarefa
-      SET status = 'aprovado', aprovado_em = NOW()
-      WHERE tarefa_id = ${venda.aprovacao_credito_tarefa_id} AND status = 'pendente'
-    `.catch(() => {});
-    // Limpar tarefa da venda para liberar novo fluxo
-    await sql`
-      UPDATE alissonerp.vendas_erp SET aprovacao_credito_tarefa_id = NULL WHERE id = ${vendaId}
-    `.catch(() => {});
+      // Concluir tarefa de aprovação pendente + liberar novo fluxo na venda
+      if (venda.aprovacao_credito_tarefa_id) {
+        await tx`
+          UPDATE alissonerp.tarefas
+          SET status = 'concluida', updated_at = NOW()
+          WHERE id = ${venda.aprovacao_credito_tarefa_id}
+            AND status = 'aguardando_aprovacao'
+        `;
+        await tx`
+          UPDATE alissonerp.aprovacoes_tarefa
+          SET status = 'aprovado', aprovado_em = NOW()
+          WHERE tarefa_id = ${venda.aprovacao_credito_tarefa_id} AND status = 'pendente'
+        `;
+        await tx`
+          UPDATE alissonerp.vendas_erp SET aprovacao_credito_tarefa_id = NULL WHERE id = ${vendaId}
+        `;
+      }
+
+      await logAudit(tx, {
+        tabela: "vendas_erp",
+        operacao: "UPDATE",
+        registro_id: vendaId,
+        usuario_id: user.id,
+        dados_antes: { desconto_aprovado_por: null, tarefa_id: venda.aprovacao_credito_tarefa_id ?? null },
+        dados_depois: { desconto_aprovado: true, threshold: thresholdAprov },
+      });
+    });
+  } catch (err) {
+    return internalError(`[POST /api/vendas/${vendaId}/aprovar-desconto]`, err, "Falha ao aprovar desconto. Nada foi gravado — tente novamente.");
   }
 
-  // Notificar quem solicitou
-  const [tarefaInfo] = await sql`
-    SELECT t.criado_por, v.numero_venda
-    FROM alissonerp.tarefas t
-    JOIN alissonerp.vendas_erp v ON v.id = t.venda_id
-    WHERE t.venda_id = ${vendaId} AND t.tags @> ARRAY['aprovacao_desconto']::text[]
-    ORDER BY t.id DESC LIMIT 1
-  `.catch(() => []);
-
-  if (tarefaInfo?.criado_por && tarefaInfo.criado_por !== user.id) {
-    await criarNotificacao({
-      usuarioId: String(tarefaInfo.criado_por),
-      tipo: "aprovacao",
-      titulo: "Desconto aprovado — Venda " + tarefaInfo.numero_venda,
-      mensagem: `Seu desconto acima de ${thresholdAprov}% foi aprovado. Você já pode solicitar aprovação da venda.`,
-      remetenteId: user.id,
-      link: `/vendas/${vendaId}`,
-      vendaId,
-    }).catch(() => {});
+  // Notificação é best-effort de verdade (não afeta a aprovação),
+  // mas a falha agora é LOGADA em vez de engolida.
+  try {
+    const [tarefaInfo] = await sql`
+      SELECT t.criado_por, v.numero_venda
+      FROM alissonerp.tarefas t
+      JOIN alissonerp.vendas_erp v ON v.id = t.venda_id
+      WHERE t.venda_id = ${vendaId} AND t.tags @> ARRAY['aprovacao_desconto']::text[]
+      ORDER BY t.id DESC LIMIT 1
+    `;
+    if (tarefaInfo?.criado_por && tarefaInfo.criado_por !== user.id) {
+      await criarNotificacao({
+        usuarioId: String(tarefaInfo.criado_por),
+        tipo: "aprovacao",
+        titulo: "Desconto aprovado — Venda " + tarefaInfo.numero_venda,
+        mensagem: `Seu desconto acima de ${thresholdAprov}% foi aprovado. Você já pode solicitar aprovação da venda.`,
+        remetenteId: user.id,
+        link: `/vendas/${vendaId}`,
+        vendaId,
+      });
+    }
+  } catch (err) {
+    console.error(`[aprovar-desconto] Notificação falhou (venda ${vendaId}):`, err);
   }
 
   return NextResponse.json({ ok: true });

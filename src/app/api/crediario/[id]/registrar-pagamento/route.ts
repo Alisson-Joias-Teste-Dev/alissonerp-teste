@@ -26,7 +26,6 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { creditarSaldo } from "@/lib/saldo-credito";
-import { concluirVenda } from "@/lib/vendas-aprovar";
 import { logAudit } from "@/lib/audit";
 import { zodError } from "@/lib/schemas/common";
 
@@ -110,7 +109,6 @@ export async function POST(
   const valorRestante = ehPagamentoParcial ? Number(conta.valor) - valorEfetivo : 0;
 
   let saldoDevolvido = false;
-  let vendaConcluida = false;
 
   let novoCreditoId: number | null = null;
 
@@ -119,8 +117,8 @@ export async function POST(
   // que contas_receber, pagamentos_venda e comunicacoes_crediario fiquem
   // consistentes. Se qualquer passo falhar, tudo é revertido.
   //
-  // Operações com risco de lock (creditarSaldo, concluirVenda) rodam FORA
-  // da transação — ver seção 4 e 5 abaixo.
+  // Operações com risco de lock (creditarSaldo) rodam FORA
+  // da transação — ver seção 4 abaixo.
   //
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await sql.begin(async (tx: any) => {
@@ -293,32 +291,11 @@ export async function POST(
     }
   }
 
-  // PASSO 5 — Auto-concluir venda se quitada
-  // Se todos os pagamentos da venda estão confirmados e a venda está 'aprovado',
-  // conclui automaticamente (chama o Tiny ERP se aplicável).
-  // Só dispara se não há mais pagamentos pendentes na venda.
-  if (vendaId) {
-    const [pendentes] = await sql`
-      SELECT COUNT(*) AS cnt FROM alissonerp.pagamentos_venda
-      WHERE venda_id = ${vendaId} AND status = 'pendente'
-    `;
-    const [venda] = await sql`
-      SELECT situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}
-    `;
-    if (Number(pendentes.cnt) === 0 && venda?.situacao === "aprovado") {
-      try {
-        await concluirVenda(vendaId, user.id, { tinyBestEffort: true });
-        vendaConcluida = true;
-      } catch (err) {
-        console.error("[crediario/baixa] Erro ao concluir venda:", err);
-      }
-    }
-  }
-
+  // Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda —
+  // o status só muda na entrega (em_rota → entregue).
   return NextResponse.json({
     ok: true,
     saldo_devolvido: saldoDevolvido,
-    venda_concluida: vendaConcluida,
     pagamento_parcial: ehPagamentoParcial || undefined,
     valor_pago: valorEfetivo,
     valor_restante: ehPagamentoParcial ? valorRestante : undefined,

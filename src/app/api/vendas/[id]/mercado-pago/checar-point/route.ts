@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getAccessToken } from "@/lib/mercado-pago";
-import { concluirVenda } from "@/lib/vendas-aprovar";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
@@ -12,7 +11,9 @@ import { internalError } from "@/lib/api-error";
 //
 // Polling ativo para intents MP Point quando o webhook não chega.
 // Busca o pagamento por external_reference no MP API. Se aprovado,
-// confirma no banco e conclui a venda — mesma lógica do webhook handler.
+// confirma no banco — mesma lógica do webhook handler.
+// Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda
+// (status só muda na entrega: aprovado → em_rota → entregue).
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function GET(
@@ -136,28 +137,11 @@ export async function GET(
     return { quitada, pago, total };
   });
 
-  if (result.quitada) {
-    // Busca system user
-    const [sysRow] = await sql`SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'mp_system_user_id'`;
-    let systemUserId: string | null = sysRow?.valor ? String(sysRow.valor).replace(/"/g, "").trim() : null;
-    if (!systemUserId) {
-      const [v] = await sql`SELECT created_by FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
-      systemUserId = v?.created_by ? String(v.created_by) : null;
-    }
-
-    if (systemUserId) {
-      try {
-        await concluirVenda(vendaId, systemUserId, { tinyBestEffort: true });
-      } catch {
-        // Tiny pode falhar — pagamento já foi confirmado, isso é suficiente
-      }
-    }
-  }
-
+  // Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda.
   return NextResponse.json({
     ok: true,
     status: "confirmado",
     payment_id: paymentId,
-    venda_concluida: result.quitada,
+    pagamento_quitado: result.quitada,
   });
 }

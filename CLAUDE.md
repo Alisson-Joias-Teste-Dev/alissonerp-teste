@@ -1,10 +1,78 @@
 # Alisson ERP — fabricaAJ
 
 > **Todo agente DEVE ler este arquivo antes de qualquer task.**
+> **Esta é a FONTE ÚNICA DE VERDADE do projeto.** Substitui o antigo `AGENTS.md` (opencode).
+> Se algo conflitar com outro doc, este arquivo vence.
 
 **Stack:** Next.js 16.1.6 | React 19 | PostgreSQL 15 (Supabase self-hosted) | TailwindCSS v4 | Zustand
 **Versao:** v2.65.5 | **Branch:** `homolog` (nunca main direto)
 **Docs completos:** `docs/arquitetura.md` | **Changelog:** `docs/CHANGELOG.md`
+
+> Projeto **100% desenvolvido por IA**. A disciplina de processo (§0) é o que mantém a qualidade — leia a §0 ANTES de qualquer coisa.
+
+---
+
+## 0. Como Trabalhar Neste Projeto (LEIA PRIMEIRO)
+
+### Fluxo orientado a plano — INVIOLÁVEL
+
+```
+1. RESUMO SEM JARGÃO — antes de qualquer trabalho, apresentar ao Jonathan um resumo
+   em português simples do que será feito. Sem termos técnicos.
+
+2. APROVAÇÃO — nada começa sem o "ok" explícito do Jonathan.
+
+3. PLANO TÉCNICO — aprovado o resumo, criar o plano de implementação técnica
+   (passo a passo, arquivos, impactos).
+
+4. EXECUÇÃO ESTRITA AO PLANO — os agentes seguem o plano à risca.
+   NADA é executado fora do plano. Tudo que for feito tem que estar no plano.
+
+5. MUDANÇA NO MEIO DO CAMINHO — se o agente encontrar uma melhoria ou problema
+   fora do escopo aprovado:
+     a) PARA. Não implementa.
+     b) AVISA o Jonathan: o que é e por que ajudaria o sistema.
+     c) Refaz o RESUMO SEM JARGÃO e adiciona o item ao plano.
+     d) Só executa DEPOIS de aprovado e DENTRO do plano.
+
+   Regra de ferro: TUDO tem que estar no plano. NADA fora dele.
+```
+
+### House Rules
+
+```
+- NUNCA alterar código, banco ou arquivos sem aprovação explícita do Jonathan.
+  Mesmo em "modo build", qualquer modificação precisa de autorização prévia.
+- NÃO gastar tokens à toa — direto ao ponto, sem exploração desnecessária,
+  sem retrabalho. Eficiência é regra.
+- COMENTAR A REGRA DE NEGÓCIO (em PT) em todo código novo ou alterado:
+    • O QUÊ o trecho faz
+    • O PORQUÊ (a regra de negócio por trás)
+    • O IMPACTO se for alterado/removido (o que vai quebrar)
+  Use `//` para one-liners e `/** */` para blocos no topo de funções/arquivos.
+  A migration 292 é um bom exemplo desse padrão de comentário.
+```
+
+### Gestão de contexto (MANUAL por enquanto)
+
+```
+Quando o contexto chegar a ~50%:
+  1. Salvar um arquivo .md (em docs/ ou raiz) com o PRÓXIMO PASSO a executar.
+  2. PEDIR ao Jonathan para dar /clear.
+  3. Após o /clear, retomar lendo esse .md.
+
+(Por enquanto é manual — Jonathan quer ver o processo acontecer antes de automatizar.
+ Depois isso vira um hook via /update-config.)
+```
+
+### Blindagem & engenharia — princípio permanente
+
+```
+- NUNCA duplicar tabelas. NUNCA duplicar código. Reusar o que já existe.
+- Tudo que for construído deve ser BLINDADO contra problemas futuros.
+- Agir SEMPRE com boas práticas e arquitetura/engenharia de software modernas.
+- Adicionar features, NUNCA refatorar código que funciona (ver §2 Database Safety).
+```
 
 ---
 
@@ -24,6 +92,7 @@
 **Acesso DB:** API routes Next.js com `postgres` npm (SQL direto via `src/lib/db.ts`).
 **NUNCA** usar `supabase.from()` para schema alissonerp (PostgREST bug — retorna `[]` silenciosamente).
 `supabase.auth.getUser()` e `supabase.storage` funcionam normalmente.
+**Escrita no banco (INSERT/UPDATE/DELETE/migration) exige aprovação — ver §0 House Rules e §2 Database Safety.**
 
 **Storage:** Upload SEMPRE server-side via `src/lib/storage.ts`.
 - Buckets PUBLICOS (avatars, imagens): `<img src={url}>` direto, sem signed URL
@@ -37,7 +106,7 @@
 
 ### Pre-Codigo
 ```
-1. Ler este CLAUDE.md
+1. Ler este CLAUDE.md (em especial a §0)
 2. Ler docs/arquitetura.md (se task complexa)
 3. SELECT column_name FROM information_schema.columns WHERE table_schema='alissonerp' AND table_name='NOME'
 4. SELECT id, name FROM storage.buckets (se envolver fotos)
@@ -142,7 +211,10 @@ fila_sync: erros Tiny vao para fila_sync_externo, nao bloqueiam a operacao princ
 
 ---
 
-## 4. Sistema de Agentes
+## 4. Sistema de Agentes (Claude Code)
+
+> Os agentes rodam como **skills do Claude Code** (`/gerente`, `/backend`, `/frontend`, `/qa`),
+> definidos em `.claude/commands/`. (O fluxo antigo `@aiox-master`/opencode foi descontinuado.)
 
 ### Roles
 | Skill | Papel | Dominio |
@@ -166,12 +238,15 @@ fila_sync: erros Tiny vao para fila_sync_externo, nao bloqueiam a operacao princ
 
 ### Workflow
 ```
-Jonathan -> Gerente (analisa, quebra, delega)
-  +-- Backend (DB + API) -> implementa -> tsc -> reporta
-  +-- Frontend (UI) -> implementa -> tsc -> reporta
-  +-- QA (revisa TUDO) -> APROVADO / REJEITADO
-       APROVADO -> Gerente reporta a Jonathan -> aguarda teste
+Jonathan -> /gerente (resumo sem jargao -> aprovacao -> plano tecnico -> delega)
+  +-- /backend (DB + API) -> implementa SEGUINDO O PLANO -> tsc -> reporta
+  +-- /frontend (UI) -> implementa SEGUINDO O PLANO -> tsc -> reporta
+  +-- /qa (revisa TUDO) -> APROVADO / REJEITADO
+       APROVADO -> /gerente reporta a Jonathan -> aguarda teste
        REJEITADO -> volta ao especialista -> corrige -> QA re-revisa
+
+Nenhum agente executa nada fora do plano aprovado (ver §0).
+QA nunca eh pulado. Push para main exige aprovacao explicita (ver §2 Git).
 ```
 
 ---
@@ -231,119 +306,16 @@ Permissoes granulares: src/lib/permissoes.ts -> temPermissao()
 
 ```
 1. npx tsc --noEmit (ZERO erros obrigatorio)
-2. Reportar o que foi feito
+2. Reportar o que foi feito (e confirmar que ficou DENTRO do plano — ver §0)
 3. Commit/push: seguir regra Git secao 2 (fixes = auto, features = aguarda)
 4. Aguardar Jonathan testar (features e migrations)
-5. Atualizar: ~/.claude/projects/C--Users-Jonathan-Ara-jo-OneDrive-fabricaAJ/memory/ (se mudou algo estrutural)
-           docs/arquitetura.md (se mudou arquitetura)
-           docs/CHANGELOG.md
+5. Atualizar docs afetadas (ver §9): docs/arquitetura.md, docs/CHANGELOG.md,
+   memory files, este CLAUDE.md (se mudou algo estrutural)
 ```
 
 ---
 
-## 8. Referencias
-
-- **Mapeamento exaustivo do banco:** `docs/db-mapping/` — 7 schemas, 377 tabelas, 321 funcoes (com corpo), 148 triggers, 122 views, 234 RLS policies, cross-reference com codigo. Comecar em `docs/db-mapping/README.md`.
-- **Schema doc resumido por categoria:** `docs/schema/` (alissonerp-vendas, -pcp, -estoque, -admin, -ordens, -outros, public, directus)
-- **Arquitetura completa:** `docs/arquitetura.md` (~155KB)
-- **Dominio ERP (schemas, fluxos, tabelas):** `docs/claude-memory/MEMORY.md`
-- **Memory files:** `~/.claude/projects/C--Users-Jonathan-Ara-jo-OneDrive-fabricaAJ/memory/`
-- **API Routes (280+):** ver memory `project_api_routes.md`
-- **Modulo Service:** ver memory `project_modulo_service.md`
-- **Storage Buckets:** ver memory `project_storage_buckets.md`
-- **Usuarios teste:** ver `docs/claude-memory/MEMORY.md` secao 17
-
----
-
-## 9. Regras Obrigatorias
-
-### Documentacao sempre em sincronia
-
-Toda alteracao no codigo — seja correcao de bug, refatoracao, ou feature nova — DEVE atualizar a documentacao afetada no MESMO commit.
-
-Arquivos de documentacao do projeto:
-- `MEMORY.md`
-- `CLAUDE.md`
-- `docs/arquitetura.md`
-- `ESTRUTURA_ATUAL.md`
-- `.aiox/knowledge/context.md`
-
-O que atualizar:
-- Arquivo criado/deletado/renomeado → atualizar referencias em todos os docs
-- Componente adicionado/removido → atualizar lista de componentes
-- Comportamento alterado → atualizar descricao do comportamento
-- Contagens (ex: "5 modais") → recalcular e corrigir
-
-Regra: se o commit altera codigo mas nao atualiza docs afetadas, o trabalho NAO esta completo. Docs desatualizadas sao bugs.
-
----
-
-## 10. Orquestracao Automatica de Tarefas (@aiox-master)
-
-### Fluxo padrao — Jonathan so precisa explicar o problema e dar a aprovacao final
-
-Quando uma tarefa e iniciada via @aiox-master, o fluxo abaixo e executado AUTOMATICAMENTE, sem Jonathan precisar dizer qual agente chamar:
-
-```
-1. Jonathan explica o problema → @aiox-master entende e faz perguntas de clareza
-2. @aiox-master delega → @analyst investiga (codigo, banco, logs)
-3. @analyst entrega → @aiox-master delega → @architect avalia impacto e solucao
-4. @architect entrega → @aiox-master delega → @dev (feature/refactor) ou @hotfix (bug prod)
-5. Implementacao pronta → @aiox-master delega → @qa revisa
-6. @qa APROVA → @aiox-master pede AUTORIZACAO FINAL ao Jonathan
-7. Jonathan aprova → @aiox-master delega → @devops faz push
-8. @devops confirma push → @aiox-master reporta tarefa concluida
-
-REJEICAO: se @qa REJEITAR → @aiox-master devolve automaticamente ao @dev/hotfix → repete ate @qa aprovar
-```
-
-### Responsabilidades do Jonathan nesse fluxo
-
-```
-- Explicar o problema no inicio
-- Responder perguntas do time durante o processo
-- Dar a aprovacao final ANTES do push (passo 7)
-- Qualquer outro passo e automatico
-```
-
-### Responsabilidades do @aiox-master
-
-```
-- Entender o problema e fazer perguntas de clareza antes de comecar
-- Adaptar o fluxo: pular etapas que nao fazem sentido (ex: bug simples nao precisa de @analyst)
-- Informar Jonathan quando o proximo agente foi acionado e o que ele vai fazer
-- Nunca pular o @qa — toda mudanca de codigo passa por revisao
-- Nunca autorizar push sem aprovacao explicita do Jonathan
-```
-
-### Troca de modelo entre fases
-
-O fluxo usa modelos diferentes por fase:
-
-```
-FASE DE ANALISE (Opus):
-  @aiox-master, @analyst, @architect, @qa → exigem Opus
-
-FASE DE EXECUCAO (Sonnet):
-  @sm, @dev, @hotfix, @devops → rodam em Sonnet
-```
-
-Regra para o @aiox-master:
-
-```
-Ao terminar a fase de analise (antes de @dev/@hotfix):
-  → Avisar: "Analise completa. Troque para Sonnet com /model sonnet e diga 'continua'."
-
-Ao terminar a fase de execucao (antes de @qa):
-  → Avisar: "Implementacao pronta. Troque para Opus com /model opus e diga 'continua'."
-
-Quando Jonathan disser "continua" apos a troca:
-  → Retomar exatamente de onde parou e delegar pro proximo agente.
-```
-
----
-
-## 11. Padrao de API Route (pos-EPIC-001)
+## 8. Padrao de API Route (pos-EPIC-001)
 
 ### Novo padrao com defineRoute (recomendado para rotas novas)
 ```typescript
@@ -368,3 +340,39 @@ export const POST = defineRoute({
 import { requireAuth } from "@/lib/auth-server";
 // usar requireAuth() em vez de createServerSupabase() + getUser() manual
 ```
+
+---
+
+## 9. Documentacao Sempre em Sincronia (OBRIGATORIO)
+
+Toda alteracao no codigo — bug, refatoracao ou feature — DEVE atualizar a documentacao afetada no MESMO commit.
+
+Arquivos de documentacao do projeto:
+- `CLAUDE.md` (este — fonte unica de verdade)
+- `MEMORY.md` / `docs/claude-memory/MEMORY.md`
+- `docs/arquitetura.md`
+- `docs/CHANGELOG.md`
+- `ESTRUTURA_ATUAL.md`
+- `.aiox/knowledge/context.md`
+
+O que atualizar:
+- Arquivo criado/deletado/renomeado → atualizar referencias em todos os docs
+- Componente adicionado/removido → atualizar lista de componentes
+- Comportamento alterado → atualizar descricao do comportamento
+- Contagens (ex: "5 modais") → recalcular e corrigir
+
+Regra: se o commit altera codigo mas nao atualiza docs afetadas, o trabalho NAO esta completo. Docs desatualizadas sao bugs.
+
+---
+
+## 10. Referencias
+
+- **Mapeamento exaustivo do banco:** `docs/db-mapping/` — 7 schemas, 377 tabelas, 321 funcoes (com corpo), 148 triggers, 122 views, 234 RLS policies, cross-reference com codigo. Comecar em `docs/db-mapping/README.md`.
+- **Schema doc resumido por categoria:** `docs/schema/` (alissonerp-vendas, -pcp, -estoque, -admin, -ordens, -outros, public, directus)
+- **Arquitetura completa:** `docs/arquitetura.md` (~155KB)
+- **Dominio ERP (schemas, fluxos, tabelas):** `docs/claude-memory/MEMORY.md`
+- **Memory files:** `~/.claude/projects/.../memory/`
+- **API Routes (280+):** ver memory `project_api_routes.md`
+- **Modulo Service:** ver memory `project_modulo_service.md`
+- **Storage Buckets:** ver memory `project_storage_buckets.md`
+- **Usuarios teste:** ver `docs/claude-memory/MEMORY.md` secao 17

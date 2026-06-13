@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { fetchPayment, fetchMerchantOrder, getWebhookSecret } from "@/lib/mercado-pago";
-import { concluirVenda, estornarVenda } from "@/lib/vendas-aprovar";
+import { estornarVenda } from "@/lib/vendas-aprovar";
 
 // Webhook MP — payload do gateway pode vir com campos adicionais (passthrough).
 // Validamos apenas a forma; tipo "merchant_order" usa o mesmo schema.
@@ -31,9 +31,8 @@ const WebhookSchema = z.object({
 //   6. Idempotência: se pagamento já confirmado, retorna 200 sem reprocessar
 //   7. Se status=approved:
 //        - UPDATE pagamentos_venda status=confirmado
-//        - Se soma(confirmados) >= total_venda:
-//            - approveVenda()  (envia Tiny, noop se já aprovada)
-//            - concluirVenda() (marca contas_receber como pago)
+//        (fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda —
+//         o status só muda na entrega: aprovado → em_rota → entregue)
 //   8. Retorna sempre 200 em cenários tratados (evita MP reentregar)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -215,16 +214,8 @@ async function handleMerchantOrder(orderId: string | null, liveMode?: boolean): 
   if (result?.ignored) return NextResponse.json({ ok: true, ignored: "pagamento não encontrado" });
   if (result?.ja_processado) return NextResponse.json({ ok: true, ja_processado: true });
 
-  if (result.quitada) {
-    const systemUserId = await getSystemUserId(vendaId);
-    if (systemUserId) {
-      try {
-        await concluirVenda(vendaId, systemUserId, { tinyBestEffort: true });
-      } catch (err) {
-        console.error("[webhook-mp merchant_order] Erro ao concluir venda:", err);
-      }
-    }
-  }
+  // Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda.
+  // A venda permanece no status atual até a entrega (em_rota → entregue).
 
   await sql`
     INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status)
@@ -234,11 +225,11 @@ async function handleMerchantOrder(orderId: string | null, liveMode?: boolean): 
       venda_id: vendaId,
       pagamento_id: pagamentoId,
       payment_id: paymentId,
-      resultado: result.quitada ? "venda_concluida" : "pagamento_confirmado",
+      resultado: result.quitada ? "pagamento_quitado" : "pagamento_confirmado",
     })}::text::jsonb, 200)
   `;
 
-  return NextResponse.json({ ok: true, venda_id: vendaId, pagamento_id: pagamentoId, venda_concluida: result.quitada });
+  return NextResponse.json({ ok: true, venda_id: vendaId, pagamento_id: pagamentoId, pagamento_quitado: result.quitada });
 }
 
 export async function POST(req: NextRequest) {
@@ -533,70 +524,35 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda.
+    // A venda permanece no status atual (ex.: aprovado) até a entrega
+    // (em_rota → entregue). Ordem + Tiny já aconteceram na aprovação.
     if (result.quitada) {
-      // 7c. Aprovar + concluir venda (fora da tx porque approveVenda tem seus próprios COMMITs)
-      const systemUserId = await getSystemUserId(vendaId);
-      if (!systemUserId) {
-        await sql`
-          INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
-          VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ venda_id: vendaId })}::text::jsonb, 500, 'system_user_id não configurado')
-        `;
-        return NextResponse.json({ ok: false, error: "system_user_id não configurado" });
-      }
-
-      let resultadoConclusao;
-      console.log(`[webhook-mp] pagamento quitado venda=${vendaId} pago=${result.pago} total=${result.total} — concluindo`);
-      try {
-        // tinyBestEffort=true: se Tiny estiver fora (token expirado, etc),
-        // a venda AINDA é concluída. O webhook de pagamento MP nunca pode
-        // ficar refém do estado da integração Tiny — cliente já pagou.
-        resultadoConclusao = await concluirVenda(vendaId, systemUserId, {
-          tinyBestEffort: true,
-        });
-      } catch (err) {
-        const internalMsg = err instanceof Error ? err.message : "Erro ao concluir venda";
-        console.error(`[webhook-mp] concluirVenda falhou venda=${vendaId}`, err);
-        await sql`
-          INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
-          VALUES (${WEBHOOK_NOME}, ${JSON.stringify({ venda_id: vendaId, payment_id: paymentId })}::text::jsonb, 500, ${internalMsg})
-        `;
-        // Retorna 200 mesmo assim — pagamento já está registrado como confirmado
-        return NextResponse.json({
-          ok: false,
-          pagamento_confirmado: true,
-          venda_concluida: false,
-          error: "Erro ao concluir venda",
-        });
-      }
-
       await sql`
-        INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
+        INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status)
         VALUES (${WEBHOOK_NOME}, ${JSON.stringify({
           venda_id: vendaId,
           pagamento_id: pagamentoId,
           payment_id: paymentId,
-          resultado: "venda_concluida",
+          resultado: "pagamento_quitado",
           pago: result.pago,
           total: result.total,
-          ...(resultadoConclusao.tiny_erro ? { tiny_erro: resultadoConclusao.tiny_erro } : {}),
-          cr_quitadas: resultadoConclusao.cr_quitadas,
-        })}::text::jsonb, 200, ${resultadoConclusao.tiny_erro ?? null})
+        })}::text::jsonb, 200)
       `;
 
       return NextResponse.json({
         ok: true,
         venda_id: vendaId,
         pagamento_id: pagamentoId,
-        venda_concluida: true,
-        ...(resultadoConclusao.tiny_erro ? { tiny_sync_pendente: true } : {}),
+        pagamento_quitado: true,
       });
     } else {
-      // Pagamento parcial — só confirma esse pagamento, não fecha venda
+      // Pagamento parcial — só confirma esse pagamento
       return NextResponse.json({
         ok: true,
         venda_id: vendaId,
         pagamento_id: pagamentoId,
-        venda_concluida: false,
+        pagamento_quitado: false,
         pago: result.pago,
         total: result.total,
       });

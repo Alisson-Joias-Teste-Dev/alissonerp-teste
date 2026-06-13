@@ -200,7 +200,7 @@ export async function submeterVendaParaAprovacaoCredito(
       mensagem: tipo === "gerente" ? descGerente : descDiretor,
       remetenteId: userId,
       link: `/tarefas?abrir=${tarefa_id}`,
-    }).catch(() => {});
+    }).catch((e) => console.error("[vendas-credito-aprovar] best-effort falhou (notificação/webhook):", e));
 
     return {
       precisa_aprovacao: true,
@@ -264,7 +264,7 @@ export async function processarAprovacaoCredito(
           remetenteId: aprovadorId,
           vendaId,
           link: `/vendas/${vendaId}`,
-        }).catch(() => {});
+        }).catch((e) => console.error("[vendas-credito-aprovar] best-effort falhou (notificação/webhook):", e));
       }
       return { ok: true, acao: "cartao_liberado", message: "Cartão de crédito liberado para esta venda." };
     } else {
@@ -282,7 +282,7 @@ export async function processarAprovacaoCredito(
           remetenteId: aprovadorId,
           vendaId,
           link: `/vendas/${vendaId}`,
-        }).catch(() => {});
+        }).catch((e) => console.error("[vendas-credito-aprovar] best-effort falhou (notificação/webhook):", e));
       }
       return { ok: true, acao: "cartao_rejeitado", message: "Cartão de crédito rejeitado." };
     }
@@ -304,7 +304,7 @@ export async function processarAprovacaoCredito(
     await sql`
       INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
       VALUES ('processarAprovacaoCredito_bloqueado', ${JSON.stringify({ vendaId, aprovadorId, decisao, motivo: "desconto_pendente" })}::text::jsonb, 409, 'desconto >${credThreshold}% sem aprovação')
-    `.catch(() => {});
+    `.catch((e) => console.error("[vendas-credito-aprovar] best-effort falhou (notificação/webhook):", e));
     return { ok: false, acao: "erro", message: `Venda tem desconto acima de ${credThreshold}% aguardando aprovação. Solicite aprovação de desconto antes de aprovar crédito.` };
   }
 
@@ -326,7 +326,7 @@ export async function processarAprovacaoCredito(
       mensagem: motivo ?? "Aprovação de crédito foi rejeitada pelo aprovador",
       remetenteId: aprovadorId,
       link: `/vendas/${vendaId}`,
-    }).catch(() => {});
+    }).catch((e) => console.error("[vendas-credito-aprovar] best-effort falhou (notificação/webhook):", e));
 
     return { ok: true, acao: "rejeitado", message: "Aprovação de crédito rejeitada" };
   }
@@ -423,7 +423,7 @@ export async function processarAprovacaoCredito(
     mensagem: motivo ?? msgOk,
     remetenteId: aprovadorId,
     link: `/vendas/${vendaId}`,
-  }).catch(() => {});
+  }).catch((e) => console.error("[vendas-credito-aprovar] best-effort falhou (notificação/webhook):", e));
 
   return {
     ok: true,

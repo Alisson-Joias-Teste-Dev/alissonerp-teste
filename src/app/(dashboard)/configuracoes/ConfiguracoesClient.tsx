@@ -41,6 +41,7 @@ import {
   Truck,
   Search,
   Scale,
+  MessageCircle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
@@ -3157,6 +3158,11 @@ function TabIntegracoes() {
   const [showInterClientSecret, setShowInterClientSecret] = useState(false);
   const [showInterCronSecret, setShowInterCronSecret] = useState(false);
 
+  // WhatsApp do desenvolvedor (Etapa 3) — recebe o código quando o envio ao
+  // cliente falha. Não é segredo; o valor é exibido no campo.
+  const [whatsappDev, setWhatsappDev] = useState("");
+  const [savingWhatsappDev, setSavingWhatsappDev] = useState(false);
+
   // Mercado Pago Point devices
   interface PointDeviceRow {
     id: number;
@@ -3195,6 +3201,7 @@ function TabIntegracoes() {
           /** Le estado de ativacao dos gateways do banco (fin_gateways.ativo) */
           if (typeof data.mp_ativo === "boolean") setMpAtivo(data.mp_ativo);
           if (typeof data.pagbank_ativo === "boolean") setPagbankAtivo(data.pagbank_ativo);
+          if (typeof data.whatsapp_desenvolvedor === "string") setWhatsappDev(data.whatsapp_desenvolvedor);
           if (data.mp_configured) carregarMpDevices();
         }
       } catch { /* silenciar */ }
@@ -3502,6 +3509,24 @@ function TabIntegracoes() {
     </span>
   );
 
+  async function salvarWhatsappDev() {
+    setSavingWhatsappDev(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/configuracoes/integracoes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ whatsapp_desenvolvedor: whatsappDev.trim() }),
+      });
+      if (res.ok) setMsg({ tipo: "ok", texto: "WhatsApp do desenvolvedor salvo." });
+      else setMsg({ tipo: "erro", texto: "Erro ao salvar o WhatsApp do desenvolvedor." });
+    } catch {
+      setMsg({ tipo: "erro", texto: "Erro ao salvar o WhatsApp do desenvolvedor." });
+    } finally {
+      setSavingWhatsappDev(false);
+    }
+  }
+
   return (
     <div className="space-y-6 max-w-xl">
       {/* Mensagem global */}
@@ -3517,6 +3542,52 @@ function TabIntegracoes() {
           {msg.texto}
         </div>
       )}
+
+      {/* WhatsApp do desenvolvedor (Etapa 3) — fallback quando o código não
+          chega ao cliente: o sistema manda o código + erro para este número. */}
+      <div
+        className="rounded-xl p-5 space-y-4"
+        style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className="rounded-lg p-2 flex items-center justify-center"
+            style={{ backgroundColor: "#25D366" + "22", color: "#128C7E" }}
+          >
+            <MessageCircle size={18} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold" style={{ color: P.creme }}>WhatsApp do desenvolvedor</p>
+            <p className="text-xs" style={{ color: P.muted }}>
+              Recebe o código de entrega + o erro quando o envio ao cliente falha
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <label className="text-xs font-medium" style={{ color: P.muted }}>
+              Número (com DDD, ex: 85999999999)
+            </label>
+            <input
+              type="tel"
+              value={whatsappDev}
+              onChange={(e) => setWhatsappDev(e.target.value)}
+              placeholder="85999999999"
+              className="w-full mt-1 rounded-lg px-3 py-2 text-sm outline-none"
+              style={{ backgroundColor: P.card, border: `1px solid ${P.border}`, color: P.creme }}
+            />
+          </div>
+          <button
+            onClick={salvarWhatsappDev}
+            disabled={savingWhatsappDev}
+            className="rounded-lg px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
+            style={{ backgroundColor: P.verde, color: "#fff" }}
+          >
+            {savingWhatsappDev ? "Salvando…" : "Salvar"}
+          </button>
+        </div>
+      </div>
 
       {/* WooCommerce */}
       <div

@@ -7,6 +7,8 @@
  *
  * Use em lugar de fetch() direto em qualquer chamada de API.
  */
+import { traduzErroOperacional } from "@/lib/erros-operacionais";
+
 export async function apiFetch<T = unknown>(
   url: string,
   options?: RequestInit,
@@ -30,7 +32,8 @@ export async function apiFetch<T = unknown>(
     } catch {
       /* body não é JSON — mantém msg genérica */
     }
-    throw new Error(msg);
+    // Traduz erros operacionais (prefixos técnicos do banco) p/ texto claro.
+    throw new Error(traduzErroOperacional(msg));
   }
 
   // 204 No Content — sem body

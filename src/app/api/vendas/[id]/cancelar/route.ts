@@ -4,6 +4,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { ensureTinyToken } from "@/lib/vendas-aprovar";
 import { internalError } from "@/lib/api-error";
+import { logAudit } from "@/lib/audit";
 
 // ─── POST /api/vendas/[id]/cancelar ───────────────────────────────────────────
 // Cancela venda (apenas gerente+ ou admin/dev).
@@ -93,8 +94,20 @@ export async function POST(
 
       if (creditoUsado > 0) {
         const { creditarSaldo } = await import("@/lib/saldo-credito");
-        await creditarSaldo(creditoUsado, vendaId, null, user.id);
+        // Mesma transação (txClient) — devolução de crédito e cancelamento são atômicos
+        await creditarSaldo(creditoUsado, vendaId, null, user.id, tx);
       }
+
+      // Rastreabilidade §0.1: registra QUEM cancelou e o estado anterior,
+      // na mesma transação (rollback desfaz o log junto).
+      await logAudit(tx, {
+        tabela: "vendas_erp",
+        operacao: "UPDATE",
+        registro_id: vendaId,
+        usuario_id: user.id,
+        dados_antes: { situacao: venda.situacao },
+        dados_depois: { situacao: "cancelado", bloqueado: true, credito_devolvido: creditoUsado > 0 ? creditoUsado : undefined },
+      });
     });
   } catch (err) {
     return internalError(`[POST /api/vendas/${vendaId}/cancelar]`, err, "Falha ao cancelar. Tente novamente.");

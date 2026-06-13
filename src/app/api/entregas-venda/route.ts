@@ -28,6 +28,8 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { criarEntrega } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
+import { authOr401, ForbiddenError } from "@/lib/auth-server";
+import { isVendasFullAccess, requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 
 // REGRA DE NEGÓCIO: papéis que podem visualizar a lista de entregas.
 // "consultora" tem visibilidade restrita (apenas entregas de suas vendas).
@@ -157,11 +159,14 @@ export async function GET(req: NextRequest) {
         ve.numero_venda,
         ve.total_venda,
         ve.situacao AS venda_situacao,
-        c.nome AS cliente_nome,
-        mb.nome AS motoboy_nome
+        COALESCE(c.nome, ca.nome) AS cliente_nome,
+        mb.nome AS motoboy_nome,
+        ev.is_avulso,
+        ev.descricao_avulso
       FROM alissonerp.entregas_venda ev
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = ev.venda_id
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
+      LEFT JOIN public.contatos ca ON ca.id_contato = ev.contato_id
       LEFT JOIN alissonerp.motoboys mb ON mb.user_id = ev.motoboy_id
       WHERE 1=1
         ${whereVendedor}
@@ -192,15 +197,27 @@ export async function GET(req: NextRequest) {
   // REGRA DE NEGÓCIO: campos NUMERIC do PostgreSQL vêm como string.
   // Converter com Number() para o frontend receber números nativos.
   // IMPACTO SE REMOVIDO: o frontend recebe strings e cálculos quebram.
+  //
+  // REGRA DE SEGURANÇA (Blindagem 2026-06): os códigos de verificação A/B
+  // saem MASCARADOS para todos exceto admin/desenvolvedor. O código só chega
+  // por WhatsApp ao cliente/motoboy — o operador não pode vê-lo na API.
+  // IMPACTO SE REMOVIDO: qualquer usuário com acesso à lista confirma
+  // entregas sem o cliente estar presente (burla o sistema de códigos).
+  const podeVerCodigos = ["admin", "desenvolvedor"].includes(usuario.role as string);
+  const mascarar = (c: unknown) => (c ? "••••••" : null);
   return NextResponse.json({
     items: items.map((r) => ({
       ...r,
-      venda_id: Number(r.venda_id),
+      codigo_cliente: podeVerCodigos ? r.codigo_cliente : mascarar(r.codigo_cliente),
+      codigo_motoboy: podeVerCodigos ? r.codigo_motoboy : mascarar(r.codigo_motoboy),
+      venda_id: r.venda_id != null ? Number(r.venda_id) : null,
       motoboy_id: r.motoboy_id ? String(r.motoboy_id) : null,
       frete_cobrado: Number(r.frete_cobrado ?? 0),
       frete_motoboy: Number(r.frete_motoboy ?? 0),
       total_venda: r.total_venda ? Number(r.total_venda) : null,
       aprovacao_frete_necessaria: Boolean(r.aprovacao_frete_necessaria),
+      is_avulso: Boolean(r.is_avulso),
+      descricao_avulso: r.descricao_avulso ? String(r.descricao_avulso) : null,
     })),
     total,
     page,
@@ -216,16 +233,14 @@ export async function GET(req: NextRequest) {
 // IMPACTO SE ALTERADO: não contorne a lib com INSERT direto — a lib
 // garante atomicidade e unicidade de códigos de verificação.
 export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data } = await supabase.auth.getUser();
-  const user = data.user;
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  // Verifica se usuário existe no ERP (qualquer role pode criar entrega)
-  const [usuario] = await sql`
-    SELECT id FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
-  `;
-  if (!usuario) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  // REGRA DE NEGÓCIO (Blindagem 2026-06): criar entrega NÃO é para qualquer
+  // usuário autenticado. Apenas roles de vendas (admin/dev/diretor/gerentes)
+  // ou a consultora DONA da venda. Motoboy/ourives/etc não criam entregas.
+  // POR QUE: criar entrega expõe fluxo de códigos e leva à baixa de estoque.
+  // IMPACTO SE REMOVIDO: reabre a falha crítica C1 da análise (qualquer um
+  // criava entrega de qualquer venda).
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
 
   // Validação do body com Zod
   let raw: unknown;
@@ -239,6 +254,20 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return zodError(parsed.error);
 
   const body = parsed.data;
+
+  // Consultora só cria entrega de venda própria; demais roles não-full são bloqueadas.
+  if (!isVendasFullAccess(user.role)) {
+    if (user.role !== "consultora") {
+      return NextResponse.json({ error: "Sem permissão para criar entregas" }, { status: 403 });
+    }
+    try {
+      await requireVendaOwnership(user, body.vendaId);
+    } catch (e) {
+      if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+      if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+      throw e;
+    }
+  }
 
   // Delega a criação para a lib, que faz todas as validações de negócio
   // e executa em transação atômica com geração de códigos e auditoria.
@@ -257,14 +286,17 @@ export async function POST(req: NextRequest) {
       user.id,
     );
 
-    // Retorna a entrega criada + códigos de verificação para exibição
-    // REGRA DE NEGÓCIO: os códigos são sensíveis — o frontend exibe em
-    // um modal de confirmação e o usuário os anota antes de fechar.
+    // REGRA DE SEGURANÇA (Blindagem 2026-06): os códigos NUNCA voltam em claro
+    // na resposta — eles chegam ao cliente/motoboy somente por WhatsApp.
+    // O frontend usa apenas a PRESENÇA do código (máscara) para decidir o
+    // fluxo do modal (Código B existe? → fluxo motoboy) e os status de envio.
+    // IMPACTO SE REMOVIDO: o operador captura o código na resposta da rede
+    // e confirma a entrega sem o cliente — burla todo o sistema de códigos.
     return NextResponse.json({
-      entrega,
-      codigos: {
-        cliente: entrega.codigoCliente,
-        motoboy: entrega.codigoMotoboy,
+      entrega: {
+        ...entrega,
+        codigoCliente: entrega.codigoCliente ? "••••••" : null,
+        codigoMotoboy: entrega.codigoMotoboy ? "••••••" : null,
       },
     });
   } catch (err) {

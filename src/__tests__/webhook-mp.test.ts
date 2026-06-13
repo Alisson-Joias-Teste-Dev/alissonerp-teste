@@ -312,7 +312,9 @@ describe("POST /api/webhooks/mercado-pago", () => {
 
   // ── 4. type=payment status=approved ────────────────────────────────────────
   describe("type=payment status=approved", () => {
-    it("aprovado e quitado: confirma pagamento e chama concluirVenda", async () => {
+    // Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda —
+    // o status só muda na entrega (em_rota → entregue).
+    it("aprovado e quitado: confirma pagamento e NÃO conclui a venda (fluxo novo)", async () => {
       mockFetchPayment.mockResolvedValueOnce({
         id: PAYMENT_ID,
         status: "approved",
@@ -334,20 +336,12 @@ describe("POST /api/webhooks/mercado-pago", () => {
       // Dentro do begin: retorna quitada=true
       sqlMock.begin = vi.fn(async () => ({ quitada: true, pago: 1000, total: 1000 }));
 
-      // getSystemUserId — SELECT configuracoes_sistema
-      sqlMock
-        .mockResolvedValueOnce([{ valor: JSON.stringify(SYSTEM_USER_ID) }]); // mp_system_user_id
-
       const res = await POST(makeRequest());
       const data = await res.json();
       expect(res.status).toBe(200);
       expect(data.ok).toBe(true);
-      expect(data.venda_concluida).toBe(true);
-      expect(mockConcluirVenda).toHaveBeenCalledWith(
-        VENDA_ID,
-        SYSTEM_USER_ID,
-        { tinyBestEffort: true },
-      );
+      expect(data.pagamento_quitado).toBe(true);
+      expect(mockConcluirVenda).not.toHaveBeenCalled();
     });
 
     it("aprovado mas pagamento parcial: confirma e NÃO chama concluirVenda", async () => {
@@ -375,7 +369,7 @@ describe("POST /api/webhooks/mercado-pago", () => {
 
       const res = await POST(makeRequest());
       const data = await res.json();
-      expect(data.venda_concluida).toBe(false);
+      expect(data.pagamento_quitado).toBe(false);
       expect(data.pago).toBe(500);
       expect(data.total).toBe(1000);
       expect(mockConcluirVenda).not.toHaveBeenCalled();
@@ -469,7 +463,7 @@ describe("POST /api/webhooks/mercado-pago", () => {
       expect(capturedUpdate).toContain(PAYMENT_ID); // gateway_id
     });
 
-    it("ja_coberto: outros pagamentos já cobrem total — pula UPDATE e conclui", async () => {
+    it("ja_coberto: outros pagamentos já cobrem total — quitada, sem conclusão (fluxo novo)", async () => {
       mockFetchPayment.mockResolvedValueOnce({
         id: PAYMENT_ID,
         status: "approved",
@@ -494,13 +488,10 @@ describe("POST /api/webhooks/mercado-pago", () => {
         total: 1000,
       }));
 
-      sqlMock
-        .mockResolvedValueOnce([{ valor: JSON.stringify(SYSTEM_USER_ID) }]);
-
       const res = await POST(makeRequest());
       const data = await res.json();
-      expect(data.venda_concluida).toBe(true);
-      expect(mockConcluirVenda).toHaveBeenCalled();
+      expect(data.pagamento_quitado).toBe(true);
+      expect(mockConcluirVenda).not.toHaveBeenCalled();
     });
   });
 
@@ -689,7 +680,7 @@ describe("POST /api/webhooks/mercado-pago", () => {
 
   // ── 8. type=merchant_order ─────────────────────────────────────────────────
   describe("type=merchant_order", () => {
-    it("order com payment approved: confirma pagamento ERP", async () => {
+    it("order com payment approved: confirma pagamento ERP sem concluir a venda (fluxo novo)", async () => {
       mockFetchMerchantOrder.mockResolvedValueOnce({
         external_reference: `venda:${VENDA_ID}:pag:${PAGAMENTO_ID}`,
         payments: [
@@ -698,16 +689,13 @@ describe("POST /api/webhooks/mercado-pago", () => {
       });
       // dentro do begin tx
       sqlMock.begin = vi.fn(async () => ({ quitada: true }));
-      // getSystemUserId
-      sqlMock
-        .mockResolvedValueOnce([]) // log inicial
-        .mockResolvedValueOnce([{ valor: JSON.stringify(SYSTEM_USER_ID) }]);
+      sqlMock.mockResolvedValueOnce([]); // log inicial
 
       const res = await POST(makeRequest({ type: "merchant_order" }));
       const data = await res.json();
       expect(res.status).toBe(200);
-      expect(data.venda_concluida).toBe(true);
-      expect(mockConcluirVenda).toHaveBeenCalled();
+      expect(data.pagamento_quitado).toBe(true);
+      expect(mockConcluirVenda).not.toHaveBeenCalled();
     });
 
     it("order sem payment approved: noop pending", async () => {
@@ -880,9 +868,12 @@ describe("POST /api/webhooks/mercado-pago", () => {
     });
   });
 
-  // ── 12. Erro ao concluir venda ────────────────────────────────────────────
-  describe("Erro ao concluir venda — pagamento já confirmado", () => {
-    it("concluirVenda lança erro: pagamento JÁ confirmado, retorna 200 com erro", async () => {
+  // ── 12. Pagamento quitado — fluxo novo 06/2026 ─────────────────────────────
+  // A auto-conclusão por pagamento foi APOSENTADA: quitação não depende mais
+  // de system_user_id nem de concluirVenda. O webhook só registra o pagamento;
+  // o status da venda muda apenas na entrega (em_rota → entregue).
+  describe("Pagamento quitado não conclui a venda (fluxo novo)", () => {
+    it("quitada sem mp_system_user_id configurado: 200 ok mesmo assim", async () => {
       mockFetchPayment.mockResolvedValueOnce({
         id: PAYMENT_ID,
         status: "approved",
@@ -901,49 +892,11 @@ describe("POST /api/webhooks/mercado-pago", () => {
 
       sqlMock.begin = vi.fn(async () => ({ quitada: true, pago: 1000, total: 1000 }));
 
-      sqlMock
-        .mockResolvedValueOnce([{ valor: JSON.stringify(SYSTEM_USER_ID) }]);
-
-      mockConcluirVenda.mockRejectedValueOnce(new Error("Tiny indisponível"));
-
       const res = await POST(makeRequest());
       const data = await res.json();
       expect(res.status).toBe(200);
-      expect(data.ok).toBe(false);
-      expect(data.pagamento_confirmado).toBe(true);
-      expect(data.venda_concluida).toBe(false);
-      expect(data.error).toMatch(/Tiny/);
-    });
-
-    it("system_user_id não configurado: retorna erro mas 200", async () => {
-      mockFetchPayment.mockResolvedValueOnce({
-        id: PAYMENT_ID,
-        status: "approved",
-        external_reference: `venda:${VENDA_ID}:pag:${PAGAMENTO_ID}`,
-        transaction_amount: 1000,
-      });
-      sqlMock
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{
-          id: PAGAMENTO_ID,
-          venda_id: VENDA_ID,
-          status: "pendente",
-          valor: 1000,
-          gateway_payload: {},
-        }]);
-
-      sqlMock.begin = vi.fn(async () => ({ quitada: true, pago: 1000, total: 1000 }));
-
-      // configuracoes_sistema vazio + venda sem created_by
-      sqlMock
-        .mockResolvedValueOnce([]) // configuracoes_sistema sem mp_system_user_id
-        .mockResolvedValueOnce([{ created_by: null }]); // venda sem created_by
-
-      const res = await POST(makeRequest());
-      const data = await res.json();
-      expect(res.status).toBe(200);
-      expect(data.ok).toBe(false);
-      expect(data.error).toMatch(/system_user_id/);
+      expect(data.ok).toBe(true);
+      expect(data.pagamento_quitado).toBe(true);
       expect(mockConcluirVenda).not.toHaveBeenCalled();
     });
   });

@@ -13,7 +13,10 @@ const KEYS_TINY = ["tiny_client_id", "tiny_client_secret", "tiny_bearer_token"] 
 const KEYS_MP = ["mp_access_token", "mp_webhook_secret", "mp_user_id", "mp_webhook_base_url"] as const;
 const KEYS_INTER = ["inter_client_id", "inter_client_secret", "inter_cert_pem", "inter_key_pem", "inter_conta_corrente", "inter_cron_secret"] as const;
 const KEYS_PAGBANK = ["pagbank_access_token", "pagbank_webhook_secret", "pagbank_webhook_base_url", "pagbank_ambiente"] as const;
-const ALL_KEYS = [...KEYS_WOO, ...KEYS_KOMMO, ...KEYS_TINY, ...KEYS_MP, ...KEYS_INTER, ...KEYS_PAGBANK] as const;
+// Etapa 3 (Jonathan 11/06): WhatsApp do desenvolvedor — recebe o código quando
+// o envio ao cliente falha. Não é segredo, mas guardado no mesmo lugar p/ reuso.
+const KEYS_WHATSAPP = ["whatsapp_desenvolvedor"] as const;
+const ALL_KEYS = [...KEYS_WOO, ...KEYS_KOMMO, ...KEYS_TINY, ...KEYS_MP, ...KEYS_INTER, ...KEYS_PAGBANK, ...KEYS_WHATSAPP] as const;
 
 // ─── GET /api/configuracoes/integracoes ──────────────────────────────────────
 // Retorna status de configuração (não retorna valores sensíveis)
@@ -76,6 +79,9 @@ export async function GET() {
       chaves.has("pagbank_access_token") &&
       chaves.has("pagbank_webhook_secret"),
     pagbank_ambiente: chaves.has("pagbank_ambiente") ? await readSecretVal("pagbank_ambiente") : "producao",
+    // Etapa 3: o número do desenvolvedor não é sensível — retorna o valor pra
+    // preencher o campo na tela de Integrações.
+    whatsapp_desenvolvedor: chaves.has("whatsapp_desenvolvedor") ? await readSecretVal("whatsapp_desenvolvedor") : "",
   });
 }
 

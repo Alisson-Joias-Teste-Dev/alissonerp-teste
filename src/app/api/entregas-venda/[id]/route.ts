@@ -47,7 +47,7 @@ export async function GET(
   // Três queries em paralelo para montar o detalhe completo da entrega
   // REGRA DE NEGÓCIO: queries separadas permitem exibição progressiva
   // no frontend (cabeçalho primeiro, itens depois).
-  const [entrega, itens, countRow] = await Promise.all([
+  const [entrega, itens, countRow, naEntregaRow] = await Promise.all([
     // Query 1 — Cabeçalho da entrega com venda, motoboy e usuários
     // JOIN com vendas_erp para dados comerciais (número, total, situação, cliente)
     // JOIN com motoboys para nome/telefone do entregador
@@ -77,6 +77,8 @@ export async function GET(
         ev.created_at,
         ev.updated_at,
         ev.foto_entrega_path,
+        ev.is_avulso,
+        ev.descricao_avulso,
         -- Dados da venda vinculada
         ve.numero_venda,
         ve.total_venda,
@@ -145,6 +147,16 @@ export async function GET(
       FROM alissonerp.entregas_venda_itens
       WHERE entrega_id = ${entregaId}
     `,
+    // Query 4 — Saldo "Na Entrega" pendente da venda.
+    // REGRA DE NEGÓCIO (13/06): se > 0, o motoboy precisa CONFIRMAR O PAGAMENTO
+    // antes de poder confirmar a entrega (o front mostra "Confirmar Pagamento" e
+    // bloqueia "Confirmar Entrega"). Cobre o caso de pagamento na entrega.
+    sql`
+      SELECT COALESCE(SUM(valor), 0)::numeric AS total
+      FROM alissonerp.pagamentos_venda p
+      JOIN alissonerp.entregas_venda ev ON ev.venda_id = p.venda_id
+      WHERE ev.id = ${entregaId} AND p.forma = 'Na Entrega' AND p.status = 'pendente'
+    `,
   ]);
 
   if (!entrega[0]) {
@@ -168,6 +180,14 @@ export async function GET(
 
   const e = entrega[0];
 
+  // REGRA DE SEGURANÇA (Blindagem 2026-06): códigos A/B mascarados para todos
+  // exceto admin/desenvolvedor — o código chega ao cliente/motoboy só por
+  // WhatsApp. O drawer mostra a máscara; admin pode revelar (podeVerCodigos).
+  // IMPACTO SE REMOVIDO: operador vê o código e confirma entrega sem o
+  // cliente estar presente (burla o sistema de dois códigos).
+  const podeVerCodigos = ["admin", "desenvolvedor"].includes(usuario.role as string);
+  const mascarar = (c: unknown) => (c ? "••••••" : null);
+
   // Monta o objeto de resposta com conversão de NUMERIC e junção dos itens
   // REGRA DE NEGÓCIO: campos NUMERIC vêm como string do PostgreSQL;
   // converter com Number() para o frontend manipular como número nativo.
@@ -176,8 +196,8 @@ export async function GET(
     id: Number(e.id),
     venda_id: Number(e.venda_id),
     codigo_entrega: e.codigo_entrega,
-    codigo_cliente: e.codigo_cliente,
-    codigo_motoboy: e.codigo_motoboy,
+    codigo_cliente: podeVerCodigos ? e.codigo_cliente : mascarar(e.codigo_cliente),
+    codigo_motoboy: podeVerCodigos ? e.codigo_motoboy : mascarar(e.codigo_motoboy),
     tipo: e.tipo,
     forma_entrega: e.forma_entrega,
     situacao: e.situacao,
@@ -196,10 +216,14 @@ export async function GET(
     created_at: e.created_at,
     updated_at: e.updated_at,
     foto_entrega_path: e.foto_entrega_path ?? null,
+    is_avulso: Boolean(e.is_avulso),
+    descricao_avulso: e.descricao_avulso ?? null,
     // Dados da venda
     numero_venda: e.numero_venda,
     total_venda: e.total_venda ? Number(e.total_venda) : null,
     venda_situacao: e.venda_situacao,
+    // Saldo "Na Entrega" pendente: se > 0, o motoboy confirma o pagamento antes de entregar.
+    na_entrega_pendente: Number(naEntregaRow[0]?.total ?? 0),
     cliente_id: e.cliente_id ? Number(e.cliente_id) : null,
     cliente_nome: e.cliente_nome,
     cliente_celular: e.cliente_celular ?? null,

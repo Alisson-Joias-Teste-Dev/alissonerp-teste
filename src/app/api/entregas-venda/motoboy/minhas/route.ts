@@ -97,8 +97,9 @@ export async function GET(req: NextRequest) {
         ev.id, ev.venda_id, ev.codigo_entrega, ev.tipo, ev.situacao,
         ev.forma_entrega, ev.regiao, ev.frete_motoboy, ev.data_saida,
         ev.data_entrega_realizada, ev.created_at,
+        ev.is_avulso, ev.descricao_avulso,
         ve.numero_venda, ve.total_venda,
-        c.nome AS cliente_nome,
+        COALESCE(c.nome, ca.nome) AS cliente_nome,
         EXISTS (
           SELECT 1 FROM alissonerp.pagamentos_motoboy_itens pmi
           WHERE pmi.entrega_id = ev.id
@@ -106,6 +107,7 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.entregas_venda ev
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = ev.venda_id
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
+      LEFT JOIN public.contatos ca ON ca.id_contato = ev.contato_id
       WHERE ev.motoboy_id = ${motoboyUserId}::uuid
         AND ev.situacao <> 'cancelada'
         ${whereSituacao}
@@ -166,6 +168,8 @@ export async function GET(req: NextRequest) {
       numero_venda: r.numero_venda,
       total_venda: r.total_venda ? Number(r.total_venda) : null,
       cliente_nome: r.cliente_nome,
+      is_avulso: Boolean(r.is_avulso),
+      descricao_avulso: r.descricao_avulso ? String(r.descricao_avulso) : null,
       foi_pago: Boolean(r.foi_pago),
     })),
     total,

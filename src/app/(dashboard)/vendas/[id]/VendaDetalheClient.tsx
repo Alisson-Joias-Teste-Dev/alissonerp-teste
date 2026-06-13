@@ -201,6 +201,12 @@ const PAG_STATUS_COLOR: Record<string, { bg: string; text: string }> = {
   confirmado: { bg: "#D1FAE5", text: "#065F46" },
   cancelado:  { bg: "#FEE2E2", text: "#991B1B" },
   estornado:  { bg: "#F3F4F6", text: "#6B7280" },
+  // Dinheiro/Ouro recebido pelo motoboy na entrega, aguardando conferência do caixa.
+  aguard_conferencia: { bg: "#FEF3C7", text: "#92400E" },
+};
+// Rótulo amigável do status (o badge não mostra o valor cru do banco).
+const PAG_STATUS_LABEL: Record<string, string> = {
+  aguard_conferencia: "aguard. conferência",
 };
 
 const PROXIMA_SITUACAO: Record<string, { label: string; value: string; icon: typeof CheckCircle }[]> = {
@@ -525,6 +531,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
   // ── Manual MP inline (pagamento pendente na venda) ──────────────────────────
   const [mpManualPagId, setMpManualPagId] = useState<number | null>(null);
+  // Etapa 4 — qual pagamento 'Na Entrega' está abrindo o seletor de forma p/ cobrar
+  const [cobrarPagId, setCobrarPagId] = useState<number | null>(null);
   const [mpManualPagIdValue, setMpManualPagIdValue] = useState("");
   const [mpManualPagLoading, setMpManualPagLoading] = useState(false);
   const [mpManualPagMsg, setMpManualPagMsg] = useState<{ text: string; ok: boolean } | null>(null);
@@ -588,7 +596,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         }
         setGateways(lista);
       }
-    }).catch(() => {});
+      // Pitfall §3: erro de carga não pode ser silencioso
+    }).catch(() => useErrorStore.getState().push("Erro ao carregar gateways de pagamento", { level: "warning" }));
   }, []);
 
   // ── PagamentoForm payments ──────────────────────────────────────────────────
@@ -654,6 +663,32 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   }, [vendaId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Saldo de entrega por item (qtd vendida − já entregue) — para mostrar na tela
+  // quando houve entrega PARCIAL (ex.: 1 de 2 já entregue). Decisão Jonathan 12/06:
+  // o sistema precisa MOSTRAR o que já foi entregue.
+  const [saldoEntrega, setSaldoEntrega] = useState<Array<{
+    itemVendaId: number; nomeProduto: string; qtdVendida: number; qtdEntregue: number; saldoPendente: number; bloqueadoReposicao?: boolean;
+  }>>([]);
+  const [bloqueioVendaInteira, setBloqueioVendaInteira] = useState(false);
+  useEffect(() => {
+    if (!venda || !["aprovado", "enviado", "em_rota"].includes(venda.situacao)) { setSaldoEntrega([]); setBloqueioVendaInteira(false); return; }
+    let cancelado = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/entregas-venda/saldo-pendente?venda_id=${vendaId}&todos=1`);
+        if (res.ok) { const d = await res.json(); if (!cancelado) { setSaldoEntrega(d.itens ?? []); setBloqueioVendaInteira(!!d.bloqueioVendaInteira); } }
+      } catch { /* silencioso */ }
+    })();
+    return () => { cancelado = true; };
+  }, [venda, vendaId]);
+  const entregaParcialResumo = saldoEntrega.filter((i) => i.qtdEntregue > 0);
+  const faltamEntregar = saldoEntrega.reduce((s, i) => s + i.saldoPendente, 0);
+  // Mapa item_venda_id → entrega (pra mostrar "X de Y entregue" em cada item)
+  const entregaPorItem = new Map(saldoEntrega.map((i) => [i.itemVendaId, i]));
+  // Reposição por item: há item PRONTO para entregar (saldo > 0 e não bloqueado)?
+  const temItemEntregavel = saldoEntrega.some((i) => i.saldoPendente > 0 && !i.bloqueadoReposicao);
+  const itemReposicaoBloqueado = saldoEntrega.find((i) => i.saldoPendente > 0 && i.bloqueadoReposicao);
 
   // Realtime: recarrega quando desconto_aprovado_por ou situacao mudam
   useEffect(() => {
@@ -1291,7 +1326,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      setMpManualMsg({ text: `Pagamento verificado e registrado! Valor: R$ ${Number(data.valor_registrado).toFixed(2).replace(".", ",")}${data.venda_concluida ? " — venda concluída." : ""}`, ok: true });
+      // Fluxo novo 06/2026: pagamento quitado não conclui mais a venda
+      setMpManualMsg({ text: `Pagamento verificado e registrado! Valor: R$ ${Number(data.valor_registrado).toFixed(2).replace(".", ",")}${data.pagamento_quitado ? " — venda quitada." : ""}`, ok: true });
       setMpManualId("");
       await load();
     } catch (e) {
@@ -1352,7 +1388,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         });
         const d = await res.json();
         if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
-        setRecebimentoMsg({ text: `Confirmado! R$ ${Number(d.valor_registrado).toFixed(2).replace(".", ",")}${d.venda_concluida ? " — venda concluída." : ""}`, ok: true });
+        setRecebimentoMsg({ text: `Confirmado! R$ ${Number(d.valor_registrado).toFixed(2).replace(".", ",")}${d.pagamento_quitado ? " — venda quitada." : ""}`, ok: true });
         setRecebimentoPagId(null);
         setRecebimentoTipo(null);
         setRecebimentoMpId("");
@@ -1430,6 +1466,30 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     finally { setUpdating(false); }
   }
 
+  // Etapa 4 (Pagamento na Entrega): registra a forma REAL usada pelo cliente na
+  // entrega. Confirma o saldo 'Na Entrega' e baixa a conta a receber (gatilho 297),
+  // destravando a entrega ("não entrega sem pagar").
+  async function cobrarEntrega(forma: string) {
+    if (!venda) return;
+    setUpdating(true);
+    setSaveErr("");
+    try {
+      const res = await fetch(`/api/vendas/${venda.id}/cobrar-entrega`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forma }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      setCobrarPagId(null);
+      await load();
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Erro ao cobrar na entrega");
+    } finally {
+      setUpdating(false);
+    }
+  }
+
   async function confirmarPagamento(pagId: number, forma?: string) {
     if (!venda) return;
     setUpdating(true);
@@ -1439,7 +1499,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         const res = await fetch(`/api/vendas/${venda.id}/pagamentos/${pagId}/confirmar`, { method: "POST" });
         const d = await res.json();
         if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
-        if (d.venda_concluida) alert("Todos os pagamentos confirmados — venda concluída!");
+        // Fluxo novo 06/2026: pagamento quitado não conclui mais a venda —
+        // o status só muda na entrega (em_rota → entregue).
+        if (d.todos_pagos) alert("Todos os pagamentos confirmados — venda quitada!");
       } else {
         const res = await fetch(`/api/vendas/${venda.id}/pagamentos/${pagId}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -1955,6 +2017,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
 
   const situacaoStyle = SITUACAO_COLOR[venda.situacao] ?? SITUACAO_COLOR.rascunho;
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
+
+  // REGRA DE NEGÓCIO (12/06 — Jonathan): reposição bloqueia a entrega POR ITEM
+  // (ver temItemEntregavel/bloqueioVendaInteira acima, vindos do saldo-pendente):
+  // o item da reposição espera, mas os itens prontos podem ser entregues. A regra
+  // do botão "Marcar Entrega" usa essas flags.
   const podeCancelar =
     (isFullAccess && !["cancelado", "concluido", "entregue"].includes(venda.situacao)) ||
     (role === "consultora" && venda.situacao === "rascunho");
@@ -2025,6 +2092,14 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
                 style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
                 Entregue com pendência financeira
+              </span>
+            )}
+            {/* Entrega PARCIAL — mostra que parte já foi entregue (Jonathan 12/06) */}
+            {entregaParcialResumo.length > 0 && (
+              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                style={{ backgroundColor: "#DBEAFE", color: "#1E40AF" }}
+                title={entregaParcialResumo.map((i) => `${i.nomeProduto}: ${i.qtdEntregue} de ${i.qtdVendida} entregue(s)`).join("\n")}>
+                Entrega parcial — falta(m) {faltamEntregar} un.
               </span>
             )}
             {venda.tiny_pedido_id && (
@@ -2681,6 +2756,20 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                               onBlur={e => handleUpdateItem(item.id!, "quantidade", e.target.value)}
                               className="w-12 border rounded px-1 py-0.5 text-xs text-center outline-none" style={{ borderColor: C.cremeBorder }} />
                           ) : item.quantidade}
+                          {/* Quanto deste item já foi entregue (Jonathan 12/06) — na coluna
+                              Qtde porque a do nome tem truncate e escondia o badge. */}
+                          {(() => {
+                            const ent = item.id ? entregaPorItem.get(item.id) : undefined;
+                            if (!ent || ent.qtdEntregue <= 0) return null;
+                            const completo = ent.saldoPendente <= 0;
+                            return (
+                              <div className="mt-1 text-[9px] font-semibold px-1.5 py-0.5 rounded-full inline-block whitespace-nowrap"
+                                style={{ backgroundColor: completo ? "#D1FAE5" : "#DBEAFE", color: completo ? "#065F46" : "#1E40AF" }}
+                                title={`${ent.qtdEntregue} de ${ent.qtdVendida} entregue(s)`}>
+                                {completo ? "✓ entregue" : `entregue ${ent.qtdEntregue}/${ent.qtdVendida}`}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-2 py-2" style={{ color: "#9CA3AF" }}>{item.unidade ?? "un"}</td>
                         <td className="px-2 py-2 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
@@ -3100,6 +3189,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                 const sc = PAG_STATUS_COLOR[pag.status] ?? PAG_STATUS_COLOR.pendente;
                 const temLiquido = pag.valor_liquido != null && pag.valor_liquido > 0;
                 const isAReceber = pag.forma === "A Receber";
+                const isNaEntrega = pag.forma === "Na Entrega";
                 const isPix = pag.forma === "Pix";
                 const isCartao = pag.forma === "Cartão de Crédito";
                 const creditoAprovado = isAReceber && creditoFoiAprovado;
@@ -3148,7 +3238,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       <div className="flex items-center gap-2">
                         {/* Badge de status */}
                         <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                          style={{ backgroundColor: sc.bg, color: sc.text }}>{pag.status}</span>
+                          style={{ backgroundColor: sc.bg, color: sc.text }}>{PAG_STATUS_LABEL[pag.status] ?? pag.status}</span>
                         {/* Badge crédito aprovado (A Receber) */}
                         {isAReceber && creditoAprovado && pag.status === "pendente" && (
                           <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
@@ -3196,8 +3286,34 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                           )
                         )}
 
+                        {/* Na Entrega pendente → cobrar com a forma real (Etapa 4) */}
+                        {isNaEntrega && pag.status === "pendente" &&
+                          (isFullAccess || ["gerente_loja", "diretor", "consultora"].includes(role)) && (
+                          cobrarPagId === pag.id ? (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {["Dinheiro", "Pix", "Cartão de Crédito", "Cartão de Débito"].map(f => (
+                                <button key={f} onClick={() => cobrarEntrega(f)} disabled={updating}
+                                  className="text-[11px] px-2 py-1 rounded-lg font-medium disabled:opacity-50"
+                                  style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                                  {f}
+                                </button>
+                              ))}
+                              <button onClick={() => setCobrarPagId(null)} disabled={updating}
+                                className="text-[11px] px-2 py-1 rounded-lg" style={{ color: "#9CA3AF" }}>
+                                cancelar
+                              </button>
+                            </div>
+                          ) : (
+                            <button onClick={() => { setCobrarPagId(pag.id); setSaveErr(""); }} disabled={updating}
+                              className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-50"
+                              style={{ backgroundColor: "#D97706", color: "#fff" }}>
+                              Cobrar na entrega
+                            </button>
+                          )
+                        )}
+
                         {/* Outros pagamentos pendentes → confirmar manual */}
-                        {!isAReceber && pag.forma !== "Manual (MP)" && !isPix && !isCartao && pag.status === "pendente" &&
+                        {!isAReceber && !isNaEntrega && pag.forma !== "Manual (MP)" && !isPix && !isCartao && pag.status === "pendente" &&
                           (isFullAccess || ["gerente_loja", "diretor"].includes(role)) && (
                           <button onClick={() => confirmarPagamento(pag.id, pag.forma)} disabled={updating}
                             className="text-xs px-2 py-1 rounded-lg font-medium disabled:opacity-50"
@@ -3929,10 +4045,25 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                 Abre o modal de entrega parcial/total com códigos de verificação.
                 Visível apenas quando a venda já foi enviada, seguindo o fluxo:
                 rascunho → aprovado (Salvar/Marcar Enviado) → enviado (Marcar Entrega). */}
-            {["aprovado", "enviado"].includes(venda.situacao) && (
+            {["aprovado", "enviado", "em_rota"].includes(venda.situacao) && (
               <button
-                onClick={() => setShowMarcarEntrega(true)}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
+                onClick={() => {
+                  // Reposição POR ITEM: só bloqueia se NÃO há nenhum item pronto.
+                  // Tendo item entregável, abre o modal (o item da reposição é
+                  // filtrado lá e no backend).
+                  if (bloqueioVendaInteira) {
+                    setSaveErr("Venda com reposição aberta sem item identificado. Conclua ou cancele a reposição antes de entregar.");
+                    return;
+                  }
+                  if (!temItemEntregavel && itemReposicaoBloqueado) {
+                    setSaveErr("Os itens pendentes aguardam reposição. Conclua a reposição para entregá-los.");
+                    return;
+                  }
+                  setShowMarcarEntrega(true);
+                }}
+                disabled={bloqueioVendaInteira || (saldoEntrega.length > 0 && !temItemEntregavel)}
+                title={itemReposicaoBloqueado ? `O item "${itemReposicaoBloqueado.nomeProduto}" aguarda reposição — os prontos podem ser entregues` : undefined}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: C.esmeralda, color: C.creme }}
               >
                 <PackageCheck size={16} />

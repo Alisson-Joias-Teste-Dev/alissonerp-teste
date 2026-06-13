@@ -3,7 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { zodError } from "@/lib/schemas/common";
-import { estornarVenda, concluirVenda, approveVenda } from "@/lib/vendas-aprovar";
+import { estornarVenda, approveVenda } from "@/lib/vendas-aprovar";
 import { logAudit } from "@/lib/audit";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { vendaTemExcecaoEntregaAprovada, vendaTemPagamentoCompleto } from "@/lib/entrega-sem-pagamento";
@@ -14,7 +14,14 @@ const CAMPOS_RESTRITOS_RASCUNHO = new Set(["cliente_id", "vendedor_id", "data_ve
 
 // Situações que precisam de helper próprio (com transação interna) — não podem ser
 // envolvidos em sql.begin() externo porque aninhamento de transações não é suportado.
-const SITUACOES_COM_HELPER = new Set(["aprovado", "concluido"]);
+// Fluxo novo 06/2026: 'concluido' foi APOSENTADO — nenhuma venda transiciona
+// mais para ele (o fim do fluxo é 'entregue', via confirmação de entrega).
+const SITUACOES_COM_HELPER = new Set(["aprovado"]);
+
+// Status aposentados: vendas antigas podem ESTAR neles (histórico), mas nenhuma
+// solicitação pode levar uma venda PARA eles. IMPACTO SE REMOVIDO: vendas novas
+// voltariam a virar 'concluido'/'enviado' por solicitação, quebrando o fluxo novo.
+const SITUACOES_APOSENTADAS = new Set(["concluido", "enviado"]);
 
 const ROLES_FINANCEIRO = ["admin", "desenvolvedor", "diretor"];
 
@@ -235,14 +242,16 @@ export async function PATCH(
       }
     }
 
+    if (campo === "situacao" && SITUACOES_APOSENTADAS.has(String(sol.valor_solicitado))) {
+      return NextResponse.json(
+        { error: `Status '${String(sol.valor_solicitado)}' foi aposentado no fluxo novo. O fim da venda é 'entregue' (via confirmação de entrega).` },
+        { status: 409 },
+      );
+    }
+
     if (campo === "situacao" && SITUACOES_COM_HELPER.has(String(sol.valor_solicitado))) {
-      const v = String(sol.valor_solicitado);
       try {
-        if (v === "aprovado") {
-          await approveVenda(Number(sol.venda_id), user.id, { tinyBestEffort: true });
-        } else {
-          await concluirVenda(Number(sol.venda_id), user.id, { tinyBestEffort: true });
-        }
+        await approveVenda(Number(sol.venda_id), user.id, { tinyBestEffort: true });
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Falha ao aplicar situação";
         console.error(`[solicitacoes-alteracao] erro ao aplicar situacao sol=${solId}:`, e);
@@ -333,15 +342,13 @@ async function posCommitPagamento(
 ): Promise<boolean> {
   if (novoStatus === "confirmado") {
     try {
+      // Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda
+      // (status só muda na entrega). Mantém apenas o auto-aprovar de
+      // rascunho com crédito.
       const [pvenda] = await sql`
         SELECT v.situacao, v.aprovacao_credito_tipo
         FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
       `;
-      const [pendentes] = await sql`
-        SELECT COUNT(*)::int AS cnt FROM alissonerp.pagamentos_venda
-        WHERE venda_id = ${vendaId} AND status = 'pendente'
-      `;
-      const todosPagos = Number(pendentes.cnt) === 0;
 
       if (pvenda?.situacao === "rascunho" && pvenda?.aprovacao_credito_tipo) {
         const [outrosPend] = await sql`
@@ -352,14 +359,8 @@ async function posCommitPagamento(
           await approveVenda(vendaId, adminId, { tinyBestEffort: true });
         }
       }
-      if (todosPagos) {
-        const [atual] = await sql`SELECT situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
-        if (atual?.situacao === "aprovado") {
-          await concluirVenda(vendaId, adminId, { tinyBestEffort: true });
-        }
-      }
     } catch (e) {
-      console.error(`[posCommitPagamento] auto-aprovar/concluir venda=${vendaId}:`, e);
+      console.error(`[posCommitPagamento] auto-aprovar venda=${vendaId}:`, e);
       return false;
     }
   } else if (novoStatus === "estornado") {
@@ -385,8 +386,9 @@ async function aplicarCampoVendaTx(
   switch (campo) {
     case "situacao": {
       const v = String(valorJson);
-      // Somente transições simples chegam aqui (rascunho, cancelado, enviado, entregue).
-      // aprovado/concluido são roteados antes pelo helper com tx própria.
+      // Somente transições simples chegam aqui (rascunho, cancelado, entregue).
+      // 'aprovado' é roteado antes pelo helper com tx própria; 'concluido' e
+      // 'enviado' foram aposentados (bloqueados antes — fluxo novo 06/2026).
       await tx`UPDATE alissonerp.vendas_erp SET situacao = ${v}, updated_at = NOW() WHERE id = ${vendaId}`;
       return;
     }

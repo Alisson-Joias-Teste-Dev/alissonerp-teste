@@ -2,16 +2,24 @@
 // Helper compartilhado de transição de estado de vendas.
 //
 // Usado por:
-//   - PATCH /api/vendas/[id] (aprovação/conclusão manual pela vendedora)
-//   - POST /api/webhooks/mercado-pago (aprovação/conclusão automática ao
-//     confirmar pagamento MP)
+//   - PATCH /api/vendas/[id] (aprovação manual pela vendedora)
+//   - POST /api/webhooks/mercado-pago (aprovação automática ao confirmar
+//     pagamento MP)
 //
-// Três funções públicas:
+// Funções públicas:
 //   - sendToTiny(vendaId)        → envia venda pra API Tiny v3 (idempotente
 //                                   via guard tiny_pedido_id)
-//   - approveVenda(vendaId, uid) → rascunho → aprovado (dispara Tiny)
-//   - concluirVenda(vendaId, uid)→ aprovado/rascunho → concluido
-//                                   (cria ordem se vier de orçamento, marca CR)
+//   - approveVenda(vendaId, uid) → rascunho → aprovado (dispara Tiny + cria
+//                                   ordem de orçamento/serviço)
+//   - estornarVenda(...)         → reverte pagamento confirmado
+//
+// FLUXO NOVO (refatoração vendas 06/2026): o fim da venda é a ENTREGA
+// (rascunho → aprovado → em_rota → entregue), não mais a "conclusão".
+// concluirVenda() foi APOSENTADA: pagamento confirmado NÃO muda mais o
+// status da venda. Ordem + Tiny acontecem na APROVAÇÃO (approveVenda);
+// a conta a receber é criada pelo trigger ao virar 'entregue' (migration
+// 296). Se reativar conclusão por pagamento, o status 'concluido' volta a
+// nascer e quebra os relatórios do fluxo novo.
 //
 // Idempotência é obrigatória: webhook MP reentrega a mesma notificação várias
 // vezes. Se já processou, as funções retornam noop sem erro.
@@ -20,6 +28,7 @@
 import sql from "@/lib/db";
 import { verificarReposicaoAutomatica } from "@/lib/reposicao-automatica";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { orcamentoFichaToDados, nomeItemOrdem } from "@/lib/orcamento-ficha-to-dados";
 
 // ─── Tipos internos ──────────────────────────────────────────────────────────
 
@@ -341,6 +350,9 @@ export async function criarOrdemDoOrcamento(
   vendaId: number,
   userId: string
 ): Promise<{ id: number; numero_ordem: string } | null> {
+  // Ficha técnica COMPLETA (mesmos campos do antigo inline do PATCH /api/vendas/[id]):
+  // sem os campos de perfil/friso/canal/pedra a ordem nasce com ficha incompleta
+  // e a fábrica produz a peça errada (bug recorrente do QuadradoCanal).
   const [vendaOrc] = await sql`
     SELECT v.orcamento_id, v.cliente_id, v.vendedor_id, v.data_entrega,
            v.numero_venda,
@@ -350,7 +362,13 @@ export async function criarOrdemDoOrcamento(
            ft.perfil, ft.modelo, ft.aro_numeracao, ft.largura, ft.espessura,
            ft.peso_estimado, ft.densidade_ouro, ft.cor_metal,
            ft.tipo_fonte, ft.texto, ft.qtd_pedras, ft.tamanho_pedra,
-           ft.tipo_aplicacao_pedra, ft.pedras_detalhadas
+           ft.tipo_aplicacao_pedra, ft.pedras_detalhadas,
+           ft.diametro, ft.profundidade_concava, ft.dome_porcentagem,
+           ft.has_friso, ft.friso_kind, ft.friso_tipo, ft.friso_lado,
+           ft.friso_largura, ft.friso_profundidade, ft.friso_offset,
+           ft.canal_largura, ft.canal_borda_altura, ft.chanfro_tamanho,
+           ft.pedra_fileiras, ft.pedra_drill, ft.pedra_meia_lua,
+           ft.pedra_volta_completa, ft.tipo_pedra
     FROM alissonerp.vendas_erp v
     LEFT JOIN alissonerp.orcamentos o ON o.id = v.orcamento_id
     LEFT JOIN alissonerp.orcamento_fichas_tecnicas ft ON ft.id = o.ficha_tecnica_id
@@ -384,12 +402,6 @@ export async function criarOrdemDoOrcamento(
       }
     }
 
-    const perfilNomes: Record<string, string> = {
-      Anatomica: "Anatômica", Boleada: "Boleada", BoleadaDouble: "Boleada Dupla",
-      Chanfrada: "Chanfrada", Concava: "Côncava", FrisoUnico: "Friso Único",
-      FrisoLateral: "Friso Lateral", QuadradoCanal: "Quadrado Canal", Simples: "Reta",
-    };
-
     const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
     const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
     const nextNum = Math.max(Number(max_id_ali), Number(max_id_dir)) + 1;
@@ -416,8 +428,11 @@ export async function criarOrdemDoOrcamento(
     `;
     ordemCriada = { id: Number(ordem.id), numero_ordem: String(ordem.numero_ordem) };
 
+    // Item 1 + ficha técnica — montados via helper compartilhado
+    // (src/lib/orcamento-ficha-to-dados.ts), mesma fonte única de verdade do
+    // antigo inline do PATCH. Cobre TODOS os campos de perfil/friso/canal/pedra.
     const nomeItem = vendaOrc.tipo === "alianca"
-      ? `${isPar ? "Aliança 1 - " : "Aliança "}${perfilNomes[vendaOrc.perfil as string] ?? vendaOrc.modelo ?? "Personalizada"}`
+      ? nomeItemOrdem(vendaOrc as unknown as Record<string, unknown>, isPar ? "Aliança 1 - " : "Aliança ")
       : `Peça Personalizada`;
     await tx`
       INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
@@ -425,25 +440,13 @@ export async function criarOrdemDoOrcamento(
     `;
 
     const tipoItem = vendaOrc.tipo === "alianca" ? "alianca" : "peca_personalizada";
-    const dadosFicha: Record<string, unknown> = {};
-    if (vendaOrc.tipo === "alianca") {
-      if (vendaOrc.largura) dadosFicha.milimetragem = String(vendaOrc.largura);
-      if (vendaOrc.aro_numeracao) dadosFicha.numeracao = String(vendaOrc.aro_numeracao).replace("Aro ", "");
-      const pf = perfilNomes[vendaOrc.perfil as string] ?? vendaOrc.modelo ?? vendaOrc.perfil;
-      if (pf) dadosFicha.modelo = pf;
-      if (vendaOrc.tipo_fonte) dadosFicha.tipo_fonte = vendaOrc.tipo_fonte;
-      if (vendaOrc.texto) dadosFicha.texto_gravacao = vendaOrc.texto;
-      if (vendaOrc.cor_metal) dadosFicha.cor_metal = vendaOrc.cor_metal;
-      if (vendaOrc.peso_estimado) dadosFicha.peso_estimado = vendaOrc.peso_estimado;
-      if (vendaOrc.espessura) dadosFicha.espessura = vendaOrc.espessura;
-      if (vendaOrc.qtd_pedras) dadosFicha.qtd_pedras = vendaOrc.qtd_pedras;
-      if (vendaOrc.tamanho_pedra) dadosFicha.tamanho_pedra = vendaOrc.tamanho_pedra;
-      if (vendaOrc.tipo_aplicacao_pedra) dadosFicha.tipo_aplicacao_pedra = vendaOrc.tipo_aplicacao_pedra;
-    } else {
-      if (vendaOrc.peso_estimado) dadosFicha.peso_estimado = vendaOrc.peso_estimado;
-      if (vendaOrc.cor_metal) dadosFicha.cor_metal = vendaOrc.cor_metal;
-      if (vendaOrc.pedras_detalhadas) dadosFicha.pedras_detalhadas = vendaOrc.pedras_detalhadas;
-    }
+    const dadosFicha: Record<string, unknown> = vendaOrc.tipo === "alianca"
+      ? orcamentoFichaToDados(vendaOrc as unknown as Record<string, unknown>)
+      : {
+          ...(vendaOrc.peso_estimado ? { peso_estimado: vendaOrc.peso_estimado } : {}),
+          ...(vendaOrc.cor_metal ? { cor_metal: vendaOrc.cor_metal } : {}),
+          ...(vendaOrc.pedras_detalhadas ? { pedras_detalhadas: vendaOrc.pedras_detalhadas } : {}),
+        };
     await tx`
       INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
       VALUES (${ordem.id}, ${tipoItem}, ${JSON.stringify(dadosFicha)}::jsonb, ${userId}::uuid)
@@ -453,29 +456,24 @@ export async function criarOrdemDoOrcamento(
       const [ft2] = await tx`
         SELECT perfil, modelo, aro_numeracao, largura, espessura, peso_estimado,
                densidade_ouro, cor_metal, tipo_fonte, texto, qtd_pedras, tamanho_pedra,
-               tipo_aplicacao_pedra, pedras_detalhadas
+               tipo_aplicacao_pedra, pedras_detalhadas,
+               diametro, profundidade_concava, dome_porcentagem,
+               has_friso, friso_kind, friso_tipo, friso_lado,
+               friso_largura, friso_profundidade, friso_offset,
+               canal_largura, canal_borda_altura, chanfro_tamanho,
+               pedra_fileiras, pedra_drill, pedra_meia_lua,
+               pedra_volta_completa, tipo_pedra
         FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ${vendaOrc.ficha_tecnica_2_id}
       `;
       if (ft2) {
-        const nomeItem2 = `Aliança 2 - ${perfilNomes[ft2.perfil as string] ?? ft2.modelo ?? "Personalizada"}`;
+        const ft2Row = ft2 as unknown as Record<string, unknown>;
+        const nomeItem2 = nomeItemOrdem(ft2Row, "Aliança 2 - ");
         const peso2 = Number(ft2.peso_estimado ?? 0);
         await tx`
           INSERT INTO alissonerp.itens_ordem (ordem_id, nome_produto, quantidade, peso_estimado)
           VALUES (${ordem.id}, ${nomeItem2}, 1, ${peso2})
         `;
-        const dadosFicha2: Record<string, unknown> = {};
-        if (ft2.largura) dadosFicha2.milimetragem = String(ft2.largura);
-        if (ft2.aro_numeracao) dadosFicha2.numeracao = String(ft2.aro_numeracao).replace("Aro ", "");
-        const pf2 = perfilNomes[ft2.perfil as string] ?? ft2.modelo ?? ft2.perfil;
-        if (pf2) dadosFicha2.modelo = pf2;
-        if (ft2.tipo_fonte) dadosFicha2.tipo_fonte = ft2.tipo_fonte;
-        if (ft2.texto) dadosFicha2.texto_gravacao = ft2.texto;
-        if (ft2.cor_metal) dadosFicha2.cor_metal = ft2.cor_metal;
-        if (ft2.peso_estimado) dadosFicha2.peso_estimado = ft2.peso_estimado;
-        if (ft2.espessura) dadosFicha2.espessura = ft2.espessura;
-        if (ft2.qtd_pedras) dadosFicha2.qtd_pedras = ft2.qtd_pedras;
-        if (ft2.tamanho_pedra) dadosFicha2.tamanho_pedra = ft2.tamanho_pedra;
-        if (ft2.tipo_aplicacao_pedra) dadosFicha2.tipo_aplicacao_pedra = ft2.tipo_aplicacao_pedra;
+        const dadosFicha2 = orcamentoFichaToDados(ft2Row);
         await tx`
           INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
           VALUES (${ordem.id}, 'alianca', ${JSON.stringify(dadosFicha2)}::jsonb, ${userId}::uuid)
@@ -615,6 +613,25 @@ export async function approveVenda(
     return { ok: true, ja_aprovada: true };
   }
 
+  // ── Celular obrigatório para aprovar (Etapa 3 — decisão Jonathan 11/06) ───
+  // REGRA DE NEGÓCIO: a partir da aprovação entra a entrega, e o código de
+  // retirada (Código A) é enviado por WhatsApp. Sem celular do cliente o código
+  // não tem para onde ir. Por isso NÃO se aprova venda cujo cliente não tem
+  // celular cadastrado. O telefone fixo NÃO conta — WhatsApp exige celular.
+  // IMPACTO SE REMOVIDO: vendas aprovadas sem como mandar o código ao cliente.
+  const [clienteCel] = await sql`
+    SELECT c.celular
+    FROM alissonerp.vendas_erp v
+    LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
+    WHERE v.id = ${vendaId}
+  `;
+  const celular = ((clienteCel?.celular ?? "") as string).trim();
+  if (!celular) {
+    throw new Error(
+      "Cliente sem celular cadastrado. O código de entrega é enviado por WhatsApp — cadastre o celular do cliente antes de aprovar a venda.",
+    );
+  }
+
   // ── Bloquear aprovação se cartão foi liberado mas sem pagamento ainda ────
   const [cartaoBlock] = await sql`
     SELECT
@@ -633,7 +650,7 @@ export async function approveVenda(
     await sql`
       INSERT INTO alissonerp.webhook_log (webhook_nome, payload, response_status, erro)
       VALUES ('approveVenda_bloqueado', ${JSON.stringify({ vendaId, userId, motivo: "desconto_pendente" })}::text::jsonb, 409, 'desconto >${approveVendaThreshold}% sem aprovação')
-    `.catch(() => {});
+    `.catch((e) => console.error("[approveVenda] webhook_log falhou:", e));
     throw new Error(`Venda tem desconto acima de ${approveVendaThreshold}% aguardando aprovação. Solicite aprovação de desconto antes de prosseguir.`);
   }
 
@@ -750,147 +767,6 @@ export async function approveVenda(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// concluirVenda — {rascunho, aprovado} → concluido
-//
-// ORDEM CRÍTICA (local-first, commit-then-sync):
-//
-//   1. UPDATE vendas_erp.situacao = 'concluido'
-//      → trigger 113 cria contas_receber automaticamente
-//   2. fn_cr_marcar_pago_mp → marca CR como recebida
-//   3. criarOrdemDoOrcamento → cria ordem de fabricação se orçamento (best-effort)
-//   4. sendToTiny → sincroniza com Tiny ERP (best-effort)
-//
-// Filosofia: o pagamento já foi confirmado pelo banco/Mercado Pago. O
-// "fechamento" da venda no nosso sistema é inegociável — não pode ser
-// bloqueado por uma integração downstream como o Tiny. Se o Tiny estiver
-// fora (token expirado, rede, etc), a venda permanece concluída e o erro
-// é salvo em tiny_sync_erro pra ser reenviado manualmente depois.
-//
-// Esse helper NÃO chama approveVenda. Mesmo quando venda está em rascunho,
-// pula direto pra 'concluido' (o trigger 114 de blindagem só dispara
-// quando OLD.situacao IN ('confirmado','concluido'), então rascunho→concluido
-// passa limpo).
-//
-// opts.tinyBestEffort:
-//   - true (webhook MP): erro Tiny NÃO propaga. Retorna tiny_erro no result.
-//   - false/undefined (fluxo manual futuro): retorna tiny_erro mas também
-//     não propaga, porque a venda JÁ está concluída e reverter seria pior.
-//     O caller vê o tiny_erro no retorno e decide mostrar pro usuário.
-// ═══════════════════════════════════════════════════════════════════════════
-
-export async function concluirVenda(
-  vendaId: number,
-  userId: string,
-  opts: ApproveVendaOpts = {}
-): Promise<{
-  ok: true;
-  ordem_criada?: string;
-  ja_concluida?: boolean;
-  cr_quitadas?: number;
-  tiny_erro?: string;
-}> {
-  void opts; // reservado pra extensões futuras; hoje Tiny sempre é best-effort
-
-  const [venda] = await sql`
-    SELECT id, situacao, bloqueado FROM alissonerp.vendas_erp WHERE id = ${vendaId}
-  `;
-  if (!venda) throw new Error(`Venda ${vendaId} não encontrada`);
-  if (venda.bloqueado) throw new Error("Venda bloqueada");
-
-  if (venda.situacao === "concluido") {
-    return { ok: true, ja_concluida: true };
-  }
-  if (venda.situacao === "cancelado") {
-    throw new Error("Venda cancelada não pode ser concluída");
-  }
-
-  // ── 0. GUARD: verificar cobertura total de pagamentos ───────────────────
-  // Checar pendentes E se a soma dos confirmados realmente cobre o total_venda.
-  // data_confirmacao IS NOT NULL garante que só pagamentos com confirmação real
-  // (webhook, verificar-manual, confirmar endpoint) entram no cálculo —
-  // preferences fantasma (status='confirmado' sem data_confirmacao) são excluídas.
-  const [pagCheck] = await sql`
-    SELECT
-      v.total_venda::numeric AS total_venda,
-      COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'pendente'), 0)::numeric AS soma_pendentes,
-      COALESCE(SUM(p.valor) FILTER (WHERE p.status = 'confirmado' AND p.data_confirmacao IS NOT NULL), 0)::numeric AS soma_confirmados
-    FROM alissonerp.vendas_erp v
-    LEFT JOIN alissonerp.pagamentos_venda p ON p.venda_id = v.id
-    WHERE v.id = ${vendaId}
-    GROUP BY v.total_venda
-  `;
-  if (Number(pagCheck?.soma_pendentes ?? 0) > 0) {
-    throw new Error(
-      "Venda possui pagamentos pendentes. Confirme todos os pagamentos antes de concluir.",
-    );
-  }
-  const somaConfirmada = Number(pagCheck?.soma_confirmados ?? 0);
-  const totalVendaCheck = Number(pagCheck?.total_venda ?? 0);
-  if (somaConfirmada < totalVendaCheck - 0.01) {
-    throw new Error(
-      `Pagamento insuficiente: R$${somaConfirmada.toFixed(2)} confirmados de R$${totalVendaCheck.toFixed(2)} devidos. Registre o pagamento completo antes de concluir.`,
-    );
-  }
-
-  // ── 1. FECHAMENTO FINANCEIRO ─────────────────────────────────────────────
-  // Transição pra concluido. Trigger 113 (fn_venda_gerar_conta_receber)
-  // cria contas_receber automaticamente.
-  await sql`
-    UPDATE alissonerp.vendas_erp
-    SET situacao = 'concluido', updated_at = NOW()
-    WHERE id = ${vendaId} AND situacao NOT IN ('concluido', 'cancelado')
-  `;
-
-  // ── 2. MARCAR CONTAS_RECEBER COMO RECEBIDAS ──────────────────────────────
-  // M5: Se a função falhar (CR já cancelada, etc), a venda continua concluída
-  let crQuitadas: unknown = 0;
-  try {
-    const [crResult] = await sql`
-      SELECT alissonerp.fn_cr_marcar_pago_mp(${vendaId}) AS fn_cr_marcar_pago_mp
-    `;
-    crQuitadas = crResult?.fn_cr_marcar_pago_mp;
-  } catch (err) {
-    console.error(`[concluirVenda] fn_cr_marcar_pago_mp falhou p/ venda ${vendaId}:`, err);
-  }
-
-  // ── 3. CRIAR ORDEM (orçamento ou serviço) — best-effort ─────────────────
-  let ordemCriada: string | undefined;
-  try {
-    const ordem = await criarOrdemDoOrcamento(vendaId, userId);
-    if (ordem) ordemCriada = ordem.numero_ordem;
-  } catch (err) {
-    console.error(`[concluirVenda] Erro ao criar ordem (orcamento) p/ venda ${vendaId}:`, err);
-  }
-  if (!ordemCriada) {
-    try {
-      const ordemSvc = await criarOrdemDeServico(vendaId);
-      if (ordemSvc) ordemCriada = ordemSvc.numero_ordem;
-    } catch (err) {
-      console.error(`[concluirVenda] Erro ao criar ordem (servico) p/ venda ${vendaId}:`, err);
-    }
-  }
-
-  // ── 4. SINCRONIZAR COM TINY (best-effort, DEPOIS do fechamento) ──────────
-  let tinyErro: string | undefined;
-  try {
-    await sendToTiny(vendaId);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    tinyErro = msg;
-    console.error(`[concluirVenda] Tiny falhou p/ venda ${vendaId}, venda continua concluída: ${msg}`);
-    // sendToTiny já gravou tiny_sync_erro no banco antes do throw.
-    // A venda está fechada e a CR paga; o Tiny pode ser reenviado manualmente.
-  }
-
-  return {
-    ok: true,
-    ...(ordemCriada ? { ordem_criada: ordemCriada } : {}),
-    ...(tinyErro ? { tiny_erro: tinyErro } : {}),
-    cr_quitadas: Number(crQuitadas ?? 0),
-  };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // estornarVenda — reverte pagamento confirmado (refund / cancelamento / chargeback)
 //
 // Regras de negócio (definidas pelo Jonathan):
@@ -912,7 +788,11 @@ export async function concluirVenda(
 // (após confirmado) ou charged_back.
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type EstornoAcao = "cancelada" | "revertida_rascunho" | "ja_estornado";
+// "mantida_terminal": venda já estava entregue/concluido (ponto final do fluxo
+// novo 06/2026) — o estorno registra a devolução do pagamento e cancela a conta
+// a receber, mas NÃO desfaz a entrega voltando pra rascunho. Correção de venda
+// entregue é via cancelamento ou solicitação de alteração (decisão Jonathan).
+export type EstornoAcao = "cancelada" | "revertida_rascunho" | "ja_estornado" | "mantida_terminal";
 
 export interface EstornarVendaResult {
   ok: true;
@@ -928,8 +808,16 @@ export async function estornarVenda(
 ): Promise<EstornarVendaResult> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return await (sql as any).begin(async (tx: typeof sql): Promise<EstornarVendaResult> => {
-    // 1. Bloqueia pagamento + venda para evitar race entre dois estornos simultâneos
-    await tx`SELECT id FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE`;
+    // 1. Bloqueia pagamento + venda para evitar race entre dois estornos simultâneos.
+    // Captura a situacao para decidir se o estorno pode reverter o status (fluxo novo).
+    const [vendaLock] = await tx`
+      SELECT id, situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE
+    `;
+    const situacaoAtual = vendaLock?.situacao as string | undefined;
+    // Entregue/concluido = ponto final (trava de status, migration 297): o estorno
+    // NÃO volta pra rascunho nem cancela essas vendas — só devolve o pagamento e
+    // cancela a CR. Sem este guard, o UPDATE pra rascunho seria recusado pela trava.
+    const ehTerminal = situacaoAtual === "entregue" || situacaoAtual === "concluido";
     const [pag] = await tx`
       SELECT id, venda_id, status, gateway_payload
       FROM alissonerp.pagamentos_venda
@@ -970,7 +858,12 @@ export async function estornarVenda(
 
     // 4. Decide ação sobre a venda
     let acao: EstornoAcao;
-    if (nOutros > 0) {
+    if (ehTerminal) {
+      // Venda entregue/concluida = ponto final: NÃO mexe no status. O pagamento
+      // já foi marcado estornado e a CR será cancelada abaixo. A correção da
+      // venda em si (se necessária) é via cancelamento ou solicitação de alteração.
+      acao = "mantida_terminal";
+    } else if (nOutros > 0) {
       // Ainda há outros pagamentos confirmados → volta pra rascunho
       // pra vendedora recobrar o valor estornado (ou cancelar manualmente)
       await tx`

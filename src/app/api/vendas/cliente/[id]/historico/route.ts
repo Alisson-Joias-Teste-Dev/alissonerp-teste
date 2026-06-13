@@ -31,7 +31,7 @@ export async function GET(
     FROM alissonerp.vendas_erp v
     LEFT JOIN alissonerp.itens_venda_erp i ON i.venda_id = v.id
     WHERE v.cliente_id = ${clienteId}
-      AND v.situacao IN ('aprovado', 'concluido')
+      AND v.situacao IN ('aprovado', 'em_rota', 'entregue', 'concluido')
     GROUP BY v.id, v.numero_venda, v.data_venda, v.total_venda, v.situacao
     ORDER BY v.data_venda DESC
     LIMIT 20
