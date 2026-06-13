@@ -22,7 +22,7 @@ import { zodError } from "@/lib/schemas/common";
  */
 
 // ─── GET: lista os pagamentos do motoboy aguardando conferência ──────────────
-export async function GET(_req: NextRequest) {
+export async function GET() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
@@ -89,6 +89,7 @@ export async function POST(req: NextRequest) {
   const pagamentoId = parsed.data.pagamento_id;
 
   try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sql.begin: pitfall de tipo do postgres.js (ver CLAUDE.md §3)
     const resultado = await (sql as any).begin(async (tx: any) => {
       // Trava a linha e garante que ainda está aguardando conferência
       const [pag] = await tx`

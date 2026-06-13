@@ -31,6 +31,17 @@ import { zodError } from "@/lib/schemas/common";
  *
  * IMPACTO SE REMOVIDO: motoboy fica travado no Código A sem como registrar o
  *   pagamento na rua; ou o dinheiro do motoboy entra no caixa sem conferência.
+ *
+ * PENDÊNCIA CONHECIDA (decisão Jonathan 13/06 — ADIADA, não é bug):
+ *   A entrega ocorre com o pagamento ainda em 'aguard_conferencia'. O gatilho
+ *   fn_venda_gerar_conta_receber (na entrega) só conta 'confirmado' como pago,
+ *   então cria uma conta a receber pelo valor — e a conferência do caixa não baixa
+ *   essa conta. Resultado: o valor pode aparecer no caixa E em "a receber" (duplo
+ *   registro). NÃO corrigido de propósito: contas a receber não está em uso e será
+ *   revisto junto com o financeiro. Correção planejada (Opção A): incluir
+ *   'aguard_conferencia' no cálculo de "pago" do gatilho de entrega. Comissão e Caixa
+ *   NÃO são afetados — ambos contam só 'confirmado', ignorando corretamente o
+ *   'aguard_conferencia' até a conferência.
  */
 
 const Schema = z.object({
@@ -89,6 +100,7 @@ export async function POST(
       if (ehOuro && (!body.ouro_gramas || !body.ouro_valor_grama)) {
         return NextResponse.json({ error: "Informe os gramas e o valor por grama do ouro." }, { status: 400 });
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sql.begin: pitfall de tipo do postgres.js (ver CLAUDE.md §3)
       await (sql as any).begin(async (tx: any) => {
         await tx`
           UPDATE alissonerp.pagamentos_venda
@@ -174,6 +186,7 @@ export async function POST(
       }, { status: 422 });
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sql.begin: pitfall de tipo do postgres.js (ver CLAUDE.md §3)
     await (sql as any).begin(async (tx: any) => {
       await tx`
         UPDATE alissonerp.pagamentos_venda

@@ -1942,7 +1942,13 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
       await apiFetch(`/api/financeiro/caixa/motoboy`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pagamento_id: id }),
       });
-      // some da lista e recarrega a página pra refletir no caixa/cofre normal
+      // Tira da lista local na hora (feedback imediato) e recarrega a página.
+      // POR QUE reload e não router.refresh(): as listas/KPIs do caixa vêm do
+      // server component (financeiro/_data.ts) e o TabCaixa guarda esse dado em
+      // estado local (useState a partir das props). Um router.refresh() atualiza as
+      // props mas não o estado local já montado — então o pagamento confirmado não
+      // apareceria no caixa. O reload é a forma confiável de refletir o novo
+      // 'confirmado' nas listas de baixa/cofre.
       setMotoboyPend((prev) => prev.filter((p) => p.id !== id));
       setTimeout(() => window.location.reload(), 400);
     } catch (e) {
