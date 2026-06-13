@@ -1,6 +1,30 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.5 <!-- Revisado 13/06/2026 -->
+> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.6 <!-- Revisado 13/06/2026 -->
+
+## feat(entregas): motoboy confirma pagamento na entrega — Etapa 1 (v2.66.6)
+
+Jonathan (13/06): o motoboy, na rua, confirma o pagamento "Na Entrega" ANTES de
+poder confirmar a entrega. No detalhe da entrega, tendo saldo "Na Entrega" pendente,
+"Confirmar Entrega" some e aparece "Confirmar Pagamento" (4 formas).
+- **Dinheiro/Ouro:** motoboy confirma (se responsabiliza) → status `aguard_conferencia`
+  (NÃO entra no financeiro ainda — gatilho de CR e de rastreio de ouro só disparam em
+  `confirmado`; entra na Etapa 2, conferência do caixa). Status curto porque
+  `pagamentos_venda.status` é varchar(20).
+- **Mercado Pago/PagBank:** motoboy digita o ID → o sistema VERIFICA NA API (reusa
+  `fetchPayment` / `buscarPedido`-`buscarCobranca`) → aprovado → `confirmado` (entra
+  no financeiro). Sem duplicar a verificação que já existe no PDV.
+- Confirmado o pagamento, some o "Na Entrega" pendente → a trava do Código A libera.
+- Sem migration (status é texto livre; nenhum schema novo — `pagamentos_venda` já tem
+  `gateway_id`, `ouro_*`, `source`, `caixa_baixa_id`).
+- Arquivos: rota `entregas-venda/[id]/confirmar-pagamento`; `na_entrega_pendente` no GET
+  do detalhe; `EntregaDetalheDrawer` + novo `ConfirmarPagamentoMotoboyModal`.
+- Testado: back (rollback — Dinheiro→aguard_conferencia, sem CR, libera entrega) e
+  front completo (motoboy → Confirmar Pagamento Dinheiro → Confirmar Entrega → venda
+  ENTREGUE; CR = 0). MP/PagBank: lógica reusada do PDV; verificação na API real precisa
+  de um ID válido (teste do Jonathan). tsc limpo.
+- **Falta:** Etapa 2 (botão "Confirmar pagamento do motoboy" no caixa p/ dinheiro/ouro);
+  Etapa 3 (troca) — depois.
 
 ## feat(entregas): retirada com "Na Entrega" pendente exige cobrar antes (v2.66.5)
 

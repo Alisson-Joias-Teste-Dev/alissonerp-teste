@@ -46,7 +46,9 @@ import {
   Send,
   Camera,
   Phone,
+  Wallet,
 } from "lucide-react";
+import ConfirmarPagamentoMotoboyModal from "./ConfirmarPagamentoMotoboyModal";
 import { apiFetch } from "@/lib/apiFetch";
 import ConfirmarEntregaModal from "./ConfirmarEntregaModal";
 import CorreiosRastreioModal from "./CorreiosRastreioModal";
@@ -98,6 +100,7 @@ interface EntregaDetalhe {
   numero_venda: string | null;
   total_venda: number | null;
   venda_situacao: string | null;
+  na_entrega_pendente?: number;
   cliente_id: number | null;
   cliente_nome: string | null;
   cliente_celular: string | null;
@@ -235,6 +238,9 @@ export default function EntregaDetalheDrawer({
 
   const [modalCorreios, setModalCorreios] = useState(false);
 
+  // Pagamento na entrega (motoboy confirma o pagamento antes de entregar)
+  const [modalPagamento, setModalPagamento] = useState(false);
+
   // Cancelamento
   const [cancelando, setCancelando] = useState(false);
   const [mostrarCancelarConfirm, setMostrarCancelarConfirm] = useState(false);
@@ -342,16 +348,27 @@ export default function EntregaDetalheDrawer({
   const isRetirada = detalhe?.forma_entrega === "retirada";
   const isMotoboy = detalhe?.forma_entrega === "motoboy";
 
+  // REGRA DE NEGÓCIO (13/06 — Jonathan): pagamento na entrega. Se a venda tem saldo
+  // "Na Entrega" pendente, o motoboy precisa CONFIRMAR O PAGAMENTO antes de poder
+  // confirmar a entrega. Enquanto pendente, "Confirmar Entrega" some e aparece
+  // "Confirmar Pagamento". (A trava de banco no Código A continua existindo.)
+  const naEntregaPendente = Number(detalhe?.na_entrega_pendente ?? 0);
+  const temNaEntregaPendente = naEntregaPendente > 0.009;
+
   // Ações disponíveis
   const podeConfirmarRetirada =
-    isPendente && isRetirada && !detalhe?.is_avulso;
+    isPendente && isRetirada && !detalhe?.is_avulso && !temNaEntregaPendente;
   const podeRegistrarSaida =
     isPendente && isMotoboy && !detalhe?.data_saida && !detalhe?.is_avulso;
   const podeCancelar = isPendente;
   const podeInformarCorreios =
     !isCancelada && !detalhe?.is_avulso;
   const podeConfirmarEntregaCliente =
-    isPendente && isMotoboy && !!detalhe?.data_saida && !detalhe?.is_avulso;
+    isPendente && isMotoboy && !!detalhe?.data_saida && !detalhe?.is_avulso && !temNaEntregaPendente;
+  // Pagamento na entrega: confirmar o pagamento antes da entrega (retirada OU motoboy já saído)
+  const podeConfirmarPagamento =
+    isPendente && temNaEntregaPendente && !detalhe?.is_avulso &&
+    (isRetirada || (isMotoboy && !!detalhe?.data_saida));
   // Avulso confirma com botão simples, sem código nem registro de saída
   const podeConfirmarAvulso = isPendente && !!detalhe?.is_avulso;
 
@@ -1380,6 +1397,30 @@ export default function EntregaDetalheDrawer({
                 </button>
               )}
 
+              {/* Confirmar Pagamento na entrega (antes de liberar a entrega) */}
+              {podeConfirmarPagamento && (
+                <button
+                  onClick={() => setModalPagamento(true)}
+                  style={{
+                    padding: "10px 12px",
+                    background: "#D97706",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                  }}
+                >
+                  <Wallet size={14} />
+                  Confirmar Pagamento — R$ {naEntregaPendente.toFixed(2)}
+                </button>
+              )}
+
               {/* Confirmar Entrega ao Cliente (via motoboy, após saída) */}
               {podeConfirmarEntregaCliente && (
                 <button
@@ -1484,6 +1525,16 @@ export default function EntregaDetalheDrawer({
       </div>
 
       {/* ── Sub-modais ────────────────────────────────────────────────────── */}
+      {modalPagamento && entregaId && (
+        <ConfirmarPagamentoMotoboyModal
+          entregaId={entregaId}
+          valor={naEntregaPendente}
+          isOpen={modalPagamento}
+          onClose={() => setModalPagamento(false)}
+          onSuccess={handleRefresh}
+        />
+      )}
+
       {modalConfirmar.aberto && (
         <ConfirmarEntregaModal
           entregaId={modalConfirmar.entregaId}

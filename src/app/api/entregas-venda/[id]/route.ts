@@ -47,7 +47,7 @@ export async function GET(
   // Três queries em paralelo para montar o detalhe completo da entrega
   // REGRA DE NEGÓCIO: queries separadas permitem exibição progressiva
   // no frontend (cabeçalho primeiro, itens depois).
-  const [entrega, itens, countRow] = await Promise.all([
+  const [entrega, itens, countRow, naEntregaRow] = await Promise.all([
     // Query 1 — Cabeçalho da entrega com venda, motoboy e usuários
     // JOIN com vendas_erp para dados comerciais (número, total, situação, cliente)
     // JOIN com motoboys para nome/telefone do entregador
@@ -147,6 +147,16 @@ export async function GET(
       FROM alissonerp.entregas_venda_itens
       WHERE entrega_id = ${entregaId}
     `,
+    // Query 4 — Saldo "Na Entrega" pendente da venda.
+    // REGRA DE NEGÓCIO (13/06): se > 0, o motoboy precisa CONFIRMAR O PAGAMENTO
+    // antes de poder confirmar a entrega (o front mostra "Confirmar Pagamento" e
+    // bloqueia "Confirmar Entrega"). Cobre o caso de pagamento na entrega.
+    sql`
+      SELECT COALESCE(SUM(valor), 0)::numeric AS total
+      FROM alissonerp.pagamentos_venda p
+      JOIN alissonerp.entregas_venda ev ON ev.venda_id = p.venda_id
+      WHERE ev.id = ${entregaId} AND p.forma = 'Na Entrega' AND p.status = 'pendente'
+    `,
   ]);
 
   if (!entrega[0]) {
@@ -212,6 +222,8 @@ export async function GET(
     numero_venda: e.numero_venda,
     total_venda: e.total_venda ? Number(e.total_venda) : null,
     venda_situacao: e.venda_situacao,
+    // Saldo "Na Entrega" pendente: se > 0, o motoboy confirma o pagamento antes de entregar.
+    na_entrega_pendente: Number(naEntregaRow[0]?.total ?? 0),
     cliente_id: e.cliente_id ? Number(e.cliente_id) : null,
     cliente_nome: e.cliente_nome,
     cliente_celular: e.cliente_celular ?? null,
