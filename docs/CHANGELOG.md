@@ -1,6 +1,25 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 12/06/2026 — Versão: v2.66.1 <!-- Revisado 12/06/2026 -->
+> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.2 <!-- Revisado 13/06/2026 -->
+
+## feat(estoque): reposição concluída dá ENTRADA no estoque (v2.66.2, mig 302)
+
+Jonathan (13/06): reposição concluída não dava entrada da peça no estoque comercial →
+a entrega da venda quebrava com `STOCK_NEGATIVE` (caso C-2372 / item 90000764). Agora a
+peça entra no estoque quando o **protocolo de VOLTA** é concluído (fluxo normal) — e o
+**botão "Concluir pelo sistema"** (master) também dá a entrada, pois pula o protocolo de
+volta. Os dois usam a mesma função idempotente (não dobra).
+- `fn_reposicao_entrada_estoque(ordem, user)` — idempotente (1 entrada por ordem+produto);
+  só age em reposição; cria `movimentacoes_estoque_comercial` 'entrada' (almox. 2,
+  motivo `reposicao_entrada`, ref. ordens) → espelha no físico via `trg_mirror_movimento_to_sle`.
+- Gatilho `trg_reposicao_entrada_volta` (AFTER UPDATE em `protocolos`, volta→concluido).
+  NÃO toca `fn_concluir_protocolo` (no-touch) — segue o padrão dos `trg_concluir_conversao`.
+- `fn_mirror`: 1 branch aditivo — no físico a entrada de reposição rotula como
+  `producao_auto` (voucher_type válido por `chk_voucher_type_valid`; bug pego no teste).
+- Rota `concluir-sistema`: chama a função após concluir, na mesma transação.
+- Testado no banco (rollback): volta dá entrada; botão dá entrada; idempotência (2x→1);
+  entrega destrava; controle sem-entrada ainda dá STOCK_NEGATIVE. tsc limpo.
+- "Pra trás": Jonathan resolve clicando o botão nas ordens travadas (sem acerto manual no banco).
 
 ## fix(entregas): entrega "total" não exige o item da reposição (v2.66.1)
 

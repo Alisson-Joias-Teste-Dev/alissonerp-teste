@@ -1,12 +1,24 @@
 # Refatoração Vendas/Entregas — Ponto de Retomada
 
-> Atualizado: 12/06/2026 (Fortaleza) · Branch: **homolog** · Último commit: **ba2ef276**
-> Versões desta leva: **v2.62.0 → v2.66.1** · Tudo no homolog, **NADA em produção** ainda.
+> Atualizado: 13/06/2026 (Fortaleza) · Branch: **homolog**
+> Versões desta leva: **v2.62.0 → v2.66.2** · Tudo no homolog, **NADA em produção** ainda.
 > Plano original aprovado: conversa de 11/06 + `docs/analise-vendas-entregas-2026-06.md`
 
 ---
 
-## 🔴 TAREFA ATIVA (onde paramos) — Reposição não dá entrada no estoque
+## ✅ RESOLVIDO (13/06) — Reposição agora dá entrada no estoque (v2.66.2, mig 302)
+
+A peça entra no estoque quando o **protocolo de VOLTA** conclui (gatilho
+`trg_reposicao_entrada_volta`) e também pelo **botão "Concluir pelo sistema"** do master
+(rota `concluir-sistema`), ambos via `fn_reposicao_entrada_estoque` (idempotente). No
+físico rotula como `producao_auto`. **"Pra trás"**: Jonathan destrava as ordens travadas
+clicando o botão (sem acerto de banco). Testado (rollback): volta/botão dão entrada,
+idempotência (2x→1), entrega destrava, controle sem-entrada ainda dá STOCK_NEGATIVE;
+tsc limpo. **Pendente:** rebuild no painel + teste manual → depois produção (migs 295-302).
+
+<details><summary>histórico do problema (resolvido) — clique para abrir</summary>
+
+## 🔴 (resolvido) Reposição não dá entrada no estoque
 
 **Problema (confirmado no banco):** quando uma ordem de **reposição** é concluída, ela
 **não dá ENTRADA da peça no estoque comercial** → o físico fica zerado → na hora de
@@ -40,9 +52,11 @@ Ordem de reposição **C-2372** (id 2375) está `status='concluido'`, itens_orde
 4. **Risco de entrada dobrada:** confirmar que a conclusão do PCP **não** põe a peça em
    outro lugar (senão dá entrada 2x). Jonathan pediu pra eu **checar** — FALTA fazer.
 
-**Próximo passo imediato:** investigar #3 e #4 (read-only), trazer os números, fechar o
-plano técnico, pegar o "ok" do Jonathan, e SÓ ENTÃO codar (migration nova + teste no
-banco de teste). NÃO codar antes do ok.
+**Investigação fechada (13/06):** 36 ordens travavam entrega; só 4 tinham volta concluída
+(C-1659, C-2272, C-2297, C-2305); as outras 32 (incl. C-2372) não voltaram. Risco de
+dobra: zero (nada criava entrada de reposição hoje). Resolvido pela v2.66.2 acima.
+
+</details>
 
 ---
 
@@ -70,8 +84,8 @@ Todas as migrations abaixo foram aplicadas **só no banco de TESTE/homolog**
 **Migrations 298:** fix da trava de códigos que barrava retirada na loja.
 
 **Migrations para PRODUÇÃO (quando o Jonathan aprovar tudo):** **295, 296, 297, 298,
-299, 300, 301** (+ a nova da reposição, quando feita). Só aplicar em produção após o
-teste manual + aval explícito do Jonathan.
+299, 300, 301, 302**. Só aplicar em produção após o teste manual + aval explícito do
+Jonathan.
 
 ---
 

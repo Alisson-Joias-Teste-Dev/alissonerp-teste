@@ -159,6 +159,23 @@ export async function PATCH(
       RETURNING id
     `;
 
+    /**
+     * REGRA DE NEGÓCIO: conclusão forçada de REPOSIÇÃO dá ENTRADA no estoque.
+     *
+     * O QUE: ao concluir a ordem pelo sistema, se ela for de reposição
+     * (reposicao_venda/reposicao_loja), dá entrada da peça no estoque comercial
+     * (almox. 2) — o mesmo que o protocolo de volta faria no fluxo normal.
+     * POR QUE: este botão PULA o protocolo de volta. Sem a entrada, a peça da
+     * reposição nunca aparece no estoque e a entrega da venda quebra com
+     * STOCK_NEGATIVE (caso C-2372). A função fn_reposicao_entrada_estoque é
+     * idempotente (não dobra se a volta também concluir).
+     * IMPACTO SE REMOVIDO: reposição forçada conclui sem peça no estoque →
+     * entrega da venda travada.
+     */
+    const [entradaRepos] = await tx`
+      SELECT alissonerp.fn_reposicao_entrada_estoque(${ordemId}, ${user.id}::uuid) AS criadas
+    `;
+
     return {
       notFound: false,
       ordem_id: ordemId,
@@ -168,6 +185,7 @@ export async function PATCH(
       auditorias_concluidas: auditoriaRows.length,
       aprovacoes_concluidas: aprovacaoRows.length,
       entregas_concluidas: entregaRows.length,
+      entradas_estoque_reposicao: entradaRepos?.criadas ?? 0,
     };
   });
 
