@@ -201,6 +201,12 @@ const PAG_STATUS_COLOR: Record<string, { bg: string; text: string }> = {
   confirmado: { bg: "#D1FAE5", text: "#065F46" },
   cancelado:  { bg: "#FEE2E2", text: "#991B1B" },
   estornado:  { bg: "#F3F4F6", text: "#6B7280" },
+  // Dinheiro/Ouro recebido pelo motoboy na entrega, aguardando conferência do caixa.
+  aguard_conferencia: { bg: "#FEF3C7", text: "#92400E" },
+};
+// Rótulo amigável do status (o badge não mostra o valor cru do banco).
+const PAG_STATUS_LABEL: Record<string, string> = {
+  aguard_conferencia: "aguard. conferência",
 };
 
 const PROXIMA_SITUACAO: Record<string, { label: string; value: string; icon: typeof CheckCircle }[]> = {
@@ -3232,7 +3238,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       <div className="flex items-center gap-2">
                         {/* Badge de status */}
                         <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                          style={{ backgroundColor: sc.bg, color: sc.text }}>{pag.status}</span>
+                          style={{ backgroundColor: sc.bg, color: sc.text }}>{PAG_STATUS_LABEL[pag.status] ?? pag.status}</span>
                         {/* Badge crédito aprovado (A Receber) */}
                         {isAReceber && creditoAprovado && pag.status === "pendente" && (
                           <span className="text-xs font-semibold px-2 py-0.5 rounded-full"

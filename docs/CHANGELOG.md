@@ -1,6 +1,21 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.7 <!-- Revisado 13/06/2026 -->
+> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.8 <!-- Revisado 13/06/2026 -->
+
+## chore(pente-fino): pagamento na entrega validado p/ produção + badge (v2.66.8)
+
+Pente fino do módulo de pagamento na entrega (Jonathan 13/06, pré-produção).
+Rastreado o status novo `aguard_conferencia` por todo o sistema:
+- **Comissão:** só conta `confirmado` → venda com pagamento do motoboy não gera
+  comissão até o caixa conferir. ✅ correto.
+- **Financeiro/caixa (KPIs, lista de baixa):** só conta `confirmado` → o
+  `aguard_conferencia` fica invisível até a conferência. ✅ correto, sem inflar.
+- **Tela da venda:** o badge mostrava o status cru. Corrigido: cor + rótulo
+  "aguard. conferência" (`PAG_STATUS_COLOR`/`PAG_STATUS_LABEL`).
+- **MP/PagBank:** lógica reusa o `verificar-manual` (provado); só falta o teste
+  com ID real na API (homolog não tem) — gap conhecido.
+- **Contas a receber:** duplo registro ADIADO por decisão do Jonathan (módulo não
+  está em uso; será resolvido junto com o financeiro depois).
 
 ## feat(caixa): conferência do pagamento do motoboy — Etapa 2 (v2.66.7)
 
