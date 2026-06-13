@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { logAudit } from "@/lib/audit";
+import { traduzErroOperacional } from "@/lib/erros-operacionais";
 
 /**
  * POST /api/vendas/[id]/cobrar-entrega
@@ -99,7 +100,7 @@ export async function POST(
     if (msg === "SEM_NA_ENTREGA") {
       return NextResponse.json({ error: "Esta venda não tem saldo 'Na Entrega' pendente." }, { status: 409 });
     }
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: traduzErroOperacional(msg) }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true, valor_cobrado: valorCobrado, forma });

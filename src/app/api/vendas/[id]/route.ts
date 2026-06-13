@@ -8,6 +8,7 @@ import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 import { zodError, IdSchema } from "@/lib/schemas/common";
 import { internalError } from "@/lib/api-error";
+import { traduzErroOperacional } from "@/lib/erros-operacionais";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { approveVenda } from "@/lib/vendas-aprovar";
 import { isMasterAdmin } from "@/lib/master-admin";
@@ -652,7 +653,7 @@ export async function PATCH(
       ordemCriadaAprovacao = aprovResult.ordem_criada ?? null;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Falha ao aprovar venda";
-      return NextResponse.json({ error: msg }, { status: 409 });
+      return NextResponse.json({ error: traduzErroOperacional(msg) }, { status: 409 });
     }
   }
 
@@ -846,7 +847,9 @@ export async function PATCH(
     const msg = e instanceof Error ? e.message : "";
     const ERROS_DE_REGRA = ["STOCK_NEGATIVE", "ENTREGA_BLOCKED", "TRANSICAO", "reposição", "reposicao"];
     if (ERROS_DE_REGRA.some((m) => msg.includes(m))) {
-      return NextResponse.json({ error: msg }, { status: 409 });
+      // Traduz o prefixo técnico p/ texto claro (a tela de detalhe usa fetch cru,
+      // então a tradução precisa sair daqui, do servidor).
+      return NextResponse.json({ error: traduzErroOperacional(msg) }, { status: 409 });
     }
     return internalError(`[PATCH /api/vendas/${vendaId}]`, e, "Erro interno ao salvar venda. Tente novamente.");
   }

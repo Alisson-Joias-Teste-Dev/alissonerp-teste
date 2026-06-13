@@ -1,6 +1,20 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.3 <!-- Revisado 13/06/2026 -->
+> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.4 <!-- Revisado 13/06/2026 -->
+
+## fix(ux): tradutor de erro também no servidor (pente fino) (v2.66.4)
+
+Pente fino do módulo vendas/entregas (Jonathan 13/06). Achado: o tradutor da v2.66.3
+estava só no `apiFetch`, mas a tela de detalhe da venda (`VendaDetalheClient`) usa
+`fetch` cru — então `TRANSICAO_INVALIDA`/`STOCK_NEGATIVE`/`ENTREGA_BLOCKED` ainda
+apareciam crus ali. Correção: aplicar `traduzErroOperacional` **no servidor**, nos
+catches que emitem esses erros — `vendas/[id]/route.ts` (regra de negócio + aprovação)
+e `vendas/[id]/cobrar-entrega/route.ts`. Agora todo cliente (apiFetch ou fetch cru)
+recebe o texto claro. Idempotente. tsc limpo.
+Verificado também (sem mexer): entrada de reposição é idempotente pelos 2 caminhos
+(volta + botão); volta-concluída e ordem-concluída andam juntas (40/40, sem gap);
+baixa na entrega é idempotente e divide reserva; nenhuma ordem de reposição mista
+(produto+sem produto) existe. Sem outras pontas soltas.
 
 ## feat(ux): mensagens de erro operacional claras na entrega/venda (v2.66.3)
 
