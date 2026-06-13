@@ -1,6 +1,19 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.4 <!-- Revisado 13/06/2026 -->
+> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.5 <!-- Revisado 13/06/2026 -->
+
+## feat(entregas): retirada com "Na Entrega" pendente exige cobrar antes (v2.66.5)
+
+Jonathan (13/06, pós-teste no front): na RETIRADA na loja, se há saldo "Na Entrega"
+pendente, o operador criava a entrega, batia na trava ao confirmar o Código A, fechava
+o diálogo pra ir cobrar — e a entrega era **cancelada** (regra: entrega sem código
+confirmado é cancelada ao fechar), obrigando a recriar. Agora `criarEntrega` barra
+ANTES de gerar o código quando forma='retirada' e há 'Na Entrega' pendente:
+"Cobre o pagamento na entrega (R$X) antes de marcar a retirada — use o botão 'Cobrar
+na entrega'." Não cria entrega que cancela sozinha. **Motoboy não muda** (cliente paga
+no endereço; trava continua no Código A). Testado no back (rollback: retirada barrada
+sem criar entrega, motoboy não barrado, cobra→passa) e no front (mensagem no modal,
+0 entregas criadas). tsc limpo.
 
 ## fix(ux): tradutor de erro também no servidor (pente fino) (v2.66.4)
 

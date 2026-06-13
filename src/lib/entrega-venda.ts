@@ -614,6 +614,33 @@ export async function criarEntrega(
     );
   }
 
+  // RETIRADA + "Na Entrega" pendente: cobrar ANTES de montar a entrega.
+  //
+  // REGRA DE NEGÓCIO (13/06 — Jonathan): na retirada na loja o cliente está
+  // presente e o código do cliente é confirmado na hora; se há saldo "Na Entrega"
+  // pendente, esse código seria barrado e a entrega recém-criada acabaria
+  // CANCELADA ao fechar (a entrega só sobrevive com código confirmado). Para não
+  // criar-e-cancelar à toa, barramos AQUI, antes de gerar o código: o atendente
+  // cobra primeiro (botão "Cobrar na entrega") e depois marca a retirada.
+  // Motoboy NÃO entra nessa regra: lá o cliente paga no endereço e a cobrança/
+  // Código A acontecem na entrega (a trava de "não entrega sem pagar" continua no
+  // Código A, em marcarVendaEntregueSeCompleta).
+  // IMPACTO SE REMOVIDO: volta a gerar entrega de retirada que cancela sozinha
+  // quando o operador vai cobrar o pagamento na entrega.
+  if (params.formaEntrega === "retirada") {
+    const [naEntrega] = await sql`
+      SELECT COALESCE(SUM(valor), 0)::numeric AS total
+      FROM alissonerp.pagamentos_venda
+      WHERE venda_id = ${params.vendaId} AND forma = 'Na Entrega' AND status = 'pendente'
+    `;
+    if (Number(naEntrega.total) > 0) {
+      throw new Error(
+        `Cobre o pagamento na entrega (R$${Number(naEntrega.total).toFixed(2)}) antes de marcar a retirada — ` +
+          `use o botão "Cobrar na entrega".`,
+      );
+    }
+  }
+
   // 2. Validar que há itens para entregar
   if (!params.itens || params.itens.length === 0) {
     throw new Error(
