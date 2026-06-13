@@ -1,6 +1,36 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.8 <!-- Revisado 13/06/2026 -->
+> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.9 <!-- Revisado 13/06/2026 -->
+
+## fix(code-review): correções do pente fino antes de produção (v2.66.9)
+
+Code-review do módulo (Jonathan 13/06). O achado mais grave — "dobra de estoque"
+de um gatilho da migration 141 — foi **FALSO ALARME** (verificado no banco: o
+gatilho não existe; o teste empírico já dava +1, não +2). Os 6 bugs reais
+encontrados, todos corrigidos:
+
+1. **Caixa × venda cancelada (financeiro):** GET/POST de `caixa/motoboy` não
+   filtravam `v.situacao` → pagamento órfão de venda cancelada aparecia e podia
+   ser confirmado (entrava dinheiro de venda inexistente). Add `v.situacao <>
+   'cancelado'` nos dois.
+2. **Modal fechava no meio do envio:** `confirmar-pagamento` modal permitia
+   fechar (overlay/X) durante o POST → drawer não atualizava → re-clique → POST
+   duplicado. Trava o fechar enquanto `submetendo`.
+3. **Parse de moeda BR do Ouro:** `replace(",",".")` só trocava a 1ª vírgula e
+   não tirava o ponto de milhar → "2.500,00" virava NaN e o botão travava sem
+   explicação. Novo `parseBRL` (tira milhar, troca todas as vírgulas).
+4. **Concorrência (TOCTOU):** a leitura `FOR UPDATE` dos pendentes e a checagem de
+   duplicidade do `gateway_id` estavam FORA da transação (auto-commit) → trava
+   inútil. Movidas pra dentro do `begin`.
+5. **MP/PagBank com 2+ saldos "Na Entrega":** o `gateway_id` (índice UNIQUE
+   global) era gravado em todas as linhas → violava o índice → 500. Agora o ID
+   fica só na 1ª linha; as demais entram `confirmado` sem `gateway_id`.
+6. **Reposição: re-entrada após estorno (mig 302):** a idempotência checava
+   `status <> 'cancelado'` (status inexistente) → após estornar uma entrada não
+   deixava dar entrada de novo. Trocado por `status = 'efetivado'` (só entrada
+   ATIVA bloqueia). Testado em rollback: cria→idempotente→estorna→recria. ✅
+
+tsc limpo; migration 302 reaplicada no homolog.
 
 ## chore(pente-fino): pagamento na entrega validado p/ produção + badge (v2.66.8)
 

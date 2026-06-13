@@ -49,7 +49,10 @@ export async function GET() {
       ORDER BY ev.id DESC LIMIT 1
     ) e ON true
     LEFT JOIN alissonerp.motoboys mb ON mb.user_id = e.motoboy_id
+    -- Não listar pagamento de venda CANCELADA (senão o caixa confirmaria dinheiro
+    -- de uma venda que não existe mais). Bug pego no code-review 13/06.
     WHERE p.status = 'aguard_conferencia' AND p.forma IN ('Dinheiro', 'Ouro')
+      AND v.situacao <> 'cancelado'
     ORDER BY p.data_confirmacao ASC NULLS LAST, p.id ASC
   `;
 
@@ -93,11 +96,15 @@ export async function POST(req: NextRequest) {
     const resultado = await (sql as any).begin(async (tx: any) => {
       // Trava a linha e garante que ainda está aguardando conferência
       const [pag] = await tx`
-        SELECT id, venda_id, forma, valor, ouro_gramas FROM alissonerp.pagamentos_venda
-        WHERE id = ${pagamentoId} AND status = 'aguard_conferencia' AND forma IN ('Dinheiro', 'Ouro')
-        FOR UPDATE
+        SELECT p.id, p.venda_id, p.forma, p.valor, p.ouro_gramas
+        FROM alissonerp.pagamentos_venda p
+        JOIN alissonerp.vendas_erp v ON v.id = p.venda_id
+        WHERE p.id = ${pagamentoId} AND p.status = 'aguard_conferencia'
+          AND p.forma IN ('Dinheiro', 'Ouro')
+          AND v.situacao <> 'cancelado'
+        FOR UPDATE OF p
       `;
-      if (!pag) return { erro: "Pagamento não está aguardando conferência (já confirmado?)", status: 409 };
+      if (!pag) return { erro: "Pagamento não está aguardando conferência (venda cancelada ou já confirmado?)", status: 409 };
 
       // Confirmar → para DINHEIRO o gatilho fn_venda_baixar_recebimento_pago
       // (AFTER UPDATE OF status) cria a conta a receber paga, e o dinheiro entra

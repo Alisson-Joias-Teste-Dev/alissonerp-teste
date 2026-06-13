@@ -60,7 +60,10 @@ BEGIN
   END IF;
 
   -- Uma entrada por produto da ordem (itens_ordem). Idempotente: pula o produto
-  -- que JÁ tem entrada 'reposicao_entrada' efetivada/pendente para esta ordem.
+  -- que JÁ tem entrada 'reposicao_entrada' ATIVA ('efetivado') para esta ordem.
+  -- Checa status='efetivado' (não '<> cancelado'): se a entrada foi ESTORNADA
+  -- (status='estornado'), precisa poder dar entrada de novo. Bug pego no
+  -- code-review 13/06 (a checagem antiga travava a re-entrada após estorno).
   FOR v_item IN
     SELECT io.produto_id, SUM(io.quantidade) AS quantidade
     FROM alissonerp.itens_ordem io
@@ -76,7 +79,7 @@ BEGIN
         AND m.produto_id = v_item.produto_id
         AND m.motivo = 'reposicao_entrada'
         AND m.estorno_de_id IS NULL          -- ignora linhas que já são estorno
-        AND m.status <> 'cancelado'
+        AND m.status = 'efetivado'           -- só uma entrada ATIVA bloqueia
     ) THEN
       CONTINUE;  -- já entrou: não dobra
     END IF;

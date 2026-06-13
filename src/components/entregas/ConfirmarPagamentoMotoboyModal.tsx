@@ -33,6 +33,17 @@ const C = {
 
 type Forma = "Dinheiro" | "Ouro" | "Mercado Pago" | "PagBank";
 
+/**
+ * Converte texto em moeda BR ("2.500,00") para número (2500). Tira os pontos de
+ * milhar e troca TODAS as vírgulas por ponto. O `.replace(",", ".")` simples só
+ * trocava a 1ª vírgula e não tirava o ponto de milhar → "2.500,00" virava NaN e
+ * o botão ficava travado sem explicação. Bug pego no code-review 13/06.
+ */
+function parseBRL(s: string): number {
+  const n = Number(s.replace(/\./g, "").replace(/,/g, "."));
+  return Number.isFinite(n) ? n : NaN;
+}
+
 interface Props {
   entregaId: number;
   valor: number;
@@ -70,8 +81,8 @@ export default function ConfirmarPagamentoMotoboyModal({ entregaId, valor, isOpe
       const payload: Record<string, unknown> = { forma };
       if (ehGateway) payload.payment_id = paymentId.trim();
       if (ehOuro) {
-        payload.ouro_gramas = Number(ouroGramas.replace(",", "."));
-        payload.ouro_valor_grama = Number(ouroValorGrama.replace(",", "."));
+        payload.ouro_gramas = parseBRL(ouroGramas);
+        payload.ouro_valor_grama = parseBRL(ouroValorGrama);
       }
       await apiFetch(`/api/entregas-venda/${entregaId}/confirmar-pagamento`, {
         method: "POST",
@@ -89,10 +100,14 @@ export default function ConfirmarPagamentoMotoboyModal({ entregaId, valor, isOpe
 
   const podeConfirmar = forma != null && !submetendo &&
     (!ehGateway || paymentId.trim().length > 0) &&
-    (!ehOuro || (Number(ouroGramas.replace(",", ".")) > 0 && Number(ouroValorGrama.replace(",", ".")) > 0));
+    (!ehOuro || (parseBRL(ouroGramas) > 0 && parseBRL(ouroValorGrama) > 0));
+
+  // Não deixar fechar enquanto envia (senão o drawer não atualiza e o motoboy
+  // re-clica → POST duplicado). Bug pego no code-review 13/06.
+  const fechar = () => { if (!submetendo) onClose(); };
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+    <div onClick={fechar} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 420, overflow: "hidden", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", borderBottom: `1px solid ${C.cremeBorder}` }}>
@@ -103,7 +118,7 @@ export default function ConfirmarPagamentoMotoboyModal({ entregaId, valor, isOpe
               <div style={{ fontSize: 12, color: C.cinza }}>Na entrega — R$ {valor.toFixed(2)}</div>
             </div>
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer" }}><X size={18} color={C.cinza} /></button>
+          <button onClick={fechar} disabled={submetendo} style={{ background: "none", border: "none", cursor: submetendo ? "not-allowed" : "pointer", opacity: submetendo ? 0.4 : 1 }}><X size={18} color={C.cinza} /></button>
         </div>
 
         {sucesso ? (

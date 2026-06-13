@@ -81,17 +81,16 @@ export async function POST(
   if (!entrega) return NextResponse.json({ error: "Entrega não encontrada" }, { status: 404 });
   const vendaId = Number(entrega.venda_id);
 
-  // Pagamentos "Na Entrega" pendentes da venda (o que precisa ser cobrado)
-  const pendentes = await sql`
-    SELECT id, valor FROM alissonerp.pagamentos_venda
-    WHERE venda_id = ${vendaId} AND forma = 'Na Entrega' AND status = 'pendente'
-    FOR UPDATE
+  // Pré-checagem (UX rápida): a venda tem "Na Entrega" pendente?
+  // A leitura AUTORITATIVA é refeita DENTRO da transação com FOR UPDATE (abaixo),
+  // pra não haver janela entre ler e gravar (TOCTOU). Bug pego no code-review 13/06.
+  const preCheck = await sql`
+    SELECT 1 FROM alissonerp.pagamentos_venda
+    WHERE venda_id = ${vendaId} AND forma = 'Na Entrega' AND status = 'pendente' LIMIT 1
   `;
-  if (pendentes.length === 0) {
+  if (preCheck.length === 0) {
     return NextResponse.json({ error: "Esta venda não tem pagamento na entrega pendente." }, { status: 409 });
   }
-  const totalPendente = pendentes.reduce((s: number, p: Record<string, unknown>) => s + Number(p.valor ?? 0), 0);
-  const ids = pendentes.map((p: Record<string, unknown>) => Number(p.id));
 
   try {
     // ── DINHEIRO / OURO: aguardando conferência do caixa ────────────────────
@@ -101,7 +100,16 @@ export async function POST(
         return NextResponse.json({ error: "Informe os gramas e o valor por grama do ouro." }, { status: 400 });
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sql.begin: pitfall de tipo do postgres.js (ver CLAUDE.md §3)
-      await (sql as any).begin(async (tx: any) => {
+      const resultado = await (sql as any).begin(async (tx: any) => {
+        // Trava as linhas pendentes DENTRO da tx (autoritativo)
+        const pendentes = await tx`
+          SELECT id, valor FROM alissonerp.pagamentos_venda
+          WHERE venda_id = ${vendaId} AND forma = 'Na Entrega' AND status = 'pendente'
+          FOR UPDATE
+        `;
+        if (pendentes.length === 0) return { erro: "Esta venda não tem pagamento na entrega pendente.", status: 409 };
+        const totalPendente = pendentes.reduce((s: number, p: Record<string, unknown>) => s + Number(p.valor ?? 0), 0);
+        const ids = pendentes.map((p: Record<string, unknown>) => Number(p.id));
         await tx`
           UPDATE alissonerp.pagamentos_venda
           SET forma = ${body.forma},
@@ -118,8 +126,10 @@ export async function POST(
           dados_antes: { forma: "Na Entrega", status: "pendente" },
           dados_depois: { forma: body.forma, status: "aguard_conferencia", contexto: "pagamento_motoboy", valor: totalPendente },
         });
+        return { ok: true, forma: body.forma, status: "aguard_conferencia", valor: totalPendente };
       });
-      return NextResponse.json({ ok: true, forma: body.forma, status: "aguard_conferencia", valor: totalPendente });
+      if (resultado?.erro) return NextResponse.json({ error: resultado.erro }, { status: resultado.status ?? 500 });
+      return NextResponse.json(resultado);
     }
 
     // ── MERCADO PAGO / PAGBANK: verifica na API, confirma direto ────────────
@@ -128,9 +138,9 @@ export async function POST(
     }
     const paymentId = body.payment_id;
 
-    // Não pode reaproveitar um ID já usado
-    const [dup] = await sql`SELECT id FROM alissonerp.pagamentos_venda WHERE gateway_id = ${paymentId} LIMIT 1`;
-    if (dup) return NextResponse.json({ error: "Este pagamento já está registrado no sistema." }, { status: 409 });
+    // Pré-checagem de duplicidade (a autoritativa é refeita dentro da tx).
+    const [dupPre] = await sql`SELECT id FROM alissonerp.pagamentos_venda WHERE gateway_id = ${paymentId} LIMIT 1`;
+    if (dupPre) return NextResponse.json({ error: "Este pagamento já está registrado no sistema." }, { status: 409 });
 
     let aprovado = false;
     let valorPago = 0;
@@ -179,15 +189,34 @@ export async function POST(
       payload = { pb_id: paymentId, pb_status: pbStatus, pb_valor: valorPago, pb_tipo: pbTipo, via: "motoboy" };
     }
 
-    // Valor da API precisa cobrir o que falta (tolerância de 1 centavo)
-    if (valorPago + 0.01 < totalPendente) {
-      return NextResponse.json({
-        error: `O pagamento (R$${valorPago.toFixed(2)}) é menor que o valor na entrega (R$${totalPendente.toFixed(2)}).`,
-      }, { status: 422 });
-    }
+    const sourceErp = body.forma === "Mercado Pago" ? "manual_mp" : "manual_pagbank";
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sql.begin: pitfall de tipo do postgres.js (ver CLAUDE.md §3)
-    await (sql as any).begin(async (tx: any) => {
+    const resultado = await (sql as any).begin(async (tx: any) => {
+      // Trava + lê os pendentes DENTRO da tx (autoritativo)
+      const pendentes = await tx`
+        SELECT id, valor FROM alissonerp.pagamentos_venda
+        WHERE venda_id = ${vendaId} AND forma = 'Na Entrega' AND status = 'pendente'
+        FOR UPDATE
+      `;
+      if (pendentes.length === 0) return { erro: "Esta venda não tem pagamento na entrega pendente.", status: 409 };
+      const totalPendente = pendentes.reduce((s: number, p: Record<string, unknown>) => s + Number(p.valor ?? 0), 0);
+      const ids = pendentes.map((p: Record<string, unknown>) => Number(p.id));
+
+      // Valor da API precisa cobrir o que falta (tolerância de 1 centavo)
+      if (valorPago + 0.01 < totalPendente) {
+        return { erro: `O pagamento (R$${valorPago.toFixed(2)}) é menor que o valor na entrega (R$${totalPendente.toFixed(2)}).`, status: 422 };
+      }
+
+      // Duplicidade autoritativa (gateway_id tem índice UNIQUE global)
+      const [dup] = await tx`SELECT id FROM alissonerp.pagamentos_venda WHERE gateway_id = ${paymentId} LIMIT 1`;
+      if (dup) return { erro: "Este pagamento já está registrado no sistema.", status: 409 };
+
+      // gateway_id é UNIQUE global → não pode repetir em várias linhas. Quando há
+      // 2+ saldos "Na Entrega", o ID do gateway fica só na 1ª linha; as demais
+      // entram como 'confirmado' do mesmo pagamento, sem gateway_id (senão viola o
+      // índice uq_pagamentos_gateway_id → 500). Bug pego no code-review 13/06.
+      const [primeiroId, ...demaisIds] = ids;
       await tx`
         UPDATE alissonerp.pagamentos_venda
         SET forma = ${formaErp},
@@ -195,18 +224,32 @@ export async function POST(
             gateway_id = ${paymentId},
             gateway_payload = ${JSON.stringify(payload)}::jsonb,
             status = 'confirmado',
-            source = ${body.forma === "Mercado Pago" ? "manual_mp" : "manual_pagbank"},
+            source = ${sourceErp},
             data_confirmacao = now()
-        WHERE id = ANY(${ids}::int[])
+        WHERE id = ${primeiroId}
       `;
+      if (demaisIds.length > 0) {
+        await tx`
+          UPDATE alissonerp.pagamentos_venda
+          SET forma = ${formaErp},
+              gateway = ${gatewayNome},
+              gateway_payload = ${JSON.stringify({ ...payload, parcela_de: primeiroId })}::jsonb,
+              status = 'confirmado',
+              source = ${sourceErp},
+              data_confirmacao = now()
+          WHERE id = ANY(${demaisIds}::int[])
+        `;
+      }
       await logAudit(tx, {
         tabela: "pagamentos_venda", operacao: "UPDATE", registro_id: vendaId, usuario_id: user.id,
         dados_antes: { forma: "Na Entrega", status: "pendente" },
         dados_depois: { forma: formaErp, status: "confirmado", gateway: gatewayNome, gateway_id: paymentId, contexto: "pagamento_motoboy" },
       });
+      return { ok: true, forma: formaErp, status: "confirmado", gateway: gatewayNome, valor: valorPago };
     });
 
-    return NextResponse.json({ ok: true, forma: formaErp, status: "confirmado", gateway: gatewayNome, valor: valorPago });
+    if (resultado?.erro) return NextResponse.json({ error: resultado.erro }, { status: resultado.status ?? 500 });
+    return NextResponse.json(resultado);
   } catch (e) {
     return internalError(`[POST /api/entregas-venda/${entregaId}/confirmar-pagamento]`, e, "Erro ao confirmar pagamento na entrega.");
   }
