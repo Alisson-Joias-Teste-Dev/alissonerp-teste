@@ -1,6 +1,31 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.6 <!-- Revisado 13/06/2026 -->
+> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.7 <!-- Revisado 13/06/2026 -->
+
+## feat(caixa): conferência do pagamento do motoboy — Etapa 2 (v2.66.7)
+
+Jonathan (13/06): Dinheiro/Ouro que o motoboy recebeu na rua ficam
+`aguard_conferencia` (Etapa 1). Agora o caixa confere e libera pro financeiro.
+- Rota `financeiro/caixa/motoboy` (GET lista os `aguard_conferencia` Dinheiro/Ouro
+  com venda/cliente/motoboy; POST confirma → status `confirmado`). Permissão
+  `podedarBaixaCaixa`.
+- `TabCaixa` (Financeiro › Caixa): seção nova **"Pagamentos do motoboy a conferir"**
+  no topo, com botão Confirmar por linha. Confirmou → entra no fluxo normal.
+- **Dinheiro:** confirmar dispara o gatilho existente `fn_venda_baixar_recebimento_pago`
+  (AFTER UPDATE) → entra na lista de baixa do caixa. **Ouro:** o gatilho de rastreio
+  (`fn_rastreio_pagamento_ouro`) é AFTER INSERT e NÃO pega o UPDATE — então a rota
+  insere o rastreio do cofre manualmente (sem mexer no gatilho, p/ não dobrar nas
+  vendas de loja). Sem migration.
+- Testado: back (rollback — Dinheiro cria CR; Ouro cria rastreio no cofre) + front
+  (confirmei no caixa → R$100 entrou na lista de baixa, venda no topo). tsc limpo.
+
+> ⚠️ PENDÊNCIA CONHECIDA (adiada por decisão do Jonathan 13/06 — contas a receber não
+> está em uso ainda): como a entrega ocorre com o pagamento ainda em
+> `aguard_conferencia`, o gatilho `fn_venda_gerar_conta_receber` (que só conta
+> `confirmado` como pago) cria uma **conta a receber** pelo valor — e a conferência do
+> caixa não baixa essa conta. Resultado: o valor aparece no caixa **E** em "a receber"
+> (duplo registro). Correção futura (Opção A): incluir `aguard_conferencia` no cálculo
+> de "pago" do gatilho (não cria a conta na entrega; vira paga na conferência).
 
 ## feat(entregas): motoboy confirma pagamento na entrega — Etapa 1 (v2.66.6)
 

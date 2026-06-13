@@ -32,6 +32,7 @@ import { dispararWebhook } from "@/lib/webhooks";
 import PeriodoFiltro, { type Periodo, calcPeriodo } from "@/components/ui/PeriodoFiltro";
 import { useErrorStore } from "@/stores/errorStore";
 import { STATUS_LABEL, STATUS_COLORS } from "@/lib/cofre-ouro-status";
+import { apiFetch } from "@/lib/apiFetch";
 
 // ─── palette (tema claro/creme consistente com o resto do sistema) ───────────
 const C = {
@@ -1916,6 +1917,41 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   const [conversoesData, setConversoesData] = useState<ConversaoCofreResumo[]>([]);
   const [upgradesData, setUpgradesData] = useState<UpgradeCofreResumo[]>([]);
 
+  // ── Etapa 2 (13/06): pagamentos do MOTOBOY aguardando conferência ──────────
+  // REGRA DE NEGÓCIO: Dinheiro/Ouro que o motoboy recebeu na rua entram em
+  // 'aguard_conferencia'. O caixa confere aqui; ao confirmar, o status vira
+  // 'confirmado' e os gatilhos existentes põem o dinheiro no caixa / o ouro no
+  // cofre — daí segue o fluxo normal.
+  interface MotoboyPend {
+    id: number; forma: string; valor: number;
+    ouro_gramas: number | null; ouro_valor_grama: number | null;
+    numero_venda: string | null; cliente_nome: string | null; motoboy_nome: string | null;
+  }
+  const [motoboyPend, setMotoboyPend] = useState<MotoboyPend[]>([]);
+  const [confirmandoMot, setConfirmandoMot] = useState<number | null>(null);
+  const carregarMotoboyPend = useCallback(async () => {
+    try {
+      const d = await apiFetch<{ pendentes: MotoboyPend[] }>("/api/financeiro/caixa/motoboy");
+      setMotoboyPend(d.pendentes ?? []);
+    } catch { /* silencioso — não trava o caixa */ }
+  }, []);
+  useEffect(() => { carregarMotoboyPend(); }, [carregarMotoboyPend]);
+  async function confirmarMotoboyPend(id: number) {
+    setConfirmandoMot(id);
+    try {
+      await apiFetch(`/api/financeiro/caixa/motoboy`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pagamento_id: id }),
+      });
+      // some da lista e recarrega a página pra refletir no caixa/cofre normal
+      setMotoboyPend((prev) => prev.filter((p) => p.id !== id));
+      setTimeout(() => window.location.reload(), 400);
+    } catch (e) {
+      useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao confirmar pagamento do motoboy", { level: "critical" });
+    } finally {
+      setConfirmandoMot(null);
+    }
+  }
+
   /**
    * REGRA DE NEGÓCIO: destino da baixa de ouro precisa aparecer no histórico
    * para conferência operacional (quem recebeu em Fábrica/Service/Alisson).
@@ -2385,6 +2421,45 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
 
   return (
     <div className="space-y-4">
+      {/* Etapa 2 — Pagamentos do motoboy a conferir (Dinheiro/Ouro recebidos na rua) */}
+      {podeBaixar && motoboyPend.length > 0 && (
+        <div className="rounded-xl bg-white border p-4" style={{ borderColor: C.ambar + "99" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <Banknote size={16} style={{ color: C.ambar }} />
+            <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>
+              Pagamentos do motoboy a conferir
+            </p>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: C.ambarLt, color: C.ambar }}>
+              {motoboyPend.length}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {motoboyPend.map((p) => (
+              <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2" style={{ borderColor: C.cremeBorder }}>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate" style={{ color: "#1A1A1A" }}>
+                    {p.forma} · {fmt(p.valor)}
+                    {p.forma === "Ouro" && p.ouro_gramas != null ? ` · ${p.ouro_gramas.toFixed(3)}g` : ""}
+                  </p>
+                  <p className="text-[11px] truncate" style={{ color: C.cinza }}>
+                    Venda {p.numero_venda ?? "—"} · {p.cliente_nome ?? "—"}
+                    {p.motoboy_nome ? ` · motoboy ${p.motoboy_nome}` : ""}
+                  </p>
+                </div>
+                <button
+                  onClick={() => confirmarMotoboyPend(p.id)}
+                  disabled={confirmandoMot === p.id}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white whitespace-nowrap"
+                  style={{ backgroundColor: C.verde, opacity: confirmandoMot === p.id ? 0.6 : 1 }}
+                >
+                  {confirmandoMot === p.id ? "Confirmando..." : "Confirmar"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Período */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.cinza }}>
