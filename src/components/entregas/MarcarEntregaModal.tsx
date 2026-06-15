@@ -355,8 +355,8 @@ function CodigosModal({
               Só sabe se foi enviado ou se precisa cadastrar o WhatsApp. */}
           <div style={{
             padding: "14px 16px", borderRadius: 10,
-            background: whatsappEnviado ? C.verdeLt : C.cremeBg,
-            border: `1px solid ${whatsappEnviado ? C.verde : C.cremeBorder}`,
+            background: whatsappEnviado ? C.verdeLt : permiteCorrigirWhatsapp ? C.vermelhoLt : C.cremeBg,
+            border: `1px solid ${whatsappEnviado ? C.verde : permiteCorrigirWhatsapp ? C.vermelho : C.cremeBorder}`,
             marginBottom: 12,
           }}>
             {whatsappEnviado && (
@@ -377,16 +377,19 @@ function CodigosModal({
 
             {permiteCorrigirWhatsapp && (
               <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <AlertTriangle size={16} color={C.ambar} />
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#92400e" }}>
-                    {isSemWhatsapp
-                      ? `${clienteNome || "Cliente"} não possui WhatsApp`
-                      : whatsappErro || "WhatsApp não enviado"}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <AlertTriangle size={18} color={C.vermelho} />
+                  <span style={{ fontSize: 14, fontWeight: 800, color: C.vermelho }}>
+                    O código NÃO foi enviado ao cliente
                   </span>
                 </div>
+                <p style={{ fontSize: 12.5, color: "#7f1d1d", marginBottom: 8, lineHeight: 1.5, fontWeight: 600 }}>
+                  Motivo: {isSemWhatsapp
+                    ? `${clienteNome || "o cliente"} não tem WhatsApp cadastrado`
+                    : (whatsappErro || "WhatsApp não enviado")}.
+                </p>
                 <p style={{ fontSize: 12, color: C.cinza, marginBottom: 10, lineHeight: 1.5 }}>
-                  Informe ou corrija o WhatsApp do cliente para enviar o código de retirada.
+                  Corrija o WhatsApp do cliente abaixo e clique <b>Salvar e Enviar</b>. <b>Não cancele a entrega</b> — o código já foi gerado, só falta chegar ao cliente.
                 </p>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input

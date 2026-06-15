@@ -1,6 +1,19 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 13/06/2026 — Versão: v2.66.9 <!-- Revisado 13/06/2026 -->
+> 📋 Última atualização automática: 15/06/2026 — Versão: v2.66.10 <!-- Revisado 15/06/2026 -->
+
+## fix(entregas): aviso claro quando o código do cliente NÃO é enviado no WhatsApp (v2.66.10)
+
+Caso real (venda 15495, 15/06): o número do cliente não estava no WhatsApp, então o
+código de retirada era gerado mas não chegava — e a consultora cancelava e refazia a
+entrega 9x sem entender o motivo. O aviso no `MarcarEntregaModal` era discreto (bloco
+creme/âmbar "Atenção").
+- Agora o bloco fica **vermelho** e diz explicitamente **"O código NÃO foi enviado ao
+  cliente"** + o motivo + a instrução: **corrija o WhatsApp e clique "Salvar e Enviar",
+  NÃO cancele a entrega** (o código já foi gerado). A mensagem/recuperação (campo +
+  "Salvar e Enviar") já existiam — só ficaram visíveis e acionáveis.
+- Escopo: só o Código A (cliente/retirada). Motoboy (Código B) e marcador na lista de
+  vendas ficam para depois. Só front (`MarcarEntregaModal.tsx`), sem migration.
 
 ## fix(code-review): correções do pente fino antes de produção (v2.66.9)
 
