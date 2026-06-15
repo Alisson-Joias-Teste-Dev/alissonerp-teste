@@ -1,6 +1,20 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 15/06/2026 — Versão: v2.66.11 <!-- Revisado 15/06/2026 -->
+> 📋 Última atualização automática: 15/06/2026 — Versão: v2.66.12 <!-- Revisado 15/06/2026 -->
+
+## feat(vendas): cadastro do cliente só Celular (WhatsApp) com máscara (v2.66.12)
+
+Pedido do Jonathan (15/06): no modal "Dados do Cliente" tirar o Telefone e deixar só o
+**Celular**, rotulado **"Celular (WhatsApp)"**, com **máscara enquanto digita** — mas só
+no front; no banco salva os dígitos limpos pra não quebrar o envio do WhatsApp.
+- Novo helper `maskCelular` em `@/lib/formatters` (máscara progressiva `(XX) XXXXX-XXXX`).
+  Reusa o `onlyDigits` já existente.
+- `VendaDetalheClient`: removido o campo Telefone (exibição + form editar + form novo
+  cliente); Celular vira "Celular (WhatsApp)" com máscara; o estado guarda só dígitos e o
+  save grava `onlyDigits(celular)` — modelo correto no banco.
+- Seguro: o envio do código (`whatsapp.ts`) usa `celular || telefone` (prefere celular) e
+  normaliza tirando máscara, então não quebra. Telefone antigo de clientes legados não é
+  apagado (campo só some da tela). Sem migration.
 
 ## fix(vendas): modal "Dados do Cliente" não mostrava celular nem endereço (v2.66.11)
 

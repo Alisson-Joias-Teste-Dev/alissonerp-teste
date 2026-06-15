@@ -10,7 +10,7 @@ import {
   RotateCcw, ArrowRight, PackageCheck, ScanLine,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { maskCpfCnpj } from "@/lib/formatters";
+import { maskCpfCnpj, maskCelular, onlyDigits } from "@/lib/formatters";
 import { gerarPDFOrcamento } from "@/lib/gerar-pdf-orcamento";
 import type { OrcamentoPDF } from "@/lib/gerar-pdf-orcamento";
 import MercadoPagoCobranca from "@/components/vendas/MercadoPagoCobranca";
@@ -1644,7 +1644,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     try {
       const res = await fetch("/api/contatos", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: cliente.id, ...editClienteForm }),
+        body: JSON.stringify({ id: cliente.id, ...editClienteForm, celular: onlyDigits(editClienteForm.celular) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -1678,7 +1678,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     try {
       const res = await fetch("/api/contatos", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(novoClienteForm),
+        body: JSON.stringify({ ...novoClienteForm, celular: onlyDigits(novoClienteForm.celular) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -2571,8 +2571,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       <div><Label required>Nome</Label><Input value={editClienteForm.nome} onChange={e => setEditClienteForm(p => ({ ...p, nome: e.target.value }))} /></div>
                       <div><Label>CPF/CNPJ</Label><Input value={editClienteForm.cpf_cnpj} onChange={e => setEditClienteForm(p => ({ ...p, cpf_cnpj: e.target.value }))} /></div>
                       <div><Label>Email</Label><Input type="email" value={editClienteForm.email} onChange={e => setEditClienteForm(p => ({ ...p, email: e.target.value }))} /></div>
-                      <div><Label>Telefone</Label><Input value={editClienteForm.telefone} onChange={e => setEditClienteForm(p => ({ ...p, telefone: e.target.value }))} /></div>
-                      <div><Label>Celular</Label><Input value={editClienteForm.celular} onChange={e => setEditClienteForm(p => ({ ...p, celular: e.target.value }))} /></div>
+                      <div><Label>Celular (WhatsApp)</Label><Input value={maskCelular(editClienteForm.celular)} placeholder="(85) 99999-9999" inputMode="tel" onChange={e => setEditClienteForm(p => ({ ...p, celular: onlyDigits(e.target.value) }))} /></div>
                     </div>
                     <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
                       <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço de Cobrança</p>
@@ -2594,8 +2593,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Nome</span><p style={{ color: "#1A1A1A" }}>{cliente.nome}</p></div>
                       <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>CPF/CNPJ</span><p className="font-mono" style={{ color: "#1A1A1A" }}>{cliente.cpf_cnpj ? maskCpfCnpj(cliente.cpf_cnpj) : "—"}</p></div>
                       <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Email</span><p style={{ color: "#1A1A1A" }}>{cliente.email || "—"}</p></div>
-                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Telefone</span><p style={{ color: "#1A1A1A" }}>{cliente.telefone || "—"}</p></div>
-                      {cliente.celular && <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Celular</span><p style={{ color: "#1A1A1A" }}>{cliente.celular}</p></div>}
+                      <div><span className="text-xs font-medium" style={{ color: "#6B7280" }}>Celular (WhatsApp)</span><p style={{ color: "#1A1A1A" }}>{cliente.celular ? maskCelular(cliente.celular) : "—"}</p></div>
                     </div>
                     <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
                       <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço de Cobrança</p>
@@ -2651,8 +2649,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                     {cpfExistente && <p className="text-xs text-red-500 mt-1">Já cadastrado: {cpfExistente}</p>}
                   </div>
                   <div><Label>Email</Label><Input type="email" value={novoClienteForm.email} onChange={e => setNovoClienteForm(p => ({ ...p, email: e.target.value }))} /></div>
-                  <div><Label>Telefone</Label><Input value={novoClienteForm.telefone} onChange={e => setNovoClienteForm(p => ({ ...p, telefone: e.target.value }))} /></div>
-                  <div><Label>Celular</Label><Input value={novoClienteForm.celular} onChange={e => setNovoClienteForm(p => ({ ...p, celular: e.target.value }))} /></div>
+                  <div><Label>Celular (WhatsApp)</Label><Input value={maskCelular(novoClienteForm.celular)} placeholder="(85) 99999-9999" inputMode="tel" onChange={e => setNovoClienteForm(p => ({ ...p, celular: onlyDigits(e.target.value) }))} /></div>
                 </div>
                 <div className="pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
                   <p className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>Endereço</p>
