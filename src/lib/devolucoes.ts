@@ -18,6 +18,7 @@ import sql from "@/lib/db";
 import { gerarValeTroca } from "@/lib/vale-troca";
 import { estornarMP, criarContaPagarReembolso } from "@/lib/reembolso";
 import { criarNotificacao } from "@/lib/notificacoes";
+import { avaliarPrazoDevolucao } from "@/lib/prazo-devolucao";
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -236,11 +237,18 @@ export async function solicitarAprovacaoDevolucao(
     throw new Error(`Devolucao ja foi submetida (status=${dev.status})`);
   }
 
-  // Encontrar aprovador: gerente_loja (configurado) → diretor → admin
+  // Aprovador: se a devolução está FORA DO PRAZO (7 dias úteis a partir da entrega
+  // real ao cliente), usa o aprovador configurado ESPECIFICAMENTE para isso (lista
+  // aberta em Configurações). Dentro do prazo, mantém o comportamento atual
+  // (aprovadora_credito_gerente → fallback gerente/diretor/admin).
+  const prazo = await avaliarPrazoDevolucao(dev.venda_id);
+  const chaveAprovador = prazo.dentroPrazo
+    ? "aprovadora_credito_gerente"
+    : "aprovador_devolucao_fora_prazo";
   let aprovadorId: string | undefined;
   const [config] = await sql`
     SELECT valor FROM alissonerp.configuracoes_sistema
-    WHERE chave = 'aprovadora_credito_gerente'
+    WHERE chave = ${chaveAprovador}
   `;
   if (config?.valor) {
     const [g] = await sql`
@@ -278,7 +286,11 @@ export async function solicitarAprovacaoDevolucao(
     reembolso_manual: "Reembolso manual (contas a pagar)",
   };
 
+  const avisoPrazo = prazo.dentroPrazo
+    ? ""
+    : `⚠️ FORA DO PRAZO de 7 dias úteis: a venda foi entregue ao cliente há ${prazo.diasUteis} dias úteis.\n`;
   const descricao =
+    avisoPrazo +
     `Devolucao ${dev.numero} — Venda ${dev.numero_venda} — ${dev.cliente_nome ?? "sem cliente"}\n` +
     `Valor total devolvido: R$ ${valorTotal.toFixed(2)}\n` +
     `Retencao: ${pct.toFixed(2)}% (R$ ${(valorTotal - valorComp).toFixed(2)})\n` +

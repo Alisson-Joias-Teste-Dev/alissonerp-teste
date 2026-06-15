@@ -30,6 +30,7 @@ const CHAVES = [
   "metal_aprovador_id",
   "aprovador_limpeza",
   "aprovador_entrega_sem_pagamento",
+  "aprovador_devolucao_fora_prazo",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -98,6 +99,13 @@ export async function GET() {
         nome
     `;
 
+    // Lista ABERTA — qualquer usuário ativo pode ser escolhido como aprovador de
+    // devolução fora do prazo (decisão Jonathan 15/06/2026).
+    const todosUsuarios = await sql`
+      SELECT id, nome, role FROM alissonerp.usuarios
+      WHERE ativo = true ORDER BY nome
+    `;
+
     return NextResponse.json({
       aprovador_credito_diretor: configMap.get("aprovador_credito_diretor") ?? "",
       aprovador_desconto_padrao: configMap.get("aprovador_desconto_padrao") ?? "",
@@ -107,6 +115,7 @@ export async function GET() {
       metal_aprovador_id: configMap.get("metal_aprovador_id") ?? "",
       aprovador_limpeza: configMap.get("aprovador_limpeza") ?? "",
       aprovador_entrega_sem_pagamento: configMap.get("aprovador_entrega_sem_pagamento") ?? "",
+      aprovador_devolucao_fora_prazo: configMap.get("aprovador_devolucao_fora_prazo") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -114,6 +123,7 @@ export async function GET() {
         metal_aprovadores: aprovadoresMetal,
         aprovadores_limpeza: aprovadoresLimpeza,
         aprovadores_entrega_sem_pagamento: aprovadoresEntregaSemPagamento,
+        todos_usuarios: todosUsuarios,
       },
     });
   } catch {
@@ -173,6 +183,10 @@ export async function PUT(req: NextRequest) {
      */
     if (body.aprovador_entrega_sem_pagamento !== undefined) {
       updates.push({ chave: "aprovador_entrega_sem_pagamento", valor: body.aprovador_entrega_sem_pagamento });
+    }
+    // Aprovador de devolução fora do prazo (lista aberta — qualquer usuário ativo).
+    if (body.aprovador_devolucao_fora_prazo !== undefined) {
+      updates.push({ chave: "aprovador_devolucao_fora_prazo", valor: body.aprovador_devolucao_fora_prazo });
     }
 
     for (const u of updates) {

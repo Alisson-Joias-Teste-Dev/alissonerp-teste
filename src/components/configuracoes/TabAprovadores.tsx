@@ -31,6 +31,7 @@ interface AprovadorConfig {
   metal_aprovador_id?: string;
   aprovador_limpeza?: string;
   aprovador_entrega_sem_pagamento?: string;
+  aprovador_devolucao_fora_prazo?: string;
 }
 
 interface Usuario {
@@ -46,6 +47,7 @@ interface UsuariosPorRole {
   metal_aprovadores: Usuario[];
   aprovadores_limpeza: Usuario[];
   aprovadores_entrega_sem_pagamento: Usuario[];
+  todos_usuarios: Usuario[];
 }
 
 const P = {
@@ -132,6 +134,21 @@ const CONFIG_ITENS = [
     usuariosKey: "aprovadores_entrega_sem_pagamento" as const,
     icone: "📦",
   },
+  /**
+   * REGRA DE NEGÓCIO: aprovador de devolução FORA DO PRAZO (7 dias úteis).
+   * O QUE: quando a venda passou de 7 dias úteis desde a entrega real, a consultora
+   *   não cria o vale direto — pede aprovação, que cai pra esta pessoa.
+   * POR QUE: controla exceções de prazo de troca com responsável rastreável.
+   * IMPACTO SE REMOVIDO: pedido fora do prazo cai no fallback (gerente/diretor/admin).
+   * Lista ABERTA: qualquer usuário ativo pode ser escolhido (decisão Jonathan 15/06).
+   */
+  {
+    chave: "aprovador_devolucao_fora_prazo" as const,
+    titulo: "Devolução fora do prazo (7 dias úteis)",
+    descricao: "Aprova gerar vale-troca de devolução quando a venda passou de 7 dias úteis desde a entrega ao cliente",
+    usuariosKey: "todos_usuarios" as const,
+    icone: "↩️",
+  },
 ];
 
 export default function TabAprovadores() {
@@ -147,6 +164,7 @@ export default function TabAprovadores() {
     metal_aprovador_id: "",
     aprovador_limpeza: "",
     aprovador_entrega_sem_pagamento: "",
+    aprovador_devolucao_fora_prazo: "",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
     gerentes: [],
@@ -155,6 +173,7 @@ export default function TabAprovadores() {
     metal_aprovadores: [],
     aprovadores_limpeza: [],
     aprovadores_entrega_sem_pagamento: [],
+    todos_usuarios: [],
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -173,8 +192,9 @@ export default function TabAprovadores() {
           metal_aprovador_id: d.metal_aprovador_id ?? "",
           aprovador_limpeza: d.aprovador_limpeza ?? "",
           aprovador_entrega_sem_pagamento: d.aprovador_entrega_sem_pagamento ?? "",
+          aprovador_devolucao_fora_prazo: d.aprovador_devolucao_fora_prazo ?? "",
         });
-        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [] });
+        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [] });
       })
       .finally(() => setLoading(false));
   }, []);
@@ -187,7 +207,7 @@ export default function TabAprovadores() {
   function getUserName(chave: string): string {
     const id = (config as any)[chave];
     if (!id) return "";
-    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores, ...usuarios.aprovadores_limpeza, ...usuarios.aprovadores_entrega_sem_pagamento];
+    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores, ...usuarios.aprovadores_limpeza, ...usuarios.aprovadores_entrega_sem_pagamento, ...usuarios.todos_usuarios];
     const u = all.find((x) => x.id === id);
     return u?.nome ?? "";
   }

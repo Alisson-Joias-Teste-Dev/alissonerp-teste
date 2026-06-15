@@ -65,6 +65,8 @@ export default function NovaDevolucaoClient({ role }: Props) {
   const [buscandoVenda, setBuscandoVenda] = useState(false);
   const [buscaErr, setBuscaErr] = useState("");
   const [venda, setVenda] = useState<Venda | null>(null);
+  // Avaliação do prazo de 7 dias úteis (a partir da entrega real). null = não avaliado.
+  const [prazoInfo, setPrazoInfo] = useState<{ dentroPrazo: boolean; motivo: string | null; diasUteis: number | null } | null>(null);
 
   // Step 2: Selecionar Itens
   const [selecionados, setSelecionados] = useState<Record<number, number>>({}); // item_venda_id -> qtd
@@ -84,6 +86,7 @@ export default function NovaDevolucaoClient({ role }: Props) {
     setBuscandoVenda(true);
     setBuscaErr("");
     setVenda(null);
+    setPrazoInfo(null);
     try {
       // Busca via GET /api/vendas (q=numero) para descobrir o id, depois carrega completa
       // /api/vendas exige inicio+fim — usa janela ampla (5 anos) pra permitir devolução de vendas antigas
@@ -116,6 +119,11 @@ export default function NovaDevolucaoClient({ role }: Props) {
       }
       setVenda(d);
       setSelecionados({});
+      // Avalia o prazo de 7 dias úteis (a partir da entrega real ao cliente) — feedback na hora.
+      try {
+        const elRes = await fetch(`/api/devolucoes/elegibilidade?venda_id=${match.id}`);
+        setPrazoInfo(elRes.ok ? await elRes.json() : null);
+      } catch { setPrazoInfo(null); }
     } catch (e) {
       setBuscaErr(e instanceof Error ? e.message : "Erro ao buscar");
     } finally {
@@ -301,6 +309,13 @@ export default function NovaDevolucaoClient({ role }: Props) {
                   Esta venda já possui {venda.devolucoes.length} devolução(ões) registrada(s).
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Aviso de prazo (7 dias úteis) — feedback já no passo 1, ao carregar a venda. */}
+          {venda && prazoInfo && !prazoInfo.dentroPrazo && (
+            <div className="rounded-lg border px-4 py-3 text-sm" style={{ backgroundColor: "#FEF2F2", borderColor: "#FECACA", color: "#991B1B" }}>
+              <strong>Fora do prazo de devolução.</strong> {prazoInfo.motivo} Você poderá avançar e <strong>solicitar aprovação</strong> ao final.
             </div>
           )}
 
@@ -575,6 +590,13 @@ export default function NovaDevolucaoClient({ role }: Props) {
             <p className="text-sm" style={{ color: "#374151" }}>{motivo}</p>
           </div>
 
+          {/* Explicação quando a venda passou do prazo de 7 dias úteis. */}
+          {prazoInfo && !prazoInfo.dentroPrazo && (
+            <div className="rounded-lg border px-4 py-3 text-sm" style={{ backgroundColor: "#FEF2F2", borderColor: "#FECACA", color: "#991B1B" }}>
+              <strong>Fora do prazo de devolução.</strong> {prazoInfo.motivo}
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
             <button
               onClick={() => setStep(3)}
@@ -584,15 +606,18 @@ export default function NovaDevolucaoClient({ role }: Props) {
               <ArrowLeft size={14} /> Voltar
             </button>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => salvar(false)}
-                disabled={saving}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium border disabled:opacity-40"
-                style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
-              >
-                {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-                Salvar Rascunho
-              </button>
+              {/* Fora do prazo: só permite o caminho de aprovação (esconde "Salvar Rascunho"). */}
+              {!(prazoInfo && !prazoInfo.dentroPrazo) && (
+                <button
+                  onClick={() => salvar(false)}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium border disabled:opacity-40"
+                  style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+                >
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+                  Salvar Rascunho
+                </button>
+              )}
               <button
                 onClick={() => salvar(true)}
                 disabled={saving}
@@ -600,7 +625,7 @@ export default function NovaDevolucaoClient({ role }: Props) {
                 style={{ backgroundColor: C.esmeralda, color: C.creme }}
               >
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                Solicitar Aprovação
+                {prazoInfo && !prazoInfo.dentroPrazo ? "Solicitar Aprovação (fora do prazo)" : "Solicitar Aprovação"}
               </button>
             </div>
           </div>
