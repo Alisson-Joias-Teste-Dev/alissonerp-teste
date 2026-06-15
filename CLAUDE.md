@@ -142,6 +142,27 @@ Mapear TODOS os impactos (views, triggers, componentes) ANTES de implementar
 Se impacta 3 lugares, corrigir os 3 na mesma sessao
 ```
 
+### Assinatura de Mudancas no Banco — OBRIGATORIO (toda mudanca, sempre)
+```
+O token de acesso ao banco de PRODUCAO e COMPARTILHADO entre a IA do Jonathan
+(Claude Code) e a IA do chefe. Para rastrear QUEM mexeu, TODO agente DEVE assinar
+ANTES de qualquer DDL/DML manual no banco (view, funcao, trigger, INSERT/UPDATE/DELETE):
+
+  SELECT alissonerp.assinar_mudanca_banco(
+    '<autor>',     -- quem AUTORIZOU: 'jonathan' | 'chefe'
+    '<agente>',    -- ferramenta executora: 'claude-code' | 'ia-chefe'
+    '<descricao>', -- o que muda, em linguagem clara
+    '<sql>'        -- o SQL aplicado (resumo fiel)
+  );
+
+E setar a etiqueta da conexao ANTES de conectar:  PGAPPNAME='claude-code-jonathan'
+(a IA do chefe deve usar a sua propria etiqueta, ex 'ia-chefe').
+
+Livro: alissonerp.log_mudancas_banco (append-only, criado na migration 303).
+Captura sozinho app_name + IP de origem + usuario. NUNCA pular a assinatura.
+REGRA DE DEFESA: mudanca que aparece no banco e NAO esta no livro = nao foi o Jonathan.
+```
+
 ### Ouro = Dinheiro
 ```
 Movimentacoes: SEMPRE dupla-entrada (debito + credito)
