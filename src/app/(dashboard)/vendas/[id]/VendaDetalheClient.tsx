@@ -91,7 +91,7 @@ interface FormaFrete { id: number; nome: string; codigo: string; id_api_logistic
 interface Venda {
   id: number; numero_venda: string;
   cliente_id: number | null; cliente_nome: string | null; cliente_cpf_cnpj: string | null;
-  cliente_email: string | null; cliente_telefone: string | null;
+  cliente_email: string | null; cliente_telefone: string | null; cliente_celular?: string | null;
   vendedor_id: number | null; vendedor_nome: string | null;
   data_venda: string; data_entrega: string | null;
   total_produtos: number; total_desconto: number; total_frete: number;
@@ -724,6 +724,10 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     setCliente(venda.cliente_id ? {
       id: venda.cliente_id, nome: venda.cliente_nome ?? "",
       cpf_cnpj: venda.cliente_cpf_cnpj, email: venda.cliente_email, telefone: venda.cliente_telefone,
+      celular: venda.cliente_celular ?? null,
+      endereco: venda.cliente_endereco ?? null, numero: venda.cliente_numero ?? null,
+      complemento: venda.cliente_complemento ?? null, bairro: venda.cliente_bairro ?? null,
+      municipio: venda.cliente_municipio ?? null, cep: venda.cliente_cep ?? null, uf: venda.cliente_uf ?? null,
     } : null);
     const vendedorAutoFill = venda.vendedor_id ?? vendedorId ?? "";
     setVendedorSel(vendedorAutoFill);
