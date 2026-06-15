@@ -88,3 +88,19 @@ export function maskCpfCnpj(raw: string | null | undefined): string {
   }
   return raw;
 }
+
+/**
+ * Máscara de celular (BR) para EXIBIÇÃO/INPUT — formata progressivamente enquanto
+ * digita. O banco guarda só os dígitos (use onlyDigits ao salvar); a máscara é
+ * puramente visual e NÃO deve ir pro banco — o envio do WhatsApp (Evolution)
+ * normaliza a partir dos dígitos, então máscara salva quebraria a consistência.
+ * Ex: "85999567025" → "(85) 99956-7025" | "8599567025" → "(85) 9956-7025"
+ */
+export function maskCelular(raw: string | null | undefined): string {
+  const d = onlyDigits(raw).slice(0, 11); // DDD (2) + até 9 dígitos
+  if (d.length === 0) return '';
+  if (d.length <= 2) return `(${d}`;
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
