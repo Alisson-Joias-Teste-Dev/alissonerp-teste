@@ -1,6 +1,18 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 15/06/2026 — Versão: v2.66.10 <!-- Revisado 15/06/2026 -->
+> 📋 Última atualização automática: 15/06/2026 — Versão: v2.66.11 <!-- Revisado 15/06/2026 -->
+
+## fix(vendas): modal "Dados do Cliente" não mostrava celular nem endereço (v2.66.11)
+
+Caso real (venda 15495, 15/06): o modal mostrava só o telefone e o endereço todo "—",
+mesmo o cliente tendo celular (onde chega o WhatsApp) e endereço completo no cadastro.
+- **Causa 1 (front):** ao abrir a venda, o objeto `cliente` era montado só com
+  id/nome/cpf/email/telefone (`VendaDetalheClient` ~L725) — celular e endereço (que a API
+  já retornava) eram descartados. Agora mapeia celular + endereco/numero/complemento/
+  bairro/municipio/cep/uf.
+- **Causa 2 (API):** `GET /vendas/[id]` não selecionava `c.celular`. Adicionado
+  `c.celular AS cliente_celular`.
+- Sem migration. (Nota: contatos não tem coluna "cidade" separada — a UI usa `municipio`.)
 
 ## fix(entregas): aviso claro quando o código do cliente NÃO é enviado no WhatsApp (v2.66.10)
 

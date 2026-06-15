@@ -101,6 +101,7 @@ export async function GET(
       (SELECT u.nome FROM alissonerp.usuarios u WHERE u.id = ve.desconto_cartao_aprovado_por) AS desconto_cartao_aprovado_por_nome,
       c.endereco AS cliente_endereco, c.numero AS cliente_numero, c.complemento AS cliente_complemento,
       c.bairro AS cliente_bairro, c.municipio AS cliente_municipio, c.cep AS cliente_cep, c.uf AS cliente_uf,
+      c.celular AS cliente_celular,
       c.id_api_contato AS cliente_id_tiny
     FROM alissonerp.vw_vendas_erp_completa v
     LEFT JOIN alissonerp.vendas_erp ve ON ve.id = v.id
