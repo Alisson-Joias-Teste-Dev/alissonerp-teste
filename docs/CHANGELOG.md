@@ -1,6 +1,21 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/06/2026 — Versão: v2.67.2 <!-- Revisado 16/06/2026 -->
+> 📋 Última atualização automática: 16/06/2026 — Versão: v2.67.3 <!-- Revisado 16/06/2026 -->
+
+## fix(vendas): comissão de item promocional usa a faixa do desconto real (v2.67.3)
+
+Bug do Jonathan: ao vender um item em PROMOÇÃO, o POS gravava o preço promocional como se fosse
+o de lista, com `pct_desconto = 0` → a comissão saía pela **taxa cheia** (4%) em vez da faixa do
+desconto. (até 15/06, ~R$591 pagos a mais; junho ainda não fechado.)
+- **POS (`NovaVendaClientV2`):** novo helper `comissaoPct` — a comissão sai do desconto vs o
+  **preço cheio** (`preco_lista_original`, que a busca já devolve). Item normal: cheio == lista →
+  idêntico a `getComissao(pct)`. Item promo: cheio > promo → entra o desconto da promo → faixa
+  certa (ex.: promo 44% → 0,5%). Aplicado em `calcItem`, `updateItem` e `applyApprovedDiscount`.
+- **Aprovação inalterada:** `preco_lista` segue = preço promo e `pct_desconto` = desconto manual,
+  então a promo continua isenta do gate (decisão Jonathan 16/06) e o desconto manual EXTRA acima
+  da promo ainda passa pela aprovação. Sem mexer no backend de gate. Sem migration.
+- Regra documentada em `docs/regras-negocio/promocoes.md`. Correção dos dados de junho já gravados
+  = à parte (decisão do Jonathan, item a item — ver relatório de 15/06).
 
 ## fix(purificacao): ganho de teor não trava mais ao concluir — tolerância só vale pra perda (v2.67.2)
 

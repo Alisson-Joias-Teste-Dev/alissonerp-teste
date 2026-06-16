@@ -51,6 +51,9 @@ interface Produto {
   sku: string;
   nome: string;
   preco_venda: number | null;
+  /** Preço cheio (curva) antes da promo — base da comissão. Vem de busca/route.ts
+   *  (preco_lista_original). Para item NÃO promo é igual ao preco_venda. */
+  preco_lista_original?: number | null;
   peso_precificado: number | null;
   unidade: string | null;
   sufixo_variacao: string | null;
@@ -93,6 +96,10 @@ interface ItemVenda {
   sku: string | null;
   quantidade: number;
   preco_lista: number;
+  /** Preço cheio (curva) p/ base da comissão. Difere de preco_lista quando o item
+   *  está em promoção (preco_lista = preço promo; preco_lista_original = preço cheio).
+   *  Opcional: item carregado de rascunho não tem o cheio no banco → cálculo usa fallback. */
+  preco_lista_original?: number;
   pct_desconto: number;
   preco_unitario: number;
   total_item: number;
@@ -976,14 +983,41 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     return faixa.comissao_pct;
   }
 
+  /**
+   * Comissão do item a partir do desconto vs o preço CHEIO (preco_lista_original).
+   *
+   * REGRA DE NEGÓCIO (16/06/2026 — ver docs/regras-negocio/promocoes.md):
+   *   A comissão sai da faixa do desconto REAL do item. Para item em promoção,
+   *   o preço cheio (curva) > preco_lista (promo), então o desconto da promo
+   *   entra na conta e getComissao pega a faixa certa (ex.: promo 44% → 0,5%).
+   *   Item NÃO promo: preco_lista_original == preco_lista → idêntico a getComissao(pct).
+   *
+   * IMPACTO SE REMOVIDO: volta o bug em que item promocional pagava comissão
+   *   pela taxa CHEIA (getComissao(0)), porque o preço promo era tratado como
+   *   lista sem desconto. (até 15/06: ~R$591 pagos a mais.)
+   *
+   * Fallback: se não dá pra confiar no preço cheio (≤0 ou < preço unitário, ex.:
+   *   item personalizado/markup), usa o desconto manual (pctManual).
+   */
+  function comissaoPct(precoListaOriginal: number, precoUnit: number, pctManual: number): number {
+    if (precoListaOriginal > 0 && precoListaOriginal >= precoUnit) {
+      const descTotal = Math.round(((precoListaOriginal - precoUnit) / precoListaOriginal) * 10000) / 100;
+      return getComissao(Math.max(0, descTotal));
+    }
+    return getComissao(pctManual);
+  }
+
   function calcItem(produto: Produto, q: number, pct: number): Omit<ItemVenda, "_key"> {
     const precoLista = produto.preco_venda ?? 0;
+    // Preço cheio p/ base da comissão: em promoção, preco_venda já é o promo;
+    // o cheio vem em preco_lista_original. Item normal: os dois são iguais.
+    const precoListaOriginal = produto.preco_lista_original ?? precoLista;
     const precoUnit = precoLista * (1 - pct / 100);
     const totalItem = precoUnit * q;
-    const pctComissao = getComissao(pct);
+    const pctComissao = comissaoPct(precoListaOriginal, precoUnit, pct);
     return {
       produto_id: produto.id, nome_produto: produto.nome, sku: produto.sku,
-      quantidade: q, preco_lista: precoLista, pct_desconto: pct,
+      quantidade: q, preco_lista: precoLista, preco_lista_original: precoListaOriginal, pct_desconto: pct,
       preco_unitario: precoUnit, total_item: totalItem,
       pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100,
       peso_estimado: produto.peso_precificado,
@@ -1015,8 +1049,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         const novaLista = Math.max(0, parseFloat(normalized) || 0);
         const precoUnit = novaLista * (1 - pct / 100);
         const totalItem = precoUnit * q;
-        const pctComissao = getComissao(pct);
-        return { ...item, preco_lista: novaLista, preco_unitario: precoUnit, total_item: totalItem, pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100 };
+        // Edição manual do preço de lista → novaLista vira o preço cheio (sem promo).
+        const pctComissao = comissaoPct(novaLista, precoUnit, pct);
+        return { ...item, preco_lista: novaLista, preco_lista_original: novaLista, preco_unitario: precoUnit, total_item: totalItem, pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100 };
       }
       if (field === "preco_unitario") {
         const novoPreco = parseFloat(raw.replace(",", ".")) || 0;
@@ -1067,7 +1102,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         ? precoUnitDigitado
         : precoLista * (1 - pct / 100);
       const totalItem = precoUnit * q;
-      const pctComissao = getComissao(pct);
+      const pctComissao = comissaoPct(item.preco_lista_original ?? precoLista, precoUnit, pct);
       return { ...item, quantidade: q, pct_desconto: pct, preco_lista: precoLista, preco_unitario: precoUnit, total_item: totalItem, pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100 };
     }));
   }
@@ -1101,7 +1136,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       if (item._key !== key) return item;
       const precoUnit  = item.preco_lista * (1 - pct / 100);
       const totalItem  = precoUnit * item.quantidade;
-      const pctComissao = getComissao(pct);
+      const pctComissao = comissaoPct(item.preco_lista_original ?? item.preco_lista, precoUnit, pct);
       return { ...item, pct_desconto: pct, preco_unitario: precoUnit, total_item: totalItem, pct_comissao: pctComissao, valor_comissao: totalItem * pctComissao / 100 };
     }));
   }
