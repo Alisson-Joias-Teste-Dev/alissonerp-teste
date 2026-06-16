@@ -64,6 +64,9 @@ interface Produto {
   em_promocao?: boolean;
   promocao_nome?: string | null;
   preco_promo?: number | null;
+  /** Preço ORIGINAL da promoção (snapshot que a campanha fixou) — base do desconto
+   *  da promo p/ comissão. Difere da curva atual (que oscila com o ouro). */
+  preco_promo_original?: number | null;
   max_parcelas_promo?: number | null;
   /** Percentual do servico automatico sobre joia base (ex: 0.30 = 30% para rodio).
    *  NULL = usa PCT_RODIO_DEFAULT. Frente C do Plano de Acao (30/05/2026). */
@@ -1009,9 +1012,14 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
 
   function calcItem(produto: Produto, q: number, pct: number): Omit<ItemVenda, "_key"> {
     const precoLista = produto.preco_venda ?? 0;
-    // Preço cheio p/ base da comissão: em promoção, preco_venda já é o promo;
-    // o cheio vem em preco_lista_original. Item normal: os dois são iguais.
-    const precoListaOriginal = produto.preco_lista_original ?? precoLista;
+    // Preço cheio p/ base da comissão. Em PROMOÇÃO: o desconto que conta é o da
+    // PROMOÇÃO — preço original que a campanha fixou (preco_promo_original, snapshot
+    // estável), NÃO a curva atual (que oscila com o ouro e daria desconto/comissão
+    // errados, ex.: 21% em vez de 27%). Item normal: usa o próprio preço de venda.
+    // Ver docs/regras-negocio/promocoes.md.
+    const precoListaOriginal = (produto.em_promocao && (produto.preco_promo_original ?? 0) > 0)
+      ? (produto.preco_promo_original as number)
+      : precoLista;
     const precoUnit = precoLista * (1 - pct / 100);
     const totalItem = precoUnit * q;
     const pctComissao = comissaoPct(precoListaOriginal, precoUnit, pct);

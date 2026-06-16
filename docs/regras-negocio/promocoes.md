@@ -32,10 +32,12 @@ A busca de produto (`GET /api/vendas/produtos/busca`) retorna, quando `em_promoc
 - `preco_lista_original` = preço **cheio** (curva)
 - `preco_promo`, `em_promocao`, `promocao_nome`, `max_parcelas_promo`
 
-## ⚠️ BUG ATUAL — comissão de item promocional (a corrigir)
-No `calcItem` (`NovaVendaClientV2.tsx`), `preco_lista` é setado com `produto.preco_venda` — que **já é o preço promo** — e `pct_desconto=0`. Resultado: grava o promo como se fosse lista sem desconto, e `getComissao(0)` paga a **taxa cheia**.
-- **Desejado:** item em promo → `preco_lista = preco_lista_original` (cheio), `preco_unitario = preco_promo`, `pct_desconto = (original − promo)/original`, `pct_comissao = getComissao(desse pct)`. E **item de promoção não deve exigir aprovação** mesmo com desconto alto (é desconto do sistema, não da consultora).
-- `getComissao(pct)`: tabela de faixas por % de desconto; `>30% → 0,5%`; senão a faixa daquele %.
+## ✅ Comissão de item promocional — CORRIGIDO (v2.67.3, 16/06/2026)
+Antes: no `calcItem` (`NovaVendaClientV2.tsx`) a comissão saía de `getComissao(pct_desconto)` com `pct_desconto=0` → **taxa cheia** (4%) em item promo.
+Solução (helper `comissaoPct`): a comissão sai do desconto vs o **preço ORIGINAL da promoção** — `preco_promo_original` (snapshot que a campanha fixou em `promocao_itens.preco_original`), exposto pela `busca/route.ts` a partir de `vw_produto_preco_vigente`.
+- **⚠️ Achado no teste de front (16/06):** NÃO usar a **curva atual** como base — ela oscila com o ouro e dá desconto/comissão errados. Ex.: AJ5237 vendido a R$1.446; original da promo = R$1.980 → **27% → 0,85%** (certo). A curva atual (R$1.840) daria 21% → 1,55% (errado). Por isso a base é o snapshot da promo, não a curva.
+- `preco_lista`/`pct_desconto` do item ficam **inalterados** (preço promo / desconto manual) → a promo segue **isenta do gate de aprovação**, e o desconto manual EXTRA abaixo do preço da promo ainda pede aprovação. Sem migration, sem mexer no backend de gate.
+- `getComissao(pct)`: faixas por % de desconto; `>30% → 0,5%`.
 
 ## Decisões (Jonathan — 16/06/2026)
 1. **Comissão do item promo = `getComissao(desconto real da promo)`, regra NORMAL** — incluindo a trava `>30% → 0,5%`. A promo é tratada igual a um desconto manual para fins de comissão (ex.: promo de 44% paga 0,5% à consultora).

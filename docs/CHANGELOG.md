@@ -8,9 +8,13 @@ Bug do Jonathan: ao vender um item em PROMOÇÃO, o POS gravava o preço promoci
 o de lista, com `pct_desconto = 0` → a comissão saía pela **taxa cheia** (4%) em vez da faixa do
 desconto. (até 15/06, ~R$591 pagos a mais; junho ainda não fechado.)
 - **POS (`NovaVendaClientV2`):** novo helper `comissaoPct` — a comissão sai do desconto vs o
-  **preço cheio** (`preco_lista_original`, que a busca já devolve). Item normal: cheio == lista →
-  idêntico a `getComissao(pct)`. Item promo: cheio > promo → entra o desconto da promo → faixa
-  certa (ex.: promo 44% → 0,5%). Aplicado em `calcItem`, `updateItem` e `applyApprovedDiscount`.
+  **preço ORIGINAL da promoção** (`preco_promo_original`, snapshot que a campanha fixou), exposto
+  agora pela `vendas/produtos/busca`. Item normal: base == preço de venda → idêntico a
+  `getComissao(pct)`. Item promo: base = original da promo → faixa certa (ex.: AJ5237 27% → 0,85%).
+  Aplicado em `calcItem`, `updateItem` e `applyApprovedDiscount`.
+- **Atenção (pego no teste de front):** a base é o snapshot da promo, **NÃO a curva atual** — a curva
+  oscila com o ouro e daria desconto/comissão errados (AJ5237 daria 21%/1,55% pela curva vs 27%/0,85%
+  correto pela promo). Validado na tela local (mostra 0,85%).
 - **Aprovação inalterada:** `preco_lista` segue = preço promo e `pct_desconto` = desconto manual,
   então a promo continua isenta do gate (decisão Jonathan 16/06) e o desconto manual EXTRA acima
   da promo ainda passa pela aprovação. Sem mexer no backend de gate. Sem migration.
