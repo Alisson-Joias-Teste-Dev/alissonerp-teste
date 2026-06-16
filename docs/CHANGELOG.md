@@ -1,6 +1,21 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/06/2026 — Versão: v2.67.6 <!-- Revisado 16/06/2026 -->
+> 📋 Última atualização automática: 16/06/2026 — Versão: v2.67.7 <!-- Revisado 16/06/2026 -->
+
+## fix(produtos): salvar pai replica TODOS os campos alterados nas variações (v2.67.7)
+
+Bug do Jonathan (16/06): ao salvar um produto PAI e mandar "replicar nos filhos", o backend só
+aplicava uma whitelist curta (situação, metal, categoria, fator, pedra-sim/não, fornecedor, medidas).
+**Peso, nome, preço de pedras, ficha, tipo NÃO replicavam** — daí variações com preço errado (ex.:
+SKU 1829, 33 variações com pedra zerada apesar do BOM ter as pedras).
+- **Backend (`produtos/[id]/route.ts`):** a propagação passou de whitelist fixa para **replicar
+  todos os campos que vieram no body** (que já vem só com o que mudou), preservando só a IDENTIDADE
+  da variação (sku, numeração, sufixo, e o "nº X" do nome). **Peso agora replica** (e o preço do
+  ouro recalcula pelo trigger). Após replicar, roda `recalcularPrecoPedras` em cada variação →
+  preço de pedras e total ficam corretos a partir do BOM.
+- **Front (`ProdutoDrawer`):** whitelist de "deve perguntar" ampliada (nome, peso, preço de pedras,
+  tipo, serviço…) e o confirm agora **lista o que foi alterado** ("Você alterou: peso, … Replicar
+  nas N variações?"). Mantém numeração/aro e o "nº" do nome por variação.
 
 ## fix(orcamento): seletor de aprovação agora CADASTRA cliente novo, não só busca (v2.67.6)
 

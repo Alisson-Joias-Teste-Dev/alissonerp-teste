@@ -570,6 +570,9 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
   // deve perguntar se replica para filhos ANTES de salvar.
   // Impacto: sem essa confirmação prévia, o usuário pode alterar dezenas de
   // variações sem perceber, ou deixar dados divergentes entre pai e filhos.
+  // REGRA (16/06/2026 — Jonathan): qualquer campo do produto (menos a identidade
+  // da variação: sku/numeração/sufixo) é replicável. O backend replica tudo que
+  // vier no body; aqui listamos só pra decidir SE pergunta e mostrar o que muda.
   const CAMPOS_REPLICAVEIS_PAI = new Set([
     "situacao",
     "tipo_metal",
@@ -582,6 +585,12 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
     "largura_aro",
     "altura_aro",
     "base",
+    "nome",
+    "peso_precificado",
+    "preco_pedras",
+    "tipo_item",
+    "preco_servico",
+    "pct_calculo_servico",
   ]);
 
   // BOM editing
@@ -996,15 +1005,25 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       // Impacto: evita prompt desnecessário quando usuário alterou apenas dados
       // não replicáveis, mantendo o fluxo rápido e previsível.
       const camposBody = Object.keys(body);
-      const temCampoReplicavelAlterado = camposBody.some((k) => CAMPOS_REPLICAVEIS_PAI.has(k));
+      const camposReplAlterados = camposBody.filter((k) => CAMPOS_REPLICAVEIS_PAI.has(k));
       const devePerguntarReplicacao = Boolean(
-        produto.eh_pai && variacoes.length > 0 && temCampoReplicavelAlterado
+        produto.eh_pai && variacoes.length > 0 && camposReplAlterados.length > 0
       );
 
       let replicarFilhos = false;
       if (devePerguntarReplicacao) {
+        const LABELS: Record<string, string> = {
+          situacao: "situação", tipo_metal: "metal", categoria_geral: "categoria",
+          categoria_precificacao: "categoria de preço", tem_pedra_preciosa: "tem pedra",
+          fator: "fator", observacao_erp: "observação", fornecedor: "fornecedor",
+          largura_aro: "largura do aro", altura_aro: "altura do aro", base: "base",
+          nome: "nome", peso_precificado: "peso", preco_pedras: "preço das pedras",
+          tipo_item: "tipo", preco_servico: "preço de serviço", pct_calculo_servico: "% serviço",
+        };
+        const lista = camposReplAlterados.map((k) => LABELS[k] ?? k).join(", ");
         replicarFilhos = confirm(
-          `Este produto pai tem ${variacoes.length} variação(ões). Deseja salvar e replicar TUDO nos filhos (campos, produção, rota, pedras e BOM)?`
+          `Você alterou: ${lista}.\n\nReplicar essas mudanças nas ${variacoes.length} variação(ões)? ` +
+          `(a numeração/aro e o "nº" do nome de cada variação são mantidos)`
         );
       }
 
