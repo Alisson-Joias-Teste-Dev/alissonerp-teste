@@ -1,6 +1,16 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/06/2026 — Versão: v2.67.5 <!-- Revisado 16/06/2026 -->
+> 📋 Última atualização automática: 16/06/2026 — Versão: v2.67.6 <!-- Revisado 16/06/2026 -->
+
+## fix(orcamento): seletor de aprovação agora CADASTRA cliente novo, não só busca (v2.67.6)
+
+Complemento do v2.67.5: o seletor abria, mas só buscava clientes JÁ cadastrados — se o cliente do
+orçamento não existia (ex.: "Victor" do ORC-0000157), a busca não trazia ninguém e continuava o beco.
+- Adicionado **"+ Cliente não cadastrado? Cadastrar e aprovar"** no modal: form com **nome
+  pré-preenchido** do orçamento + CPF + Celular → `POST /api/contatos` (só nome obrigatório,
+  sincroniza pro Tiny) → vincula e aprova. (`cadastrarEVincular` em `OrcamentoClient.tsx`.)
+- Validado na tela (ORC-0000157): seletor abre → "Cadastrar" mostra o form com "Victor Welsem Sousa
+  Mendes" já preenchido. Sem submeter (não criar dado de teste em produção).
 
 ## fix(orcamento): aprovar sem cliente vinculado abre seletor pra vincular e aprovar (v2.67.5)
 
