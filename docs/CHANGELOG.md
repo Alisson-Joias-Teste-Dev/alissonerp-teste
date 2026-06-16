@@ -1,6 +1,38 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/06/2026 — Versão: v2.67.2 <!-- Revisado 16/06/2026 -->
+> 📋 Última atualização automática: 16/06/2026 — Versão: v2.67.4 <!-- Revisado 16/06/2026 -->
+
+## fix(promocoes): base da campanha = preço de venda (curva), não preco_tiny (v2.67.4)
+
+Bug do Jonathan (16/06): na criação de campanha o "Lista"/preço original vinha do `preco_tiny`
+(campo legado do Tiny), divergente do preço real de venda (ex.: AJ4715 tiny R$3.268,75 vs venda
+R$4.780; AJ5237 tiny R$1.980 vs venda R$1.840).
+- **Backend (`expandirItensComPais`):** o snapshot `preco_original` passa a vir de
+  `vw_produtos_geral_preco.preco_venda` (curva — mesma fonte do POS e da lista de produtos), pai e
+  filhos. Vale só pra campanhas **NOVAS**; as existentes ficam como estão (decisão Jonathan 16/06).
+- **Modal (`NovaPromocaoModal`):** "Lista" mostra `preco_curva` (que o `/api/produtos` já devolve),
+  não `preco_tiny`. Validado na tela: AJ4715 mostra R$4.780,00.
+- Snapshot na criação (estável; não oscila com o ouro depois). Casa com o fix de comissão v2.67.3
+  (que lê `preco_promo_original`).
+
+## fix(vendas): comissão de item promocional usa a faixa do desconto real (v2.67.3)
+
+Bug do Jonathan: ao vender um item em PROMOÇÃO, o POS gravava o preço promocional como se fosse
+o de lista, com `pct_desconto = 0` → a comissão saía pela **taxa cheia** (4%) em vez da faixa do
+desconto. (até 15/06, ~R$591 pagos a mais; junho ainda não fechado.)
+- **POS (`NovaVendaClientV2`):** novo helper `comissaoPct` — a comissão sai do desconto vs o
+  **preço ORIGINAL da promoção** (`preco_promo_original`, snapshot que a campanha fixou), exposto
+  agora pela `vendas/produtos/busca`. Item normal: base == preço de venda → idêntico a
+  `getComissao(pct)`. Item promo: base = original da promo → faixa certa (ex.: AJ5237 27% → 0,85%).
+  Aplicado em `calcItem`, `updateItem` e `applyApprovedDiscount`.
+- **Atenção (pego no teste de front):** a base é o snapshot da promo, **NÃO a curva atual** — a curva
+  oscila com o ouro e daria desconto/comissão errados (AJ5237 daria 21%/1,55% pela curva vs 27%/0,85%
+  correto pela promo). Validado na tela local (mostra 0,85%).
+- **Aprovação inalterada:** `preco_lista` segue = preço promo e `pct_desconto` = desconto manual,
+  então a promo continua isenta do gate (decisão Jonathan 16/06) e o desconto manual EXTRA acima
+  da promo ainda passa pela aprovação. Sem mexer no backend de gate. Sem migration.
+- Regra documentada em `docs/regras-negocio/promocoes.md`. Correção dos dados de junho já gravados
+  = à parte (decisão do Jonathan, item a item — ver relatório de 15/06).
 
 ## fix(purificacao): ganho de teor não trava mais ao concluir — tolerância só vale pra perda (v2.67.2)
 

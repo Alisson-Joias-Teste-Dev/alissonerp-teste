@@ -47,14 +47,20 @@ export async function expandirItensComPais(
   if (itens.length === 0) return [];
 
   const ids = itens.map(i => i.produto_id);
-  const precosBase = await tx<{ id_produto: number; preco_tiny: string | null; eh_pai: boolean | null; erp_id: number | null }[]>`
+  // REGRA DE NEGÓCIO (16/06/2026 — Jonathan): a base ("preço original") da promoção é o
+  // PREÇO DE VENDA real (curva, vw_produtos_geral_preco.preco_venda) — a MESMA fonte do
+  // preço mostrado na lista de produtos e usada no POS. NÃO usar preco_tiny (campo legado
+  // do Tiny, divergente: ex. AJ4715 tiny=3268,75 vs venda=4780). Snapshot = preço de venda
+  // no momento de criar a campanha. Ver docs/regras-negocio/promocoes.md.
+  const precosBase = await tx<{ id_produto: number; preco_base: string | null; eh_pai: boolean | null; erp_id: number | null }[]>`
     SELECT
       p.id_produto,
-      p.preco_tiny,
+      vg.preco_venda AS preco_base,
       ep.eh_pai,
       ep.id AS erp_id
     FROM public.produtos p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+    LEFT JOIN alissonerp.vw_produtos_geral_preco vg ON vg.id_produto = p.id_produto
     WHERE p.id_produto = ANY(${ids})
   `;
 
@@ -67,7 +73,7 @@ export async function expandirItensComPais(
     if (!base) {
       throw new Error(`Produto id=${item.produto_id} nao encontrado em public.produtos`);
     }
-    const precoLista = parseFloat(base.preco_tiny ?? "0");
+    const precoLista = parseFloat(base.preco_base ?? "0");
 
     if (base.eh_pai === true) {
       if (precoLista <= 0) {
@@ -91,14 +97,15 @@ export async function expandirItensComPais(
 
   if (produtosPaisExpandir.length > 0) {
     const paiIds = produtosPaisExpandir.map(x => x.paiId);
-    const filhos = await tx<{ produto_id: number; preco_tiny: string | null; pai_produto_id: number }[]>`
+    const filhos = await tx<{ produto_id: number; preco_base: string | null; pai_produto_id: number }[]>`
       SELECT
         filho_ep.produto_id,
-        p.preco_tiny,
+        vgf.preco_venda AS preco_base,
         pai_ep.produto_id AS pai_produto_id
       FROM alissonerp.erp_produtos pai_ep
       INNER JOIN alissonerp.erp_produtos filho_ep ON filho_ep.parent_id = pai_ep.id
       INNER JOIN public.produtos p ON p.id_produto = filho_ep.produto_id
+      LEFT JOIN alissonerp.vw_produtos_geral_preco vgf ON vgf.id_produto = filho_ep.produto_id
       WHERE pai_ep.produto_id = ANY(${paiIds})
         AND p.situacao = 'A'
     `;
@@ -106,7 +113,7 @@ export async function expandirItensComPais(
     for (const filho of filhos) {
       const pai = produtosPaisExpandir.find(x => x.paiId === Number(filho.pai_produto_id));
       if (!pai) continue;
-      const precoListaFilho = parseFloat(filho.preco_tiny ?? "0");
+      const precoListaFilho = parseFloat(filho.preco_base ?? "0");
       if (precoListaFilho <= 0) continue; // Filho sem preco -> pula
       const precoPromoFilho = Math.round(precoListaFilho * (1 - pai.pct) * 100) / 100;
       resultado.push({

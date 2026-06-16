@@ -48,6 +48,10 @@ export async function GET(req: NextRequest) {
       COALESCE(ecc.controla_estoque, true) AS controla_estoque,
       -- Promocao vigente (migration 248) + regra de pagamento (migration 257)
       CASE WHEN vpv.em_promocao THEN vpv.preco_vigente ELSE NULL END AS preco_promo,
+      -- Preço ORIGINAL definido na promoção (snapshot) — base do desconto da promo
+      -- para a comissão. NÃO usar a curva atual (oscila com o ouro). Ver
+      -- docs/regras-negocio/promocoes.md.
+      CASE WHEN vpv.em_promocao THEN vpv.preco_promo_original ELSE NULL END AS preco_promo_original,
       COALESCE(vpv.em_promocao, false) AS em_promocao,
       vpv.nome_campanha AS promocao_nome,
       CASE WHEN vpv.em_promocao THEN vpv.max_parcelas_cartao ELSE NULL END AS max_parcelas_promo,
@@ -124,6 +128,7 @@ export async function GET(req: NextRequest) {
       rfid_disponivel:   Number(p.rfid_disponivel ?? 0),
       preco_lista_original: p.preco_lista_original != null ? Number(p.preco_lista_original) : null,
       preco_promo:        p.preco_promo        != null ? Number(p.preco_promo)        : null,
+      preco_promo_original: p.preco_promo_original != null ? Number(p.preco_promo_original) : null,
       em_promocao:        Boolean(p.em_promocao),
       promocao_nome:      p.promocao_nome ?? null,
       max_parcelas_promo: p.max_parcelas_promo != null ? Number(p.max_parcelas_promo) : null,
