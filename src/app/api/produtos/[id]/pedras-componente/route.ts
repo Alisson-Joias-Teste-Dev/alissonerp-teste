@@ -109,6 +109,23 @@ export async function PUT(
     `;
   }
 
+  // SINCRONIZA preco_pedras com o subtotal das pedras-componente (16/06/2026 —
+  // Jonathan). Antes, o PUT gravava as pedras mas NÃO atualizava preco_pedras, então
+  // o preço da peça ficava defasado/zerado — foi por isso que as variações do 1829
+  // (que TÊM as pedras-componente) apareciam com pedra = R$0. Recalcula a partir do
+  // que foi efetivamente gravado. IMPACTO SE REMOVIDO: preco_pedras volta a divergir.
+  const [{ subtotal }] = await sql<{ subtotal: string }[]>`
+    SELECT COALESCE(SUM(quantidade * preco_unitario_snapshot), 0)::numeric AS subtotal
+    FROM alissonerp.produto_pedras_componente
+    WHERE produto_id = ${produtoId}
+  `;
+  await sql`
+    UPDATE public.produtos
+    SET preco_pedras     = ${Number(subtotal)},
+        preco_total_sync = COALESCE(preco_sync, 0) + ${Number(subtotal)}
+    WHERE id_produto = ${produtoId}
+  `;
+
   return NextResponse.json({ ok: true, count: pedras.length });
 }
 

@@ -698,86 +698,79 @@ export async function PATCH(
             if (filhos.length > 0) {
               const filhoIds = filhos.map(f => f.produto_id);
 
-              // REGRA DE NEGÓCIO: whitelist de campos replicáveis.
-              // Campos identitários de variação (sku, numeração, sufixo) NÃO
-              // podem ser tocados para preservar integridade pai/filho.
-              // Impacto: alterar esses identificadores quebra rastreabilidade.
-              // public.produtos
-              if (pubUpdate.situacao !== undefined) {
-                await sql`
-                  UPDATE public.produtos SET situacao = ${pubUpdate.situacao as string}
-                  WHERE id_produto = ANY(${filhoIds})
-                `;
+              // REGRA DE NEGÓCIO (16/06/2026 — Jonathan): replicar TODOS os campos
+              // que o usuário ALTEROU (o body já vem só com o que mudou), não uma
+              // whitelist curta — era o bug de "salvou no pai e não pegou tudo nas
+              // variações". Preserva só a IDENTIDADE da variação: sku, numeração,
+              // sufixo e o "nº X" do nome. peso REPLICA (o preço do ouro recalcula
+              // via trigger); pedras recalculam por variação a partir do BOM.
+              // IMPACTO SE REDUZIDO: volta a divergência pai/filhos.
+              const IDENT_PUB = new Set(["sku", "id_produto", "id_api_produto"]);
+              // public.produtos: replica tudo que mudou, menos nome (tratado à parte).
+              const pubRepl: Record<string, unknown> = {};
+              for (const [k, v] of Object.entries(pubUpdate)) {
+                if (k === "nome" || IDENT_PUB.has(k)) continue;
+                pubRepl[k] = v;
               }
-              if (pubUpdate.tipo_metal !== undefined) {
-                await sql`
-                  UPDATE public.produtos SET tipo_metal = ${pubUpdate.tipo_metal as string | null}
-                  WHERE id_produto = ANY(${filhoIds})
-                `;
-              }
-              if (pubUpdate.categoria !== undefined) {
-                await sql`
-                  UPDATE public.produtos SET categoria = ${pubUpdate.categoria as string | null}
-                  WHERE id_produto = ANY(${filhoIds})
-                `;
-              }
-              if (pubUpdate.categoria_precificacao !== undefined) {
-                await sql`
-                  UPDATE public.produtos SET categoria_precificacao = ${pubUpdate.categoria_precificacao as string | null}
-                  WHERE id_produto = ANY(${filhoIds})
-                `;
-              }
-              if (pubUpdate.tem_pedra_preciosa !== undefined) {
-                await sql`
-                  UPDATE public.produtos SET tem_pedra_preciosa = ${pubUpdate.tem_pedra_preciosa as boolean}
-                  WHERE id_produto = ANY(${filhoIds})
-                `;
-                for (const fid of filhoIds) {
-                  await recalcularPrecoPedras(fid);
-                }
-              }
-              if (pubUpdate.fator !== undefined) {
-                await sql`
-                  UPDATE public.produtos SET fator = ${pubUpdate.fator as number | null}
-                  WHERE id_produto = ANY(${filhoIds})
-                `;
-              }
-              if (pubUpdate.peso_precificado !== undefined) {
-                // REGRA DE NEGÓCIO: v1 NÃO replica peso para filhos.
-                // Peso da variação costuma seguir grade (numeração/comprimento),
-                // então copiar peso do pai pode distorcer preço e custo.
-                // Impacto: preço incorreto em massa nas variações.
+              if (Object.keys(pubRepl).length > 0) {
+                await sql`UPDATE public.produtos SET ${sql(pubRepl)} WHERE id_produto = ANY(${filhoIds})`;
               }
 
-              // erp_produtos (fornecedor / observacao_erp)
-              if (erpUpdate.fornecedor !== undefined || erpUpdate.observacao_erp !== undefined) {
-                const temForn = await colunaExiste("alissonerp", "erp_produtos", "fornecedor");
-                if (temForn) {
-                  await sql`
-                    UPDATE alissonerp.erp_produtos SET
-                      fornecedor     = CASE WHEN ${erpUpdate.fornecedor !== undefined} THEN ${erpUpdate.fornecedor as string | null} ELSE fornecedor END,
-                      observacao_erp = CASE WHEN ${erpUpdate.observacao_erp !== undefined} THEN ${erpUpdate.observacao_erp as string | null} ELSE observacao_erp END,
-                      date_updated   = NOW()
-                    WHERE produto_id = ANY(${filhoIds})
-                  `;
-                } else {
-                  await sql`
-                    UPDATE alissonerp.erp_produtos SET
-                      observacao_erp = CASE WHEN ${erpUpdate.observacao_erp !== undefined} THEN ${erpUpdate.observacao_erp as string | null} ELSE observacao_erp END,
-                      date_updated   = NOW()
-                    WHERE produto_id = ANY(${filhoIds})
-                  `;
+              // nome: mantém o "nº X" de cada variação (troca só a base vinda do pai).
+              if (pubUpdate.nome !== undefined && pubUpdate.nome) {
+                const baseNome = String(pubUpdate.nome).trim();
+                const sufs = await sql<{ produto_id: number; sufixo_variacao: string | null }[]>`
+                  SELECT produto_id, sufixo_variacao FROM alissonerp.erp_produtos WHERE produto_id = ANY(${filhoIds})
+                `;
+                for (const s of sufs) {
+                  const num = (s.sufixo_variacao ?? "").replace(/\D/g, "");
+                  const novoNome = num ? `${baseNome} nº ${num}` : baseNome;
+                  await sql`UPDATE public.produtos SET nome = ${novoNome} WHERE id_produto = ${s.produto_id as number}`;
                 }
               }
 
-              if (erpUpdate.largura_aro !== undefined || erpUpdate.altura_aro !== undefined || erpUpdate.base !== undefined) {
+              // erp_produtos: replica o que mudou (fornecedor/obs/medidas), sem tocar identidade.
+              const IDENT_ERP = new Set(["produto_id", "id", "parent_id", "eh_pai", "eh_variacao", "sufixo_variacao", "numeracao"]);
+              const erpRepl: Record<string, unknown> = {};
+              for (const [k, v] of Object.entries(erpUpdate)) {
+                if (IDENT_ERP.has(k)) continue;
+                erpRepl[k] = v;
+              }
+              if ("fornecedor" in erpRepl && !(await colunaExiste("alissonerp", "erp_produtos", "fornecedor"))) {
+                delete erpRepl.fornecedor;
+              }
+              if (Object.keys(erpRepl).length > 0) {
+                await sql`UPDATE alissonerp.erp_produtos SET ${sql(erpRepl)}, date_updated = NOW() WHERE produto_id = ANY(${filhoIds})`;
+              }
+
+              // Propaga as PEDRAS-COMPONENTE (pedras precificadas que definem o
+              // preco_pedras — alissonerp.produto_pedras_componente) do pai pras
+              // variações e SINCRONIZA preco_pedras de cada uma. É AQUI que mora o
+              // preço das pedras (NÃO no produto_composicao, cujas pedras estão sem
+              // preco_compra_usd). Sem isso, a variação fica com preco_pedras=0 (bug
+              // do 1829). IMPACTO SE REMOVIDO: variações sem preço de pedra.
+              const pedrasPai = await sql<{ pedra_produto_id: number; quantidade: number; preco_unitario_snapshot: string }[]>`
+                SELECT pedra_produto_id, quantidade, preco_unitario_snapshot
+                FROM alissonerp.produto_pedras_componente
+                WHERE produto_id = ${produtoId}
+              `;
+              const subtotalPedras = Math.round(
+                pedrasPai.reduce((s, p) => s + Number(p.preco_unitario_snapshot) * Number(p.quantidade), 0) * 100,
+              ) / 100;
+              for (const fid of filhoIds) {
+                await sql`DELETE FROM alissonerp.produto_pedras_componente WHERE produto_id = ${fid}`;
+                for (const pp of pedrasPai) {
+                  await sql`
+                    INSERT INTO alissonerp.produto_pedras_componente
+                      (produto_id, pedra_produto_id, quantidade, preco_unitario_snapshot)
+                    VALUES (${fid}, ${pp.pedra_produto_id}, ${pp.quantidade}, ${pp.preco_unitario_snapshot})
+                  `;
+                }
                 await sql`
-                  UPDATE alissonerp.erp_produtos SET
-                    largura_aro  = CASE WHEN ${erpUpdate.largura_aro !== undefined} THEN ${erpUpdate.largura_aro as number | null} ELSE largura_aro END,
-                    altura_aro   = CASE WHEN ${erpUpdate.altura_aro !== undefined} THEN ${erpUpdate.altura_aro as number | null} ELSE altura_aro END,
-                    base         = CASE WHEN ${erpUpdate.base !== undefined} THEN ${erpUpdate.base as number | null} ELSE base END,
-                    date_updated = NOW()
-                  WHERE produto_id = ANY(${filhoIds})
+                  UPDATE public.produtos
+                  SET preco_pedras     = ${subtotalPedras},
+                      preco_total_sync = COALESCE(preco_sync, 0) + ${subtotalPedras}
+                  WHERE id_produto = ${fid}
                 `;
               }
             }
