@@ -259,6 +259,93 @@ export default function OrcamentoClient({
   const [showNovoMenu, setShowNovoMenu] = useState(false);
   const [rejectId, setRejectId] = useState<number | null>(null);
   const [rejectMotivo, setRejectMotivo] = useState("");
+
+  // ── Aprovar pela lista com seletor de cliente (decisão Jonathan 16/06/2026) ──
+  // REGRA: aprovar um orçamento cria uma venda → exige cliente CADASTRADO vinculado.
+  // Quando o orçamento só tem nome digitado (cliente_id nulo), o backend barra com
+  // 422 "Vincule um cliente". Em vez do beco sem saída, abrimos um seletor pra
+  // buscar/vincular um cliente cadastrado e aprovar de uma vez.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [aprovarOrc, setAprovarOrc] = useState<Record<string, any> | null>(null);
+  const [aprovarBusca, setAprovarBusca] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [aprovarResults, setAprovarResults] = useState<any[]>([]);
+  const [aprovarMsg, setAprovarMsg] = useState("");
+  // Cliente não cadastrado (ex.: nome digitado que não existe no cadastro): cadastra
+  // na hora (POST /api/contatos → sincroniza pro Tiny) e aprova. Nome pré-preenchido.
+  const [aprovarNovo, setAprovarNovo] = useState(false);
+  const [aprovarNovoForm, setAprovarNovoForm] = useState({ nome: "", cpf_cnpj: "", celular: "" });
+
+  async function aprovarPatchOrc(orcId: number) {
+    const res = await fetch(`/api/orcamento/${orcId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "aprovado" }),
+    });
+    const data = await res.json().catch(() => ({})) as { error?: string; numero_venda?: string };
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function iniciarAprovacao(o: Record<string, any>) {
+    if (!confirm(`Aprovar ${o.numero_orcamento}? Será criada uma venda pré-preenchida no PDV.`)) return;
+    const r = await aprovarPatchOrc(o.id);
+    if (r.ok) {
+      alert(`Orçamento aprovado! Venda #${r.data.numero_venda} criada como rascunho. Abra a venda para preencher pagamento e aprovar.`);
+      fetchOrcamentos();
+      return;
+    }
+    // 422 "Vincule um cliente" → abre o seletor em vez de dar beco sem saída.
+    if (r.status === 422 && /vincule um cliente/i.test(r.data.error ?? "")) {
+      setAprovarOrc(o); setAprovarBusca(""); setAprovarResults([]); setAprovarMsg("");
+      setAprovarNovo(false);
+      setAprovarNovoForm({ nome: o.nome_cliente ?? "", cpf_cnpj: "", celular: "" });
+      return;
+    }
+    alert(r.data.error ?? "Erro ao aprovar");
+  }
+
+  async function buscarClientesAprovar(termo: string) {
+    setAprovarBusca(termo);
+    if (termo.trim().length < 2) { setAprovarResults([]); return; }
+    const res = await fetch(`/api/vendas/clientes/busca?q=${encodeURIComponent(termo.trim())}`).catch(() => null);
+    const data = res?.ok ? await res.json().catch(() => []) : [];
+    setAprovarResults(Array.isArray(data) ? data : []);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function vincularEAprovar(c: any) {
+    if (!aprovarOrc) return;
+    const idCliente = c.id_contato ?? c.id;
+    if (idCliente == null) { setAprovarMsg("Cliente sem ID — escolha outro."); return; }
+    setAprovarMsg("Vinculando e aprovando…");
+    // Um PATCH só: o route vincula o cliente_id e então processa status=aprovado.
+    const res = await fetch(`/api/orcamento/${aprovarOrc.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cliente_id: Number(idCliente), status: "aprovado" }),
+    });
+    const data = await res.json().catch(() => ({})) as { error?: string; numero_venda?: string };
+    if (!res.ok) { setAprovarMsg(data.error ?? "Erro ao aprovar"); return; }
+    const numero = aprovarOrc.numero_orcamento;
+    setAprovarOrc(null); setAprovarBusca(""); setAprovarResults([]); setAprovarMsg(""); setAprovarNovo(false);
+    alert(`${numero} aprovado! Venda #${data.numero_venda} criada como rascunho.`);
+    fetchOrcamentos();
+  }
+
+  // Cliente não existe no cadastro → cria (POST /api/contatos, só nome obrigatório,
+  // sincroniza pro Tiny via fila) e já vincula+aprova.
+  async function cadastrarEVincular() {
+    if (!aprovarOrc) return;
+    if (!aprovarNovoForm.nome.trim()) { setAprovarMsg("Nome é obrigatório."); return; }
+    setAprovarMsg("Cadastrando cliente…");
+    const resC = await fetch("/api/contatos", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(aprovarNovoForm),
+    });
+    const novo = await resC.json().catch(() => ({}));
+    if (!resC.ok) { setAprovarMsg((novo as { error?: string }).error ?? "Falha ao cadastrar cliente"); return; }
+    // /api/contatos retorna { id, nome, ... } — vincularEAprovar aceita id_contato ?? id.
+    await vincularEAprovar(novo);
+  }
   const [editingOrcId, setEditingOrcId] = useState<number | null>(null);
   // updated_at do orçamento carregado — usado no PUT como guard otimista
   // (ADR 0006). Atualizado quando o save retorna o novo carimbo.
@@ -2038,18 +2125,7 @@ export default function OrcamentoClient({
                       <td className="px-4 py-2.5">
                         {o.status === "rascunho" || o.status === "enviado" ? (
                           <div className="flex gap-1">
-                            <button onClick={async (e) => {
-                              e.stopPropagation();
-                              if (!confirm(`Aprovar ${o.numero_orcamento}? Será criada uma venda pré-preenchida no PDV.`)) return;
-                              const res = await fetch(`/api/orcamento/${o.id}`, {
-                                method: "PATCH", headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ status: "aprovado" }),
-                              });
-                              const data = await res.json().catch(() => ({})) as { error?: string; numero_venda?: string; venda_id?: number };
-                              if (!res.ok) { alert(data.error ?? "Erro ao aprovar"); return; }
-                              alert(`Orçamento aprovado! Venda #${data.numero_venda} criada como rascunho. Abra a venda para preencher pagamento e aprovar.`);
-                              fetchOrcamentos();
-                            }}
+                            <button onClick={(e) => { e.stopPropagation(); void iniciarAprovacao(o); }}
                               className="text-[10px] px-2 py-1 rounded font-semibold bg-green-50 text-green-700 hover:bg-green-100">
                               Aprovar
                             </button>
@@ -2119,6 +2195,61 @@ export default function OrcamentoClient({
                   setRejectId(null); setRejectMotivo("");
                   fetchOrcamentos();
                 }} className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: "#EF4444" }}>Rejeitar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {aprovarOrc && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setAprovarOrc(null)}>
+            <div className="bg-white rounded-xl border shadow-xl w-full max-w-md mx-4 p-5" style={{ borderColor: C.cremeBorder }} onClick={e => e.stopPropagation()}>
+              <h3 className="text-base font-semibold mb-1" style={{ color: "#1A1A1A" }}>Vincular cliente e aprovar</h3>
+              <p className="text-xs mb-3" style={{ color: "#6B7280" }}>
+                {aprovarOrc.numero_orcamento}: este orçamento não tem um cliente cadastrado vinculado
+                {aprovarOrc.nome_cliente ? ` (nome digitado: "${aprovarOrc.nome_cliente}")` : ""}. Busque e selecione um cliente cadastrado para aprovar.
+              </p>
+              <input autoFocus value={aprovarBusca} onChange={e => void buscarClientesAprovar(e.target.value)}
+                placeholder="Buscar cliente por nome ou CPF (mín. 2 letras)"
+                className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none mb-2"
+                style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+              <div className="max-h-56 overflow-y-auto border rounded-lg mb-3" style={{ borderColor: C.cremeBorder }}>
+                {aprovarResults.length === 0 && aprovarBusca.trim().length >= 2 ? (
+                  <div className="px-3 py-3 text-xs" style={{ color: "#6B7280" }}>
+                    Nenhum cliente encontrado. Cadastre o cliente primeiro e tente de novo.
+                  </div>
+                ) : aprovarResults.map((c) => (
+                  <button key={c.id_contato ?? c.id} onClick={() => void vincularEAprovar(c)}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b last:border-b-0" style={{ borderColor: C.cremeBorder }}>
+                    <span className="text-gray-900">{c.nome}</span>
+                    {c.cpf_cnpj ? <span className="text-gray-400 text-xs ml-2">{c.cpf_cnpj}</span> : null}
+                  </button>
+                ))}
+              </div>
+              {!aprovarNovo ? (
+                <button onClick={() => { setAprovarNovo(true); setAprovarMsg(""); }}
+                  className="text-xs font-semibold mb-2" style={{ color: C.esmeralda }}>
+                  + Cliente não cadastrado? Cadastrar e aprovar
+                </button>
+              ) : (
+                <div className="border rounded-lg p-3 mb-2 space-y-2" style={{ borderColor: C.cremeBorder }}>
+                  <p className="text-xs font-semibold" style={{ color: "#374151" }}>Cadastrar novo cliente</p>
+                  <input value={aprovarNovoForm.nome} onChange={e => setAprovarNovoForm(f => ({ ...f, nome: e.target.value }))}
+                    placeholder="Nome*" className="w-full border rounded px-2 py-1.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                  <div className="flex gap-2">
+                    <input value={aprovarNovoForm.cpf_cnpj} onChange={e => setAprovarNovoForm(f => ({ ...f, cpf_cnpj: e.target.value }))}
+                      placeholder="CPF/CNPJ" className="w-1/2 border rounded px-2 py-1.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                    <input value={aprovarNovoForm.celular} onChange={e => setAprovarNovoForm(f => ({ ...f, celular: e.target.value }))}
+                      placeholder="Celular (WhatsApp)" className="w-1/2 border rounded px-2 py-1.5 text-sm outline-none" style={{ borderColor: C.cremeBorder, color: "#374151" }} />
+                  </div>
+                  <button onClick={() => void cadastrarEVincular()}
+                    className="w-full px-3 py-2 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: C.esmeralda }}>
+                    Cadastrar e aprovar
+                  </button>
+                </div>
+              )}
+              {aprovarMsg && <p className="text-xs mb-2" style={{ color: "#B45309" }}>{aprovarMsg}</p>}
+              <div className="flex justify-end">
+                <button onClick={() => setAprovarOrc(null)} className="px-4 py-2 rounded-lg text-sm font-medium border" style={{ borderColor: C.cremeBorder, color: "#6B7280" }}>Cancelar</button>
               </div>
             </div>
           </div>

@@ -1,6 +1,28 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/06/2026 — Versão: v2.67.4 <!-- Revisado 16/06/2026 -->
+> 📋 Última atualização automática: 16/06/2026 — Versão: v2.67.6 <!-- Revisado 16/06/2026 -->
+
+## fix(orcamento): seletor de aprovação agora CADASTRA cliente novo, não só busca (v2.67.6)
+
+Complemento do v2.67.5: o seletor abria, mas só buscava clientes JÁ cadastrados — se o cliente do
+orçamento não existia (ex.: "Victor" do ORC-0000157), a busca não trazia ninguém e continuava o beco.
+- Adicionado **"+ Cliente não cadastrado? Cadastrar e aprovar"** no modal: form com **nome
+  pré-preenchido** do orçamento + CPF + Celular → `POST /api/contatos` (só nome obrigatório,
+  sincroniza pro Tiny) → vincula e aprova. (`cadastrarEVincular` em `OrcamentoClient.tsx`.)
+- Validado na tela (ORC-0000157): seletor abre → "Cadastrar" mostra o form com "Victor Welsem Sousa
+  Mendes" já preenchido. Sem submeter (não criar dado de teste em produção).
+
+## fix(orcamento): aprovar sem cliente vinculado abre seletor pra vincular e aprovar (v2.67.5)
+
+Bug do Jonathan (16/06): aprovar um orçamento pela lista dava "Vincule um cliente antes de aprovar"
+mesmo mostrando o nome — porque o orçamento tinha só `nome_cliente` (texto) e não `cliente_id` (FK).
+Beco sem saída.
+- **`OrcamentoClient` (lista):** o "Aprovar" agora reage ao 422 e abre um **seletor de cliente** (busca
+  em `/api/vendas/clientes/busca`); ao escolher, vincula e aprova num PATCH só
+  (`{cliente_id, status:'aprovado'}`). Se o cliente não existir, a mensagem orienta a cadastrar.
+  Espelha o modal de Rejeitar; reusa a busca de cliente já existente. Sem backend novo.
+- Regra: aprovar = vira venda → exige cliente CADASTRADO (`public.contatos` é readonly/Tiny). Doc em
+  `docs/regras-negocio/orcamento.md`. Validado na tela (ORC-0000157: abre o seletor, busca traz clientes).
 
 ## fix(promocoes): base da campanha = preço de venda (curva), não preco_tiny (v2.67.4)
 
