@@ -390,6 +390,7 @@ Regra: se o commit altera codigo mas nao atualiza docs afetadas, o trabalho NAO 
 
 - **Mapeamento exaustivo do banco:** `docs/db-mapping/` — 7 schemas, 377 tabelas, 321 funcoes (com corpo), 148 triggers, 122 views, 234 RLS policies, cross-reference com codigo. Comecar em `docs/db-mapping/README.md`.
 - **Schema doc resumido por categoria:** `docs/schema/` (alissonerp-vendas, -pcp, -estoque, -admin, -ordens, -outros, public, directus)
+- **Regras de negócio (mantido à MÃO, por módulo):** `docs/regras-negocio/` (ex.: `comercial.md`) — o PORQUÊ/COMO do negócio (≠ schema auto-gerado). LER o arquivo do módulo ANTES de mexer nele e MANTER atualizado (regra nova → acrescenta; mudou → corrige).
 - **Arquitetura completa:** `docs/arquitetura.md` (~155KB)
 - **Dominio ERP (schemas, fluxos, tabelas):** `docs/claude-memory/MEMORY.md`
 - **Memory files:** `~/.claude/projects/.../memory/`
