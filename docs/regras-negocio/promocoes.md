@@ -21,7 +21,7 @@ Campanhas de **desconto por janela de tempo**, com **reversão automática** ao 
   - `cancelada` → **cancelada**
 - **Reversão automática = sem cron.** A view só aplica a promo quando `situacao_manual='agendada'` E `CURRENT_DATE` entre início e fim. Passou a `data_fim`, a view deixa de aplicar e o preço volta ao de lista. Encerrar/cancelar muda `situacao_manual` e tira a promo na hora.
 - **Produto pai/filho** (`erp_produtos.eh_pai`/`parent_id`): aplica o **mesmo % de desconto** do pai em todas as variações filhas (`preco_promo_filho = preco_lista_filho * (1 - pct)`). Pai sem `preco_tiny>0` → erro (não dá pra calcular o pct).
-- **`preco_original`** = snapshot do preço de lista/curva no momento de criar a promo (não recalcula depois).
+- **`preco_original`** = snapshot do **preço de VENDA real (curva, `vw_produtos_geral_preco.preco_venda`)** no momento de criar a campanha — NÃO o `preco_tiny` (campo legado do Tiny, divergente). Corrigido 16/06/2026 (v2.67.4); campanhas criadas ANTES disso têm `preco_original` na base antiga (preco_tiny) e ficam como estão. Snapshot estável (não recalcula se o ouro oscilar depois).
 - **Conflito:** 1 produto não pode estar em duas promos `agendada` com janelas sobrepostas (`checarConflitoPromocoes` → 409).
 - **`max_parcelas_cartao`:** a campanha pode limitar o nº de parcelas no cartão (1–12) pros itens em promo.
 - **Permissão:** só full-access (admin/desenvolvedor/diretor) cria/edita/encerra/cancela; qualquer autenticado lê.

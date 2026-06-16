@@ -18,7 +18,8 @@ interface ProdutoBusca {
   id_produto: number;
   sku: string;
   nome: string;
-  preco_tiny: string | null;
+  /** Preço de venda real (curva) — base "Lista"/original da promoção (não o preco_tiny legado). */
+  preco_curva: number | string | null;
   eh_pai?: boolean | null;
 }
 
@@ -104,11 +105,11 @@ export default function NovaPromocaoModal({
         const res = await fetch(`/api/produtos?busca=${encodeURIComponent(busca.trim())}&limit=20`);
         if (!res.ok) { setResultados([]); return; }
         const data = await res.json();
-        setResultados((data.produtos ?? []).map((p: { id_produto: number; sku: string; nome: string; preco_tiny: string | null; eh_pai: boolean | null }) => ({
+        setResultados((data.produtos ?? []).map((p: { id_produto: number; sku: string; nome: string; preco_curva: number | string | null; eh_pai: boolean | null }) => ({
           id_produto: Number(p.id_produto),
           sku: p.sku,
           nome: p.nome,
-          preco_tiny: p.preco_tiny,
+          preco_curva: p.preco_curva,
           eh_pai: p.eh_pai ?? false,
         })));
       } catch { setResultados([]); }
@@ -119,7 +120,7 @@ export default function NovaPromocaoModal({
 
   function adicionarItem(p: ProdutoBusca) {
     if (itens.some(i => i.produto_id === p.id_produto)) return;
-    const preco = parseFloat(p.preco_tiny ?? "0") || 0;
+    const preco = Number(p.preco_curva ?? 0) || 0;
     setItens(prev => [...prev, {
       produto_id: p.id_produto,
       sku: p.sku,
@@ -341,7 +342,7 @@ export default function NovaPromocaoModal({
                       <span className="text-gray-900">{p.nome}</span>
                       {p.eh_pai && <span className="ml-1 text-[9px] uppercase font-bold text-blue-600">PAI</span>}
                     </div>
-                    <span className="text-gray-700">{fmtMoeda(parseFloat(p.preco_tiny ?? "0"))}</span>
+                    <span className="text-gray-700">{fmtMoeda(Number(p.preco_curva ?? 0))}</span>
                   </button>
                 ))}
               </div>
