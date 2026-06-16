@@ -849,8 +849,14 @@ function ModalConcluir({
   const retornadoNum = parseFloat(pesoRetornado) || 0;
   const perda = pesoEsperado > 0 ? pesoEsperado - retornadoNum : 0;
   const perdaPct = pesoEsperado > 0 ? (perda / pesoEsperado) * 100 : 0;
+  // ehGanho: retornou MAIS que o esperado (perda negativa) = ganho de teor, bom resultado.
+  // Mostrado como "Ganho +Xg", nunca como "Perda -Xg". A API libera ganho sem travar (regra 15/06).
+  const ehGanho = retornadoNum > 0 && perda < 0;
+  const ganho = -perda;        // peso ganho (positivo) quando ehGanho
+  const ganhoPct = -perdaPct;  // % de ganho (positivo) quando ehGanho
   const perdaAlta = perdaPct > 2;
-  const perdaBaixa = retornadoNum > 0 && perdaPct < 1;
+  // perdaBaixa: rendimento ótimo (perda pequena, sem ser ganho) — ganho tem seu próprio destaque.
+  const perdaBaixa = retornadoNum > 0 && perdaPct >= 0 && perdaPct < 1;
 
   async function chamarIA(file: File, peso: number) {
     setIaLoading(true);
@@ -952,26 +958,39 @@ function ModalConcluir({
           {/* Resultado em tempo real */}
           {retornadoNum > 0 && (
             <div style={{
-              background: perdaAlta ? "#fee2e2" : perdaBaixa ? "#dcfce7" : P.bg,
-              border: `1px solid ${perdaAlta ? P.vermelho : perdaBaixa ? P.verde : P.border}`,
+              background: perdaAlta ? "#fee2e2" : (perdaBaixa || ehGanho) ? "#dcfce7" : P.bg,
+              border: `1px solid ${perdaAlta ? P.vermelho : (perdaBaixa || ehGanho) ? P.verde : P.border}`,
               borderRadius: 8,
               padding: "10px 14px",
               fontSize: 13,
             }}>
               <Row label="Esperado" value={formatPeso(pesoEsperado)} />
               <Row label="Retornado" value={formatPeso(retornadoNum)} bold />
-              <Row
-                label="Perda processo"
-                value={`${formatPeso(perda)} (${perdaPct.toFixed(2)}%)`}
-                color={perdaAlta ? P.vermelho : perdaBaixa ? P.verde : P.text}
-                bold
-              />
-              {perdaAlta && (
+              {/* Ganho de teor: retornou mais que o esperado → mostra "Ganho +Xg" em verde, nunca "Perda -Xg". */}
+              {ehGanho ? (
+                <Row
+                  label="Ganho de teor"
+                  value={`+${formatPeso(ganho)} (+${ganhoPct.toFixed(2)}%)`}
+                  color={P.verde}
+                  bold
+                />
+              ) : (
+                <Row
+                  label="Perda processo"
+                  value={`${formatPeso(perda)} (${perdaPct.toFixed(2)}%)`}
+                  color={perdaAlta ? P.vermelho : perdaBaixa ? P.verde : P.text}
+                  bold
+                />
+              )}
+              {ehGanho && (
+                <div style={{ color: P.verde, marginTop: 6, fontWeight: 600 }}>Ganho de teor — rendimento acima do esperado</div>
+              )}
+              {!ehGanho && perdaAlta && (
                 <div style={{ display: "flex", alignItems: "center", gap: 6, color: P.vermelho, marginTop: 6, fontWeight: 600 }}>
                   <AlertTriangle size={14} /> Perda acima de 2% — verificar processo
                 </div>
               )}
-              {perdaBaixa && (
+              {!ehGanho && perdaBaixa && (
                 <div style={{ color: P.verde, marginTop: 6, fontWeight: 600 }}>Excelente rendimento (abaixo de 1%)</div>
               )}
             </div>

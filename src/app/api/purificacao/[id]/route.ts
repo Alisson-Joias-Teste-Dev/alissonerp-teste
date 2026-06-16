@@ -129,10 +129,14 @@ export async function PATCH(
 
   const peso_esperado = Number((purif as { peso_esperado_24k: string | number }).peso_esperado_24k);
 
-  // Validar que retornado não excede esperado × 1.05 (5% tolerância)
-  if (peso_retornado_24k > peso_esperado * 1.05) {
+  // Regra de negócio: a tolerância só barra PERDA (ouro voltou com MENOS peso que o esperado).
+  // GANHO de teor (retornado >= esperado) passa livre — é o bom resultado da sangria, nunca deve travar.
+  // Trava só quando a perda passa de 5% (retornado < esperado × 0,95).
+  // IMPACTO se removido/invertido: voltaria a barrar ganho de teor (bug reportado 15/06) OU deixaria
+  // passar perda absurda por erro de digitação sem nenhuma proteção.
+  if (peso_retornado_24k < peso_esperado * 0.95) {
     return NextResponse.json(
-      { error: `Peso retornado (${peso_retornado_24k}g) excede o esperado com tolerância (${(peso_esperado * 1.05).toFixed(2)}g)` },
+      { error: `Peso retornado (${peso_retornado_24k}g) está abaixo do esperado além da tolerância de 5% (mínimo ${(peso_esperado * 0.95).toFixed(2)}g)` },
       { status: 400 },
     );
   }

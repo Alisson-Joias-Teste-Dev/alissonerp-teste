@@ -1,6 +1,24 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 15/06/2026 — Versão: v2.66.12 <!-- Revisado 15/06/2026 -->
+> 📋 Última atualização automática: 16/06/2026 — Versão: v2.67.2 <!-- Revisado 16/06/2026 -->
+
+## fix(purificacao): ganho de teor não trava mais ao concluir — tolerância só vale pra perda (v2.67.2)
+
+Bug do Jonathan (15/06): no módulo de PURIFICAÇÃO (e na sua gêmea LIGAÇÃO), ao concluir, a
+trava de tolerância de 5% barrava o **ganho** de teor — ex.: esperado 23,09g, retornado
+24,54g (+6,28%, ótimo rendimento) dava erro "excede o esperado com tolerância (24,24g)" e
+não deixava concluir.
+- **Regra nova:** ganho (retornado ≥ esperado) **passa livre**, nunca trava. A tolerância de
+  5% agora só barra **perda** — conclui se `retornado ≥ esperado × 0,95`; barra abaixo disso.
+- **API (gêmeas):** `purificacao/[id]/route.ts` (24k) e `purificacao/ligacao/[id]/route.ts`
+  (18k) — condição trocada de `> esperado × 1,05` (barrava ganho) para `< esperado × 0,95`
+  (barra perda > 5%) + mensagem nova ("abaixo do esperado além da tolerância de 5%").
+- **Front (painéis em tempo real):** `PurificacaoClient.tsx` e `LigacaoTab.tsx` — num ganho a
+  tela mostrava "Perda −1,45g" (perda negativa). Agora mostra **"Ganho de teor +1,45g
+  (+6,28%)"** em verde. Aviso de perda >2% e "excelente rendimento <1%" só aparecem quando
+  NÃO é ganho.
+- Sem migration, sem mudança de schema. O que entra no pote continua sendo o peso real
+  retornado (dupla-entrada intacta); `perda_processo` negativo = ganho registrado.
 
 ## feat(vendas): cadastro do cliente só Celular (WhatsApp) com máscara (v2.66.12)
 

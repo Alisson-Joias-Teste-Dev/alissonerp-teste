@@ -80,10 +80,14 @@ export async function PATCH(
 
   const peso_esperado = Number((ligacao as any).peso_18k_esperado);
 
-  // Tolerância 5%
-  if (peso_18k_real > peso_esperado * 1.05) {
+  // Regra de negócio: a tolerância só barra PERDA (18k produzido com MENOS peso que o esperado).
+  // GANHO de teor (real >= esperado) passa livre — é o bom resultado da liga, nunca deve travar.
+  // Trava só quando a perda passa de 5% (real < esperado × 0,95). Gêmea da regra em /purificacao/[id].
+  // IMPACTO se removido/invertido: voltaria a barrar ganho de teor (bug reportado 15/06) OU deixaria
+  // passar perda absurda por erro de digitação sem nenhuma proteção.
+  if (peso_18k_real < peso_esperado * 0.95) {
     return NextResponse.json(
-      { error: `Peso real (${peso_18k_real}g) excede o esperado com tolerância (${(peso_esperado * 1.05).toFixed(3)}g)` },
+      { error: `Peso real (${peso_18k_real}g) está abaixo do esperado além da tolerância de 5% (mínimo ${(peso_esperado * 0.95).toFixed(3)}g)` },
       { status: 400 },
     );
   }
