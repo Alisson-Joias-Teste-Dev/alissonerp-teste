@@ -743,11 +743,35 @@ export async function PATCH(
                 await sql`UPDATE alissonerp.erp_produtos SET ${sql(erpRepl)}, date_updated = NOW() WHERE produto_id = ANY(${filhoIds})`;
               }
 
-              // Recalcula as pedras de cada variação: cobre o peso replicado (o preço
-              // do ouro/preco_sync recalcula pelo trigger) e as pedras do BOM, deixando
-              // preco_pedras e preco_total_sync consistentes em todas as variações.
+              // Propaga as PEDRAS-COMPONENTE (pedras precificadas que definem o
+              // preco_pedras — alissonerp.produto_pedras_componente) do pai pras
+              // variações e SINCRONIZA preco_pedras de cada uma. É AQUI que mora o
+              // preço das pedras (NÃO no produto_composicao, cujas pedras estão sem
+              // preco_compra_usd). Sem isso, a variação fica com preco_pedras=0 (bug
+              // do 1829). IMPACTO SE REMOVIDO: variações sem preço de pedra.
+              const pedrasPai = await sql<{ pedra_produto_id: number; quantidade: number; preco_unitario_snapshot: string }[]>`
+                SELECT pedra_produto_id, quantidade, preco_unitario_snapshot
+                FROM alissonerp.produto_pedras_componente
+                WHERE produto_id = ${produtoId}
+              `;
+              const subtotalPedras = Math.round(
+                pedrasPai.reduce((s, p) => s + Number(p.preco_unitario_snapshot) * Number(p.quantidade), 0) * 100,
+              ) / 100;
               for (const fid of filhoIds) {
-                await recalcularPrecoPedras(fid);
+                await sql`DELETE FROM alissonerp.produto_pedras_componente WHERE produto_id = ${fid}`;
+                for (const pp of pedrasPai) {
+                  await sql`
+                    INSERT INTO alissonerp.produto_pedras_componente
+                      (produto_id, pedra_produto_id, quantidade, preco_unitario_snapshot)
+                    VALUES (${fid}, ${pp.pedra_produto_id}, ${pp.quantidade}, ${pp.preco_unitario_snapshot})
+                  `;
+                }
+                await sql`
+                  UPDATE public.produtos
+                  SET preco_pedras     = ${subtotalPedras},
+                      preco_total_sync = COALESCE(preco_sync, 0) + ${subtotalPedras}
+                  WHERE id_produto = ${fid}
+                `;
               }
             }
           }

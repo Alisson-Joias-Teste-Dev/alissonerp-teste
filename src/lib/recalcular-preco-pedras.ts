@@ -25,7 +25,25 @@ export async function recalcularPrecoPedras(produto_id: number): Promise<number>
   `;
 
   if (pedras.length === 0) {
-    // Sem pedras com preço → zerar e sincronizar com preco_sync do ouro
+    // BLINDAGEM (16/06/2026 — Jonathan): distinguir "produto SEM pedra" de "tem pedra
+    // no BOM mas SEM preco_compra_usd". No 2º caso, NÃO zerar preco_pedras — zerar
+    // destrói valor existente (foi o bug que zerou as variações do 1829 a cada save do
+    // pai). Só zera de fato quando não há nenhuma pedra na composição.
+    // IMPACTO SE REMOVIDO: volta a destruir o preço das pedras em massa.
+    const [{ qtd_pedras }] = await sql<{ qtd_pedras: number }[]>`
+      SELECT COUNT(*)::int AS qtd_pedras
+      FROM alissonerp.produto_composicao
+      WHERE produto_id = ${produto_id} AND tipo = 'pedra'
+    `;
+    if (Number(qtd_pedras) > 0) {
+      // Tem pedra no BOM, mas sem USD pra precificar → preserva o valor atual.
+      // O preço correto entra quando a variação receber o preco_compra_usd (propagado do pai).
+      const [row] = await sql<{ preco_pedras: string | null }[]>`
+        SELECT preco_pedras FROM public.produtos WHERE id_produto = ${produto_id}
+      `;
+      return Number(row?.preco_pedras ?? 0);
+    }
+    // Sem pedra nenhuma → zera de fato e sincroniza com o preco_sync do ouro.
     await sql`
       UPDATE public.produtos
       SET preco_pedras     = 0,
