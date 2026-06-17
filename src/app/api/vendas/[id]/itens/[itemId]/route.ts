@@ -5,7 +5,6 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { zodError } from "@/lib/schemas/common";
-import { isFullAccess } from "@/lib/roles";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { logAudit } from "@/lib/audit";
 
@@ -53,13 +52,9 @@ export async function PATCH(
     return NextResponse.json({ error: "Venda já aprovada. Não é possível alterar itens." }, { status: 409 });
   }
 
-  // Onda 1D: consultora so edita item de venda propria
-  let userRole: string;
-  let userMxDesconto: number;
+  // Onda 1D: consultora so edita item de venda propria (valida ownership)
   try {
-    const own = await checkOwnership(user.id, vendaId);
-    userRole = own.role;
-    userMxDesconto = own.mxDesconto;
+    await checkOwnership(user.id, vendaId);
   }
   catch (e) {
     if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
@@ -78,20 +73,15 @@ export async function PATCH(
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;
 
-  // ── Gate de desconto (v2.60.4): bloqueia vendedora/gerente de ultrapassar
-  // mx_desconto_permitido ao EDITAR item. Espelha regra do POST e do orçamento.
-  if (body.pct_desconto !== undefined && !isFullAccess(userRole)) {
-    const descNovo = Number(body.pct_desconto);
-    if (Number.isFinite(descNovo) && descNovo > userMxDesconto) {
-      return NextResponse.json(
-        {
-          error: `Desconto ${descNovo}% excede seu limite (${userMxDesconto}%). Solicite aprovação.`,
-          solicitar: true,
-        },
-        { status: 403 },
-      );
-    }
-  }
+  // ── Gate de desconto (v2.68.2): numa venda RASCUNHO o desconto acima do limite
+  // da consultora PODE ser salvo (igual ao fluxo de criação de venda). A aprovação
+  // é exigida DEPOIS: ao salvar item com desconto > limite, a venda invalida a
+  // aprovação anterior (bloco abaixo) → o botão "Solicitar Aprovação de Desconto"
+  // aparece, e a APROVAÇÃO da venda/pagamento fica travada até o diretor aprovar
+  // (desconto_aprovado_por). ANTES bloqueávamos aqui (v2.60.4), o que criava um
+  // DEADLOCK: a consultora era mandada "solicitar aprovação", mas o desconto nunca
+  // era persistido, então o botão de solicitar nunca aparecia.
+  // Esta rota só edita venda em rascunho (guard de situacao acima).
 
   await sql`
     UPDATE alissonerp.itens_venda_erp SET
