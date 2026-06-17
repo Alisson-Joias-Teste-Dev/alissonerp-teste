@@ -69,6 +69,23 @@ function round2(v: number): number {
   return Math.round(v * 100) / 100;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// recomputarTotais — calcula o valor a compensar (vale/reembolso) da devolucao.
+//
+// REGRA DE NEGOCIO (decisao Jonathan): o credito NUNCA pode passar do que o
+//   cliente EFETIVAMENTE PAGOU. Por isso o valor das mercadorias devolvidas e
+//   capado pela FRACAO PAGA da venda: credito_do_item = valor_item × (pago / total_venda).
+//   Ex.: comprou 10k, pagou so 3k, devolve tudo -> vale = 3k (nao 10k).
+//   - Guard de LEGADO: venda SEM nenhum registro em pagamentos_venda (vendas
+//     migradas) -> fracao = 1 (comportamento antigo), para nao zerar o vale de
+//     venda antiga ja paga.
+//   - Denominador = total_venda (frete entra como nao-reembolsavel, a favor da empresa).
+//   - Retencao % continua valendo, aplicada sobre a base proporcional.
+//   - valor_retido fica = total − compensacao (reconcilia o display e embute a
+//     parte nao paga + a retencao de politica).
+// IMPACTO SE REMOVIDO: volta a gerar vale pelo valor cheio dos itens, podendo
+//   creditar mais do que o cliente pagou (entrega com pagamento parcial).
+// ═══════════════════════════════════════════════════════════════════════════
 async function recomputarTotais(devolucaoId: number, txClient?: any): Promise<void> {
   const runner = txClient ?? sql;
   const [row] = await runner`
@@ -78,10 +95,31 @@ async function recomputarTotais(devolucaoId: number, txClient?: any): Promise<vo
     FROM alissonerp.devolucoes_itens
     WHERE devolucao_id = ${devolucaoId}
   `;
-  const total = parseFloat(row?.total ?? "0");
+  const total = parseFloat(row?.total ?? "0"); // valor das mercadorias devolvidas (preco pago por item × qtd)
   const pct = parseFloat(row?.pct ?? "0");
-  const retido = round2((total * pct) / 100);
-  const compensacao = round2(total - retido);
+
+  // Quanto o cliente pagou da venda (e se ha pagamento rastreado).
+  const [pg] = await runner`
+    SELECT
+      v.total_venda::numeric AS total_venda,
+      COALESCE((SELECT SUM(p.valor) FROM alissonerp.pagamentos_venda p
+                WHERE p.venda_id = v.id AND p.status = 'confirmado'), 0)::numeric AS pago,
+      (SELECT COUNT(*) FROM alissonerp.pagamentos_venda p WHERE p.venda_id = v.id)::int AS n_pag
+    FROM alissonerp.devolucoes_venda d
+    JOIN alissonerp.vendas_erp v ON v.id = d.venda_id
+    WHERE d.id = ${devolucaoId}
+  `;
+  const totalVenda = parseFloat(pg?.total_venda ?? "0");
+  const pago = parseFloat(pg?.pago ?? "0");
+  const nPag = Number(pg?.n_pag ?? 0);
+
+  // Fracao paga: legado (sem pagamento rastreado) ou total_venda invalido -> 1.
+  const fracao = nPag === 0 || totalVenda <= 0 ? 1 : Math.min(1, pago / totalVenda);
+
+  const valorPagoNosItens = round2(total * fracao);            // teto = o que o cliente pagou nesses itens
+  const retidoPolitica = round2((valorPagoNosItens * pct) / 100);
+  const compensacao = round2(valorPagoNosItens - retidoPolitica);
+  const retido = round2(total - compensacao);                  // reconcilia: total = retido + compensacao
 
   await runner`
     UPDATE alissonerp.devolucoes_venda
