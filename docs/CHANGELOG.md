@@ -1,6 +1,19 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/06/2026 — Versão: v2.68.0 <!-- Revisado 16/06/2026 -->
+> 📋 Última atualização automática: 16/06/2026 — Versão: v2.68.1 <!-- Revisado 16/06/2026 -->
+
+## fix(devolucao): vale proporcional ao que o cliente pagou (v2.68.1)
+
+Furo encontrado pelo Jonathan: o valor do vale saía pelo **preço dos itens**, sem olhar **quanto o
+cliente pagou**. Entrega com pagamento parcial (Na Entrega/A Receber) devolvida geraria vale maior
+que o pago (ex.: pagou 3k de 10k, devolve tudo → geraria 10k). **Não materializou** em dados
+rastreados (0 casos), mas era bug latente.
+- **`recomputarTotais` agora capa pela fração paga:** `crédito_item = valor_item × (pago / total_venda)`.
+  Pagou tudo → valor cheio; pagou parcial → recebe só o que pagou naquele item.
+- **Guard de legado:** venda sem pagamento rastreado (`pagamentos_venda` vazio) → fração 1 (valor cheio),
+  pra não zerar vale de venda antiga já paga.
+- Frete entra como não-reembolsável (denominador = `total_venda`); retenção % aplicada sobre a base proporcional.
+- Validado no homolog: pagou 90 de 300 + devolve tudo → vale R$90; venda legada (0 pagamentos) → vale cheio R$300.
 
 ## feat(comercial): blindagem vale-troca + devolução (estoque, comentários, histórico) (v2.68.0)
 
