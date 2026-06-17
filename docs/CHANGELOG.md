@@ -1,6 +1,17 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/06/2026 — Versão: v2.68.1 <!-- Revisado 16/06/2026 -->
+> 📋 Última atualização automática: 16/06/2026 — Versão: v2.68.2 <!-- Revisado 16/06/2026 -->
+
+## fix(vendas): consultora consegue salvar desconto acima do limite em rascunho (v2.68.2)
+
+Deadlock: ao EDITAR o preço/desconto de um item acima do limite da consultora, a rota
+`PATCH /api/vendas/[id]/itens/[itemId]` recusava o save (403 "Desconto X% excede seu limite. Solicite
+aprovação."). Como o desconto nunca era persistido, o botão **"Solicitar Aprovação de Desconto"** (que
+só aparece quando há item salvo com desconto > limite) **nunca surgia** — a consultora era mandada
+solicitar aprovação sem ter como. **Fix:** a edição de item em venda **rascunho** agora **salva** o
+desconto alto (igual ao fluxo de criação de venda); a invalidação de aprovação anterior continua, o
+botão aparece, e a aprovação segue **exigida na aprovação da venda e no pagamento** (gates inalterados).
+Não testado e2e como consultora (sessão de preview deslogada) — validar em prod.
 
 ## fix(devolucao): vale proporcional ao que o cliente pagou (v2.68.1)
 
