@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import NotaFiscalStatusBadge from "@/components/fiscal/NotaFiscalStatusBadge";
 import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
+import ComentariosOrdem from "@/components/ComentariosOrdem";
 
 const C = {
   esmeralda:   "#184036",
@@ -89,23 +90,42 @@ interface Devolucao {
   itens: DevolucaoItem[];
   vales_troca: ValeTrocaSumario[];
   reembolsos: Reembolso[];
+  cadeia_vales?: CadeiaVale[];
+}
+
+// B4: no de da arvore/cadeia de vale-troca originada nesta devolucao.
+interface CadeiaVale {
+  id: number;
+  numero: string;
+  status: string;
+  valor_original: number;
+  valor_disponivel: number;
+  vale_origem_id: number | null;
+  venda_utilizado_id: number | null;
+  venda_uso_numero: string | null;
+  cliente_uso_nome: string | null;
+  utilizado_em: string | null;
+  created_at: string;
+  nivel: number;
 }
 
 const STATUS_LABEL: Record<string, string> = {
   rascunho: "Rascunho",
   aguardando_aprovacao: "Aguardando Aprovação",
   aprovado: "Aprovado",
+  aguardando_aprovacao_estoque: "Aguardando Estoque",
   rejeitado: "Rejeitado",
   concluido: "Concluído",
   cancelado: "Cancelado",
 };
 const STATUS_COLOR: Record<string, { bg: string; text: string }> = {
-  rascunho:             { bg: "#F3F4F6", text: "#6B7280" },
-  aguardando_aprovacao: { bg: "#FEF9C3", text: "#713F12" },
-  aprovado:             { bg: "#DBEAFE", text: "#1E40AF" },
-  rejeitado:            { bg: "#FEE2E2", text: "#991B1B" },
-  concluido:            { bg: "#D1FAE5", text: "#065F46" },
-  cancelado:            { bg: "#E5E7EB", text: "#374151" },
+  rascunho:                     { bg: "#F3F4F6", text: "#6B7280" },
+  aguardando_aprovacao:         { bg: "#FEF9C3", text: "#713F12" },
+  aprovado:                     { bg: "#DBEAFE", text: "#1E40AF" },
+  aguardando_aprovacao_estoque: { bg: "#FFEDD5", text: "#9A3412" },
+  rejeitado:                    { bg: "#FEE2E2", text: "#991B1B" },
+  concluido:                    { bg: "#D1FAE5", text: "#065F46" },
+  cancelado:                    { bg: "#E5E7EB", text: "#374151" },
 };
 
 const CONDICAO_LABEL: Record<string, string> = {
@@ -232,7 +252,9 @@ export default function DevolucaoDetalheClient({ id, role }: Props) {
 
   async function concluir() {
     if (!dev) return;
-    if (!confirm("Concluir devolução? Isso gerará vale/reembolso e movimentará estoque.")) return;
+    // B3: "Concluir" agora envia para a aprovação do ESTOQUE; o vale/reembolso
+    // só é gerado quando o estoque aprovar.
+    if (!confirm("Enviar para a aprovação do estoque? O vale/reembolso só será gerado depois que o estoque aprovar.")) return;
     setUpdating(true);
     setError("");
     try {
@@ -540,6 +562,51 @@ export default function DevolucaoDetalheClient({ id, role }: Props) {
         )}
       </div>
 
+      {/* B4: Histórico completo do vale-troca (cadeia: Y -> troco A -> troco B...) */}
+      {dev.cadeia_vales && dev.cadeia_vales.length > 0 && (
+        <div className="rounded-xl border p-4 mb-4 bg-white" style={{ borderColor: C.cremeBorder }}>
+          <div className="flex items-center gap-2 mb-3">
+            <Ticket size={16} style={{ color: C.esmeralda }} />
+            <h3 className="text-sm font-bold" style={{ color: "#374151" }}>Histórico do Vale-Troca</h3>
+          </div>
+          <div className="space-y-1.5">
+            {dev.cadeia_vales.map((v) => (
+              <div
+                key={v.id}
+                className="flex items-center justify-between px-3 py-2 rounded-lg border"
+                style={{ borderColor: C.cremeBorder, marginLeft: `${Math.min(v.nivel, 6) * 16}px` }}
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    {v.nivel > 0 && <ArrowRight size={12} style={{ color: "#9CA3AF" }} />}
+                    <span className="font-semibold text-sm" style={{ color: C.esmeralda }}>{v.numero}</span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: "#F3F4F6", color: "#6B7280" }}>
+                      {v.status}
+                    </span>
+                    {v.nivel > 0 && <span className="text-[10px]" style={{ color: "#9CA3AF" }}>(troco)</span>}
+                  </div>
+                  <p className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>
+                    {v.venda_uso_numero
+                      ? `Usado na venda ${v.venda_uso_numero}${v.cliente_uso_nome ? ` — ${v.cliente_uso_nome}` : ""}${v.utilizado_em ? ` em ${fmtDate(v.utilizado_em)}` : ""}`
+                      : "Ainda não utilizado"}
+                  </p>
+                </div>
+                <div className="text-right shrink-0 ml-2">
+                  <p className="text-[10px]" style={{ color: "#9CA3AF" }}>Original {fmt(v.valor_original)}</p>
+                  <p className="font-semibold tabular-nums text-sm" style={{ color: C.esmeralda }}>Saldo {fmt(v.valor_disponivel)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* B2: Comentários da devolução (reusa o componente das ordens, com alarme @menção) */}
+      <div className="rounded-xl border p-4 mb-4 bg-white" style={{ borderColor: C.cremeBorder }}>
+        <h3 className="text-sm font-bold mb-3" style={{ color: "#374151" }}>Comentários</h3>
+        <ComentariosOrdem devolucaoId={dev.id} />
+      </div>
+
       {/* Ações */}
       {(dev.status === "rascunho" || dev.status === "aprovado") && (
         <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
@@ -572,14 +639,26 @@ export default function DevolucaoDetalheClient({ id, role }: Props) {
               style={{ backgroundColor: "#059669", color: "#fff" }}
             >
               {updating ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-              Concluir Devolução
+              Enviar p/ Aprovação do Estoque
             </button>
           )}
           {dev.status === "aprovado" && !todosInspecionados && (
             <p className="text-xs" style={{ color: "#9CA3AF" }}>
-              Inspecione todos os itens antes de concluir. <ArrowRight size={12} className="inline" />
+              Inspecione todos os itens antes de enviar ao estoque. <ArrowRight size={12} className="inline" />
             </p>
           )}
+        </div>
+      )}
+
+      {/* B3: aguardando o estoque conferir antes de gerar o vale */}
+      {dev.status === "aguardando_aprovacao_estoque" && (
+        <div className="rounded-xl border p-3 mb-4 mt-2" style={{ borderColor: "#FED7AA", backgroundColor: "#FFF7ED" }}>
+          <p className="text-sm font-medium" style={{ color: "#9A3412" }}>
+            Aguardando aprovação do estoque
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: "#C2410C" }}>
+            O vale/reembolso será gerado automaticamente quando o responsável pelo estoque aprovar a conferência.
+          </p>
         </div>
       )}
 

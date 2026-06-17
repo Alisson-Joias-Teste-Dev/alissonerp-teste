@@ -87,16 +87,30 @@ interface UsuarioBusca {
   role: string;
 }
 
+// Componente reutilizavel de comentarios+alarme. Por padrao opera sobre ORDENS
+// (ordemId), mantendo 100% do comportamento atual. Passando `devolucaoId` ele
+// opera sobre a DEVOLUCAO (tabela/rota/realtime proprios) — reuso sem duplicar
+// e sem alterar nada das ordens.
 interface Props {
-  ordemId: number;
+  ordemId?: number;
+  devolucaoId?: number;
   onCountChange?: (count: number) => void;
 }
 
 const SOMENTE_LEITURA = false;
 
-export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
+export default function ComentariosOrdem({ ordemId, devolucaoId, onCountChange }: Props) {
   const { user, role } = useAuth();
   const isAdmin = role === "admin" || role === "desenvolvedor";
+
+  // Entidade-alvo: devolucao (se passado) ou ordem (padrao).
+  const isDevolucao = devolucaoId != null;
+  const entityId = (devolucaoId ?? ordemId) as number;
+  const apiBase = isDevolucao
+    ? `/api/devolucoes/${entityId}/comentarios`
+    : `/api/ordens/${entityId}/comentarios`;
+  const realtimeTable = isDevolucao ? "comentarios_devolucao" : "comentarios_ordem";
+  const realtimeFilter = isDevolucao ? `devolucao_id=eq.${entityId}` : `ordem_id=eq.${entityId}`;
 
   const [comentarios, setComentarios] = useState<Comentario[]>([]);
   const [loading, setLoading] = useState(true);
@@ -141,7 +155,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
 
   // Load initial comments
   useEffect(() => {
-    fetch(`/api/ordens/${ordemId}/comentarios`)
+    fetch(apiBase)
       .then((r) => r.json())
       .then(async (data: Comentario[]) => {
         const comUrls = carregarSignedUrls(data);
@@ -150,7 +164,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [ordemId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Scroll to bottom on new comments
   useEffect(() => {
@@ -163,18 +177,18 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase
-      .channel(`comentarios-ordem-${ordemId}`)
+      .channel(`comentarios-${realtimeTable}-${entityId}`)
       .on(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         "postgres_changes" as any,
         {
           event: "INSERT",
           schema: "alissonerp",
-          table: "comentarios_ordem",
-          filter: `ordem_id=eq.${ordemId}`,
+          table: realtimeTable,
+          filter: realtimeFilter,
         },
         () => {
-          fetch(`/api/ordens/${ordemId}/comentarios`)
+          fetch(apiBase)
             .then((r) => r.json())
             .then(async (data: Comentario[]) => {
               const comUrls = carregarSignedUrls(data);
@@ -189,7 +203,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [ordemId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // @mention search (debounced)
   useEffect(() => {
@@ -303,7 +317,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
     if (!texto.trim() || enviando) return;
     setEnviando(true);
     try {
-      const res = await fetch(`/api/ordens/${ordemId}/comentarios`, {
+      const res = await fetch(apiBase, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ texto: texto.trim(), mencoes, foto_base64: fotoBase64 ?? null }),
@@ -313,7 +327,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
         setMencoes([]);
         removerFotoSelecionada();
         const novos: Comentario[] = await fetch(
-          `/api/ordens/${ordemId}/comentarios`
+          apiBase
         ).then((r) => r.json());
         const comUrls = carregarSignedUrls(novos);
         setComentarios(comUrls);
@@ -326,7 +340,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
 
   async function salvarEdicao(id: number) {
     if (!editTexto.trim()) return;
-    const res = await fetch(`/api/ordens/${ordemId}/comentarios/${id}`, {
+    const res = await fetch(`${apiBase}/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ texto: editTexto.trim() }),
@@ -343,7 +357,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
   }
 
   async function confirmarDelete(id: number) {
-    const res = await fetch(`/api/ordens/${ordemId}/comentarios/${id}`, {
+    const res = await fetch(`${apiBase}/${id}`, {
       method: "DELETE",
     });
     if (res.ok) {
@@ -381,7 +395,7 @@ export default function ComentariosOrdem({ ordemId, onCountChange }: Props) {
               Nenhum comentário ainda.
             </p>
             <p className="text-[11px] mt-1" style={{ color: "#C4B5A0" }}>
-              Seja o primeiro a comentar nesta ordem.
+              Seja o primeiro a comentar {isDevolucao ? "nesta devolução" : "nesta ordem"}.
             </p>
           </div>
         ) : (

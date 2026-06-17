@@ -1534,12 +1534,59 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     }
   }
 
-  // ─── Aplicar Vale-Troca ───────────────────────────────────────────────────
+  // ─── Aplicar Vale-Troca (com 2a confirmação por WhatsApp — brecha #1) ──────
+  // Antes de aplicar um vale COM dono, o sistema envia um código ao WhatsApp do
+  // dono; o caixa digita o código informado pelo cliente. Vale sem dono (promo)
+  // é aplicado direto. Se o WhatsApp falhar, um responsável libera via exceção.
   async function aplicarValeNaVenda(vendaIdLocal: number, valor: number, numero?: string) {
+    const valeNum = (numero ?? valeNumero).trim();
+
+    let valeCodigo: string | undefined;
+    let valeExcecao = false;
+
+    // 1. Solicita o código ao dono. precisa_codigo=false => vale promocional (segue direto).
+    try {
+      const sres = await fetch(`/api/vale-troca/solicitar-codigo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vale_numero: valeNum }),
+      });
+      const sd = await sres.json() as {
+        ok: boolean; precisa_codigo?: boolean; precisa_excecao?: boolean;
+        telefone_mascarado?: string; erro?: string;
+      };
+      if (sres.ok && sd.precisa_codigo) {
+        const onde = sd.telefone_mascarado ? ` (${sd.telefone_mascarado})` : "";
+        const msg = sd.precisa_excecao
+          ? `Não foi possível enviar o código pelo WhatsApp do dono${sd.erro ? ` — ${sd.erro}` : ""}.\n\nSe o dono recebeu mesmo assim, digite o código; ou deixe em branco para pedir liberação de um responsável.`
+          : `Um código foi enviado ao WhatsApp do dono do vale${onde}.\n\nDigite o código informado pelo cliente:`;
+        const cod = window.prompt(msg, "");
+        if (cod && cod.trim()) {
+          valeCodigo = cod.trim();
+        } else if (sd.precisa_excecao) {
+          valeExcecao = window.confirm(
+            "Liberar o vale SEM o código? Exige autorização de um responsável (gerente/aprovador configurado). Continuar?",
+          );
+          if (!valeExcecao) throw new Error("Confirmação do vale cancelada.");
+        } else {
+          throw new Error("Confirmação do vale cancelada — código não informado.");
+        }
+      }
+    } catch (e) {
+      // Só interrompe se for o cancelamento explícito; falha de rede ao solicitar
+      // segue (o backend ainda barra a aplicação se o código faltar).
+      if (e instanceof Error && e.message.startsWith("Confirmação")) throw e;
+    }
+
+    // 2. Aplica o vale — o backend valida código/exceção em definitivo.
     const res = await fetch(`/api/vendas/${vendaIdLocal}/pagamentos`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ forma: "Vale-Troca", valor, vale_numero: (numero ?? valeNumero).trim() }),
+      body: JSON.stringify({
+        forma: "Vale-Troca", valor, vale_numero: valeNum,
+        ...(valeCodigo ? { vale_codigo: valeCodigo } : {}),
+        ...(valeExcecao ? { vale_excecao: true } : {}),
+      }),
     });
     const data = await res.json() as { novo_vale?: { id: number; numero: string; valor_original: number }; error?: string };
     if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);

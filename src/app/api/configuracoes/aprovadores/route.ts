@@ -31,6 +31,8 @@ const CHAVES = [
   "aprovador_limpeza",
   "aprovador_entrega_sem_pagamento",
   "aprovador_devolucao_fora_prazo",
+  "aprovador_devolucao_estoque",
+  "aprovador_vale_troca_excecao",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -116,6 +118,8 @@ export async function GET() {
       aprovador_limpeza: configMap.get("aprovador_limpeza") ?? "",
       aprovador_entrega_sem_pagamento: configMap.get("aprovador_entrega_sem_pagamento") ?? "",
       aprovador_devolucao_fora_prazo: configMap.get("aprovador_devolucao_fora_prazo") ?? "",
+      aprovador_devolucao_estoque: configMap.get("aprovador_devolucao_estoque") ?? "",
+      aprovador_vale_troca_excecao: configMap.get("aprovador_vale_troca_excecao") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -187,6 +191,14 @@ export async function PUT(req: NextRequest) {
     // Aprovador de devolução fora do prazo (lista aberta — qualquer usuário ativo).
     if (body.aprovador_devolucao_fora_prazo !== undefined) {
       updates.push({ chave: "aprovador_devolucao_fora_prazo", valor: body.aprovador_devolucao_fora_prazo });
+    }
+    // B3: aprovador do estoque — conferência da devolução antes de gerar o vale.
+    if (body.aprovador_devolucao_estoque !== undefined) {
+      updates.push({ chave: "aprovador_devolucao_estoque", valor: body.aprovador_devolucao_estoque });
+    }
+    // A1: aprovador de exceção do vale — libera quando a confirmação por WhatsApp falha.
+    if (body.aprovador_vale_troca_excecao !== undefined) {
+      updates.push({ chave: "aprovador_vale_troca_excecao", valor: body.aprovador_vale_troca_excecao });
     }
 
     for (const u of updates) {

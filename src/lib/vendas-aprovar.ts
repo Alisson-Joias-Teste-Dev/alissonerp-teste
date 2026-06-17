@@ -28,6 +28,7 @@
 import sql from "@/lib/db";
 import { verificarReposicaoAutomatica } from "@/lib/reposicao-automatica";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { reverterAplicacaoVale } from "@/lib/vale-troca";
 import { orcamentoFichaToDados, nomeItemOrdem } from "@/lib/orcamento-ficha-to-dados";
 
 // ─── Tipos internos ──────────────────────────────────────────────────────────
@@ -819,7 +820,7 @@ export async function estornarVenda(
     // cancela a CR. Sem este guard, o UPDATE pra rascunho seria recusado pela trava.
     const ehTerminal = situacaoAtual === "entregue" || situacaoAtual === "concluido";
     const [pag] = await tx`
-      SELECT id, venda_id, status, gateway_payload
+      SELECT id, venda_id, status, gateway_payload, forma, valor, vale_troca_id
       FROM alissonerp.pagamentos_venda
       WHERE id = ${pagamentoId} AND venda_id = ${vendaId}
       FOR UPDATE
@@ -855,6 +856,15 @@ export async function estornarVenda(
         gateway_payload = ${JSON.stringify(novoPayload)}::jsonb
       WHERE id = ${pagamentoId}
     `;
+
+    // #2 (auditoria 16/06): se o pagamento estornado era Vale-Troca, devolve o
+    // credito ao vale — volta a 'ativo' com o valor aplicado. Sem isto,
+    // cancelar/estornar uma venda paga com vale queimava o credito do cliente.
+    // O troco-filho (se houve) NAO e tocado: ja e credito separado e legitimo,
+    // mantendo a cadeia de troco conservada (#6).
+    if (pag.forma === "Vale-Troca" && pag.vale_troca_id) {
+      await reverterAplicacaoVale(tx, Number(pag.vale_troca_id), Number(pag.valor), null);
+    }
 
     // 4. Decide ação sobre a venda
     let acao: EstornoAcao;

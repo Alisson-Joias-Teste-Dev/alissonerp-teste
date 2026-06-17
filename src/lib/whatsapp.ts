@@ -237,6 +237,31 @@ export async function enviarConfirmacaoEntregaConcluida(
 }
 
 /**
+ * Envia o código de 2ª confirmação do Vale-Troca para o WhatsApp do DONO do vale.
+ *
+ * REGRA DE NEGÓCIO (brecha #1 da auditoria 16/06): o vale só pode ser aplicado
+ * após o DONO confirmar com este código. Garante que o vale de um cliente não
+ * seja usado na venda de outro sem autorização. O operador não vê o código —
+ * só o dono recebe.
+ *
+ * IMPACTO SE REMOVIDO: volta a ser possível aplicar vale alheio sem consentimento.
+ */
+export async function enviarCodigoValeTroca(
+  telefone: string,
+  codigo: string,
+  nome: string,
+): Promise<EnviarCodigoWhatsAppResult> {
+  const mensagem =
+    `Olá, ${nome}!\n\n` +
+    `Para autorizar o uso do seu Vale-Troca da Alisson Joias, informe o código abaixo ao atendente:\n\n` +
+    `🔐 *${codigo}*\n\n` +
+    `Este código confirma que VOCÊ autorizou o uso do seu vale.\n` +
+    `Se não foi você, NÃO informe o código e avise sua consultora.`;
+
+  return enviarMensagemWhatsApp(telefone, mensagem, nome);
+}
+
+/**
  * Envia mensagem genérica pelo WhatsApp (uso interno).
  */
 async function enviarMensagemWhatsApp(

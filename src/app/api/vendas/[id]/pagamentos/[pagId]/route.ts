@@ -112,6 +112,18 @@ export async function PATCH(
     } catch (e) {
       console.error(`[pagamentos/PATCH] auto-aprovar venda=${vendaId}:`, e);
     }
+  } else if (body.status === "estornado") {
+    // Estorno: estornarVenda é o DONO da operação — marca o pagamento como
+    // estornado, cancela a conta a receber, reverte a venda E DEVOLVE O VALE (#2).
+    // NÃO pré-setamos o status aqui: o guard de idempotência do estornarVenda
+    // short-circuita quando o pagamento já está 'estornado', o que pulava a
+    // reversão do vale (e da CR/venda) no estorno manual pelo painel.
+    try {
+      await estornarVenda(vendaId, pId, { motivo: "Estorno manual via painel" });
+    } catch (e) {
+      console.error(`[pagamentos/PATCH] estornarVenda venda=${vendaId} pag=${pId}:`, e);
+      return NextResponse.json({ error: "Falha ao estornar pagamento" }, { status: 500 });
+    }
   } else {
     await sql`
       UPDATE alissonerp.pagamentos_venda SET
@@ -120,14 +132,6 @@ export async function PATCH(
         gateway_id       = COALESCE(${body.gateway_id      ?? null},              gateway_id)
       WHERE id = ${pId}
     `;
-    // Estorno: reabrir/reverter venda conforme regras de negócio
-    if (body.status === "estornado") {
-      try {
-        await estornarVenda(vendaId, pId, { motivo: "Estorno manual via painel" });
-      } catch (e) {
-        console.error(`[pagamentos/PATCH] estornarVenda venda=${vendaId} pag=${pId}:`, e);
-      }
-    }
   }
 
   return NextResponse.json({ ok: true });

@@ -17,6 +17,7 @@
 | Comercial (vendas, vale-troca, comissão, entrega) | `comercial.md` | ✅ documentado |
 | Promoções (campanhas de desconto) | `promocoes.md` | ✅ documentado |
 | Orçamento (cotações → vira venda) | `orcamento.md` | ✅ documentado |
+| Produtos (precificação, pedras, pai/variações) | `produtos.md` | ✅ documentado |
 | Financeiro (contas a receber, caixa, crediário, comissão/fechamento) | `financeiro.md` | ⬜ a capturar |
 | Estoque (comercial + insumos) | `estoque.md` | ⬜ a capturar |
 | PCP / Produção | `pcp.md` | ⬜ a capturar |

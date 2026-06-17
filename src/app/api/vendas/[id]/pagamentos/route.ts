@@ -7,6 +7,9 @@ import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { confirmarCodigoVale } from "@/lib/vale-troca-codigo";
+import { logAudit } from "@/lib/audit";
+import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
 
 const PagamentoPostSchema = z.object({
   forma: z.string().min(1, "forma obrigatória").max(100),
@@ -16,6 +19,8 @@ const PagamentoPostSchema = z.object({
   parcelas: z.number().int().min(1).max(99).optional(),
   status: z.string().max(50).optional(),
   vale_numero: z.string().max(100).optional(),
+  vale_codigo: z.string().max(20).optional(),      // 2a confirmacao (WhatsApp) — brecha #1
+  vale_excecao: z.boolean().optional(),            // override por aprovador quando WhatsApp falha
   ouro_peso: z.number().positive().optional(),
   ouro_valor_grama: z.number().positive().optional(),
   ouro_foto_path: z.string().max(500).optional(),
@@ -120,6 +125,8 @@ export async function POST(
     parcelas?:        number;
     status?:          string;
     vale_numero?:     string;
+    vale_codigo?:     string;
+    vale_excecao?:    boolean;
     ouro_peso?:       number;
     ouro_valor_grama?: number;
     ouro_foto_path?:  string;
@@ -155,27 +162,97 @@ export async function POST(
     if (!body.vale_numero) {
       return NextResponse.json({ error: "vale_numero obrigatório para Vale-Troca" }, { status: 400 });
     }
+    // ── A1 (brecha #1): 2a confirmacao do dono (reads + confirmacao do codigo) ─
+    // Vale COM dono so e aplicado apos o dono confirmar o codigo enviado por
+    // WhatsApp. Vale SEM dono (promo) e aplicado direto. Quando o WhatsApp falha,
+    // um responsavel autorizado (ROLES_DEVOLUCAO ou aprovador_vale_troca_excecao)
+    // libera via vale_excecao=true — sempre auditado.
+    const valeNum = body.vale_numero.trim();
+    const [valeRow] = await sql<{ id: number; cliente_id: number | null; status: string }[]>`
+      SELECT id, cliente_id, status FROM alissonerp.vale_troca WHERE numero = ${valeNum}
+    `;
+    if (!valeRow) return NextResponse.json({ error: "Vale-troca não encontrado" }, { status: 400 });
+    if (valeRow.status !== "ativo") return NextResponse.json({ error: `Vale-troca ${valeRow.status}` }, { status: 400 });
+
+    if (valeRow.cliente_id != null) {
+      if (body.vale_excecao === true) {
+        const [u] = await sql<{ role: string }[]>`
+          SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+        `;
+        const [cfg] = await sql<{ valor: string }[]>`
+          SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovador_vale_troca_excecao'
+        `;
+        const autorizado = hasRole(u?.role, ROLES_DEVOLUCAO) || (!!cfg?.valor && cfg.valor === user.id);
+        if (!autorizado) {
+          return NextResponse.json(
+            { error: "Exceção do vale exige um responsável autorizado (gerente ou aprovador configurado)." },
+            { status: 403 },
+          );
+        }
+        await logAudit(sql, {
+          tabela: "vale_troca",
+          operacao: "UPDATE",
+          registro_id: valeRow.id,
+          usuario_id: user.id,
+          dados_depois: { excecao_aplicacao: true, venda_id: vendaId, motivo: "confirmacao_whatsapp_indisponivel" },
+        });
+      } else {
+        if (!body.vale_codigo) {
+          return NextResponse.json(
+            { error: "Informe o código de confirmação enviado ao WhatsApp do cliente (ou solicite aprovação de um responsável).", precisa_codigo: true },
+            { status: 400 },
+          );
+        }
+        const conf = await confirmarCodigoVale(valeRow.id, String(body.vale_codigo));
+        if (!conf.ok) {
+          return NextResponse.json({ error: conf.erro, bloqueado: conf.bloqueado ?? false }, { status: 409 });
+        }
+      }
+    }
+
+    // ── A3 (brecha #5) ATÔMICO: trava a venda (FOR UPDATE), recalcula o saldo,
+    // aplica o vale e insere o pagamento na MESMA transacao — igual ao hook do
+    // Ouro. Isso impede que pagamentos concorrentes ultrapassem o total da venda.
+    // O vale nunca aplica mais que o saldo restante; o excedente vira troco.
     try {
       const { aplicarValeTroca } = await import("@/lib/vale-troca");
-      const aplic = await aplicarValeTroca(body.vale_numero.trim(), vendaId, body.valor, user.id);
-
-      const [novoPg] = await sql`
-        INSERT INTO alissonerp.pagamentos_venda (
-          venda_id, forma, gateway, valor, parcelas, status, vale_troca_id, data_confirmacao
-        ) VALUES (
-          ${vendaId}, 'Vale-Troca', NULL, ${aplic.valor_aplicado}, 1,
-          'confirmado', ${aplic.vale_aplicado_id}, now()
-        )
-        RETURNING id
-      `;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const out = await (sql as any).begin(async (tx: typeof sql) => {
+        const [lock] = await tx`
+          SELECT v.total_venda::numeric AS total,
+                 COALESCE((
+                   SELECT SUM(p.valor) FROM alissonerp.pagamentos_venda p
+                   WHERE p.venda_id = ${vendaId} AND p.status = 'confirmado'
+                 ), 0)::numeric AS pago
+          FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
+          FOR UPDATE
+        `;
+        const restante = Number(lock.total) - Number(lock.pago);
+        if (restante <= 0.01) throw new Error("VALE_VENDA_PAGA");
+        const valorUsarVale = Math.min(body.valor, Math.round(restante * 100) / 100);
+        const aplic = await aplicarValeTroca(valeNum, vendaId, valorUsarVale, user.id, tx);
+        const [novoPg] = await tx`
+          INSERT INTO alissonerp.pagamentos_venda (
+            venda_id, forma, gateway, valor, parcelas, status, vale_troca_id, data_confirmacao
+          ) VALUES (
+            ${vendaId}, 'Vale-Troca', NULL, ${aplic.valor_aplicado}, 1,
+            'confirmado', ${aplic.vale_aplicado_id}, now()
+          )
+          RETURNING id
+        `;
+        return { pagId: novoPg.id as number, aplic };
+      });
 
       return NextResponse.json({
-        id: novoPg.id,
-        valor_aplicado: aplic.valor_aplicado,
-        precisa_complemento: aplic.precisa_complemento,
-        novo_vale: aplic.novo_vale,
+        id: out.pagId,
+        valor_aplicado: out.aplic.valor_aplicado,
+        precisa_complemento: out.aplic.precisa_complemento,
+        novo_vale: out.aplic.novo_vale,
       }, { status: 201 });
     } catch (err) {
+      if (err instanceof Error && err.message === "VALE_VENDA_PAGA") {
+        return NextResponse.json({ error: "Venda já está totalmente paga" }, { status: 409 });
+      }
       return internalError("[POST /api/vendas/[id]/pagamentos] vale-troca", err, "Erro ao aplicar vale-troca", 400);
     }
   }

@@ -96,6 +96,8 @@ export default function DevolucoesClient({ role }: Props) {
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (statusFilter) params.set("status", statusFilter);
+      // B1: busca agora vai pro servidor (filtra todas as paginas, nao so a carregada)
+      if (busca.trim()) params.set("busca", busca.trim());
       const res = await fetch(`/api/devolucoes?${params}`);
       if (!res.ok) throw new Error("Erro ao carregar devoluções");
       const d = (await res.json()) as { data: Devolucao[]; total: number };
@@ -106,22 +108,21 @@ export default function DevolucoesClient({ role }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, page]);
+  }, [statusFilter, page, busca]);
 
+  // Volta pra primeira pagina quando muda o filtro/busca (evita pagina vazia).
   useEffect(() => {
-    load();
+    setPage(1);
+  }, [busca, statusFilter]);
+
+  // Debounce: nao dispara um fetch por tecla digitada na busca.
+  useEffect(() => {
+    const t = setTimeout(() => { load(); }, 300);
+    return () => clearTimeout(t);
   }, [load]);
 
-  // Filtro local por busca (numero venda / cliente)
-  const filtered = rows.filter((r) => {
-    if (!busca.trim()) return true;
-    const q = busca.trim().toLowerCase();
-    return (
-      r.numero.toLowerCase().includes(q) ||
-      (r.numero_venda ?? "").toLowerCase().includes(q) ||
-      (r.cliente_nome ?? "").toLowerCase().includes(q)
-    );
-  });
+  // A busca agora e server-side; a lista exibida e exatamente o que veio da API.
+  const filtered = rows;
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
 

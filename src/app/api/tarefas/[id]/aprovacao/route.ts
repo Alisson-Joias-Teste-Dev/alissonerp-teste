@@ -538,6 +538,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
+  // Aprovacao do ESTOQUE da devolucao (tag 'devolucao_estoque') tem PRIORIDADE
+  // sobre a aprovacao normal — ambas as tarefas apontam pra mesma devolucao via
+  // tarefa_id, entao desambiguamos pela tag. Ao aprovar, conclui e gera o vale.
+  if (tags.includes("devolucao_estoque")) {
+    try {
+      const { processarAprovacaoEstoqueDevolucao } = await import("@/lib/devolucoes");
+      const resultado = await processarAprovacaoEstoqueDevolucao(
+        Number(id), user.id, body.decisao, body.motivo,
+      );
+      return NextResponse.json({ ok: true, devolucao_estoque: resultado });
+    } catch (err) {
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] devolucao_estoque`, err);
+    }
+  }
+
   const [devLink] = await sql`
     SELECT id FROM alissonerp.devolucoes_venda WHERE tarefa_id = ${Number(id)} LIMIT 1
   `;
