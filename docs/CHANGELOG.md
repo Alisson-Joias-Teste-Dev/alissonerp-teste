@@ -1,6 +1,24 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/06/2026 — Versão: v2.67.8 <!-- Revisado 16/06/2026 -->
+> 📋 Última atualização automática: 16/06/2026 — Versão: v2.68.0 <!-- Revisado 16/06/2026 -->
+
+## feat(comercial): blindagem vale-troca + devolução (estoque, comentários, histórico) (v2.68.0)
+
+Pacote da auditoria 16/06 do módulo vale-troca/devolução. Migrations 306–310. Testado no homolog (front+banco).
+- **Vale só com confirmação do dono (#1):** aplicar vale COM dono exige código de 6 dígitos enviado por
+  WhatsApp ao dono (`vale_troca_codigo`, 5 tentativas → bloqueia). Vale sem dono (promo) aplica direto.
+  Falha de WhatsApp/sem celular → exceção liberada por responsável (`aprovador_vale_troca_excecao`), auditada.
+- **Estorno devolve o vale (#2/#6):** `estornarVenda` reativa o vale (valor aplicado) e preserva o troco.
+  Corrigido bug: o estorno manual pelo painel pré-setava `status='estornado'` e o `estornarVenda`
+  short-circuitava no guard de idempotência — não devolvia vale nem cancelava CR/venda. Agora o
+  `estornarVenda` é o dono do estorno.
+- **Overpayment atômico (#5):** hook do vale com `FOR UPDATE` na venda (igual ao Ouro); excedente vira troco.
+- **Auditoria (#3):** aplicar/estornar/cancelar/gerar vale → `audit_log`.
+- **Devolução:** busca server-side (B1); comentários + alarme @menção reusando o componente das ordens
+  (B2, `comentarios_devolucao`); **aprovação do estoque antes de gerar o vale** (B3, status
+  `aguardando_aprovacao_estoque`, `aprovador_devolucao_estoque`); **histórico completo da cadeia de vale**
+  na devolução de origem (B4).
+- Backlog: 4-olhos real na exceção, rate-limit no solicitar-código, UX inline do código, doc do vale reativado parcial.
 
 ## fix(produtos): salvar pai replica todos os campos + preço de pedras fica em sincronia (v2.67.8)
 

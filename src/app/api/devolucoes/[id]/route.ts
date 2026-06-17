@@ -72,6 +72,30 @@ export async function GET(
     ORDER BY id
   `;
 
+  // B4: HISTORICO COMPLETO da cadeia de vale-troca desta devolucao.
+  // Parte dos vales gerados pela devolucao (raiz) e segue os trocos
+  // (vale_origem_id) recursivamente: Y -> A -> B... Mostra onde cada vale foi
+  // usado (venda/cliente), pra nao precisar caçar vale por vale na tela.
+  const cadeiaVales = await sql`
+    WITH RECURSIVE cadeia AS (
+      SELECT vt.*, 0 AS nivel
+      FROM alissonerp.vale_troca vt
+      WHERE vt.devolucao_id = ${devId}
+      UNION ALL
+      SELECT f.*, c.nivel + 1
+      FROM alissonerp.vale_troca f
+      JOIN cadeia c ON f.vale_origem_id = c.id
+    )
+    SELECT c.id, c.numero, c.status, c.valor_original, c.valor_disponivel,
+           c.vale_origem_id, c.venda_utilizado_id, c.utilizado_em, c.created_at, c.nivel,
+           vu.numero_venda AS venda_uso_numero,
+           cu.nome AS cliente_uso_nome
+    FROM cadeia c
+    LEFT JOIN alissonerp.vendas_erp vu ON vu.id = c.venda_utilizado_id
+    LEFT JOIN public.contatos cu       ON cu.id_contato = vu.cliente_id
+    ORDER BY c.nivel, c.id
+  `;
+
   return NextResponse.json({
     ...dev,
     valor_total_devolvido: Number(dev.valor_total_devolvido),
@@ -90,6 +114,13 @@ export async function GET(
       valor_disponivel: Number(v.valor_disponivel),
     })),
     reembolsos: reembolsos.map((r) => ({ ...r, valor: Number(r.valor) })),
+    // B4: arvore completa do vale (raiz da devolucao + trocos encadeados)
+    cadeia_vales: cadeiaVales.map((v) => ({
+      ...v,
+      valor_original: Number(v.valor_original),
+      valor_disponivel: Number(v.valor_disponivel),
+      nivel: Number(v.nivel),
+    })),
   });
 }
 

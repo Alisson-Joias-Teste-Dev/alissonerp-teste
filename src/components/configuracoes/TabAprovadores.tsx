@@ -32,6 +32,8 @@ interface AprovadorConfig {
   aprovador_limpeza?: string;
   aprovador_entrega_sem_pagamento?: string;
   aprovador_devolucao_fora_prazo?: string;
+  aprovador_devolucao_estoque?: string;
+  aprovador_vale_troca_excecao?: string;
 }
 
 interface Usuario {
@@ -149,6 +151,33 @@ const CONFIG_ITENS = [
     usuariosKey: "todos_usuarios" as const,
     icone: "↩️",
   },
+  /**
+   * REGRA DE NEGÓCIO: aprovador do ESTOQUE na devolução.
+   * O QUE: quem confere o estoque da devolução ANTES de gerar o vale/reembolso.
+   * POR QUE: toda devolução passa pela conferência do estoque antes de virar crédito.
+   * IMPACTO SE REMOVIDO: cai no fallback por cargo de fábrica/estoque.
+   */
+  {
+    chave: "aprovador_devolucao_estoque" as const,
+    titulo: "Devolução — aprovação do estoque",
+    descricao: "Confere o estoque da devolução antes de gerar o vale-troca/reembolso (conclui a devolução ao aprovar)",
+    usuariosKey: "todos_usuarios" as const,
+    icone: "📦",
+  },
+  /**
+   * REGRA DE NEGÓCIO: aprovador de EXCEÇÃO do vale-troca.
+   * O QUE: libera aplicar o vale quando a confirmação por WhatsApp do dono falha
+   *   (cliente sem celular / WhatsApp fora).
+   * POR QUE: não travar o caixa, mantendo um responsável rastreável pela exceção.
+   * IMPACTO SE REMOVIDO: exceção cai no fallback (gerente_loja/diretor/admin).
+   */
+  {
+    chave: "aprovador_vale_troca_excecao" as const,
+    titulo: "Vale-troca — exceção (WhatsApp indisponível)",
+    descricao: "Libera aplicar o vale quando não dá pra confirmar pelo WhatsApp do dono (sem celular / serviço fora)",
+    usuariosKey: "todos_usuarios" as const,
+    icone: "🔓",
+  },
 ];
 
 export default function TabAprovadores() {
@@ -165,6 +194,8 @@ export default function TabAprovadores() {
     aprovador_limpeza: "",
     aprovador_entrega_sem_pagamento: "",
     aprovador_devolucao_fora_prazo: "",
+    aprovador_devolucao_estoque: "",
+    aprovador_vale_troca_excecao: "",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
     gerentes: [],
@@ -193,6 +224,8 @@ export default function TabAprovadores() {
           aprovador_limpeza: d.aprovador_limpeza ?? "",
           aprovador_entrega_sem_pagamento: d.aprovador_entrega_sem_pagamento ?? "",
           aprovador_devolucao_fora_prazo: d.aprovador_devolucao_fora_prazo ?? "",
+          aprovador_devolucao_estoque: d.aprovador_devolucao_estoque ?? "",
+          aprovador_vale_troca_excecao: d.aprovador_vale_troca_excecao ?? "",
         });
         setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [] });
       })

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
-import { concluirDevolucao } from "@/lib/devolucoes";
+import { solicitarAprovacaoEstoqueDevolucao } from "@/lib/devolucoes";
 import { internalError } from "@/lib/api-error";
 
 async function getUserRole(userId: string): Promise<string | null> {
@@ -28,8 +28,11 @@ export async function POST(
   if (isNaN(devId)) return NextResponse.json({ error: "id invalido" }, { status: 400 });
 
   try {
-    const res = await concluirDevolucao(devId, user.id);
-    return NextResponse.json(res);
+    // B3: "Concluir" NAO gera mais o vale direto — envia para a aprovacao do
+    // ESTOQUE. O vale/reembolso e gerado quando o aprovador do estoque aprova
+    // (processarAprovacaoEstoqueDevolucao -> concluirDevolucao).
+    const res = await solicitarAprovacaoEstoqueDevolucao(devId, user.id);
+    return NextResponse.json({ ok: true, aguardando_aprovacao_estoque: true, ...res });
   } catch (err) {
     // Postgres errors (code/severity) viram 500 generico — nao vazam schema.
     // Errors de dominio (throw new Error com mensagem amigavel) continuam expostos como 400.

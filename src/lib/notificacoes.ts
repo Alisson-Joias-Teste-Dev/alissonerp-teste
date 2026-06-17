@@ -11,6 +11,8 @@ export interface CriarNotificacaoParams {
   vendaId?: number | null;
   ordemId?: number | null;
   comentarioId?: number | null;
+  devolucaoId?: number | null;            // alarme de comentario em devolucao (B2)
+  comentarioDevolucaoId?: number | null;  // id do comentario_devolucao mencionado
   aguardandoResposta?: boolean;
 }
 
@@ -28,7 +30,25 @@ export async function criarNotificacao(params: CriarNotificacaoParams): Promise<
   const mensagem = params.mensagem ?? "";
   const link = params.link ?? null;
 
-  if (params.comentarioId != null) {
+  if (params.comentarioDevolucaoId != null) {
+    // Alarme de @mencao em comentario de DEVOLUCAO (B2) — espelha o das ordens.
+    await sql`
+      INSERT INTO alissonerp.notificacoes
+        (usuario_id, tipo, titulo, mensagem, remetente_id, link, devolucao_id, comentario_devolucao_id, aguardando_resposta)
+      VALUES
+        (${params.usuarioId}::uuid, ${params.tipo}, ${params.titulo}, ${mensagem},
+         ${params.remetenteId ?? null}::uuid, ${link}, ${params.devolucaoId ?? null},
+         ${params.comentarioDevolucaoId}, ${params.aguardandoResposta ?? false})
+    `;
+  } else if (params.devolucaoId != null) {
+    await sql`
+      INSERT INTO alissonerp.notificacoes
+        (usuario_id, tipo, titulo, mensagem, remetente_id, link, devolucao_id)
+      VALUES
+        (${params.usuarioId}::uuid, ${params.tipo}, ${params.titulo}, ${mensagem},
+         ${params.remetenteId ?? null}::uuid, ${link}, ${params.devolucaoId})
+    `;
+  } else if (params.comentarioId != null) {
     await sql`
       INSERT INTO alissonerp.notificacoes
         (usuario_id, tipo, titulo, mensagem, remetente_id, link, ordem_id, comentario_id, aguardando_resposta)

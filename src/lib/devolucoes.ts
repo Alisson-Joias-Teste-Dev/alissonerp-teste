@@ -398,6 +398,169 @@ export async function processarAprovacaoDevolucao(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// solicitarAprovacaoEstoqueDevolucao — gate do ESTOQUE antes de gerar o vale
+//
+// Regra de negocio:
+//   O QUE: apos a devolucao estar 'aprovado' e com todos os itens inspecionados,
+//     o "Concluir" NAO gera mais o vale direto: cria uma tarefa de aprovacao para
+//     o pessoal do ESTOQUE (aprovador_devolucao_estoque nas Configuracoes; fallback
+//     por cargo de fabrica). A devolucao vai para 'aguardando_aprovacao_estoque'.
+//     Ao aprovar (processarAprovacaoEstoqueDevolucao), o estoque e movimentado e o
+//     vale/reembolso e gerado (concluirDevolucao).
+//   POR QUE: pedido — toda devolucao passa pela conferencia do estoque antes de
+//     virar credito.
+//   IMPACTO SE REMOVIDO: o vale volta a ser gerado sem conferencia do estoque.
+// ═══════════════════════════════════════════════════════════════════════════
+export async function solicitarAprovacaoEstoqueDevolucao(
+  id: number,
+  userId: string,
+): Promise<{ tarefa_id: number }> {
+  const [dev] = await sql`
+    SELECT d.id, d.numero, d.status, d.valor_compensacao, d.venda_id,
+           v.numero_venda, c.nome AS cliente_nome
+    FROM alissonerp.devolucoes_venda d
+    JOIN alissonerp.vendas_erp v ON v.id = d.venda_id
+    LEFT JOIN public.contatos c  ON c.id_contato = v.cliente_id
+    WHERE d.id = ${id}
+  `;
+  if (!dev) throw new Error("Devolucao nao encontrada");
+  if (dev.status !== "aprovado") {
+    throw new Error(`Devolucao precisa estar 'aprovado' para ir ao estoque (status=${dev.status})`);
+  }
+  const [pend] = await sql`
+    SELECT COUNT(*) AS cnt FROM alissonerp.devolucoes_itens
+    WHERE devolucao_id = ${id} AND condicao = 'pendente'
+  `;
+  if (Number(pend.cnt) > 0) {
+    throw new Error(`${pend.cnt} item(ns) ainda pendente(s) de inspecao`);
+  }
+
+  // Aprovador do estoque: config -> fallback por cargo de fabrica/estoque.
+  let aprovadorId: string | undefined;
+  const [cfg] = await sql`
+    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovador_devolucao_estoque'
+  `;
+  if (cfg?.valor) {
+    const [g] = await sql`
+      SELECT id FROM alissonerp.usuarios WHERE id = ${cfg.valor}::uuid AND ativo = true
+    `;
+    if (g) aprovadorId = String(g.id);
+  }
+  if (!aprovadorId) {
+    const [g] = await sql`
+      SELECT id FROM alissonerp.usuarios
+      WHERE role IN ('gerente_fabrica','estoquista_fabrica','admin','desenvolvedor') AND ativo = true
+      ORDER BY CASE role
+        WHEN 'gerente_fabrica'     THEN 1
+        WHEN 'estoquista_fabrica'  THEN 2
+        WHEN 'admin'               THEN 3
+        ELSE 4
+      END LIMIT 1
+    `;
+    if (!g) throw new Error("Nenhum aprovador de estoque ativo encontrado");
+    aprovadorId = String(g.id);
+  }
+
+  const [solicitante] = await sql`SELECT nome FROM alissonerp.usuarios WHERE id = ${userId}::uuid`;
+  const valorComp = parseFloat(dev.valor_compensacao);
+  const titulo = `Aprovacao de estoque — devolucao ${dev.numero}`;
+  const descricao =
+    `Conferencia do estoque da devolucao ${dev.numero} — Venda ${dev.numero_venda} — ${dev.cliente_nome ?? "sem cliente"}\n` +
+    `Compensacao a gerar: R$ ${valorComp.toFixed(2)}\n` +
+    `Ao APROVAR, o estoque e movimentado e o vale/reembolso e gerado (conclui a devolucao).\n` +
+    `Solicitado por: ${solicitante?.nome ?? "desconhecido"}`;
+
+  const result = (await sql.begin(async (tx: any) => {
+    const [tarefa] = await tx`
+      INSERT INTO alissonerp.tarefas
+        (titulo, descricao, responsavel_id, criado_por, prioridade, status, tags)
+      VALUES
+        (${titulo}, ${descricao}, ${aprovadorId}::uuid, ${userId}::uuid,
+         'alta', 'aguardando_aprovacao', ${sql.array(["devolucao", "devolucao_estoque"])})
+      RETURNING id
+    `;
+    await tx`
+      INSERT INTO alissonerp.aprovacoes_tarefa (tarefa_id, solicitante_id, aprovador_id, status)
+      VALUES (${tarefa.id}, ${userId}::uuid, ${aprovadorId}::uuid, 'pendente')
+    `;
+    await tx`
+      UPDATE alissonerp.devolucoes_venda
+      SET status = 'aguardando_aprovacao_estoque', tarefa_id = ${tarefa.id}, updated_at = now()
+      WHERE id = ${id}
+    `;
+    return { tarefa_id: tarefa.id as number };
+  })) as { tarefa_id: number };
+
+  await criarNotificacao({
+    usuarioId: aprovadorId,
+    tipo: "aprovacao",
+    titulo,
+    mensagem: descricao,
+    remetenteId: userId,
+    link: `/devolucoes/${id}`,
+  }).catch((e) => console.error("[devolucoes] best-effort falhou (notif estoque):", e));
+
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// processarAprovacaoEstoqueDevolucao — chamado pelo hook em /api/tarefas/[id]/aprovacao
+//   APROVADO  -> conclui a devolucao (gera vale/estoque) via concluirDevolucao
+//   REJEITADO -> volta para 'aprovado' (permite reinspecionar/reenviar)
+// ═══════════════════════════════════════════════════════════════════════════
+export async function processarAprovacaoEstoqueDevolucao(
+  tarefaId: number,
+  aprovadorId: string,
+  decisao: "aprovado" | "rejeitado",
+  motivo?: string,
+): Promise<{ ok: boolean; devolucao_id?: number; status?: string; message?: string }> {
+  const [dev] = await sql`
+    SELECT id, numero, criado_por, status
+    FROM alissonerp.devolucoes_venda WHERE tarefa_id = ${tarefaId}
+  `;
+  if (!dev) return { ok: false, message: "Nenhuma devolucao vinculada a esta tarefa" };
+  if (dev.status !== "aguardando_aprovacao_estoque") {
+    return { ok: false, devolucao_id: dev.id, status: dev.status, message: "Devolucao nao esta aguardando aprovacao do estoque" };
+  }
+
+  if (decisao === "rejeitado") {
+    await sql`
+      UPDATE alissonerp.devolucoes_venda
+      SET status = 'aprovado', rejeitado_motivo = ${motivo ?? null}, updated_at = now()
+      WHERE id = ${dev.id}
+    `;
+    await criarNotificacao({
+      usuarioId: String(dev.criado_por),
+      tipo: "aprovacao",
+      titulo: "Estoque reprovou — devolucao " + dev.numero,
+      mensagem: motivo ?? "Conferencia de estoque reprovada. Revise os itens e reenvie.",
+      remetenteId: aprovadorId,
+      link: `/devolucoes/${dev.id}`,
+    }).catch((e) => console.error("[devolucoes] best-effort falhou (notif):", e));
+    return { ok: true, devolucao_id: dev.id, status: "aprovado" };
+  }
+
+  // Aprovado: volta para 'aprovado' (contrato do concluirDevolucao) e conclui.
+  await sql`
+    UPDATE alissonerp.devolucoes_venda
+    SET status = 'aprovado', aprovador_id = ${aprovadorId}::uuid, updated_at = now()
+    WHERE id = ${dev.id}
+  `;
+  await concluirDevolucao(dev.id, aprovadorId);
+
+  await criarNotificacao({
+    usuarioId: String(dev.criado_por),
+    tipo: "aprovacao",
+    titulo: "Estoque aprovou — devolucao " + dev.numero,
+    mensagem: "Estoque conferido. Vale/reembolso gerado e devolucao concluida.",
+    remetenteId: aprovadorId,
+    link: `/devolucoes/${dev.id}`,
+  }).catch((e) => console.error("[devolucoes] best-effort falhou (notif):", e));
+
+  return { ok: true, devolucao_id: dev.id, status: "concluido" };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // inspecionarItem — so quando devolucao.status = 'aprovado'
 // ═══════════════════════════════════════════════════════════════════════════
 export async function inspecionarItem(

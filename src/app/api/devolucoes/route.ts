@@ -55,6 +55,10 @@ export async function GET(req: NextRequest) {
 
   const vendaId = vendaIdParam ? Number(vendaIdParam) : null;
   const clienteId = clienteIdParam ? Number(clienteIdParam) : null;
+  // B1 (bug da busca): a pesquisa por nome era feita SO no front, sobre a pagina
+  // ja carregada — quem estava em outra pagina "sumia". Agora filtra no servidor
+  // por nome do cliente, numero da devolucao e numero da venda.
+  const busca = (searchParams.get("busca") ?? "").trim() || null;
 
   const rows = await sql`
     SELECT d.id, d.numero, d.venda_id, d.tipo, d.motivo, d.status, d.tipo_compensacao,
@@ -69,6 +73,10 @@ export async function GET(req: NextRequest) {
     WHERE (${status}::text IS NULL OR d.status = ${status})
       AND (${vendaId}::int IS NULL OR d.venda_id = ${vendaId})
       AND (${clienteId}::int IS NULL OR v.cliente_id = ${clienteId})
+      AND (${busca}::text IS NULL
+           OR d.numero ILIKE '%' || ${busca} || '%'
+           OR v.numero_venda ILIKE '%' || ${busca} || '%'
+           OR c.nome ILIKE '%' || ${busca} || '%')
     ORDER BY d.created_at DESC
     LIMIT ${limit} OFFSET ${offset}
   `;
@@ -77,9 +85,14 @@ export async function GET(req: NextRequest) {
     SELECT COUNT(*)::int AS total
     FROM alissonerp.devolucoes_venda d
     JOIN alissonerp.vendas_erp v ON v.id = d.venda_id
+    LEFT JOIN public.contatos c  ON c.id_contato = v.cliente_id
     WHERE (${status}::text IS NULL OR d.status = ${status})
       AND (${vendaId}::int IS NULL OR d.venda_id = ${vendaId})
       AND (${clienteId}::int IS NULL OR v.cliente_id = ${clienteId})
+      AND (${busca}::text IS NULL
+           OR d.numero ILIKE '%' || ${busca} || '%'
+           OR v.numero_venda ILIKE '%' || ${busca} || '%'
+           OR c.nome ILIKE '%' || ${busca} || '%')
   `;
 
   return NextResponse.json({
