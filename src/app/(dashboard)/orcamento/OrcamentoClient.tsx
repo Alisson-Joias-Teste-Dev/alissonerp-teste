@@ -276,32 +276,45 @@ export default function OrcamentoClient({
   const [aprovarNovo, setAprovarNovo] = useState(false);
   const [aprovarNovoForm, setAprovarNovoForm] = useState({ nome: "", cpf_cnpj: "", celular: "" });
 
+  // B9: trava de re-entrada. Impede que dois disparos do "Aprovar" (duplo clique)
+  // cheguem ao servidor. A garantia real é no servidor + índice único; isto é só o
+  // reforço de UI para o caso trivial.
+  const aprovandoRef = useRef(false);
+
   async function aprovarPatchOrc(orcId: number) {
     const res = await fetch(`/api/orcamento/${orcId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "aprovado" }),
     });
-    const data = await res.json().catch(() => ({})) as { error?: string; numero_venda?: string };
+    const data = await res.json().catch(() => ({})) as { error?: string; numero_venda?: string; ja_existia?: boolean };
     return { ok: res.ok, status: res.status, data };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function iniciarAprovacao(o: Record<string, any>) {
+    if (aprovandoRef.current) return;
     if (!confirm(`Aprovar ${o.numero_orcamento}? Será criada uma venda pré-preenchida no PDV.`)) return;
-    const r = await aprovarPatchOrc(o.id);
-    if (r.ok) {
-      alert(`Orçamento aprovado! Venda #${r.data.numero_venda} criada como rascunho. Abra a venda para preencher pagamento e aprovar.`);
-      fetchOrcamentos();
-      return;
+    aprovandoRef.current = true;
+    try {
+      const r = await aprovarPatchOrc(o.id);
+      if (r.ok) {
+        alert(r.data.ja_existia
+          ? `Este orçamento já tinha a venda #${r.data.numero_venda} criada. Abra-a para preencher pagamento e aprovar.`
+          : `Orçamento aprovado! Venda #${r.data.numero_venda} criada como rascunho. Abra a venda para preencher pagamento e aprovar.`);
+        fetchOrcamentos();
+        return;
+      }
+      // 422 "Vincule um cliente" → abre o seletor em vez de dar beco sem saída.
+      if (r.status === 422 && /vincule um cliente/i.test(r.data.error ?? "")) {
+        setAprovarOrc(o); setAprovarBusca(""); setAprovarResults([]); setAprovarMsg("");
+        setAprovarNovo(false);
+        setAprovarNovoForm({ nome: o.nome_cliente ?? "", cpf_cnpj: "", celular: "" });
+        return;
+      }
+      alert(r.data.error ?? "Erro ao aprovar");
+    } finally {
+      aprovandoRef.current = false;
     }
-    // 422 "Vincule um cliente" → abre o seletor em vez de dar beco sem saída.
-    if (r.status === 422 && /vincule um cliente/i.test(r.data.error ?? "")) {
-      setAprovarOrc(o); setAprovarBusca(""); setAprovarResults([]); setAprovarMsg("");
-      setAprovarNovo(false);
-      setAprovarNovoForm({ nome: o.nome_cliente ?? "", cpf_cnpj: "", celular: "" });
-      return;
-    }
-    alert(r.data.error ?? "Erro ao aprovar");
   }
 
   async function buscarClientesAprovar(termo: string) {
@@ -315,20 +328,28 @@ export default function OrcamentoClient({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function vincularEAprovar(c: any) {
     if (!aprovarOrc) return;
+    if (aprovandoRef.current) return;
     const idCliente = c.id_contato ?? c.id;
     if (idCliente == null) { setAprovarMsg("Cliente sem ID — escolha outro."); return; }
     setAprovarMsg("Vinculando e aprovando…");
-    // Um PATCH só: o route vincula o cliente_id e então processa status=aprovado.
-    const res = await fetch(`/api/orcamento/${aprovarOrc.id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cliente_id: Number(idCliente), status: "aprovado" }),
-    });
-    const data = await res.json().catch(() => ({})) as { error?: string; numero_venda?: string };
-    if (!res.ok) { setAprovarMsg(data.error ?? "Erro ao aprovar"); return; }
-    const numero = aprovarOrc.numero_orcamento;
-    setAprovarOrc(null); setAprovarBusca(""); setAprovarResults([]); setAprovarMsg(""); setAprovarNovo(false);
-    alert(`${numero} aprovado! Venda #${data.numero_venda} criada como rascunho.`);
-    fetchOrcamentos();
+    aprovandoRef.current = true;
+    try {
+      // Um PATCH só: o route vincula o cliente_id e então processa status=aprovado.
+      const res = await fetch(`/api/orcamento/${aprovarOrc.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cliente_id: Number(idCliente), status: "aprovado" }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string; numero_venda?: string; ja_existia?: boolean };
+      if (!res.ok) { setAprovarMsg(data.error ?? "Erro ao aprovar"); return; }
+      const numero = aprovarOrc.numero_orcamento;
+      setAprovarOrc(null); setAprovarBusca(""); setAprovarResults([]); setAprovarMsg(""); setAprovarNovo(false);
+      alert(data.ja_existia
+        ? `${numero} já tinha a venda #${data.numero_venda} criada.`
+        : `${numero} aprovado! Venda #${data.numero_venda} criada como rascunho.`);
+      fetchOrcamentos();
+    } finally {
+      aprovandoRef.current = false;
+    }
   }
 
   // Cliente não existe no cadastro → cria (POST /api/contatos, só nome obrigatório,
