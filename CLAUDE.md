@@ -215,7 +215,7 @@ peso_pedra_ct: salvar em quilates, trigger calcula gramas (1ct = 0.2g)
 tem_pedra_preciosa = joia COM pedra, NUNCA usar para classificar pedra solta — usar ehPedraSolta() de src/lib/compras-pedras.ts (categoria 'Pedras' OU produto_pedra_extras OU nome COMEÇA com nome de pedra; includes() no nome era o bug do AJ5079)
 camera mobile: navigator.mediaDevices undefined em HTTP — fallback input[type=file]
 movimentacoes_estoque.local_estoque_id: NOT NULL
-Estoque comercial: inserir item de venda CRIA RESERVA (nunca saida direta) — reserva vira saida ao APROVAR venda
+Estoque comercial: inserir item de venda CRIA RESERVA (nunca saida direta) — reserva vira saída NA ENTREGA (confirmação do recebimento/retirada). Aprovar a venda NÃO baixa estoque — só baixa a conta a receber (financeiro, mig 299). Ver comercial.md §3
 Curva precificacao: chamar aplicarCurvaProduto() apos criar/editar produto com peso+categoria (src/lib/aplicar-curva-produto.ts)
 Vale-troca: vale > total venda gera NOVO vale com troco (vale_origem_id rastreia cadeia) — cada vale usado UMA vez
 Orcamento rascunho QuadradoCanal (Bordas Elevadas): 6 useEffects de auto-ajuste em OrcamentoClient.tsx (linhas ~911, ~968, ~988, ~1082, ~1135, ~1153) DEVEM começar com `if (isHydratingRef.current) return;` — sem isso, ao reabrir rascunho o sistema recalcula canalWidth/stoneRows/stoneCount e sobrescreve modelo/valor/peso negociados. Bug recorrente desde v2.42 — NUNCA REMOVER OS GATES.

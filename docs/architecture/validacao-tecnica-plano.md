@@ -161,7 +161,7 @@ export async function withTestTx<T>(fn: (tx: Sql) => Promise<T>, opts?: { schema
 
 ### 3.1 ⚠️ Reservas de estoque comercial
 
-**Não coberto:** plano não fala de `reservas_estoque_comercial` (CLAUDE.md §3 menciona como pegadinha). Inserir item de venda **cria reserva**; reserva vira saída ao aprovar venda.
+**Não coberto:** plano não fala de `reservas_estoque_comercial` (CLAUDE.md §3 menciona como pegadinha). Inserir item de venda **cria reserva**; reserva vira saída **na entrega** (confirmação do recebimento/retirada), não ao aprovar.
 
 **Recomendação:** adicionar nota no Dev Notes da Story 2.2 (cobertura vendas) e Story 2.3 (cobertura estoque) cobrindo reserva → saída.
 
