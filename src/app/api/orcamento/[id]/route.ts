@@ -171,8 +171,10 @@ export async function PATCH(
     return NextResponse.json({ error: "Sem permissão para aprovar/rejeitar" }, { status: 403 });
   }
 
-  // Atualizar cliente_id se fornecido
-  if (body.cliente_id) {
+  // Atualizar cliente_id se fornecido — mas NÃO em orçamento já convertido (B9):
+  // ele está "travado" e já tem uma venda. Mudar o cliente aqui divergiria da venda
+  // (a aprovação devolve a venda existente sem repassar o novo cliente).
+  if (body.cliente_id && orc.status !== "convertido" && orc.status !== "cancelado") {
     await sql`UPDATE alissonerp.orcamentos SET cliente_id = ${body.cliente_id} WHERE id = ${orcId}`;
     orc.cliente_id = body.cliente_id;
   }

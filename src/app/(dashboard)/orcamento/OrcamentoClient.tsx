@@ -280,6 +280,10 @@ export default function OrcamentoClient({
   // cheguem ao servidor. A garantia real é no servidor + índice único; isto é só o
   // reforço de UI para o caso trivial.
   const aprovandoRef = useRef(false);
+  // B9: trava separada pro "Cadastrar e aprovar" (cria contato + aprova). Ref própria
+  // porque essa função CHAMA vincularEAprovar (que usa aprovandoRef) — compartilhar a
+  // mesma ref faria uma bloquear a outra. Sem ela, duplo clique cria contato duplicado.
+  const cadastrandoRef = useRef(false);
 
   async function aprovarPatchOrc(orcId: number) {
     const res = await fetch(`/api/orcamento/${orcId}`, {
@@ -356,16 +360,22 @@ export default function OrcamentoClient({
   // sincroniza pro Tiny via fila) e já vincula+aprova.
   async function cadastrarEVincular() {
     if (!aprovarOrc) return;
+    if (cadastrandoRef.current) return;
     if (!aprovarNovoForm.nome.trim()) { setAprovarMsg("Nome é obrigatório."); return; }
+    cadastrandoRef.current = true;
     setAprovarMsg("Cadastrando cliente…");
-    const resC = await fetch("/api/contatos", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(aprovarNovoForm),
-    });
-    const novo = await resC.json().catch(() => ({}));
-    if (!resC.ok) { setAprovarMsg((novo as { error?: string }).error ?? "Falha ao cadastrar cliente"); return; }
-    // /api/contatos retorna { id, nome, ... } — vincularEAprovar aceita id_contato ?? id.
-    await vincularEAprovar(novo);
+    try {
+      const resC = await fetch("/api/contatos", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(aprovarNovoForm),
+      });
+      const novo = await resC.json().catch(() => ({}));
+      if (!resC.ok) { setAprovarMsg((novo as { error?: string }).error ?? "Falha ao cadastrar cliente"); return; }
+      // /api/contatos retorna { id, nome, ... } — vincularEAprovar aceita id_contato ?? id.
+      await vincularEAprovar(novo);
+    } finally {
+      cadastrandoRef.current = false;
+    }
   }
   const [editingOrcId, setEditingOrcId] = useState<number | null>(null);
   // updated_at do orçamento carregado — usado no PUT como guard otimista
@@ -2017,6 +2027,7 @@ export default function OrcamentoClient({
         rascunho: { bg: "#F3F4F6", color: "#6B7280" }, enviado: { bg: "#DBEAFE", color: "#1D4ED8" },
         aprovado: { bg: "#D1FAE5", color: "#065F46" }, rejeitado: { bg: "#FEE2E2", color: "#991B1B" },
         convertido: { bg: "#E0E7FF", color: "#4338CA" },
+        cancelado: { bg: "#E5E7EB", color: "#4B5563" },
       };
       const s = map[status] ?? map.rascunho;
       return <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold" style={{ backgroundColor: s.bg, color: s.color }}>{status}</span>;
@@ -2094,6 +2105,7 @@ export default function OrcamentoClient({
               { key: "aprovado", label: `Aprovado (${aprovados.length})` },
               { key: "convertido", label: `Convertido (${orcamentos.filter(o => o.status === "convertido").length})` },
               { key: "rejeitado", label: `Rejeitado (${rejeitados.length})` },
+              { key: "cancelado", label: `Cancelado (${orcamentos.filter(o => o.status === "cancelado").length})` },
             ].map(({ key, label }) => (
               <button key={key} onClick={() => setFiltroStatus(key)}
                 className="px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors"

@@ -34,7 +34,7 @@ export async function POST(
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [venda] = await sql`
-    SELECT id, situacao, bloqueado, vendedor_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    SELECT id, situacao, bloqueado, vendedor_id, orcamento_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
 
@@ -92,6 +92,19 @@ export async function POST(
         WHERE id = ${vendaId}
       `;
 
+      // B9 (regra Jonathan 18/06): se a venda veio de um orçamento, cancela o
+      // orçamento também — senão ele ficaria 'convertido' apontando pra uma venda
+      // morta, e a trava de venda-única (mig 312) impediria reaproveitá-lo. Como
+      // 1 orçamento = no máx 1 venda (índice único uq_vendas_erp_orcamento), não há
+      // ambiguidade. 'cancelado' é status válido desde a migration 313.
+      if (venda.orcamento_id) {
+        await tx`
+          UPDATE alissonerp.orcamentos
+          SET status = 'cancelado', updated_at = NOW()
+          WHERE id = ${venda.orcamento_id}
+        `;
+      }
+
       if (creditoUsado > 0) {
         const { creditarSaldo } = await import("@/lib/saldo-credito");
         // Mesma transação (txClient) — devolução de crédito e cancelamento são atômicos
@@ -106,7 +119,7 @@ export async function POST(
         registro_id: vendaId,
         usuario_id: user.id,
         dados_antes: { situacao: venda.situacao },
-        dados_depois: { situacao: "cancelado", bloqueado: true, credito_devolvido: creditoUsado > 0 ? creditoUsado : undefined },
+        dados_depois: { situacao: "cancelado", bloqueado: true, credito_devolvido: creditoUsado > 0 ? creditoUsado : undefined, orcamento_cancelado: venda.orcamento_id ?? undefined },
       });
     });
   } catch (err) {
