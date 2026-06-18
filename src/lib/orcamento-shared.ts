@@ -27,13 +27,14 @@ export const ROLES_APROVACAO = [
 export type RoleAprovacao = typeof ROLES_APROVACAO[number];
 
 // Status validos do orcamento. Espelha o CHECK chk_orcamentos_status
-// (migration 260). Adicionar status aqui exige migration nova.
+// (migrations 260 + 313). Adicionar status aqui exige migration nova.
 export const ORCAMENTO_STATUS = [
   "rascunho",
   "enviado",
   "aprovado",
   "rejeitado",
   "convertido",
+  "cancelado",
 ] as const;
 export type OrcamentoStatus = typeof ORCAMENTO_STATUS[number];
 

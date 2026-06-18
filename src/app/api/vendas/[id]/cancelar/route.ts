@@ -92,18 +92,11 @@ export async function POST(
         WHERE id = ${vendaId}
       `;
 
-      // B9 (regra Jonathan 18/06): se a venda veio de um orçamento, cancela o
-      // orçamento também — senão ele ficaria 'convertido' apontando pra uma venda
-      // morta, e a trava de venda-única (mig 312) impediria reaproveitá-lo. Como
-      // 1 orçamento = no máx 1 venda (índice único uq_vendas_erp_orcamento), não há
-      // ambiguidade. 'cancelado' é status válido desde a migration 313.
-      if (venda.orcamento_id) {
-        await tx`
-          UPDATE alissonerp.orcamentos
-          SET status = 'cancelado', updated_at = NOW()
-          WHERE id = ${venda.orcamento_id}
-        `;
-      }
+      // B9: cancelar o orçamento de origem é feito pelo gatilho
+      // trg_cancelar_orcamento_ao_cancelar_venda (mig 314) — dispara em QUALQUER rota
+      // que cancele a venda (esta, o PATCH situacao, solicitação de alteração) e até
+      // em SQL manual. Não duplicamos aqui; orcamento_id fica no SELECT só pro log de
+      // auditoria abaixo.
 
       if (creditoUsado > 0) {
         const { creditarSaldo } = await import("@/lib/saldo-credito");

@@ -197,6 +197,12 @@ export async function PATCH(
 
   // ── APROVAR → CRIAR VENDA PRÉ-PREENCHIDA ──────────────────────────────────
   if (body.status === "aprovado") {
+    // B9: orçamento cancelado é terminal — não aprova (não cria venda nem devolve a
+    // venda cancelada como se fosse conversão). Cobre a tentativa via API direta; a
+    // tela já não oferece "Aprovar" pra cancelado.
+    if (orc.status === "cancelado") {
+      return NextResponse.json({ error: "Orçamento cancelado não pode ser aprovado." }, { status: 409 });
+    }
     const clienteId = orc.cliente_id as number | null;
     if (!clienteId) {
       return NextResponse.json({ error: "Vincule um cliente antes de aprovar" }, { status: 422 });
