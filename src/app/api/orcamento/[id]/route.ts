@@ -171,8 +171,10 @@ export async function PATCH(
     return NextResponse.json({ error: "Sem permissão para aprovar/rejeitar" }, { status: 403 });
   }
 
-  // Atualizar cliente_id se fornecido
-  if (body.cliente_id) {
+  // Atualizar cliente_id se fornecido — mas NÃO em orçamento já convertido (B9):
+  // ele está "travado" e já tem uma venda. Mudar o cliente aqui divergiria da venda
+  // (a aprovação devolve a venda existente sem repassar o novo cliente).
+  if (body.cliente_id && orc.status !== "convertido" && orc.status !== "cancelado") {
     await sql`UPDATE alissonerp.orcamentos SET cliente_id = ${body.cliente_id} WHERE id = ${orcId}`;
     orc.cliente_id = body.cliente_id;
   }
@@ -195,6 +197,12 @@ export async function PATCH(
 
   // ── APROVAR → CRIAR VENDA PRÉ-PREENCHIDA ──────────────────────────────────
   if (body.status === "aprovado") {
+    // B9: orçamento cancelado é terminal — não aprova (não cria venda nem devolve a
+    // venda cancelada como se fosse conversão). Cobre a tentativa via API direta; a
+    // tela já não oferece "Aprovar" pra cancelado.
+    if (orc.status === "cancelado") {
+      return NextResponse.json({ error: "Orçamento cancelado não pode ser aprovado." }, { status: 409 });
+    }
     const clienteId = orc.cliente_id as number | null;
     if (!clienteId) {
       return NextResponse.json({ error: "Vincule um cliente antes de aprovar" }, { status: 422 });
@@ -205,6 +213,22 @@ export async function PATCH(
     const [clienteExiste] = await sql`SELECT 1 AS ok FROM public.contatos WHERE id_contato = ${clienteId} LIMIT 1`;
     if (!clienteExiste) {
       return NextResponse.json({ error: "Cliente vinculado não foi encontrado (pode ter sido removido). Selecione outro." }, { status: 422 });
+    }
+
+    // B9 (idempotência, opção A): se este orçamento JÁ gerou uma venda, devolve ELA
+    // em vez de criar outra. Cobre o caso comum de re-clique / reabrir a tela depois
+    // de já ter aprovado. A trava final contra corrida real é o índice único
+    // uq_vendas_erp_orcamento (migration 312) + o FOR UPDATE dentro da transação.
+    const [vendaJaGerada] = await sql`
+      SELECT id, numero_venda FROM alissonerp.vendas_erp
+      WHERE orcamento_id = ${orcId} ORDER BY id ASC LIMIT 1
+    `;
+    if (vendaJaGerada) {
+      return NextResponse.json({
+        ok: true, status: "convertido",
+        venda_id: vendaJaGerada.id, numero_venda: vendaJaGerada.numero_venda,
+        ja_existia: true,
+      });
     }
 
     // Bug #18 + B6: defesa em profundidade — revalida ficha técnica (1 E 2)
@@ -251,6 +275,14 @@ export async function PATCH(
     // alinha o sequence com MAX(numero_pedido/numero_venda), mas se ela ainda
     // não rodou em prod (ou alguém inserir via outro caminho), o nextval pode
     // colidir. Como sequence é monotônico, a 2ª tentativa pega número novo.
+    // B9: distingue a unique_violation da trava de orçamento (uq_vendas_erp_orcamento,
+    // mig 312) das demais. Essa NÃO pode ser retentada — retentar não ajuda, é uma
+    // duplicata real ("orçamento já tem venda"); é tratada como idempotente abaixo.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const isOrcDup = (e: any) =>
+      e?.code === "23505" &&
+      (String(e?.constraint_name ?? "").includes("orcamento") ||
+        String(e?.detail ?? "").includes("orcamento_id"));
     const runWithRetry = async <T>(fn: () => Promise<T>, max = 3): Promise<T> => {
       let lastErr: unknown;
       for (let i = 0; i < max; i++) {
@@ -259,15 +291,30 @@ export async function PATCH(
           lastErr = e;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const code = (e as any)?.code;
-          if (code !== "23505") throw e; // só retentamos unique_violation
+          // só retentamos unique_violation de numero_venda; a trava de orçamento não.
+          if (code !== "23505" || isOrcDup(e)) throw e;
         }
       }
       throw lastErr;
     };
-    type ResultadoAprovacao = { venda_id: number; numero_venda: string };
-    const resultado = await runWithRetry<ResultadoAprovacao>(() =>
+    type ResultadoAprovacao = { venda_id: number; numero_venda: string; ja_existia?: boolean };
+    let resultado: ResultadoAprovacao;
+    try {
+    resultado = await runWithRetry<ResultadoAprovacao>(() =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (sql as any).begin(async (tx: typeof sql) => {
+      // B9 (trava de corrida): trava a linha do orçamento. Duas aprovações
+      // simultâneas serializam aqui — a 2ª espera a 1ª commitar, relê e devolve a
+      // venda já criada em vez de inserir outra. (Backstop final: índice único.)
+      await tx`SELECT 1 FROM alissonerp.orcamentos WHERE id = ${orcId} FOR UPDATE`;
+      const [jaTemVenda] = await tx`
+        SELECT id, numero_venda FROM alissonerp.vendas_erp
+        WHERE orcamento_id = ${orcId} ORDER BY id ASC LIMIT 1
+      `;
+      if (jaTemVenda) {
+        return { venda_id: jaTemVenda.id, numero_venda: jaTemVenda.numero_venda as string, ja_existia: true };
+      }
+
       // 1. Data entrega: +10 dias úteis em America/Sao_Paulo.
       // Bug #19: `new Date()` no servidor em UTC pulava sábado/domingo errado
       // (sex 23h SP = sáb 02h UTC, então `getDay()` retornava 6 e atrasava 1 dia).
@@ -407,6 +454,24 @@ export async function PATCH(
       return { venda_id: venda.id, numero_venda: vendaFinal.numero_venda as string };
     }),
     );
+    } catch (e) {
+      // Backstop B9: se o índice único uq_vendas_erp_orcamento (mig 312) disparou
+      // (corrida que escapou do FOR UPDATE, ou inserção por outro caminho), trata
+      // como idempotente — devolve a venda que já existe, sem erro feio.
+      if (isOrcDup(e)) {
+        const [ex] = await sql`
+          SELECT id, numero_venda FROM alissonerp.vendas_erp
+          WHERE orcamento_id = ${orcId} ORDER BY id ASC LIMIT 1
+        `;
+        if (ex) {
+          return NextResponse.json({
+            ok: true, status: "convertido",
+            venda_id: ex.id, numero_venda: ex.numero_venda, ja_existia: true,
+          });
+        }
+      }
+      throw e;
+    }
 
     // Venda criada como rascunho — usuário preenche pagamento/frete e aprova manualmente
 
@@ -415,6 +480,7 @@ export async function PATCH(
       status: "convertido",
       venda_id: resultado.venda_id,
       numero_venda: resultado.numero_venda,
+      ja_existia: resultado.ja_existia ?? false,
     });
   }
 

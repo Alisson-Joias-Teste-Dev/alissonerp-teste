@@ -3,7 +3,7 @@
 > Documento **mantido à mão** (NÃO é auto-gerado como `docs/schema/`). Toda vez que mexermos no módulo comercial, atualizar aqui: regra nova → acrescenta; regra mudou → corrige.
 > Fonte de schema (colunas/tabelas) = `docs/schema/alissonerp-vendas.md` (auto-gerado). Aqui é o **porquê** e o **como** do negócio.
 
-Última atualização: 2026-06-16.
+Última atualização: 2026-06-18.
 
 ---
 
@@ -41,7 +41,11 @@ Arquivos: `src/app/api/financeiro/comissoes/*`, `src/lib/types/financeiro-comiss
 - **Aprovar a venda NÃO baixa estoque** — a baixa de ESTOQUE (reserva → saída) é só na **entrega** (confirmação do recebimento / retirada). Não confundir com a baixa da **conta a receber** (financeiro), que essa sim ocorre na **aprovação** (mig 299). São duas "baixas" diferentes — peça ≠ dinheiro.
 - **Saldo comercial = `vw_saldo_estoque_comercial`**: `disponivel = saldo - reservado`. **SEMPRE conferir `reservado` antes de assumir que há peça livre** — pode haver saldo físico já reservado por outra venda (inclusive rascunho).
 - **Baixa segue a EXISTÊNCIA da reserva**, não a flag `controla_estoque` (corrigido 12/06). Item com reserva ativa → baixa e divide; item sem reserva → pula sem erro.
-- **`reservas_estoque_comercial` NÃO tem triggers** → dá pra ajustar direto (UPDATE/cancel) sem efeito colateral.
+- **`reservas_estoque_comercial` NÃO tem triggers PRÓPRIOS** (na tabela) → dá pra ajustar a linha direto (UPDATE/cancel) sem efeito colateral. ⚠️ Isso NÃO vale para apagar o ITEM da venda (ver bullet abaixo) — o item tem gatilho + FK que mexem na reserva.
+- **Apagar item de venda (só em rascunho) NÃO deixa reserva órfã** *(B10, conferido em prod 18/06/2026)*. Remover um item (`DELETE /api/vendas/[id]/itens/[itemId]`, permitido **só** com `situacao='rascunho'`) limpa a reserva **sozinho**, por DOIS mecanismos redundantes: (1) FK `item_venda_id → itens_venda_erp(id) ON DELETE CASCADE` (mig 140, **validada** em prod) apaga a linha da reserva junto; (2) gatilho `trg_estoque_comercial_reversao_item` (AFTER DELETE em `itens_venda_erp`, mig 141) marca `cancelado` / estorna o movimento se já efetivado. **NÃO criar "limpeza manual" da reserva ao apagar item — a proteção já existe e funciona** (prova: 0 reservas órfãs com item apagado em prod). Impacto se duplicar a limpeza: dupla baixa/estorno.
+- **Reserva pode ser de ITEM DE VENDA ou de ORDEM.** As colunas `item_venda_id`/`venda_id`/`ordem_id` são **nullable** (a tabela foi estendida depois da mig 140). Reserva ligada a uma ordem tem `item_venda_id` nulo — é normal, não é órfã. Ao caçar órfãs por `item_venda_id`, filtrar `item_venda_id IS NOT NULL` (senão as de ordem aparecem como falso-positivo).
+- **Status de venda válidos: `rascunho` · `aprovado` · `em_rota` · `entregue` · `cancelado`.** **NÃO existe `concluido`** — era uma falha, **corrigida em 13/06/2026**. Ainda restam vendas antigas com `situacao='concluido'` no banco (resíduo, todas de antes de 13/06) — não criar lógica nova em cima desse status.
+- **Reserva "presa" (B4, conferido em prod 18/06/2026):** a reserva fica `status='ativo'` para sempre quando a venda chegou a `entregue`/`concluido` **sem registro de entrega** (`entregas_venda`) — caminho antigo (pré-13/06) que pulava o módulo de entrega, então `baixarEstoqueDaEntrega` nunca rodou (sem entrega, não há o que baixar). Resultado: `reservado` inflado e `disponivel` errado (chega a negativo). São 16 casos antigos; **não nasce reserva presa nova depois de 13/06**. Limpeza = auditoria humana do pedido → **baixa** (peça real: gera saída + efetiva a reserva) ou **cancelar** (serviço/atípico), sempre em script **assinado**. Reserva de venda **viva** (rascunho/aprovado ainda não entregue) NÃO é presa — segura a peça de propósito.
 - **Entrega parcial:** venda fica `aprovado` enquanto houver saldo pendente; vira `entregue` só quando toda a quantidade confirmada cobre os itens (`marcarVendaEntregueSeCompleta`).
 - **Trava "Na Entrega":** não marca `entregue` enquanto houver pagamento `forma='Na Entrega'` `status='pendente'` — tem que cobrar antes (`POST /api/vendas/[id]/cobrar-entrega`).
 - **Reposição aberta BLOQUEIA a entrega do item** (não a venda inteira): ordem `reposicao_venda`/`reposicao_loja` não-concluída trava só aquele produto (`calcularBloqueioReposicao`). Reposição sem produto identificável → trava a venda inteira (seguro).

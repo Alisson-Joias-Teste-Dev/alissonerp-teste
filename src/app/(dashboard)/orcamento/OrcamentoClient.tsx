@@ -276,32 +276,49 @@ export default function OrcamentoClient({
   const [aprovarNovo, setAprovarNovo] = useState(false);
   const [aprovarNovoForm, setAprovarNovoForm] = useState({ nome: "", cpf_cnpj: "", celular: "" });
 
+  // B9: trava de re-entrada. Impede que dois disparos do "Aprovar" (duplo clique)
+  // cheguem ao servidor. A garantia real é no servidor + índice único; isto é só o
+  // reforço de UI para o caso trivial.
+  const aprovandoRef = useRef(false);
+  // B9: trava separada pro "Cadastrar e aprovar" (cria contato + aprova). Ref própria
+  // porque essa função CHAMA vincularEAprovar (que usa aprovandoRef) — compartilhar a
+  // mesma ref faria uma bloquear a outra. Sem ela, duplo clique cria contato duplicado.
+  const cadastrandoRef = useRef(false);
+
   async function aprovarPatchOrc(orcId: number) {
     const res = await fetch(`/api/orcamento/${orcId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "aprovado" }),
     });
-    const data = await res.json().catch(() => ({})) as { error?: string; numero_venda?: string };
+    const data = await res.json().catch(() => ({})) as { error?: string; numero_venda?: string; ja_existia?: boolean };
     return { ok: res.ok, status: res.status, data };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function iniciarAprovacao(o: Record<string, any>) {
+    if (aprovandoRef.current) return;
     if (!confirm(`Aprovar ${o.numero_orcamento}? Será criada uma venda pré-preenchida no PDV.`)) return;
-    const r = await aprovarPatchOrc(o.id);
-    if (r.ok) {
-      alert(`Orçamento aprovado! Venda #${r.data.numero_venda} criada como rascunho. Abra a venda para preencher pagamento e aprovar.`);
-      fetchOrcamentos();
-      return;
+    aprovandoRef.current = true;
+    try {
+      const r = await aprovarPatchOrc(o.id);
+      if (r.ok) {
+        alert(r.data.ja_existia
+          ? `Este orçamento já tinha a venda #${r.data.numero_venda} criada. Abra-a para preencher pagamento e aprovar.`
+          : `Orçamento aprovado! Venda #${r.data.numero_venda} criada como rascunho. Abra a venda para preencher pagamento e aprovar.`);
+        fetchOrcamentos();
+        return;
+      }
+      // 422 "Vincule um cliente" → abre o seletor em vez de dar beco sem saída.
+      if (r.status === 422 && /vincule um cliente/i.test(r.data.error ?? "")) {
+        setAprovarOrc(o); setAprovarBusca(""); setAprovarResults([]); setAprovarMsg("");
+        setAprovarNovo(false);
+        setAprovarNovoForm({ nome: o.nome_cliente ?? "", cpf_cnpj: "", celular: "" });
+        return;
+      }
+      alert(r.data.error ?? "Erro ao aprovar");
+    } finally {
+      aprovandoRef.current = false;
     }
-    // 422 "Vincule um cliente" → abre o seletor em vez de dar beco sem saída.
-    if (r.status === 422 && /vincule um cliente/i.test(r.data.error ?? "")) {
-      setAprovarOrc(o); setAprovarBusca(""); setAprovarResults([]); setAprovarMsg("");
-      setAprovarNovo(false);
-      setAprovarNovoForm({ nome: o.nome_cliente ?? "", cpf_cnpj: "", celular: "" });
-      return;
-    }
-    alert(r.data.error ?? "Erro ao aprovar");
   }
 
   async function buscarClientesAprovar(termo: string) {
@@ -315,36 +332,50 @@ export default function OrcamentoClient({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function vincularEAprovar(c: any) {
     if (!aprovarOrc) return;
+    if (aprovandoRef.current) return;
     const idCliente = c.id_contato ?? c.id;
     if (idCliente == null) { setAprovarMsg("Cliente sem ID — escolha outro."); return; }
     setAprovarMsg("Vinculando e aprovando…");
-    // Um PATCH só: o route vincula o cliente_id e então processa status=aprovado.
-    const res = await fetch(`/api/orcamento/${aprovarOrc.id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cliente_id: Number(idCliente), status: "aprovado" }),
-    });
-    const data = await res.json().catch(() => ({})) as { error?: string; numero_venda?: string };
-    if (!res.ok) { setAprovarMsg(data.error ?? "Erro ao aprovar"); return; }
-    const numero = aprovarOrc.numero_orcamento;
-    setAprovarOrc(null); setAprovarBusca(""); setAprovarResults([]); setAprovarMsg(""); setAprovarNovo(false);
-    alert(`${numero} aprovado! Venda #${data.numero_venda} criada como rascunho.`);
-    fetchOrcamentos();
+    aprovandoRef.current = true;
+    try {
+      // Um PATCH só: o route vincula o cliente_id e então processa status=aprovado.
+      const res = await fetch(`/api/orcamento/${aprovarOrc.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cliente_id: Number(idCliente), status: "aprovado" }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string; numero_venda?: string; ja_existia?: boolean };
+      if (!res.ok) { setAprovarMsg(data.error ?? "Erro ao aprovar"); return; }
+      const numero = aprovarOrc.numero_orcamento;
+      setAprovarOrc(null); setAprovarBusca(""); setAprovarResults([]); setAprovarMsg(""); setAprovarNovo(false);
+      alert(data.ja_existia
+        ? `${numero} já tinha a venda #${data.numero_venda} criada.`
+        : `${numero} aprovado! Venda #${data.numero_venda} criada como rascunho.`);
+      fetchOrcamentos();
+    } finally {
+      aprovandoRef.current = false;
+    }
   }
 
   // Cliente não existe no cadastro → cria (POST /api/contatos, só nome obrigatório,
   // sincroniza pro Tiny via fila) e já vincula+aprova.
   async function cadastrarEVincular() {
     if (!aprovarOrc) return;
+    if (cadastrandoRef.current) return;
     if (!aprovarNovoForm.nome.trim()) { setAprovarMsg("Nome é obrigatório."); return; }
+    cadastrandoRef.current = true;
     setAprovarMsg("Cadastrando cliente…");
-    const resC = await fetch("/api/contatos", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(aprovarNovoForm),
-    });
-    const novo = await resC.json().catch(() => ({}));
-    if (!resC.ok) { setAprovarMsg((novo as { error?: string }).error ?? "Falha ao cadastrar cliente"); return; }
-    // /api/contatos retorna { id, nome, ... } — vincularEAprovar aceita id_contato ?? id.
-    await vincularEAprovar(novo);
+    try {
+      const resC = await fetch("/api/contatos", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(aprovarNovoForm),
+      });
+      const novo = await resC.json().catch(() => ({}));
+      if (!resC.ok) { setAprovarMsg((novo as { error?: string }).error ?? "Falha ao cadastrar cliente"); return; }
+      // /api/contatos retorna { id, nome, ... } — vincularEAprovar aceita id_contato ?? id.
+      await vincularEAprovar(novo);
+    } finally {
+      cadastrandoRef.current = false;
+    }
   }
   const [editingOrcId, setEditingOrcId] = useState<number | null>(null);
   // updated_at do orçamento carregado — usado no PUT como guard otimista
@@ -1996,6 +2027,7 @@ export default function OrcamentoClient({
         rascunho: { bg: "#F3F4F6", color: "#6B7280" }, enviado: { bg: "#DBEAFE", color: "#1D4ED8" },
         aprovado: { bg: "#D1FAE5", color: "#065F46" }, rejeitado: { bg: "#FEE2E2", color: "#991B1B" },
         convertido: { bg: "#E0E7FF", color: "#4338CA" },
+        cancelado: { bg: "#E5E7EB", color: "#4B5563" },
       };
       const s = map[status] ?? map.rascunho;
       return <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold" style={{ backgroundColor: s.bg, color: s.color }}>{status}</span>;
@@ -2073,6 +2105,7 @@ export default function OrcamentoClient({
               { key: "aprovado", label: `Aprovado (${aprovados.length})` },
               { key: "convertido", label: `Convertido (${orcamentos.filter(o => o.status === "convertido").length})` },
               { key: "rejeitado", label: `Rejeitado (${rejeitados.length})` },
+              { key: "cancelado", label: `Cancelado (${orcamentos.filter(o => o.status === "cancelado").length})` },
             ].map(({ key, label }) => (
               <button key={key} onClick={() => setFiltroStatus(key)}
                 className="px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors"

@@ -34,7 +34,7 @@ export async function POST(
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [venda] = await sql`
-    SELECT id, situacao, bloqueado, vendedor_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    SELECT id, situacao, bloqueado, vendedor_id, orcamento_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
 
@@ -92,6 +92,12 @@ export async function POST(
         WHERE id = ${vendaId}
       `;
 
+      // B9: cancelar o orçamento de origem é feito pelo gatilho
+      // trg_cancelar_orcamento_ao_cancelar_venda (mig 314) — dispara em QUALQUER rota
+      // que cancele a venda (esta, o PATCH situacao, solicitação de alteração) e até
+      // em SQL manual. Não duplicamos aqui; orcamento_id fica no SELECT só pro log de
+      // auditoria abaixo.
+
       if (creditoUsado > 0) {
         const { creditarSaldo } = await import("@/lib/saldo-credito");
         // Mesma transação (txClient) — devolução de crédito e cancelamento são atômicos
@@ -106,7 +112,7 @@ export async function POST(
         registro_id: vendaId,
         usuario_id: user.id,
         dados_antes: { situacao: venda.situacao },
-        dados_depois: { situacao: "cancelado", bloqueado: true, credito_devolvido: creditoUsado > 0 ? creditoUsado : undefined },
+        dados_depois: { situacao: "cancelado", bloqueado: true, credito_devolvido: creditoUsado > 0 ? creditoUsado : undefined, orcamento_cancelado: venda.orcamento_id ?? undefined },
       });
     });
   } catch (err) {

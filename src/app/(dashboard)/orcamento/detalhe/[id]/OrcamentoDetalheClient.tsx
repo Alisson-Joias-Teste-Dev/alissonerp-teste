@@ -29,6 +29,7 @@ const STATUS_COLORS: Record<string, string> = {
   aprovado: "#059669",
   convertido: "#059669",
   rejeitado: "#DC2626",
+  cancelado: "#4B5563",
 };
 
 export default function OrcamentoDetalheClient({
