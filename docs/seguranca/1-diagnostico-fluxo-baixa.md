@@ -192,7 +192,7 @@ DISPONÍVEL = saldo_fisico - total_reservado
 **Por que importa:**
 - Saldo `disponível` (na view) fica negativo silenciosamente
 - Próximas vendas continuam reservando — overbooking
-- Quando aprovar a venda, vira saída efetivada → saldo físico negativo (sintoma claro de bug)
+- Quando a venda for **entregue**, vira saída efetivada → saldo físico negativo (sintoma claro de bug)
 - Operador descobre no balcão que peça não existe
 
 **Onde a validação JÁ acontece (e devia se replicar):**

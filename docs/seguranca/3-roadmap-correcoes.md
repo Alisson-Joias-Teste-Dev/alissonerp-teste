@@ -228,7 +228,7 @@ Script de teste:
 
 - Quando venda passa de `aprovado` → `enviado`?
 - Quando passa de `enviado` → `concluido`?
-- Alguma dessas transições deve mexer em estoque? (provavelmente não — já saiu na aprovação)
+- Alguma dessas transições deve mexer em estoque? (provavelmente não — a saída de estoque ocorre na **entrega**, não nessas transições)
 - Devem virar `bloqueado=true`?
 
 ### S6.2 — Documentar e/ou implementar

@@ -38,6 +38,7 @@ Arquivos: `src/app/api/financeiro/comissoes/*`, `src/lib/types/financeiro-comiss
 ## 3. Estoque comercial, reserva e entrega
 
 - **Item de venda CRIA RESERVA** ao ser inserido (quando `estoque_comercial_config.ativo=true` pro produto) — nunca saída direta. A reserva vira **saída** quando a venda é **entregue**.
+- **Aprovar a venda NÃO baixa estoque** — a baixa de ESTOQUE (reserva → saída) é só na **entrega** (confirmação do recebimento / retirada). Não confundir com a baixa da **conta a receber** (financeiro), que essa sim ocorre na **aprovação** (mig 299). São duas "baixas" diferentes — peça ≠ dinheiro.
 - **Saldo comercial = `vw_saldo_estoque_comercial`**: `disponivel = saldo - reservado`. **SEMPRE conferir `reservado` antes de assumir que há peça livre** — pode haver saldo físico já reservado por outra venda (inclusive rascunho).
 - **Baixa segue a EXISTÊNCIA da reserva**, não a flag `controla_estoque` (corrigido 12/06). Item com reserva ativa → baixa e divide; item sem reserva → pula sem erro.
 - **`reservas_estoque_comercial` NÃO tem triggers** → dá pra ajustar direto (UPDATE/cancel) sem efeito colateral.
