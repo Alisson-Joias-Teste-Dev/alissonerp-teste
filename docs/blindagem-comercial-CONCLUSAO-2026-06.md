@@ -38,8 +38,8 @@ Uma task **só vira ✅ Concluída** quando os **4 campos** abaixo estão preenc
 | 2 | B11 | Tarefa 2  | Texto: peça sai **na entrega**, não ao aprovar | — | ✅ Concluída (18/06) |
 | 3 | B10 | Tarefa 3  | Aviso enganoso (não é bug) | — | ✅ Concluída (18/06) |
 | 4 | B5  | Tarefa 4  | Conferência mostrar ficha das peças novas (auditoria humana descontinuada a pedido) | — | ✅ Concluída (18/06) |
-| 5 | B9  | Tarefa 5  | Impedir venda duplicada do mesmo orçamento | — | Pendente |
-| 6 | B7  | Tarefa 6  | Ponteiro morto = histórico; nenhuma venda viva sem ordem (não é bug) | B → só limpa 1 duplicata | ✅ Concluída (18/06) |
+| 5 | B9  | Tarefa 5  | Impedir venda duplicada do mesmo orçamento | — | ✅ Concluída (18/06) |
+| 6 | B7  | Tarefa 6  | Ponteiro morto = histórico; nenhuma venda viva sem ordem (não é bug) | — | ✅ Concluída (18/06) |
 | 7 | B1  | Tarefa 7  | Friso fantasma (anel liso indo com friso) | **E** | Decisão pendente (E) |
 | 8 | B4  | Tarefa 8  | Soltar reservas presas (já vendidas) | — | ✅ Concluída (18/06) |
 | 9 | B2  | Tarefa 9  | Cancelar venda → cancelar ordem da fábrica | **C** | Decisão pendente (C) |
@@ -49,7 +49,7 @@ Uma task **só vira ✅ Concluída** quando os **4 campos** abaixo estão preenc
 
 **Decisões do Alisson que destravam tasks:**
 - **A** (sobra de pagamento) → B6
-- **B** (qual ordem da V-15282 é a verdadeira) → B7 _(B7 **já concluída**; a Decisão B serve só pra limpar **1 duplicata**, não destrava nada)_
+- **B** (qual ordem da V-15282 é a verdadeira) → B7 concluída como "não é bug"; **não depende mais desta decisão**.
 - **C** (cancelar venda com ouro: travar ou avisar?) → B2
 - **D** (agendador da fila do Tiny: interno ou externo?) → B3
 - **E** (criar gatilho na ficha técnica?) → B1
@@ -207,14 +207,38 @@ Uma task **só vira ✅ Concluída** quando os **4 campos** abaixo estão preenc
 
 ---
 
-### B9 — Impedir venda duplicada do mesmo orçamento · Tarefa 5 · [Status: Pendente]
+### B9 — Impedir venda duplicada do mesmo orçamento · Tarefa 5 · [Status: ✅ Concluída (18/06)]
 
 - **O que o chefe passou:** dois cliques juntos podem criar duas vendas do mesmo orçamento. Não
   aconteceu ainda, mas nada impede — é blindagem.
-- **O que era de verdade:** _(a preencher na conclusão)_
-- **Como foi corrigido:** _(a preencher na conclusão)_
-- **Prova:** _(a preencher na conclusão)_
-- **Referência:** _(commit · migration · assinatura banco · data)_
+- **O que era de verdade:** o chefe estava certo — era blindagem. Confirmado em PROD: **0 orçamentos
+  com 2+ vendas** (nunca aconteceu), mas **nada travava**: o índice em `vendas_erp(orcamento_id)` **não
+  era único** e o "Aprovar orçamento" (`PATCH /api/orcamento/[id]` → cria venda pré-preenchida) **não
+  checava** se aquele orçamento já tinha virado venda. Duplo clique, dois usuários ou reenvio por falha
+  de rede criariam 2 vendas (peça produzida 2x, cobrança/comissão dobradas).
+- **Como foi corrigido:** blindagem em camadas + follow-ups do code-review:
+  1. **Trava no banco** (mig **312**): índice **ÚNICO** parcial `uq_vendas_erp_orcamento` em
+     `vendas_erp(orcamento_id) WHERE orcamento_id IS NOT NULL` (troca o não-único `idx_vendas_orcamento`).
+  2. **Aprovação idempotente** (`PATCH /api/orcamento/[id]`): se o orçamento já gerou venda, devolve
+     **ELA** (`ja_existia`); `SELECT ... FOR UPDATE` no orçamento serializa aprovações simultâneas;
+     `catch` trata a unique_violation da trava como idempotente.
+  3. **Reforço de UI** (`OrcamentoClient`): trava de re-entrada nos botões Aprovar / Cadastrar+Aprovar.
+  4. **Cancelar venda → cancela o orçamento** (mig **314**, gatilho `trg_cancelar_orcamento_ao_cancelar_venda`):
+     pega TODAS as rotas de cancelamento + SQL manual (não só `/cancelar`). Exigiu mig **313** (status
+     `cancelado` no CHECK `chk_orcamentos_status`) + guarda "orçamento cancelado não aprova" +
+     `ORCAMENTO_STATUS` sincronizado + cor do `cancelado` na tela de detalhe.
+- **Prova:** homolog — back (índice recusa 2ª venda; gatilho cancela o orçamento via `UPDATE` cru com
+  rollback **e** pela rota real); front (2 cliques simultâneos e re-aprovação = **1 venda só**; chip
+  "Cancelado" aparece). **`/code-review`** (xhigh) achou 3 gaps reais — o principal: o cancelar cobria
+  só 1 de 3 rotas → virou gatilho. **`/simplify`** aplicou 1 ajuste (cor do cancelado no detalhe).
+  `tsc --noEmit` OK. PROD: **0 duplicados** confirmado antes de criar o índice.
+- **Referência:** migrations **312/313/314** (v2.68.4→**v2.68.7**) · commits homolog `f02280a4`,
+  `3cc6fcfb`, `91b6d62e`, `3608eb92` + merge p/ main · assinaturas `log_mudancas_banco` **id 23/24/25**
+  (`claude-code-jonathan`) · aplicadas em produção **18/06/2026**.
+- **Follow-ups separados (NÃO são o B9):** (a) **centralizar** os mapas de status do orçamento — hoje o
+  status vive em ~4 lugares (CHECK do banco + `ORCAMENTO_STATUS` + badge da lista + cores do detalhe),
+  risco de drift; (b) `alert()` → toast (sonner) nesse módulo; (c) um hook único de "single-flight" no
+  lugar dos refs de re-entrada.
 
 ---
 
@@ -222,43 +246,34 @@ Uma task **só vira ✅ Concluída** quando os **4 campos** abaixo estão preenc
 
 - **O que o chefe passou:** quando uma ordem é cancelada, o orçamento continua apontando pra ela e o
   sistema não cria ordem nova; a fábrica fica sem ordem (22 casos).
-- **O que era de verdade:** **NÃO é o problema descrito.** "Orçamento ligado a ordem cancelada" é só
-  **histórico** — o ponteiro `orcamentos.ordem_gerada_id` guarda a 1ª ordem criada na aprovação; se ela
-  for cancelada, o campo continua apontando pra ela, e **isso por si só não prende nada**. O teste que
-  importa é: *existe VENDA VIVA precisando produzir e SEM nenhuma ordem viva?* No banco de produção hoje
-  a resposta é **ZERO**. Os "22 casos" (hoje **23** ponteiros mortos) se quebram assim:
-  - **6** — a **venda foi cancelada** → ordem cancelada junto, **nada a produzir** (correto).
-  - **13** — o orçamento **nunca virou venda** (`venda_gerada_id` nulo) → nem chegou a ser venda.
-  - **1** — a venda já está **entregue** → produção encerrada.
-  - **2** — venda viva (`aprovado`/`rascunho`) e **já tem ordem viva** → a fábrica tem o que produzir.
-
-  Ou seja, "fábrica fica sem ordem" **não acontece** em nenhuma venda viva. O ponteiro morto é
-  **cosmético** (na tela do orçamento mostra link pra ordem cancelada em vez da viva), não operacional.
-- **Como foi corrigido:** **Nada a corrigir como bug — não há venda desatendida.** Só **documentação**
-  (esta conclusão). Zero código · zero banco · zero migration. **Mecânica confirmada no código** (é
-  entendimento, não fix): cancelar ordem (`src/app/api/ordens/[id]/cancelar/route.ts:102`) só marca
-  `situacao='cancelado'` e não limpa o ponteiro; e a (re)criação de ordem
-  (`src/lib/vendas-aprovar.ts:379`) é **idempotente por venda** — só roda na **aprovação** e não recria
-  se o orçamento já tem `ordem_gerada_id`. Como venda aprovada não se re-aprova, o ponteiro nunca chega
-  a causar "sem ordem" — por isso 0 casos.
+- **O que era de verdade:** **NÃO é bug.** Cancelar uma ordem é **operação normal do dia a dia** — a
+  consultora pede o cancelamento (às vezes erra e refaz; é rotina, não defeito). O orçamento continuar
+  apontando pra ordem cancelada é só **histórico**: o campo `orcamentos.ordem_gerada_id` guarda a 1ª
+  ordem criada e não é reescrito quando ela é cancelada. Isso não trava nada, não some peça, não gasta
+  ouro — é um registro velho.
+- **Como chegamos a essa conclusão:**
+  1. A pergunta que define se há problema é uma só: *existe VENDA VIVA precisando produzir e SEM nenhuma
+     ordem viva?* Venda cancelada ou já entregue não tem nada a fazer.
+  2. Medimos no banco de produção: **0 vendas vivas sem ordem.** Os "22 casos" (hoje 23 ponteiros
+     mortos) se explicam todos — venda cancelada, orçamento que nunca virou venda, venda já entregue, ou
+     venda que já tem ordem viva.
+  3. Conferimos um caso real de venda com ordem cancelada: a ordem foi cancelada **a pedido da
+     consultora** e a venda seguiu normal, cliente atendida. Confirmou a regra: cancelar é operação
+     legítima, não bug.
+- **Como foi corrigido:** Nada a corrigir — não há venda desatendida nem fluxo travado. Só
+  **documentação** (esta conclusão). Zero código · zero banco · zero migration.
 - **Prova (banco de PRODUÇÃO, read-only 18/06 — só `SELECT`, não exigiu assinatura;
   `current_database()='postgres'`, host `172.18.0.15`):**
-  - **23** orçamentos com `ordem_gerada_id` → ordem `cancelado` (os "ponteiros mortos").
-  - Quebra por situação da venda × ordens vivas na venda: `cancelada/0 → 6` · `sem venda(null)/0 → 13` ·
+  - **23** orçamentos com `ordem_gerada_id` apontando pra ordem `cancelado`.
+  - Quebra por situação da venda × ordens vivas na venda: `cancelada/0 → 6` · `sem venda/0 → 13` ·
     `entregue/0 → 1` · `aprovado/1 → 1` · `aprovado/2 → 1` · `rascunho/1 → 1` (soma = 23).
   - **`venda_viva_sem_ordem = 0`** (filtro `venda.situacao IN ('rascunho','aprovado')` + zero ordem viva
-    na venda). É a prova de que "fábrica sem ordem" não existe.
+    na venda).
   - `tsc` não aplicável (nenhum `.ts` alterado).
 - **Referência:** **docs-only** · sem migration · **sem mudança no banco → não exigiu assinatura** (só
   `SELECT` read-only em prod) · 18/06/2026 · enquadramento confirmado pelo Jonathan no chat (18/06):
-  orçamento ligado a ordem cancelada é histórico, não há o que fazer.
-- **Resíduo separado (NÃO é o B7 / não bloqueia a conclusão):** **1 duplicata** — a **V-15282**
-  (venda 29794) tem **duas** ordens vivas, **2195** e **2253** (a 2253 criada 4 dias depois = refação
-  manual). Não foi o ponteiro que causou — foi recriação na mão. Limpar **1 dado** (cancelar a ordem
-  que sobra) depende da **Decisão B** do Alisson: qual das duas é a verdadeira. É limpeza pontual de
-  dado, **não** conserto de sistema.
-- **Obs.:** o pente-fino sugeria fazer **colado** com B2 (mesma família "cancelamento"). Não se aplica
-  mais ao B7 — aqui não há conserto a fazer; B2 segue como task própria (Decisão C).
+  cancelar ordem a pedido da consultora é normal; orçamento ligado a ordem cancelada é histórico, não há
+  o que fazer.
 
 ---
 
