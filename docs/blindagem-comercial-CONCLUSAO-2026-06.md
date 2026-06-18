@@ -36,12 +36,12 @@ Uma task **só vira ✅ Concluída** quando os **4 campos** abaixo estão preenc
 |---|--------|---------------------|--------------|---------|--------|
 | 1 | B8  | Tarefa 1  | Item "não controla estoque" não reserva nem baixa (causa-raiz real) | — | ✅ Concluída (18/06) |
 | 2 | B11 | Tarefa 2  | Texto: peça sai **na entrega**, não ao aprovar | — | ✅ Concluída (18/06) |
-| 3 | B10 | Tarefa 3  | Aviso enganoso (não é bug) | — | Pendente |
-| 4 | B5  | Tarefa 4  | Conferência mostrar ficha das peças novas | — | Pendente |
+| 3 | B10 | Tarefa 3  | Aviso enganoso (não é bug) | — | ✅ Concluída (18/06) |
+| 4 | B5  | Tarefa 4  | Conferência mostrar ficha das peças novas (auditoria humana descontinuada a pedido) | — | ✅ Concluída (18/06) |
 | 5 | B9  | Tarefa 5  | Impedir venda duplicada do mesmo orçamento | — | Pendente |
-| 6 | B7  | Tarefa 6  | Ponteiro morto da ordem cancelada | **B** | Decisão pendente (B) |
+| 6 | B7  | Tarefa 6  | Ponteiro morto = histórico; nenhuma venda viva sem ordem (não é bug) | B → só limpa 1 duplicata | ✅ Concluída (18/06) |
 | 7 | B1  | Tarefa 7  | Friso fantasma (anel liso indo com friso) | **E** | Decisão pendente (E) |
-| 8 | B4  | Tarefa 8  | Soltar reservas presas (já vendidas) | — | Pendente |
+| 8 | B4  | Tarefa 8  | Soltar reservas presas (já vendidas) | — | ✅ Concluída (18/06) |
 | 9 | B2  | Tarefa 9  | Cancelar venda → cancelar ordem da fábrica | **C** | Decisão pendente (C) |
 | 10| B3  | Tarefa 10 | Destravar fila do Tiny | **D** | Decisão pendente (D) |
 | 11| B6  | Tarefa 11 | Cliente paga a mais (sobra sem destino) | **A** | Decisão pendente (A) |
@@ -49,7 +49,7 @@ Uma task **só vira ✅ Concluída** quando os **4 campos** abaixo estão preenc
 
 **Decisões do Alisson que destravam tasks:**
 - **A** (sobra de pagamento) → B6
-- **B** (qual ordem da V-15282 é a verdadeira) → B7
+- **B** (qual ordem da V-15282 é a verdadeira) → B7 _(B7 **já concluída**; a Decisão B serve só pra limpar **1 duplicata**, não destrava nada)_
 - **C** (cancelar venda com ouro: travar ou avisar?) → B2
 - **D** (agendador da fila do Tiny: interno ou externo?) → B3
 - **E** (criar gatilho na ficha técnica?) → B1
@@ -109,26 +109,101 @@ Uma task **só vira ✅ Concluída** quando os **4 campos** abaixo estão preenc
 
 ---
 
-### B10 — Aviso enganoso (não é bug) · Tarefa 3 · [Status: Pendente]
+### B10 — Aviso enganoso (não é bug) · Tarefa 3 · [Status: ✅ Concluída (18/06)]
 
 - **O que o chefe passou:** acharam que apagar um item deixaria a reserva perdida, mas o sistema já
   resolve sozinho (cascata). O aviso errado pode levar alguém a quebrar uma proteção que funciona.
-- **O que era de verdade:** _(a preencher na conclusão)_
-- **Como foi corrigido:** _(a preencher na conclusão)_
-- **Prova:** _(a preencher na conclusão)_
-- **Referência:** _(commit · migration · assinatura banco · data)_
+- **O que era de verdade:** Confirmado — **não é bug**. Apagar um item de venda (operação permitida
+  **só** com a venda em `situacao='rascunho'` — `src/app/api/vendas/[id]/itens/[itemId]/route.ts:172`)
+  **não deixa a reserva órfã**. A reserva é limpa **sozinha** por DOIS mecanismos redundantes:
+  (1) FK `reservas_estoque_comercial.item_venda_id → itens_venda_erp(id) ON DELETE CASCADE` (mig 140),
+  **validada** em prod (`convalidated=t`) → apaga a linha da reserva junto com o item;
+  (2) gatilho `trg_estoque_comercial_reversao_item` (AFTER DELETE em `itens_venda_erp`, mig 141) →
+  marca a reserva `cancelado` ou cria estorno reverso se já tinha virado movimento efetivado.
+  **NÃO existe "aviso enganoso" vivo no sistema:** busca exaustiva em `src` e `docs` (no WSL, fonte real
+  — o OneDrive está defasado) não achou nenhum texto/comentário dizendo que apagar item deixa reserva
+  presa. Ao contrário, o comentário do próprio código **já está correto** (`route.ts:195`: "remoção de
+  item ... libera reserva de estoque via trigger"). O "aviso errado" era a **crença do chefe** / o doc
+  antigo que sumiu — não um artefato vivo. **A crença está errada; a proteção funciona.**
+- **Como foi corrigido:** Só documentação (zero código · zero banco · zero migration):
+  1. `docs/regras-negocio/comercial.md §3` — 3 bullets novos: (a) ressalva no bullet "sem triggers
+     próprios" (não vale pra apagar item); (b) bullet explicitando que apagar item de rascunho limpa a
+     reserva sozinho (FK CASCADE + trigger) e **proibindo** "limpeza manual" que quebraria a proteção;
+     (c) bullet documentando que a reserva pode ser de ITEM ou de ORDEM (`ordem_id`), com colunas
+     nullable — para não confundir reserva de ordem com órfã.
+  2. Esta seção (4 campos preenchidos) + quadro-resumo.
+- **Prova (banco de PROD, read-only, 18/06/2026 — só `SELECT`, não exigiu assinatura):**
+  - **Ambiente confirmado:** `current_database()='postgres'` (PROD), host `172.18.0.15`.
+  - **FK validada:** `reservas_estoque_comercial_item_venda_id_fkey | FOREIGN KEY (item_venda_id)
+    REFERENCES alissonerp.itens_venda_erp(id) ON DELETE CASCADE`, `convalidated = t`
+    (idem `venda_id` → `vendas_erp(id) ON DELETE CASCADE`).
+  - **Gatilho habilitado:** `trg_estoque_comercial_reversao_item AFTER DELETE ON itens_venda_erp`.
+  - **Reservas órfãs reais (ativas, `item_venda_id` preenchido apontando p/ item inexistente) = 0.**
+  - ⚠️ **Cuidado registrado:** a 1ª query ingênua contou **3 "órfãs"** que eram FALSO-POSITIVO —
+    reservas de ORDEM com `item_venda_id` NULO (ordens 2177/2183/2338, todas vivas: `criado`/`aguardando`).
+    `item_venda_id`/`venda_id`/`ordem_id` viraram nullable depois da mig 140. Filtrar
+    `item_venda_id IS NOT NULL` ao caçar órfãs.
+  - **160 reservas ativas no total:** 157 ligadas a item de venda · 3 a ordem · **0 sem vínculo**.
+  - Endpoint só apaga item com `situacao='rascunho'` → reserva está sempre `ativo` no momento do delete
+    → o CASCADE simplesmente a remove (sem chance de órfã).
+- **Referência:** docs-only · sem migration · **sem mudança no banco → não exigiu assinatura** (só
+  `SELECT` read-only em prod) · 18/06/2026 · commit/push: _(pendente autorização do Jonathan — mexe em
+  docs do projeto, igual à Tarefa 2)_
 
 ---
 
-### B5 — Conferência mostrar ficha das peças novas · Tarefa 4 · [Status: Pendente]
+### B5 — Conferência mostrar ficha das peças novas · Tarefa 4 · [Status: ✅ Concluída (18/06)]
 
 - **O que o chefe passou:** a tela de auditoria/conferência não mostra a ficha (medidas, modelo,
   pedras) das ordens novas; 187 peças foram aprovadas sem ver a ficha. Aprovar sem ver deixa passar
   erro de produção.
-- **O que era de verdade:** _(a preencher na conclusão)_
-- **Como foi corrigido:** _(a preencher na conclusão)_
-- **Prova:** _(a preencher na conclusão)_
-- **Referência:** _(commit · migration · assinatura banco · data)_
+- **O que era de verdade:** **NÃO é bug — é comportamento intencional, decidido pelo Jonathan.**
+  Existe um **módulo de Auditoria** com DUAS conferências humanas: **Loja** (na ENTRADA, antes da ordem
+  ir pra fábrica) e **Fábrica** (na SAÍDA, antes da peça voltar pra loja). A Paloma/Dara aprovavam cada
+  ordem olhando a ficha. **Esse controle humano foi descontinuado a pedido.** O Jonathan **não removeu o
+  módulo** (tabelas, telas `/auditoria` e `/conferencia`, gatilhos — tudo continua de pé) — apenas o
+  configurou para **passar automaticamente**:
+  - **Loja (entrada):** auto-aprovada no instante em que a ordem nasce. É **exatamente** isso o "187
+    aprovadas sem ver a ficha" — não são peças passando despercebidas, é o passo de conferência humana
+    **desligado de propósito**.
+  - **Fábrica (saída):** **também auto-aprovada.** Quando a peça é concluída no módulo Service, a
+    auditoria de fábrica já é gravada como `aprovado` (`parecer='Aprovação automática — módulo Service'`)
+    — `src/app/api/service/[id]/concluir/route.ts:287`. Confirmado em produção (Jonathan, 18/06).
+  Ou seja, a ficha "não aparece pra conferir" porque a **conferência humana foi intencionalmente
+  desativada** — não por falha de tela. (A tela `/auditoria`, aliás, JÁ sabe mostrar a ficha no modal
+  via `/api/ficha/[ordem]`; só não é mais usada no caminho normal.)
+- **Como foi corrigido:** **Nada a corrigir — o comportamento é o desejado.** Só **documentação** (esta
+  conclusão). O módulo segue disponível caso um dia se queira **religar** a auditoria humana (bastaria
+  voltar a exigir aprovação manual, removendo a auto-aprovação da loja). Zero código · zero banco · zero
+  migration nesta task.
+- **Prova:**
+  - `183_auditoria_automatica.sql` (cabeçalho): *"Não há mais auditoria humana. Toda ordem criada via
+    PDV (Directus) recebe auditoria loja aprovada automaticamente no momento da criação."*
+  - `186_trigger_auto_auditoria_loja.sql`: `fn_auto_auditoria_loja` + `trg_auto_auditoria_loja` (AFTER
+    INSERT em `ordens`) criam e já marcam `situacao='aprovado'`, `parecer='Aprovação automática — trigger'`.
+  - `162_fix_auditoria_ordem_1846_auto_aprovacao.sql`: auto-aprovação corretiva da auditoria de loja.
+  - **Fábrica auto-aprovada no `src`:** `src/app/api/service/[id]/concluir/route.ts:287` insere a
+    auditoria de fábrica direto como `'aprovado'` (`parecer='Aprovação automática — módulo Service'`).
+    (A migration legada `098_triggers_pedras_ct_compras.sql` ~l.350 ainda cria `'pendente'`, mas **não é
+    o caminho vivo** — o módulo Service aprova sozinho.)
+  - **Banco de PRODUÇÃO (read-only, 18/06/2026 — só `SELECT`, não exigiu assinatura):**
+    `current_database()='postgres'` (PROD, host `172.18.0.15`). Auditorias **fábrica = 624 aprovadas ·
+    2 pendentes (resíduo) · 2 reprovadas**; **loja = 939 aprovadas · 14 reprovadas** (zero pendentes nas
+    duas). Pareceres da fábrica: 507 "Aprovação automática — módulo Service", 102 sem parecer, resto
+    migração/sistema. Único trigger na tabela: `trg_processar_auditoria` (BEFORE UPDATE — efeitos
+    colaterais da aprovação, **não** é auto-aprovador).
+  - Telas vivas: `src/app/(dashboard)/auditoria/AuditoriaClient.tsx` (modal carrega a ficha) e
+    `src/app/(dashboard)/conferencia/ConferenciaClient.tsx`.
+  - `tsc` não aplicável (nenhum `.ts` alterado).
+- **Referência:** **docs-only** · sem migration nova · **sem mudança no banco → não exigiu assinatura**
+  (só `SELECT` read-only em prod p/ comprovar) · auto-aprovação já em produção: **loja** via migrations
+  **162/183/186**, **fábrica** via módulo Service (`service/[id]/concluir/route.ts:287`) · conclusão
+  registrada em 18/06/2026 · decisão confirmada pelo Jonathan no chat (18/06): módulo descontinuado a
+  pedido, mantido apenas para passar automático; as duas pontas (loja + fábrica) descontinuadas.
+- **Obs.:** as DUAS pontas estão de fato automáticas — confirmado no banco de produção (loja e fábrica
+  com **zero/quase-zero pendentes**: só 2 auditorias de fábrica `pendente` resíduais, nada que trave o
+  fluxo). _(Correção: uma versão anterior desta seção dizia que a fábrica acumulava pendentes — estava
+  errado; o módulo Service aprova sozinho.)_
 
 ---
 
@@ -143,16 +218,47 @@ Uma task **só vira ✅ Concluída** quando os **4 campos** abaixo estão preenc
 
 ---
 
-### B7 — Ponteiro morto da ordem cancelada · Tarefa 6 · [Status: Decisão pendente (B)]
+### B7 — Ponteiro morto da ordem cancelada · Tarefa 6 · [Status: ✅ Concluída (18/06)]
 
 - **O que o chefe passou:** quando uma ordem é cancelada, o orçamento continua apontando pra ela e o
   sistema não cria ordem nova; a fábrica fica sem ordem (22 casos).
-- **Decisão necessária (B):** qual ordem da V-15282 é a verdadeira. _(aguardando Alisson)_
-- **O que era de verdade:** _(a preencher na conclusão)_
-- **Como foi corrigido:** _(a preencher na conclusão)_
-- **Prova:** _(a preencher na conclusão)_
-- **Referência:** _(commit · migration · assinatura banco · data)_
-- **Obs.:** fazer **colado** com B2 (mesma família "cancelamento" — ver pente-fino).
+- **O que era de verdade:** **NÃO é o problema descrito.** "Orçamento ligado a ordem cancelada" é só
+  **histórico** — o ponteiro `orcamentos.ordem_gerada_id` guarda a 1ª ordem criada na aprovação; se ela
+  for cancelada, o campo continua apontando pra ela, e **isso por si só não prende nada**. O teste que
+  importa é: *existe VENDA VIVA precisando produzir e SEM nenhuma ordem viva?* No banco de produção hoje
+  a resposta é **ZERO**. Os "22 casos" (hoje **23** ponteiros mortos) se quebram assim:
+  - **6** — a **venda foi cancelada** → ordem cancelada junto, **nada a produzir** (correto).
+  - **13** — o orçamento **nunca virou venda** (`venda_gerada_id` nulo) → nem chegou a ser venda.
+  - **1** — a venda já está **entregue** → produção encerrada.
+  - **2** — venda viva (`aprovado`/`rascunho`) e **já tem ordem viva** → a fábrica tem o que produzir.
+
+  Ou seja, "fábrica fica sem ordem" **não acontece** em nenhuma venda viva. O ponteiro morto é
+  **cosmético** (na tela do orçamento mostra link pra ordem cancelada em vez da viva), não operacional.
+- **Como foi corrigido:** **Nada a corrigir como bug — não há venda desatendida.** Só **documentação**
+  (esta conclusão). Zero código · zero banco · zero migration. **Mecânica confirmada no código** (é
+  entendimento, não fix): cancelar ordem (`src/app/api/ordens/[id]/cancelar/route.ts:102`) só marca
+  `situacao='cancelado'` e não limpa o ponteiro; e a (re)criação de ordem
+  (`src/lib/vendas-aprovar.ts:379`) é **idempotente por venda** — só roda na **aprovação** e não recria
+  se o orçamento já tem `ordem_gerada_id`. Como venda aprovada não se re-aprova, o ponteiro nunca chega
+  a causar "sem ordem" — por isso 0 casos.
+- **Prova (banco de PRODUÇÃO, read-only 18/06 — só `SELECT`, não exigiu assinatura;
+  `current_database()='postgres'`, host `172.18.0.15`):**
+  - **23** orçamentos com `ordem_gerada_id` → ordem `cancelado` (os "ponteiros mortos").
+  - Quebra por situação da venda × ordens vivas na venda: `cancelada/0 → 6` · `sem venda(null)/0 → 13` ·
+    `entregue/0 → 1` · `aprovado/1 → 1` · `aprovado/2 → 1` · `rascunho/1 → 1` (soma = 23).
+  - **`venda_viva_sem_ordem = 0`** (filtro `venda.situacao IN ('rascunho','aprovado')` + zero ordem viva
+    na venda). É a prova de que "fábrica sem ordem" não existe.
+  - `tsc` não aplicável (nenhum `.ts` alterado).
+- **Referência:** **docs-only** · sem migration · **sem mudança no banco → não exigiu assinatura** (só
+  `SELECT` read-only em prod) · 18/06/2026 · enquadramento confirmado pelo Jonathan no chat (18/06):
+  orçamento ligado a ordem cancelada é histórico, não há o que fazer.
+- **Resíduo separado (NÃO é o B7 / não bloqueia a conclusão):** **1 duplicata** — a **V-15282**
+  (venda 29794) tem **duas** ordens vivas, **2195** e **2253** (a 2253 criada 4 dias depois = refação
+  manual). Não foi o ponteiro que causou — foi recriação na mão. Limpar **1 dado** (cancelar a ordem
+  que sobra) depende da **Decisão B** do Alisson: qual das duas é a verdadeira. É limpeza pontual de
+  dado, **não** conserto de sistema.
+- **Obs.:** o pente-fino sugeria fazer **colado** com B2 (mesma família "cancelamento"). Não se aplica
+  mais ao B7 — aqui não há conserto a fazer; B2 segue como task própria (Decisão C).
 
 ---
 
@@ -170,14 +276,81 @@ Uma task **só vira ✅ Concluída** quando os **4 campos** abaixo estão preenc
 
 ---
 
-### B4 — Soltar reservas presas · Tarefa 8 · [Status: Pendente]
+### B4 — Soltar reservas presas · Tarefa 8 · [Status: ✅ Concluída (18/06)]
 
 - **O que o chefe passou:** 16 peças seguem marcadas como "reservadas" mesmo já vendidas; o sistema
   acha que estão reservadas e atrapalha vender/repor.
-- **O que era de verdade:** _(a preencher na conclusão)_
-- **Como foi corrigido:** _(a preencher na conclusão)_
-- **Prova:** _(a preencher na conclusão)_
-- **Referência:** _(commit · migration · assinatura banco · data)_
+- **O que era de verdade (Jonathan, 18/06):** **Não é bug de código** — é **resíduo de uma falha já
+  corrigida**. Dois pontos:
+  1. **Soltar a reserva já tem solução (B10):** item de venda em `rascunho` → remover o item → a reserva
+     some sozinha (FK CASCADE + trigger); venda já `aprovado` → **cancelar a venda** → a reserva é
+     liberada sozinha. Não existe (nem é preciso) "limpeza manual" da reserva.
+  2. **As 16 são resíduo pré-13/06.** O sistema **não tem** o status `concluido` — isso foi uma **falha
+     corrigida em 13/06**. Os status reais da venda são **`rascunho` · `aprovado` · `em_rota` ·
+     `entregue` · `cancelado`**. Antes de 13/06, vendas chegavam a `entregue`/`concluido` por um caminho
+     que **pulava o módulo de entrega** (não criava `entregas_venda`), então a baixa de estoque
+     (`baixarEstoqueDaEntrega`) **nunca rodava** e a reserva ficava `ativo` para sempre. São essas 16.
+  - **Como se resolve (operacional, não código):** as peças passam pela **auditoria** (conferência
+    humana de que o pedido saiu mesmo) e então são **baixadas** pelo fluxo — a reserva vira saída e a
+    peça sai do estoque. Itens que não são peça física (serviço) ou atípicos → **cancelar** a reserva
+    (ver follow-up).
+- **Como foi corrigido:** **Causa-raiz já corrigida em 13/06** (a falha do status `concluido`) — e está
+  **comprovado que parou**: zero reserva presa nova depois de 13/06. **Soltar reserva** já é coberto
+  pelo B10 (remover item no rascunho / cancelar venda). **Nesta task: só documentação** (zero código ·
+  zero banco · zero migration). A **limpeza das 16 reservas antigas** é um **follow-up de dados** à parte
+  (não é alteração de código — ver abaixo), a ser feito com auditoria + aprovação + assinatura.
+- **Prova (banco de PROD, read-only, 18/06/2026 — só `SELECT`, não exigiu assinatura):**
+  - **Ambiente:** `current_database()='postgres'` (PROD), host `172.18.0.15`.
+  - **As 16 confirmadas:** reservas `status='ativo'` cuja venda já está `concluido` (14) ou `entregue`
+    (2) = **16** (bate com o chefe). Todas com `movimento_id` e `efetivado_em` **vazios** — a reserva
+    nunca virou saída.
+  - **Nenhuma das 16 tem registro de entrega** (`entregas_venda` = nulo) → confirma que chegaram ao
+    status pelo caminho antigo, pulando a baixa.
+  - **`concluido` está morto:** a venda `concluido` mais nova é de **12/06**; `aprovado`/`entregue`/
+    `em_rota`/`cancelado`/`rascunho` têm movimento até **18/06**. As 16 presas são **todas anteriores a
+    13/06** (criadas entre 14/05 e 12/06). Nenhuma nova depois → a falha parou.
+  - **Reservas ativas normais (não presas):** `aprovado` (82) e `rascunho` (57) seguem a peça de
+    propósito (venda ainda não entregue) — não contam como presas.
+  - **Estrago real:** `reservado` inflado derruba o `disponivel`. Ex.: Escapulário AJ4785 →
+    saldo 5 / reservado 6 / **disponível −1**; vários outros com disponível 0 em peça já vendida.
+- **Referência:** **docs-only** · sem migration · **sem mudança no banco → não exigiu assinatura** (só
+  `SELECT` read-only em prod p/ comprovar) · diagnóstico/decisão registrados em 18/06/2026 · decisão do
+  Jonathan no chat (18/06): não é bug; status `concluido` foi falha corrigida em 13/06; resíduo tratado
+  pela operação · commit/push: _(pendente autorização do Jonathan — igual Tarefas 2/3)_
+- **⚠️ Pré-requisito OBRIGATÓRIO — AUDITORIA das 16 vendas (antes de qualquer baixa):** estas vendas
+  chegaram a `entregue`/`concluido` **sem registro de entrega**, ou seja, **ninguém conferiu a saída pelo
+  sistema**. Por isso, **antes** de soltar qualquer reserva, cada pedido abaixo precisa passar por
+  **auditoria humana** — confirmar que a peça **saiu de verdade** (foi mesmo entregue ao cliente). Só
+  **depois** que a auditoria confirmar a entrega é que se executa a ação (baixar ou cancelar). **Sem
+  auditoria confirmada, NÃO tocar na reserva** — baixar uma peça que na verdade não saiu sumiria com
+  estoque real; cancelar uma que saiu deixaria vender de novo o que não existe.
+
+  | Venda | Situação | SKU | Produto | Ação prevista (após auditoria) |
+  |-------|----------|-----|---------|--------------------------------|
+  | 15201 | concluido | AS1001-1 | Conserto e Manutenção de Joias | **cancelar** (serviço, não controla estoque) |
+  | 15202 | entregue  | 1192-11  | Aparador Duas Fileiras Au18k   | baixa (peça real) |
+  | 15223 | entregue  | AS1001-1 | Conserto e Manutenção de Joias | **cancelar** (serviço) |
+  | 15278 | concluido | AJ1955   | Corrente Veneziano au18k 45cm  | baixa (peça real) |
+  | 15278 | concluido | AJ4374   | Pingente Chuveiro Redondo M    | baixa (peça real) |
+  | 15339 | concluido | 1337-15  | Solitário Liz Ouro 18k         | baixa (peça real) |
+  | 15358 | concluido | AJ4785   | Escapulário NS do Carmo        | **atípico** — disp. −1 mesmo após baixa, conferir |
+  | 15371 | concluido | AJ4785   | Escapulário NS do Carmo        | **atípico** — idem 15358, conferir |
+  | 15374 | concluido | AJ5237   | Corrente Elo Cartier lapidado  | baixa (peça real) |
+  | 15374 | concluido | AJ1364   | Pingente Ponto de Luz 5mm      | baixa (peça real) |
+  | 15414 | concluido | 1532-12  | Anel V Liso Ouro 18k           | **atípico** — não aparece no estoque comercial, decidir |
+  | 15433 | concluido | 1354-15  | Anel Detalhado Triplo Ouro 18k | baixa (peça real) |
+  | 15453 | concluido | AS1001-1 | Conserto e Manutenção de Joias | **cancelar** (serviço) |
+  | 15474 | concluido | 1478-2   | Pingente Menino/Menina         | baixa (peça real) |
+  | 15474 | concluido | AJ0686   | Corrente Elo Português Ouro 18 | baixa (peça real) |
+  | 15488 | concluido | 1128-14  | Anel Prego FP au18k            | baixa (peça real) |
+
+- **Follow-up de dados (NÃO é o B4 — limpeza separada, com aprovação + assinatura):** **depois** da
+  auditoria acima, soltar as 16 reservas em PROD num script único assinado (`assinar_mudanca_banco` +
+  `PGAPPNAME`) com dry-run `BEGIN/ROLLBACK`. Três grupos: (a) peças reais entregues → **baixa** (gera
+  saída + efetiva a reserva); (b) **3 reservas de serviço** ("Conserto", SKU AS1001-1, não controla
+  estoque — família B8) → **cancelar**; (c) **2 atípicos** — Escapulário AJ4785 (fica `disponível −1`
+  mesmo após baixa → inconsistência mais funda) e Anel V Liso 1532-12 (venda 15414, nem aparece no
+  estoque comercial) → **decidir caso a caso** antes de tocar.
 
 ---
 
