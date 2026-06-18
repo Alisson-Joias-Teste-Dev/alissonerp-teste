@@ -34,7 +34,7 @@ Uma task **só vira ✅ Concluída** quando os **4 campos** abaixo estão preenc
 
 | # | Código | Tarefa (pente-fino) | Título curto | Decisão | Status |
 |---|--------|---------------------|--------------|---------|--------|
-| 1 | B8  | Tarefa 1  | Tirar filtro errado que voltou (main) | — | Pendente |
+| 1 | B8  | Tarefa 1  | Item "não controla estoque" não reserva nem baixa (causa-raiz real) | — | ✅ Concluída (18/06) |
 | 2 | B11 | Tarefa 2  | Texto: peça sai **na entrega**, não ao aprovar | — | ✅ Concluída (18/06) |
 | 3 | B10 | Tarefa 3  | Aviso enganoso (não é bug) | — | Pendente |
 | 4 | B5  | Tarefa 4  | Conferência mostrar ficha das peças novas | — | Pendente |
@@ -62,14 +62,24 @@ Uma task **só vira ✅ Concluída** quando os **4 campos** abaixo estão preenc
 
 ---
 
-### B8 — Tirar filtro errado que voltou (main) · Tarefa 1 · [Status: Pendente]
+### B8 — Item "não controla estoque" não reserva nem baixa · Tarefa 1 · [Status: ✅ Concluída (18/06)]
 
-- **O que o chefe passou:** na versão principal (main) um trecho antigo voltou e pode prender peças
-  "reservadas". Hoje não afeta (main não está em uso), mas é bomba pra desarmar antes que alguém use.
-- **O que era de verdade:** _(a preencher na conclusão)_
-- **Como foi corrigido:** _(a preencher na conclusão)_
-- **Prova:** _(a preencher na conclusão)_
-- **Referência:** _(commit · migration · assinatura banco · data)_
+- **O que o chefe passou:** "tirar um filtro que voltou no merge" no `baixarEstoqueDaEntrega` (main).
+- **O que era de verdade (regra de negócio):** o ponto não era o filtro — era a **regra**: item marcado
+  como **"não controla estoque"** (serviço, ou produto desligado) **não deve ser reservado nem baixado**.
+  O gatilho `fn_estoque_comercial_baixa_venda` checava só `ativo`, **nunca** `controla_estoque` → serviços
+  criavam **reserva fantasma** (~38 ativas em produção; ex.: serviço 6318 com 21).
+- **Como foi corrigido:** migration **311** — guarda no `fn_estoque_comercial_baixa_venda`:
+  `IF v_controla IS FALSE THEN RETURN NEW` (pula reserva **e** baixa quando `controla_estoque=false`).
+  Resto idêntico à 267. É *pular*, nunca dar erro (não quebra venda com linha de serviço).
+- **Prova:** back (homolog, transação+ROLLBACK): serviço → **0 reserva**, produto normal → 1, sem erro.
+  Front (homolog): venda **15470** com serviço → reserva **0** (antes, 15469 reservava). `/simplify` e
+  `/code-review` (máx) → 0 achados; confirmado 311 = 267 + só a guarda, e prod **== 267** antes (aditivo).
+- **Referência:** migration **311** (v2.68.3) · commit main **`45c2f2ee`** · assinatura
+  `log_mudancas_banco` **id 18** (`claude-code-jonathan`) · aplicada em produção 18/06/2026 14:45.
+- **Follow-ups separados (NÃO são o B8):** (a) **ordem de serviço por tipo de produto** — produto-serviço
+  ainda abre `reposicao_venda` (tipo errado), deve abrir ordem de serviço; (b) **limpar as ~38 reservas
+  fantasma** já existentes (só mudar status, nunca apagar).
 
 ---
 
