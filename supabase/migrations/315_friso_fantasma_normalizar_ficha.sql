@@ -66,7 +66,10 @@ CREATE OR REPLACE TRIGGER trg_normalizar_friso_ficha
 
 -- ──────────────────────────────────────────────────────────────────────────
 -- (2) LIMPEZA — zera a medida residual das fichas já existentes (mesma regra).
---     Mira só o fantasma real: anel sem friso, não-legado, COM medida de sulco.
+--     Mira anel sem friso, não-legado, com QUALQUER resíduo de friso. O WHERE
+--     cobre os 4 campos que o SET zera (largura/profundidade/lado/offset) — não
+--     basta filtrar largura/profundidade, senão uma ficha cujo único lixo é
+--     lado/offset escaparia da limpeza.
 -- ──────────────────────────────────────────────────────────────────────────
 UPDATE alissonerp.orcamento_fichas_tecnicas
 SET friso_largura      = NULL,
@@ -75,4 +78,5 @@ SET friso_largura      = NULL,
     friso_offset       = NULL
 WHERE has_friso IS NOT TRUE
   AND COALESCE(perfil, '') NOT IN ('FrisoUnico', 'FrisoLateral')
-  AND (COALESCE(friso_largura, 0) > 0 OR COALESCE(friso_profundidade, 0) > 0);
+  AND (COALESCE(friso_largura, 0) > 0 OR COALESCE(friso_profundidade, 0) > 0
+       OR friso_lado IS NOT NULL OR COALESCE(friso_offset, 0) > 0);
