@@ -142,6 +142,14 @@ export interface PagamentoFormProps {
   handleRemovePagamento: (p: PagamentoEntry) => void;
   handleMpManual: () => void;
   handleAddMultOuro: () => void;
+  /**
+   * Registro IMEDIATO de Vale-Troca dentro de Múltiplas (modo edicao/detalhe).
+   * Quando fornecida, o botao "Adicionar" do vale em Múltiplas registra na hora
+   * (igual ao Ouro), passando pela 2a confirmacao do dono (token WhatsApp).
+   * Quando AUSENTE (nova venda), o vale apenas entra na lista `payments` e e
+   * aplicado no "Concluir venda" — comportamento original, NAO mexer.
+   */
+  handleAddValeMultipla?: (valeNumero: string, valor: number) => void;
   obterVendaId?: () => Promise<{ id: number; numero_venda: string }>;
   onPagamentoConfirmado?: (vendaId: number) => void;
 
@@ -262,6 +270,7 @@ export default function PagamentoForm({
   handleRemovePagamento,
   handleMpManual,
   handleAddMultOuro,
+  handleAddValeMultipla,
   obterVendaId,
   onPagamentoConfirmado,
   onPaymentSaved: _onPaymentSaved,
@@ -726,7 +735,13 @@ export default function PagamentoForm({
                     if (multForma === "Vale-Troca") {
                       if (!multValeValidacao?.ok || !multValeValidacao.valor_disponivel) return;
                       const valorValeDisp = Math.min(multValeValidacao.valor_disponivel, restante);
-                      setPayments([...payments, { _key: Math.random().toString(36).slice(2), forma: "Vale-Troca", valor: valorValeDisp, parcelas: 1, vale_numero: multValeNumero.trim() }]);
+                      // Edicao (detalhe): registra na hora com a 2a confirmacao do dono
+                      // (token). Nova venda: acumula na lista e aplica no "Concluir".
+                      if (handleAddValeMultipla) {
+                        handleAddValeMultipla(multValeNumero.trim(), valorValeDisp);
+                      } else {
+                        setPayments([...payments, { _key: Math.random().toString(36).slice(2), forma: "Vale-Troca", valor: valorValeDisp, parcelas: 1, vale_numero: multValeNumero.trim() }]);
+                      }
                       setMultValeNumero(""); setMultValeValidacao(null); setMultValor("");
                     } else if (multForma === "Manual (MP)") {
                       handleMpManual();
@@ -734,7 +749,7 @@ export default function PagamentoForm({
                       handleAddPagamento(multValor);
                     }
                   }}
-                  disabled={restante <= 0 || (multForma === "Vale-Troca" ? !multValeValidacao?.ok : false) || (multForma === "Manual (MP)" ? (mpManualLoading || !mpManualId.trim()) : false)}
+                  disabled={saving || restante <= 0 || (multForma === "Vale-Troca" ? !multValeValidacao?.ok : false) || (multForma === "Manual (MP)" ? (mpManualLoading || !mpManualId.trim()) : false)}
                   className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
                   style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                   {multForma === "Manual (MP)"

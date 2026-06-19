@@ -1,6 +1,23 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 16/06/2026 — Versão: v2.68.2 <!-- Revisado 16/06/2026 -->
+> 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.3 <!-- Revisado 19/06/2026 -->
+
+## fix(vendas): pedir o código (token) do vale-troca também no detalhe da venda (v2.68.3)
+
+A 2ª confirmação do dono do vale (código de 6 dígitos por WhatsApp, brecha #1) só estava ligada na
+tela de **nova venda**. Ao adicionar um pagamento em **Vale-Troca** pelo **detalhe da venda**
+(`VendaDetalheClient`), o front mandava só o `vale_numero` — nunca chamava `solicitar-codigo` (não
+disparava o WhatsApp) nem tinha como digitar o código. Para vale **com dono**, o backend recusava
+(`precisa_codigo`) e o atendente ficava sem caminho pra concluir. **Fix:** a lógica do código foi
+**extraída** para `src/lib/vale-troca-confirmacao.ts` (`obterConfirmacaoVale`, fonte única) e ligada nos
+dois pontos de pagamento do detalhe (`handleAddPagamento` e `handleEdicaoAdd`). A nova venda passou a
+usar a mesma função (comportamento idêntico, sem código duplicado). Vale **promocional** (sem dono)
+segue direto, sem pedir nada. Backend e banco inalterados.
+- **Múltiplas (detalhe da venda):** o vale dentro de "Múltiplas" antes só entrava na lista visual e
+  **nunca era enviado**. Agora registra **na hora** (igual ao Ouro), passando pela mesma 2ª confirmação
+  do dono (token) — via nova prop opcional `handleAddValeMultipla` no `PagamentoForm`. Na **nova venda**
+  a prop fica ausente, então o vale em Múltiplas continua sendo aplicado no "Concluir venda" (com token,
+  via `aplicarValeNaVenda`) — comportamento original preservado.
 
 ## fix(vendas): consultora consegue salvar desconto acima do limite em rascunho (v2.68.2)
 
