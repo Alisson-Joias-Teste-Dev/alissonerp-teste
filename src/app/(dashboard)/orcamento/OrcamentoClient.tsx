@@ -1674,8 +1674,14 @@ export default function OrcamentoClient({
       profundidade_concava: p.concaveDepth,
       has_friso: p.hasGroove, friso_kind: p.hasGroove ? p.grooveKind : null,
       friso_tipo: p.hasGroove ? p.grooveType : null,
-      friso_lado: p.grooveSide, friso_largura: p.grooveWidth,
-      friso_profundidade: p.grooveDepth, friso_offset: p.grooveOffset,
+      // B1 (friso fantasma): friso DESLIGADO zera TODAS as medidas. Antes,
+      // lado/largura/profundidade/offset eram salvos sempre — sobrava "lixo" no
+      // anel liso que o visualizador 3D ressuscitava como sulco fantasma.
+      // IMPACTO se reverter: anel liso volta a sair com friso pra fabrica.
+      friso_lado: p.hasGroove ? p.grooveSide : null,
+      friso_largura: p.hasGroove ? p.grooveWidth : null,
+      friso_profundidade: p.hasGroove ? p.grooveDepth : null,
+      friso_offset: p.hasGroove ? p.grooveOffset : null,
       canal_largura: p.canalWidth, canal_borda_altura: p.canalBorderHeight,
       chanfro_tamanho: p.chamferSize, dome_porcentagem: p.domePercentage,
       pedra_fileiras: p.stoneRows, pedra_drill: p.stoneDrill,

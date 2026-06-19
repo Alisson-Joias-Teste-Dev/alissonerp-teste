@@ -105,7 +105,12 @@ export async function GET(
     const perfil = String(row.perfil ?? "Anatomica");
     const friso_largura = Number(row.friso_largura ?? 0);
     const friso_profundidade = Number(row.friso_profundidade ?? 0);
-    const has_friso = row.has_friso === true || (friso_largura > 0 && friso_profundidade > 0);
+    // B1 (friso fantasma): a flag has_friso e a UNICA verdade sobre ter friso.
+    // Antes, reconstruia friso a partir de medida residual (largura>0 && prof>0):
+    // anel liso com medida esquecida no banco virava sulco fantasma no 3D.
+    // Perfis legados FrisoUnico/FrisoLateral seguem cobertos pelo hasGroove abaixo.
+    // IMPACTO se reverter: volta o friso fantasma no anel liso com medida residual.
+    const has_friso = row.has_friso === true;
     const fonte = String(row.tipo_fonte ?? "");
     // 3D so renderiza o nome principal — adicionais aparecem na ficha tecnica.
     const texto = nomePrincipal(row.texto);
