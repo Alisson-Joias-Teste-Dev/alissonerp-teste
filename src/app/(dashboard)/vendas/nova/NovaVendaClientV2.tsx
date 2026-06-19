@@ -16,8 +16,6 @@ import { normalizarCampoPersonalizacao } from "@/lib/personalizacao-validacao";
 import NovaOrdemServicoBaseModal from "@/components/ordens/NovaOrdemServicoBaseModal";
 import UpgradeItemFields, { type UpgradeFieldsData } from "@/components/vendas/UpgradeItemFields";
 import { createClient } from "@/lib/supabase/client";
-// REGRA DE NEGOCIO: 2a confirmacao do dono do vale (codigo WhatsApp, brecha #1) — fonte unica.
-import { obterConfirmacaoVale } from "@/lib/vale-troca-confirmacao";
 // REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
 // Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos frontends.
 import { isServicoRodioProduto, descricaoItemComBaseRodio, calcularPreviewRodioPorSkuBase, getPctRodio, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
@@ -219,6 +217,7 @@ interface Pagamento {
   valor: number;
   parcelas: number;
   vale_numero?: string;
+  vale_codigo?: string; // 2a confirmacao do dono (vale COM dono) — coletado no painel, aplicado no Concluir
   db_id?: number; // ID do pagamentos_venda pré-criado (Pix/Cartão em Múltiplas)
   // Ouro (file fica local até salvar a venda; depois é uploaded e o path é usado)
   ouro_peso?: number;
@@ -677,6 +676,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [valeValidacao, setValeValidacao] = useState<{
     ok: boolean; erro?: string; valor_disponivel?: number; cliente_id?: number | null;
   } | null>(null);
+  // Código (2a confirmação do dono) do vale SINGLE — coletado no painel ValeCodigoInline,
+  // aplicado no Concluir. Múltiplas guarda o código no próprio item da lista.
+  const [valeCodigoNV, setValeCodigoNV] = useState("");
   const [valeTrocoToast, setValeTrocoToast] = useState<{ numero: string; valor: number } | null>(null);
   const [aprovacaoEnviada, setAprovacaoEnviada] = useState(false);
   const [aprovacaoDescontoEnviada, setAprovacaoDescontoEnviada] = useState(false);
@@ -1540,24 +1542,20 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   // Antes de aplicar um vale COM dono, o sistema envia um código ao WhatsApp do
   // dono; o caixa digita o código informado pelo cliente. Vale sem dono (promo)
   // é aplicado direto. Se o WhatsApp falhar, um responsável libera via exceção.
-  async function aplicarValeNaVenda(vendaIdLocal: number, valor: number, numero?: string) {
+  async function aplicarValeNaVenda(vendaIdLocal: number, valor: number, numero?: string, codigo?: string) {
     const valeNum = (numero ?? valeNumero).trim();
 
-    // 1. Solicita o código ao dono e obtém a 2a confirmação (código/exceção).
-    // Lógica extraída para src/lib/vale-troca-confirmacao.ts (fonte única, usada
-    // também na tela de detalhe da venda). precisa_codigo=false => vale promocional.
-    const conf = await obterConfirmacaoVale(valeNum);
-    const valeCodigo = conf.vale_codigo;
-    const valeExcecao = conf.vale_excecao ?? false;
+    // O código (2a confirmação do dono) é coletado ANTES, no painel ValeCodigoInline
+    // (single: state valeCodigoNV; múltiplas: gravado no item da lista). Aqui só aplica.
+    // Vale promocional (sem dono) vem sem código — o backend aplica direto.
+    const valeCodigo = (codigo ?? valeCodigoNV).trim();
 
-    // 2. Aplica o vale — o backend valida código/exceção em definitivo.
     const res = await fetch(`/api/vendas/${vendaIdLocal}/pagamentos`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         forma: "Vale-Troca", valor, vale_numero: valeNum,
         ...(valeCodigo ? { vale_codigo: valeCodigo } : {}),
-        ...(valeExcecao ? { vale_excecao: true } : {}),
       }),
     });
     const data = await res.json() as { novo_vale?: { id: number; numero: string; valor_original: number }; error?: string };
@@ -1873,7 +1871,14 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         const valeNumeroFinal = pagForma === "Vale-Troca" ? valeNumero.trim() : (pagValeItem?.vale_numero ?? "");
         if (!valeNumeroFinal) throw new Error("Número do vale-troca obrigatório");
         const valorVale = pagValeItem ? pagValeItem.valor : totalVenda;
-        await aplicarValeNaVenda(idFinal, valorVale, valeNumeroFinal);
+        // Código do dono: single vem do painel (valeCodigoNV); múltiplas vem gravado no item.
+        // Vale COM dono SEM código = bloqueia (política: código obrigatório, sem exceção).
+        const codigoVale = pagForma === "Vale-Troca" ? valeCodigoNV.trim() : (pagValeItem?.vale_codigo ?? "");
+        const valeTemDono = pagForma === "Vale-Troca" ? (valeValidacao?.cliente_id != null) : !!pagValeItem?.vale_codigo;
+        if (valeTemDono && !codigoVale) {
+          throw new Error("Confirme o código do vale (enviado ao WhatsApp do dono) antes de concluir.");
+        }
+        await aplicarValeNaVenda(idFinal, valorVale, valeNumeroFinal, codigoVale || undefined);
       }
 
       if (temAReceber) {
@@ -3109,6 +3114,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               // Functions
               validarOuroIA={validarOuroIA}
               validarValeTroca={validarValeFn}
+              // Vale COM dono: painel da 2a confirmacao. Single guarda o codigo (aplica no
+              // Concluir); Multiplas grava o codigo no item da lista. Promocional nao usa painel.
+              onAplicarVale={(_valeNum, codigo) => setValeCodigoNV(codigo)}
+              onAplicarMultVale={(valeNum, valor, codigo) => setPagamentos(prev => [...prev, { _key: uid(), forma: "Vale-Troca", valor, parcelas: 1, vale_numero: valeNum, vale_codigo: codigo }])}
+              valeBotaoLabel="Confirmar código"
               handleAddPagamento={handleAddPagamento}
               handleRemovePagamento={handleRemovePagamento}
               handleMpManual={async () => {

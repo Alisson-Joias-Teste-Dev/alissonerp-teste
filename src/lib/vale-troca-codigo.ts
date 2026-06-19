@@ -68,20 +68,49 @@ export async function solicitarCodigoVale(
   const [contato] = await sql`
     SELECT nome, celular FROM public.contatos WHERE id_contato = ${vale.cliente_id}
   `;
-  const codigo = gerarCodigo6();
-  const expira = new Date(Date.now() + EXPIRA_MIN * 60 * 1000);
 
-  const [row] = await sql`
-    INSERT INTO alissonerp.vale_troca_codigo
-      (vale_troca_id, venda_id, codigo, telefone, expira_em, created_by)
-    VALUES (${vale.id}, ${vendaId}, ${codigo}, ${contato?.celular ?? null}, ${expira}, ${userId}::uuid)
-    RETURNING id
+  // ── Reuso do codigo ativo (fix do "codigo incorreto") ──────────────────────
+  // O QUE: se ja existe um codigo VALIDO para este vale (nao confirmado, nao
+  //   bloqueado, dentro dos 15 min), REUSA o mesmo numero em vez de gerar outro.
+  // POR QUE: o dono costuma demorar a responder; cada novo pedido gerava um
+  //   codigo novo e o confirmarCodigoVale so aceita o ULTIMO — entao o codigo da
+  //   1a mensagem "morria" e dava "codigo incorreto" mesmo com o numero certo.
+  //   Reusando, o "Reenviar" manda o MESMO codigo e o que o dono recebeu sempre vale.
+  // IMPACTO SE REMOVIDO: volta o bug do codigo que troca a cada clique/reenvio.
+  const [ativo] = await sql`
+    SELECT id, codigo
+    FROM alissonerp.vale_troca_codigo
+    WHERE vale_troca_id = ${vale.id}
+      AND confirmado_em IS NULL
+      AND bloqueado_em IS NULL
+      AND expira_em > now()
+    ORDER BY created_at DESC
+    LIMIT 1
   `;
+
+  let codigo: string;
+  let codigoId: number;
+  if (ativo) {
+    // Reusa o codigo ativo (mantem expira_em/tentativas originais). Reenvia o mesmo.
+    codigo = String(ativo.codigo);
+    codigoId = ativo.id;
+  } else {
+    // Nenhum codigo ativo -> gera um novo (validade 15 min).
+    codigo = gerarCodigo6();
+    const expira = new Date(Date.now() + EXPIRA_MIN * 60 * 1000);
+    const [row] = await sql`
+      INSERT INTO alissonerp.vale_troca_codigo
+        (vale_troca_id, venda_id, codigo, telefone, expira_em, created_by)
+      VALUES (${vale.id}, ${vendaId}, ${codigo}, ${contato?.celular ?? null}, ${expira}, ${userId}::uuid)
+      RETURNING id
+    `;
+    codigoId = row.id;
+  }
 
   // Sem celular cadastrado -> nao da pra enviar; cai pro aprovador de excecao.
   if (!contato?.celular) {
     return {
-      ok: true, precisa_codigo: true, codigo_id: row.id,
+      ok: true, precisa_codigo: true, codigo_id: codigoId,
       precisa_excecao: true, erro: "Cliente sem celular cadastrado",
     };
   }
@@ -97,14 +126,14 @@ export async function solicitarCodigoVale(
       );
     }
     return {
-      ok: true, precisa_codigo: true, codigo_id: row.id,
+      ok: true, precisa_codigo: true, codigo_id: codigoId,
       telefone_mascarado: mascararTelefone(contato.celular),
       precisa_excecao: true, erro: env.erro ?? "Falha ao enviar WhatsApp",
     };
   }
 
   return {
-    ok: true, precisa_codigo: true, codigo_id: row.id,
+    ok: true, precisa_codigo: true, codigo_id: codigoId,
     telefone_mascarado: mascararTelefone(contato.celular),
   };
 }
