@@ -150,6 +150,14 @@ interface Venda {
     id: number; numero_ordem: string; tipo_ordem: string;
     situacao: string; status: string; created_at: string;
   }>;
+  /** Alianças: ficha de cada anel (só exibição — preenchido por /api/vendas/[id]). */
+  aliancaRings?: Array<{
+    anel: number; modelo: string | null; perfil: string | null;
+    tamanho: string | null; largura: number | null; espessura: number | null;
+    pedra: { tipo: string | null; qtd: number | null; tamanho_mm: number | null; aplicacao: string | null } | null;
+    valorPedra: number | null;
+    pedras: Array<{ tipo: string | null; corte: string | null; tamanho_mm: number | null; qtd: number | null; ct_total: number | null; preco_total_rs: number | null }>;
+  }>;
   empresa_emitente_id?: number | null;
   nota_fiscal_id?: number | null;
   descontoThreshold?: number | null;
@@ -652,14 +660,21 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [solicitarSucesso, setSolicitarSucesso] = useState(false);
 
   // ── Load venda ──────────────────────────────────────────────────────────────
-  const load = useCallback(async () => {
-    setLoadingVenda(true); setLoadError("");
+  // silent=true: recarrega os dados da venda SEM trocar a tela pelo spinner de
+  // loading (linha "if (loadingVenda) return <spinner>"). REGRA: o auto-salvar e
+  // o ouvinte realtime precisam atualizar o updated_at (trava de concorrencia)
+  // por baixo dos panos. Sem o silent, cada autosave disparava o spinner de tela
+  // inteira e o formulario "piscava/recarregava sozinho" enquanto o usuario digitava.
+  // IMPACTO se remover o silent: volta o bug de a tela recarregar sozinha ao digitar.
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoadingVenda(true);
+    setLoadError("");
     try {
       const res = await fetch(`/api/vendas/${vendaId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setVenda(await res.json() as Venda);
-    } catch (e) { setLoadError(e instanceof Error ? e.message : "Erro ao carregar"); }
-    finally { setLoadingVenda(false); }
+    } catch (e) { if (!silent) setLoadError(e instanceof Error ? e.message : "Erro ao carregar"); }
+    finally { if (!silent) setLoadingVenda(false); }
   }, [vendaId]);
 
   useEffect(() => { load(); }, [load]);
@@ -701,7 +716,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         schema: "alissonerp",
         table: "vendas_erp",
         filter: `id=eq.${vendaId}`,
-      }, () => { load(); })
+      }, () => { load(true); }) // silencioso: nao pisca a tela ao salvar/aprovar
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [vendaId, load]);
@@ -794,6 +809,18 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       upgrade: i.upgrade ?? null,
     })),
   [venda]);
+
+  // ── Alianças: separar cada anel na exibição (display only — ver /api/vendas/[id]) ──
+  // O QUE: quando o item é uma aliança (par), mostramos um anel por linha com
+  // tamanho/aro e pedra. POR QUE: antes vinha "tudo junto" numa linha só.
+  // Só separa quando há EXATAMENTE um item de aliança e temos as fichas dos anéis
+  // (evita mapear errado se a venda tiver mais de uma aliança). É só exibição:
+  // preço/quantidade/comissão totais não mudam (divididos igualmente entre os anéis).
+  const aliancaRings = venda?.aliancaRings ?? [];
+  const aliancaItemIdxs = itens
+    .map((it, i) => (/^alian[çc]a/i.test(it.nome_produto) ? i : -1))
+    .filter((i) => i >= 0);
+  const splitAliancaIdx = aliancaRings.length > 0 && aliancaItemIdxs.length === 1 ? aliancaItemIdxs[0] : -1;
 
   const totalProdutos = itens.reduce((s, i) => s + i.total_item, 0);
   const totalDesconto = itens.reduce((s, i) => s + (i.preco_lista - i.preco_unitario) * i.quantidade, 0);
@@ -1766,7 +1793,9 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         // POR QUE: o servidor faz updated_at = now() a cada UPDATE e o frontend
         // precisa do valor exato para a checagem de concorrência.
         // IMPACTO SE REMOVIDO: todo segundo save consecutivo falha com 409.
-        await load();
+        // silent=true: atualiza o updated_at sem trocar a tela pelo spinner
+        // (antes, o autosave "recarregava a pagina sozinha" enquanto digitava).
+        await load(true);
       }
       setIsDirty(false);
     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao salvar"); }
@@ -2188,7 +2217,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
             {sharing ? <Loader2 size={13} className="animate-spin" /> : copied ? <CheckIcon size={13} /> : <Share2 size={13} />}
             {copied ? "Copiado!" : "Compartilhar"}
           </button>
-          <button onClick={load} disabled={loadingVenda || updating}
+          <button onClick={() => load()} disabled={loadingVenda || updating}
             className="p-2 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-40" style={{ color: "#6B7280" }}>
             <RefreshCw size={16} />
           </button>
@@ -2740,10 +2769,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                     {itens.length === 0 && !addingItem && (
                       <tr><td colSpan={10} className="px-3 py-8 text-center text-sm" style={{ color: "#9CA3AF" }}>Nenhum produto adicionado</td></tr>
                     )}
-                    {itens.map((item, idx) => (<Fragment key={item._key}>
+                    {itens.map((item, idx) => {
+                      return (<Fragment key={item._key}>
                       <tr className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                         <td className="px-2 py-2 tabular-nums" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
-                        <td className="px-2 py-2 max-w-[140px] truncate font-medium" style={{ color: "#1A1A1A" }}>
+                        <td className="px-2 py-2 font-medium whitespace-nowrap" style={{ color: "#1A1A1A" }} title={item.nome_produto}>
                           {item.nome_produto}
                           {item.upgrade && (
                             <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full align-middle"
@@ -2972,7 +3002,48 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                           </td>
                         </tr>
                       )}
-                    </Fragment>))}
+                      {/* ALIANÇA: detalhe dos anéis do par (só exibição). Mostra modelo,
+                          tamanho/aro e a pedra COM seu valor — deixando claro que a pedra
+                          é cobrada (entra no preço do par). Não altera preço/desconto/comissão,
+                          que continuam editáveis na linha do item acima. */}
+                      {idx === splitAliancaIdx && aliancaRings.length > 0 && (
+                        <tr key={`${item._key}-aneis`} style={{ backgroundColor: "#FBFAF7" }}>
+                          <td colSpan={20} className="px-4 py-2 border-t" style={{ borderColor: C.cremeBorder }}>
+                            <div className="flex flex-col gap-1 pl-3 border-l-2" style={{ borderColor: C.esmeralda }}>
+                              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.esmeralda }}>Anéis do par</span>
+                              {aliancaRings.map((r) => (
+                                <div key={r.anel} className="text-xs" style={{ color: "#374151" }}>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-medium">Anel {r.anel}{r.modelo ? ` — ${r.modelo}` : ""}</span>
+                                    <span style={{ color: "#6B7280" }}>{r.tamanho ?? "—"}{r.largura != null ? ` · ${String(r.largura).replace(".", ",")}mm` : ""}</span>
+                                  </div>
+                                  {r.pedras.length > 0 ? (
+                                    // Cada pedra do anel numa linha (tipo · tamanho · lapidação · qtd · quilates · valor)
+                                    <div className="mt-0.5 pl-3 flex flex-col gap-0.5 items-start">
+                                      {r.pedras.map((p, pi) => (
+                                        <span key={pi} className="px-1.5 py-0.5 rounded-full text-[11px]" style={{ backgroundColor: "#EDE9FE", color: "#5B21B6" }}>
+                                          💎 {p.tipo ?? "pedra"}{p.tamanho_mm != null ? ` ${String(p.tamanho_mm).replace(".", ",")}mm` : ""}{p.corte ? ` · ${p.corte}` : ""}{p.qtd ? ` · ×${p.qtd}` : ""}{p.ct_total != null ? ` · ${String(p.ct_total).replace(".", ",")}ct` : ""}{p.preco_total_rs != null ? ` · ${fmt(p.preco_total_rs)}` : ""}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : r.pedra ? (
+                                    <div className="mt-0.5 pl-3">
+                                      <span className="px-1.5 py-0.5 rounded-full text-[11px]" style={{ backgroundColor: "#EDE9FE", color: "#5B21B6" }}>
+                                        💎 {r.pedra.tipo ?? "pedra"}{r.pedra.tamanho_mm != null ? ` ${String(r.pedra.tamanho_mm).replace(".", ",")}mm` : ""}{r.pedra.qtd ? ` ×${r.pedra.qtd}` : ""}{r.valorPedra != null ? ` · ${fmt(r.valorPedra)}` : ""}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[11px] pl-3" style={{ color: "#9CA3AF" }}>sem pedra</span>
+                                  )}
+                                </div>
+                              ))}
+                              <span className="text-[10px]" style={{ color: "#9CA3AF" }}>A pedra está inclusa no preço do par (ouro + pedra).</span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>);
+                    })}
                   </tbody>
                 </table>
               </div>

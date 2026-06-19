@@ -431,18 +431,116 @@ export async function PATCH(
       // pela quantidade.
       const valorComissao = Math.round(valorTotal * pctComissao) / 100;
 
-      await tx`
-        INSERT INTO alissonerp.itens_venda_erp (
-          venda_id, nome_produto, quantidade, preco_lista,
-          pct_desconto, preco_unitario, total_item, peso_estimado,
-          pct_comissao, valor_comissao, observacao
-        ) VALUES (
-          ${venda.id}, ${nomeItem}, ${qtdItem}, ${precoListaItem},
-          ${descontoPctItem}, ${valorUnitario}, ${valorTotal}, ${pesoUnitario},
-          ${pctComissao}, ${valorComissao},
-          ${'Orçamento ' + orc.numero_orcamento}
-        )
-      `;
+      // ── ALIANÇA: um item por PEDAÇO (ouro de cada anel + pedras de cada anel) ──
+      // REGRA DE NEGOCIO (pedido do Jonathan): cada anel e cada conjunto de pedras
+      // vira um item PRÓPRIO, com preço/desconto/comissão separados — a vendedora
+      // vê e desconta cada parte. Como dividir (sem coluna de valor por anel):
+      //  - ouro de cada anel  = rateio de valor_ouro pelo PESO de cada ficha;
+      //  - pedras de cada anel = rateio de valor_pedras pelo valor de pedra DAQUELA
+      //    ficha (anel sem pedra recebe 0 — nunca rateia a pedra entre os dois);
+      //  - o 1º item (ouro) absorve o resíduo de centavos pra Σtotal_item = valor do
+      //    orçamento (trigger fn_recalcular_totais_venda exige a soma fechar).
+      // Comissão segue a mesma faixa do par (pedra paga comissão — decisão do dono).
+      // produto_id fica NULL (não controla estoque comercial — igual ao item único).
+      // Só vale pra orçamento de aliança COM ficha; senão cai no item único (else).
+      // IMPACTO SE ERRADO: totais/comissão divergem (trigger de auditoria de total).
+      let didSplitAlianca = false;
+      if (orc.tipo === "alianca" && orc.ficha_tecnica_id != null) {
+        const fichaIdsAl: number[] = [orc.ficha_tecnica_id, orc.ficha_tecnica_2_id]
+          .filter((x): x is number => x != null)
+          .map((x) => Number(x));
+        const fichasAl = await tx`
+          SELECT id, modelo, peso_estimado, tipo_pedra, pedras_detalhadas
+          FROM alissonerp.orcamento_fichas_tecnicas WHERE id = ANY(${fichaIdsAl})
+        `;
+        const byIdAl = new Map(fichasAl.map((f) => [Number(f.id), f]));
+        const ringFichas = [orc.ficha_tecnica_id, orc.ficha_tecnica_2_id]
+          .map((fid: unknown) => (fid != null ? byIdAl.get(Number(fid)) : undefined))
+          .filter((f): f is NonNullable<typeof f> => !!f);
+        if (ringFichas.length > 0) {
+          const pesos = ringFichas.map((f) => Number(f.peso_estimado) || 0);
+          const pesoTot = pesos.reduce((s, p) => s + p, 0);
+          const sumPedras = (pdVal: unknown): number => {
+            let pd = pdVal;
+            if (typeof pd === "string") { try { pd = JSON.parse(pd); } catch { return 0; } }
+            return Array.isArray(pd)
+              ? pd.reduce((s: number, p) => s + (Number((p as { preco_total_rs?: unknown })?.preco_total_rs) || 0), 0)
+              : 0;
+          };
+          const rawPedras = ringFichas.map((f) => sumPedras(f.pedras_detalhadas));
+          // Pedra de cada anel: valor REAL da pedra (preco_total_rs) descontado pelo
+          // desconto do orçamento — EXATO (ex: 40,00). NÃO ratear valor_pedras (vem ~1
+          // centavo inflado pelo fator de arredondamento do orçamento).
+          const pedrasAnel = rawPedras.map((rp) => Math.round(rp * (1 - descontoPctItem / 100) * 100) / 100);
+          const somaPedrasAnel = pedrasAnel.reduce((s, p) => s + p, 0);
+          // Ouro = o que sobra do total depois das pedras (e da gravação, se houver),
+          // rateado pelo PESO de cada anel. O ÚLTIMO anel absorve o resíduo de centavos —
+          // assim anéis de MESMO peso saem com o MESMO valor (nenhum ganha/perde 1 centavo)
+          // e Σtotal = valor do orçamento (ouroAjustado + Σpedras = valorTotal). Mesma
+          // regra do espelho no orçamento.
+          const ouroAjustado = Math.round((valorTotal - somaPedrasAnel) * 100) / 100;
+          const ouroAnel: number[] = [];
+          let ouroAcc = 0;
+          pesos.forEach((p, i) => {
+            const v = i === pesos.length - 1
+              ? Math.round((ouroAjustado - ouroAcc) * 100) / 100
+              : (pesoTot > 0 ? Math.round(ouroAjustado * (p / pesoTot) * 100) / 100 : 0);
+            ouroAnel.push(v);
+            ouroAcc = Math.round((ouroAcc + v) * 100) / 100;
+          });
+
+          const itensAl: Array<{ nome: string; peso: number | null; total: number }> = [];
+          ringFichas.forEach((f, i) => {
+            const anel = i + 1;
+            const modeloR = (f.modelo as string | null) ?? "Aliança";
+            itensAl.push({ nome: `Aliança ${anel} — ${modeloR} (ouro)`, peso: pesos[i] || null, total: ouroAnel[i] });
+            if (pedrasAnel[i] > 0) {
+              const tipoP = (f.tipo_pedra as string | null) ?? "Pedras";
+              itensAl.push({ nome: `Aliança ${anel} — Pedras (${tipoP})`, peso: null, total: pedrasAnel[i] });
+            }
+          });
+
+          if (itensAl.length > 0) {
+            // Σ já fecha exato (ouroAjustado + Σpedras = valorTotal). Sem ajuste extra.
+
+            for (const it of itensAl) {
+              const precoListaIt = descontoPctItem > 0 && descontoPctItem < 100
+                ? Math.round((it.total / (1 - descontoPctItem / 100)) * 100) / 100
+                : it.total;
+              const valorComissaoIt = Math.round(it.total * pctComissao) / 100;
+              await tx`
+                INSERT INTO alissonerp.itens_venda_erp (
+                  venda_id, nome_produto, quantidade, preco_lista,
+                  pct_desconto, preco_unitario, total_item, peso_estimado,
+                  pct_comissao, valor_comissao, observacao
+                ) VALUES (
+                  ${venda.id}, ${it.nome}, 1, ${precoListaIt},
+                  ${descontoPctItem}, ${it.total}, ${it.total}, ${it.peso},
+                  ${pctComissao}, ${valorComissaoIt},
+                  ${'Orçamento ' + orc.numero_orcamento}
+                )
+              `;
+            }
+            didSplitAlianca = true;
+          }
+        }
+      }
+
+      // Item único (não-aliança, ou aliança sem ficha): comportamento original.
+      if (!didSplitAlianca) {
+        await tx`
+          INSERT INTO alissonerp.itens_venda_erp (
+            venda_id, nome_produto, quantidade, preco_lista,
+            pct_desconto, preco_unitario, total_item, peso_estimado,
+            pct_comissao, valor_comissao, observacao
+          ) VALUES (
+            ${venda.id}, ${nomeItem}, ${qtdItem}, ${precoListaItem},
+            ${descontoPctItem}, ${valorUnitario}, ${valorTotal}, ${pesoUnitario},
+            ${pctComissao}, ${valorComissao},
+            ${'Orçamento ' + orc.numero_orcamento}
+          )
+        `;
+      }
 
       // 4. Marcar orçamento como convertido com venda vinculada
       await tx`

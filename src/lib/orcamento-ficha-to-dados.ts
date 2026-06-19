@@ -66,7 +66,7 @@ export function orcamentoFichaToDados(ft: FichaRow): Record<string, unknown> {
   if (ft.densidade_ouro != null) d.densidade_ouro = ft.densidade_ouro;
 
   // v2.61: nao filtra mais defaults — ourives precisa ver TUDO que a
-  // vendedora configurou, mesmo valores "padrao" (100% curvatura, 0.4mm
+  // vendedora configurou, mesmo valores "padrao" (100% boleamento, 0.4mm
   // profundidade). Antes, dome=100 e profundidade=0 sumiam, confundindo.
   if (ft.profundidade_concava != null) d.profundidade_concava = ft.profundidade_concava;
   if (ft.dome_porcentagem != null) d.dome_porcentagem = ft.dome_porcentagem;

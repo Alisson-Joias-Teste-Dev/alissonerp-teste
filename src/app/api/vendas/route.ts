@@ -898,7 +898,7 @@ export async function POST(req: NextRequest) {
               VALUES (
                 ${ordem.id},
                 'reposicao_venda',
-                ${JSON.stringify({ ficha_produto_id: ficha.id, peso_estimado_metal: ficha.peso_estimado_metal, modelo: ficha.modelo, modelo_interno: ficha.modelo_interno, arquivo_3dm: ficha.arquivo_3dm, arquivo_glb: ficha.arquivo_glb })}::jsonb,
+                ${JSON.stringify({ ficha_produto_id: ficha.id, peso_estimado_metal: ficha.peso_estimado_metal, modelo: ficha.modelo, modelo_interno: ficha.modelo_interno, arquivo_3dm: ficha.arquivo_3dm, arquivo_glb: ficha.arquivo_glb })}::text::jsonb,
                 ${user.id}::uuid
               )
             `;

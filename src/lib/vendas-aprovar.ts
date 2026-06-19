@@ -448,9 +448,13 @@ export async function criarOrdemDoOrcamento(
           ...(vendaOrc.cor_metal ? { cor_metal: vendaOrc.cor_metal } : {}),
           ...(vendaOrc.pedras_detalhadas ? { pedras_detalhadas: vendaOrc.pedras_detalhadas } : {}),
         };
+    // dados gravado com ::text::jsonb (NAO JSON.stringify+::jsonb direto). REGRA: o driver
+    // postgres, ao castar a string JS direto pra ::jsonb, re-serializa e grava a ficha como
+    // STRING dentro de JSON (double-encoded). Forcar ::text primeiro faz o PG fazer o parse e
+    // gravar OBJETO limpo. IMPACTO se voltar pro ::jsonb: ficha tecnica corrompida no banco.
     await tx`
       INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
-      VALUES (${ordem.id}, ${tipoItem}, ${JSON.stringify(dadosFicha)}::jsonb, ${userId}::uuid)
+      VALUES (${ordem.id}, ${tipoItem}, ${JSON.stringify(dadosFicha)}::text::jsonb, ${userId}::uuid)
     `;
 
     if (Number(vendaOrc.quantidade) === 2 && vendaOrc.ficha_tecnica_2_id) {
@@ -477,7 +481,7 @@ export async function criarOrdemDoOrcamento(
         const dadosFicha2 = orcamentoFichaToDados(ft2Row);
         await tx`
           INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
-          VALUES (${ordem.id}, 'alianca', ${JSON.stringify(dadosFicha2)}::jsonb, ${userId}::uuid)
+          VALUES (${ordem.id}, 'alianca', ${JSON.stringify(dadosFicha2)}::text::jsonb, ${userId}::uuid)
         `;
       }
     }

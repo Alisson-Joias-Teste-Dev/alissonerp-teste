@@ -148,6 +148,81 @@ export async function GET(
     ORDER BY id
   `;
 
+  // ── Alianças: ficha de CADA anel (apenas exibição) ───────────────────────────
+  // REGRA DE NEGOCIO: a venda guarda a aliança como UM item ("Alianças (... + ...)",
+  // qtde 2). Para a tela mostrar cada anel SEPARADO (modelo, tamanho/aro e pedra),
+  // buscamos as fichas do orçamento que gerou a venda — anel 1 = ficha_tecnica_id,
+  // anel 2 = ficha_tecnica_2_id. NAO altera preço/quantidade/comissão (só display).
+  // IMPACTO SE REMOVIDO: a aliança volta a aparecer "tudo junto" numa linha só.
+  const orcsAlianca = await sql`
+    SELECT id, quantidade, ficha_tecnica_id, ficha_tecnica_2_id
+    FROM alissonerp.orcamentos
+    WHERE venda_gerada_id = ${vendaId}
+    ORDER BY id
+  `;
+  const fichaIds = orcsAlianca
+    .flatMap((o) => [o.ficha_tecnica_id, o.ficha_tecnica_2_id])
+    .filter((x): x is number => x != null);
+  const aliancaRings: Array<{
+    anel: number; modelo: string | null; perfil: string | null;
+    tamanho: string | null; largura: number | null; espessura: number | null;
+    pedra: { tipo: string | null; qtd: number | null; tamanho_mm: number | null; aplicacao: string | null } | null;
+    valorPedra: number | null;
+    pedras: Array<{ tipo: string | null; corte: string | null; tamanho_mm: number | null; qtd: number | null; ct_total: number | null; preco_total_rs: number | null }>;
+  }> = [];
+  if (fichaIds.length > 0) {
+    const fichas = await sql`
+      SELECT id, perfil, modelo, aro_numeracao, largura, espessura,
+             qtd_pedras, tamanho_pedra, tipo_pedra, tipo_aplicacao_pedra, pedras_detalhadas
+      FROM alissonerp.orcamento_fichas_tecnicas
+      WHERE id = ANY(${fichaIds})
+    `;
+    const byId = new Map(fichas.map((f) => [Number(f.id), f]));
+    let anel = 0;
+    for (const o of orcsAlianca) {
+      for (const fid of [o.ficha_tecnica_id, o.ficha_tecnica_2_id]) {
+        if (fid == null) continue;
+        const f = byId.get(Number(fid));
+        if (!f) continue;
+        anel += 1;
+        const qtdPedras = f.qtd_pedras != null ? Number(f.qtd_pedras) : 0;
+        // Valor da pedra do detalhamento do orçamento (deixa CLARO que é cobrada).
+        // pedras_detalhadas pode vir como array (jsonb) ou string legada — trata ambos.
+        const pedrasArr = (() => {
+          let pd: unknown = f.pedras_detalhadas;
+          if (typeof pd === "string") { try { pd = JSON.parse(pd); } catch { return [] as Array<Record<string, unknown>>; } }
+          return Array.isArray(pd) ? (pd as Array<Record<string, unknown>>) : [];
+        })();
+        const somaPedra = pedrasArr.reduce((s, p) => s + (Number(p.preco_total_rs) || 0), 0);
+        // Cada pedra separada (pra mostrar uma a uma no detalhe da aliança).
+        const pedras = pedrasArr.map((p) => ({
+          tipo: (p.tipo as string | null) ?? null,
+          corte: (p.corte as string | null) ?? null,
+          tamanho_mm: p.tamanho_mm != null ? Number(p.tamanho_mm) : null,
+          qtd: p.qtd != null ? Number(p.qtd) : null,
+          ct_total: p.ct_total != null ? Number(p.ct_total) : null,
+          preco_total_rs: p.preco_total_rs != null ? Number(p.preco_total_rs) : null,
+        }));
+        aliancaRings.push({
+          anel,
+          modelo: f.modelo ?? null,
+          perfil: f.perfil ?? null,
+          tamanho: f.aro_numeracao ?? null,
+          largura: f.largura != null ? Number(f.largura) : null,
+          espessura: f.espessura != null ? Number(f.espessura) : null,
+          pedra: qtdPedras > 0 ? {
+            tipo: f.tipo_pedra ?? null,
+            qtd: qtdPedras,
+            tamanho_mm: f.tamanho_pedra != null ? Number(f.tamanho_pedra) : null,
+            aplicacao: f.tipo_aplicacao_pedra ?? null,
+          } : null,
+          valorPedra: somaPedra > 0 ? somaPedra : null,
+          pedras,
+        });
+      }
+    }
+  }
+
   const devolucoes = await sql`
     SELECT id, numero, tipo, status, tipo_compensacao,
            valor_total_devolvido, valor_compensacao, created_at
@@ -237,6 +312,7 @@ export async function GET(
       taxas_mp:      p.taxas_mp      != null ? Number(p.taxas_mp)      : null,
     })),
     ordens,
+    aliancaRings,
   });
 }
 

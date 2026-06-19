@@ -383,7 +383,7 @@ export async function POST(req: NextRequest) {
         VALUES (
           ${ordem.id},
           ${fichaTecnicaDados.tipo_item},
-          ${JSON.stringify(fichaTecnicaDados)}::jsonb,
+          ${JSON.stringify(fichaTecnicaDados)}::text::jsonb,
           ${user.id}::uuid
         )
       `;

@@ -950,7 +950,8 @@ export default function OrcamentoClient({
     const raw = (config as any)?.risco_depth;
     return raw ? Number(raw) : 0.2;
   });
-  // Curvatura padrão (%) — aplicada a alianças novas (migration 255).
+  // Boleamento padrão (%) — aplicado a alianças novas (migration 255).
+  // "Boleamento" é o rótulo visível; internamente continua domePercentage / dome_percentage.
   // Antes era editada via params.domePercentage e nunca persistia.
   const [defaultDomePercentage, setDefaultDomePercentage] = useState<number>(
     () => Number(config?.dome_percentage ?? 100)
@@ -2729,11 +2730,11 @@ export default function OrcamentoClient({
               <p className="text-[10px] text-gray-400 mt-1">Desconto padrão aplicado no orçamento</p>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Curvatura padrão (%)</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Boleamento padrão (%)</label>
               <input type="number" min={0} max={100} step={5} value={defaultDomePercentage}
                 onChange={e => setDefaultDomePercentage(parseInt(e.target.value) || 100)}
                 className="w-full px-3 py-2.5 text-sm rounded-lg border outline-none" style={{ borderColor: C.cremeBorder }} />
-              <p className="text-[10px] text-gray-400 mt-1">Curvatura padrão dos perfis Anatomica, Boleada e Boleada Dupla em alianças novas</p>
+              <p className="text-[10px] text-gray-400 mt-1">Boleamento padrão dos perfis Anatomica, Boleada e Boleada Dupla em alianças novas</p>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Teor do ouro (%)</label>
@@ -3872,8 +3873,15 @@ export default function OrcamentoClient({
                   Admin ainda pode ver via double-click no preço final (toggle). */}
               {/* Pills de ouro e pedras (só quando há pedras preciosas) */}
               {(() => {
-                // Pill mostra a fatia do TOTAL final que vai pra cada categoria
-                // (ouro/pedras/gravação) — distribuido proporcional ao bruto.
+                // Pill mostra a fatia do TOTAL final que vai pra cada categoria,
+                // distribuída proporcional ao bruto.
+                // ESPELHO DA VENDA: em PAR, mostra cada aliança com SEU ouro e SUAS
+                // pedras separados, com as MESMAS regras dos itens da venda:
+                //  - ouro de cada anel = rateio do ouro total pelo PESO do anel;
+                //  - pedras de cada anel = rateio do total de pedras pelo valor de
+                //    pedra DAQUELE anel (anel sem pedra fica sem pedra — nunca divide
+                //    a pedra entre os dois).
+                // A soma dos pedaços bate com OURO/PEDRAS totais do orçamento.
                 const isPar = allianceMode === "par";
                 const ouroBrutoPill = isPar ? pricing.price + pricing2.price : pricing.price;
                 const pedrasBrutoPill = isPar ? pedrasCost + pedrasCost2 : pedrasCost;
@@ -3883,27 +3891,43 @@ export default function OrcamentoClient({
                 const ouroTotal = ouroBrutoPill * fatorPill;
                 const pedrasTotal = pedrasBrutoPill * fatorPill;
                 const gravTotal = gravBrutoPill * fatorPill;
+                const brl = (n: number) => `R$ ${n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+                if (isPar) {
+                  // Pedra EXATA (valor real da pedra). O desconto/arredondamento do par é
+                  // absorvido pelo OURO (valor grande) — assim a pedra não "perde" 1 centavo
+                  // nem o ouro "ganha" 1 centavo errado no rateio. ouro1 + pedras1 = A1
+                  // (bate com o split A1|A2 que aparece embaixo do total).
+                  const pedras1 = Math.round(pedrasCost * 100) / 100;
+                  const pedras2 = Math.round(pedrasCost2 * 100) / 100;
+                  const ouroAjustado = pricingTotal.price - pedras1 - pedras2 - gravTotal;
+                  const w1 = pricing.weight, w2 = pricing2.weight, wTot = w1 + w2;
+                  const ouro1 = Math.round((wTot > 0 ? ouroAjustado * (w1 / wTot) : ouroAjustado) * 100) / 100;
+                  const ouro2 = Math.round((ouroAjustado - ouro1) * 100) / 100;
+                  const qtd1 = stoneEntries.reduce((acc, s) => acc + (s.qtd ?? 0), 0);
+                  const qtd2 = stoneEntries2.reduce((acc, s) => acc + (s.qtd ?? 0), 0);
+                  return (
+                    <>
+                      <Pill label="Aliança 1 · Ouro" value={brl(ouro1)} />
+                      {pedras1 > 0 && <Pill label="Aliança 1 · Pedras" value={brl(pedras1)} sublabel={qtd1 > 0 ? `${qtd1} pedra${qtd1 > 1 ? "s" : ""}` : undefined} />}
+                      <Pill label="Aliança 2 · Ouro" value={brl(ouro2)} />
+                      {pedras2 > 0 && <Pill label="Aliança 2 · Pedras" value={brl(pedras2)} sublabel={qtd2 > 0 ? `${qtd2} pedra${qtd2 > 1 ? "s" : ""}` : undefined} />}
+                      {gravTotal > 0 && <Pill label="Gravação" value={brl(gravTotal)} />}
+                    </>
+                  );
+                }
+
+                // Unidade (1 aliança): ouro + pedras como antes.
                 const hasExtras = pedrasTotal > 0 || gravTotal > 0;
                 if (!hasExtras) return null;
-                // Calcula unitário das pedras: R$ total / soma de qtds (de ambos os anéis se par)
-                const totalQtd =
-                  stoneEntries.reduce((acc, s) => acc + (s.qtd ?? 0), 0)
-                  + (allianceMode === "par" ? stoneEntries2.reduce((acc, s) => acc + (s.qtd ?? 0), 0) : 0);
+                const totalQtd = stoneEntries.reduce((acc, s) => acc + (s.qtd ?? 0), 0);
                 const unit = totalQtd > 0 ? pedrasTotal / totalQtd : 0;
-                const sublabel = totalQtd > 0
-                  ? `R$ ${unit.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/un × ${totalQtd}`
-                  : undefined;
+                const sublabel = totalQtd > 0 ? `${brl(unit)}/un × ${totalQtd}` : undefined;
                 return (
                   <>
-                    <Pill label="Ouro" value={`R$ ${ouroTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
-                    {pedrasTotal > 0 && (
-                      <Pill
-                        label="Pedras"
-                        value={`R$ ${pedrasTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                        sublabel={sublabel}
-                      />
-                    )}
-                    {gravTotal > 0 && <Pill label="Gravacao" value={`R$ ${gravTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />}
+                    <Pill label="Ouro" value={brl(ouroTotal)} />
+                    {pedrasTotal > 0 && <Pill label="Pedras" value={brl(pedrasTotal)} sublabel={sublabel} />}
+                    {gravTotal > 0 && <Pill label="Gravação" value={brl(gravTotal)} />}
                   </>
                 );
               })()}
