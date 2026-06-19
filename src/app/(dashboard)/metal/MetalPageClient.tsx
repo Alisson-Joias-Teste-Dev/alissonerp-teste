@@ -12,7 +12,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { useState } from "react";
-import { ShoppingBag, ArrowRightLeft } from "lucide-react";
+import Link from "next/link";
+import { ShoppingBag, ArrowRightLeft, History } from "lucide-react";
 import ResumoMetal from "@/components/metal/ResumoMetal";
 import CompraForm from "@/components/metal/CompraForm";
 import RecebimentoForm from "@/components/metal/RecebimentoForm";
@@ -72,6 +73,13 @@ export default function MetalPageClient({ cotacaoOuro, configs }: MetalPageClien
           <ArrowRightLeft size={16} />
           Novo Recebimento
         </button>
+        <Link
+          href="/metal/historico"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all bg-white border-2 border-[#1A3C34]/20 text-[#1A3C34]/60 hover:border-[#1A3C34] hover:text-[#1A3C34]"
+        >
+          <History size={16} />
+          Histórico
+        </Link>
       </div>
 
       {/* Formulário com largura responsiva — confortável no notebook e no celular */}
