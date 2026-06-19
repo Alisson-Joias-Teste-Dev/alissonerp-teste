@@ -93,6 +93,26 @@ export async function POST(
     return NextResponse.json({ error: "Pagamento não está pendente" }, { status: 409 });
   }
 
+  // ── PORTA ÚNICA — crediário (redesenho 19/06/2026) ────────────────────────
+  // O QUÊ: a baixa de "A Receber" NÃO acontece mais por aqui (tela da venda/PDV);
+  //   passa a ser feita SÓ pela tela do Crediário (registrar-pagamento).
+  // POR QUÊ: existiam DUAS portas de baixa (esta + o crediário) e elas
+  //   dessincronizavam pagamentos_venda x contas_receber ("recebimento fantasma":
+  //   o pagamento era confirmado mas a conta a receber não nascia/baixava junto).
+  //   Com a conta a receber nascendo na APROVAÇÃO (migration 316), o crédito é
+  //   rastreável desde o início e a baixa tem porta única.
+  // IMPACTO SE REMOVIDO: volta a porta dupla e o risco de baixa fantasma.
+  if ((pagamentoPre.forma as string) === "A Receber") {
+    return NextResponse.json(
+      {
+        error:
+          "A baixa de 'A Receber' agora é feita pela tela do Crediário. Abra o Crediário para registrar o recebimento deste cliente.",
+        usar_crediario: true,
+      },
+      { status: 409 },
+    );
+  }
+
   let saldoDevolvido = false;
   let novoCreditoId: number | null = null;
   let valorEfetivo = 0;
