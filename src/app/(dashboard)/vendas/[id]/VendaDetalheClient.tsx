@@ -3911,8 +3911,8 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                         finally { setUpdating(false); }
                       }}
                       handleAddValeMultipla={aplicarValeMultPromo}
-                  onAplicarMultVale={aplicarValeMultComCodigo}
-                  onAplicarVale={aplicarValeSingleComCodigo}
+                      onAplicarMultVale={aplicarValeMultComCodigo}
+                      onAplicarVale={aplicarValeSingleComCodigo}
                       onPaymentSaved={() => { load(); setAddingPag(false); }}
                       cartaoBloqueado={cartaoBloqueado}
                       onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}

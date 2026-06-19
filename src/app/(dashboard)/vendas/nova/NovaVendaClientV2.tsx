@@ -1590,6 +1590,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     setLoading: (v: boolean) => void,
   ) {
     setLoading(true); setResult(null);
+    // Revalidar = limpa o código confirmado antes (evita aplicar código de um vale
+    // anterior se o atendente trocar de vale sem reconfirmar no painel).
+    setValeCodigoNV("");
     try {
       const res = await fetch("/api/vale-troca/validar", {
         method: "POST", headers: { "Content-Type": "application/json" },

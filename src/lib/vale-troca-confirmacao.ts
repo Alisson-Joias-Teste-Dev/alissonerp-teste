@@ -15,11 +15,6 @@
 //   sem caminho. NUNCA duplicar — todas as telas chamam esta funcao + ValeCodigoInline.
 // ════════════════════════════════════════════════════════════════════════════
 
-export interface ConfirmacaoVale {
-  vale_codigo?: string;
-  vale_excecao?: boolean;
-}
-
 // Resultado do disparo do codigo (sem UI). precisa_codigo=false => vale promocional
 // (aplica direto). precisa_excecao=true => nao deu pra entregar (sem celular /
 // WhatsApp fora) — politica atual: codigo OBRIGATORIO, sem bypass de gerente.
