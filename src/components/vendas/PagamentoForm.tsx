@@ -7,6 +7,8 @@ import CartaoInline from "@/components/vendas/CartaoInline";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import PagBankCobranca from "@/components/vendas/PagBankCobranca";
 import PagBankQrInline from "@/components/vendas/PagBankQrInline";
+// REGRA DE NEGOCIO: painel embutido da 2a confirmacao do vale (codigo WhatsApp, brecha #1).
+import ValeCodigoInline from "@/components/vendas/ValeCodigoInline";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -150,6 +152,17 @@ export interface PagamentoFormProps {
    * aplicado no "Concluir venda" — comportamento original, NAO mexer.
    */
   handleAddValeMultipla?: (valeNumero: string, valor: number) => void;
+  /**
+   * Aplicar vale-troca COM dono via codigo (painel ValeCodigoInline) — fluxo SINGLE.
+   * Recebe o numero do vale e o codigo confirmado pelo dono. Detalhe: faz o POST.
+   * Nova venda: guarda o codigo (aplica no Concluir). So renderiza para vale com
+   * dono (valeValidacao.cliente_id != null); promocional usa o botao normal.
+   */
+  onAplicarVale?: (valeNumero: string, codigo: string) => Promise<void> | void;
+  /** Igual ao onAplicarVale, porem para o fluxo MULTIPLAS (recebe tambem o valor). */
+  onAplicarMultVale?: (valeNumero: string, valor: number, codigo: string) => Promise<void> | void;
+  /** Texto do botao de aplicar no painel do vale (default "Registrar pagamento"). */
+  valeBotaoLabel?: string;
   obterVendaId?: () => Promise<{ id: number; numero_venda: string }>;
   onPagamentoConfirmado?: (vendaId: number) => void;
 
@@ -271,6 +284,9 @@ export default function PagamentoForm({
   handleMpManual,
   handleAddMultOuro,
   handleAddValeMultipla,
+  onAplicarVale,
+  onAplicarMultVale,
+  valeBotaoLabel,
   obterVendaId,
   onPagamentoConfirmado,
   onPaymentSaved: _onPaymentSaved,
@@ -467,6 +483,15 @@ export default function PagamentoForm({
                 )}
               </div>
             </div>
+          )}
+          {/* Vale COM dono: painel da 2a confirmacao (codigo WhatsApp). Promocional aplica direto. */}
+          {valeValidacao?.ok && valeValidacao.cliente_id != null && onAplicarVale && (
+            <ValeCodigoInline
+              key={valeNumero}
+              valeNumero={valeNumero}
+              botaoLabel={valeBotaoLabel ?? "Registrar pagamento"}
+              onAplicar={({ vale_codigo }) => onAplicarVale(valeNumero.trim(), vale_codigo)}
+            />
           )}
         </div>
       )}
@@ -730,7 +755,7 @@ export default function PagamentoForm({
                   })()}
                 </>
               )}
-              {multForma !== "Ouro" && (
+              {multForma !== "Ouro" && !(multForma === "Vale-Troca" && multValeValidacao?.ok && multValeValidacao.cliente_id != null && onAplicarMultVale) && (
                 <button onClick={() => {
                     if (multForma === "Vale-Troca") {
                       if (!multValeValidacao?.ok || !multValeValidacao.valor_disponivel) return;
@@ -765,6 +790,19 @@ export default function PagamentoForm({
                 </p>
               )}
             </div>
+
+            {/* Vale COM dono (Múltiplas): painel da 2a confirmação (código WhatsApp). Promocional usa "Adicionar". */}
+            {multForma === "Vale-Troca" && multValeValidacao?.ok && multValeValidacao.cliente_id != null && onAplicarMultVale && (
+              <ValeCodigoInline
+                key={multValeNumero}
+                valeNumero={multValeNumero}
+                botaoLabel="Adicionar vale"
+                onAplicar={async ({ vale_codigo }) => {
+                  await onAplicarMultVale(multValeNumero.trim(), Math.min(multValeValidacao.valor_disponivel ?? 0, restante), vale_codigo);
+                  setMultValeNumero(""); setMultValeValidacao(null); setMultValor("");
+                }}
+              />
+            )}
 
             {/* Ouro no fluxo Múltiplas */}
             {multForma === "Ouro" && (
@@ -873,8 +911,10 @@ export default function PagamentoForm({
         );
       })()}
 
-      {/* Botão Registrar (modo edição, formulário simples não-gateway) */}
-      {mode === "edicao" && vendaId && pagForma !== "Múltiplas" && pagForma !== "Manual (MP)" && (
+      {/* Botão Registrar (modo edição, formulário simples não-gateway).
+          Vale COM dono: o botão fica no painel ValeCodigoInline (acima) — esconde este. */}
+      {mode === "edicao" && vendaId && pagForma !== "Múltiplas" && pagForma !== "Manual (MP)" &&
+        !(pagForma === "Vale-Troca" && valeValidacao?.ok && valeValidacao.cliente_id != null && onAplicarVale) && (
         <button
           onClick={() => handleAddPagamento(pagFormValor || undefined)}
           disabled={saving || totalVenda <= 0 || (pagForma === "Ouro" && (!ouroValidacaoIA?.match || !ouroFotoPreview || !parseFloat(ouroPeso.replace(",", ".")) || !parseFloat(ouroValorGrama.replace(",", "."))))}

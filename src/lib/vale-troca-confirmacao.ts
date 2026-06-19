@@ -1,19 +1,18 @@
 // ════════════════════════════════════════════════════════════════════════════
 // vale-troca-confirmacao.ts — 2a confirmacao do Vale-Troca no FRONT (brecha #1)
 //
-// O QUE: antes de aplicar um vale COM dono num pagamento, dispara o codigo de 6
-//   digitos no WhatsApp do dono (/api/vale-troca/solicitar-codigo), pede o codigo
-//   ao atendente (prompt) e devolve { vale_codigo } / { vale_excecao } pra ir no
-//   corpo do POST de pagamentos. Vale SEM dono (promocional) volta vazio (segue
-//   direto, sem pedir nada).
+// O QUE: dispara o codigo de 6 digitos no WhatsApp do DONO do vale
+//   (/api/vale-troca/solicitar-codigo) e devolve, sem UI bloqueante, se o vale
+//   exige codigo (vale COM dono) ou nao (promocional). Quem coleta o codigo do
+//   atendente e o componente ValeCodigoInline (painel embutido no formulario de
+//   pagamento) — NAO usamos mais window.prompt.
 // POR QUE: era possivel usar vale alheio sem o consentimento do dono (2 usos
-//   cruzados reais, R$3.410). Esta e a MESMA logica ja usada na nova venda
-//   (NovaVendaClientV2.aplicarValeNaVenda) — extraida pra reuso (fonte unica), pra
-//   tambem valer na tela de detalhe da venda (Adicionar pagamento).
-// IMPACTO SE REMOVIDO/ALTERADO: a tela de detalhe da venda volta a aplicar vale
-//   sem pedir o token; o backend ainda barra (precisa_codigo em
-//   /api/vendas/[id]/pagamentos), mas o usuario fica sem caminho pra concluir.
-//   NUNCA duplicar este fluxo — todas as telas devem chamar esta funcao.
+//   cruzados reais, R$3.410). O codigo no WhatsApp garante consentimento/identidade.
+//   O painel inline substituiu o pop-up do navegador (que travava a tela e sumia
+//   ao sair da pagina, obrigando a gerar outro codigo).
+// IMPACTO SE REMOVIDO/ALTERADO: a tela volta a aplicar vale sem o token; o backend
+//   ainda barra (precisa_codigo em /api/vendas/[id]/pagamentos), mas o usuario fica
+//   sem caminho. NUNCA duplicar — todas as telas chamam esta funcao + ValeCodigoInline.
 // ════════════════════════════════════════════════════════════════════════════
 
 export interface ConfirmacaoVale {
@@ -21,56 +20,43 @@ export interface ConfirmacaoVale {
   vale_excecao?: boolean;
 }
 
-/**
- * Obtem a 2a confirmacao do dono do vale antes de aplica-lo num pagamento.
- * Lanca Error cuja mensagem COMECA com "Confirmacao" quando o atendente cancela
- * (sem codigo e sem excecao) — o chamador deve abortar o registro nesse caso.
- * Falha de REDE ao solicitar o codigo NAO interrompe: segue sem codigo e o
- * backend ainda barra a aplicacao se o codigo for obrigatorio.
- *
- * Retorno pronto pra injetar no corpo do POST com Object.assign(body, conf):
- * `vale_excecao` so vem quando true; `vale_codigo` ausente vira undefined (o
- * JSON.stringify omite). Assim o chamador nao repete os ifs de cada campo.
- */
-export async function obterConfirmacaoVale(valeNumero: string): Promise<ConfirmacaoVale> {
-  const valeNum = valeNumero.trim();
-  let vale_codigo: string | undefined;
-  let vale_excecao = false;
+// Resultado do disparo do codigo (sem UI). precisa_codigo=false => vale promocional
+// (aplica direto). precisa_excecao=true => nao deu pra entregar (sem celular /
+// WhatsApp fora) — politica atual: codigo OBRIGATORIO, sem bypass de gerente.
+export interface EnviarCodigoResult {
+  precisa_codigo: boolean;
+  telefone_mascarado?: string;
+  precisa_excecao?: boolean;
+  erro?: string;
+}
 
-  // 1. Solicita o codigo ao dono. precisa_codigo=false => vale promocional (segue direto).
+/**
+ * Dispara (ou reenvia) o codigo no WhatsApp do dono. O backend REUSA o codigo
+ * ativo (nao expirado/confirmado/bloqueado), entao "Reenviar" manda o MESMO
+ * numero — o que o dono recebeu sempre vale dentro dos 15 min.
+ */
+export async function enviarCodigoVale(valeNumero: string): Promise<EnviarCodigoResult> {
   try {
-    const sres = await fetch(`/api/vale-troca/solicitar-codigo`, {
+    const res = await fetch(`/api/vale-troca/solicitar-codigo`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ vale_numero: valeNum }),
+      body: JSON.stringify({ vale_numero: valeNumero.trim() }),
     });
-    const sd = await sres.json() as {
-      ok: boolean; precisa_codigo?: boolean; precisa_excecao?: boolean;
-      telefone_mascarado?: string; erro?: string;
+    const sd = await res.json().catch(() => ({})) as {
+      ok?: boolean; precisa_codigo?: boolean; precisa_excecao?: boolean;
+      telefone_mascarado?: string; erro?: string; error?: string;
     };
-    if (sres.ok && sd.precisa_codigo) {
-      const onde = sd.telefone_mascarado ? ` (${sd.telefone_mascarado})` : "";
-      const msg = sd.precisa_excecao
-        ? `Não foi possível enviar o código pelo WhatsApp do dono${sd.erro ? ` — ${sd.erro}` : ""}.\n\nSe o dono recebeu mesmo assim, digite o código; ou deixe em branco para pedir liberação de um responsável.`
-        : `Um código foi enviado ao WhatsApp do dono do vale${onde}.\n\nDigite o código informado pelo cliente:`;
-      const cod = window.prompt(msg, "");
-      if (cod && cod.trim()) {
-        vale_codigo = cod.trim();
-      } else if (sd.precisa_excecao) {
-        vale_excecao = window.confirm(
-          "Liberar o vale SEM o código? Exige autorização de um responsável (gerente/aprovador configurado). Continuar?",
-        );
-        if (!vale_excecao) throw new Error("Confirmação do vale cancelada.");
-      } else {
-        throw new Error("Confirmação do vale cancelada — código não informado.");
-      }
+    if (!res.ok) {
+      return { precisa_codigo: false, erro: sd.erro ?? sd.error ?? "Falha ao enviar o código" };
     }
-  } catch (e) {
-    // So interrompe se for o cancelamento explicito; falha de rede ao solicitar
-    // segue (o backend ainda barra a aplicacao se o codigo faltar).
-    if (e instanceof Error && e.message.startsWith("Confirmação")) throw e;
+    return {
+      precisa_codigo: !!sd.precisa_codigo,
+      telefone_mascarado: sd.telefone_mascarado,
+      precisa_excecao: sd.precisa_excecao,
+      erro: sd.erro,
+    };
+  } catch {
+    // Falha de rede: sinaliza erro pra UI; o backend ainda barra a aplicacao se faltar codigo.
+    return { precisa_codigo: true, erro: "Sem conexão para enviar o código. Tente reenviar." };
   }
-
-  // vale_excecao so no objeto quando true (evita mandar `false` a toa no body).
-  return vale_excecao ? { vale_codigo, vale_excecao: true } : { vale_codigo };
 }

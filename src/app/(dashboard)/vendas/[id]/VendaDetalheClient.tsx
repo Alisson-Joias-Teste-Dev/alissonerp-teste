@@ -26,9 +26,6 @@ import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 import MarcarEntregaModal from "@/components/entregas/MarcarEntregaModal";
 import { useErrorStore } from "@/stores/errorStore";
 import { getPublicUrl } from "@/lib/storage-url";
-// REGRA DE NEGOCIO: 2a confirmacao do dono do vale (codigo WhatsApp, brecha #1).
-// Mesma funcao usada na nova venda — fonte unica, NUNCA duplicar.
-import { obterConfirmacaoVale } from "@/lib/vale-troca-confirmacao";
 // REGRA DE NEGOCIO: helpers de rodio (Frente A — 30/05/2026)
 import { isServicoRodioProduto, calcularPreviewRodioPorSkuBase, getPctRodio, round2, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
 
@@ -1287,6 +1284,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     const v = valorOverride ?? parseFloat(newPagValor.replace(",", "."));
     if (!v || v <= 0) return;
     setUpdating(true);
+    setSaveErr(""); // limpa erro de tentativa anterior — um sucesso nao pode deixar banner velho na tela
     try {
       const parcelas = newPagCondicao === "À vista" ? 1 : parseInt(newPagCondicao) || newPagParcelas;
       const body: Record<string, unknown> = { forma: newPagForma, valor: v, parcelas };
@@ -1294,12 +1292,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         body.gateway = newPagGateway;
       }
       if (newPagForma === "Vale-Troca") {
-        const valeNum = newPagValeNumero.trim();
-        body.vale_numero = valeNum;
-        // 2a confirmacao do dono (codigo WhatsApp, brecha #1): vale COM dono so
-        // aplica apos o dono confirmar o codigo. Vale promocional volta vazio.
-        // Cancelar o prompt lanca "Confirmacao..." e cai no catch abaixo.
-        Object.assign(body, await obterConfirmacaoVale(valeNum));
+        // Promocional (sem dono) aplica direto. Vale COM dono usa o painel ValeCodigoInline.
+        body.vale_numero = newPagValeNumero.trim();
       }
       if (newPagForma === "Ouro") {
         const peso = parseFloat(ouroPeso.replace(",", "."));
@@ -3666,6 +3660,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
             const handleEdicaoAdd = async (valorManual?: string) => {
               if (!venda) return;
               setUpdating(true);
+              setSaveErr(""); // limpa erro de tentativa anterior (ex.: "codigo incorreto" do meio)
               try {
                 const v = valorManual ? parseFloat(valorManual.replace(",", ".")) : parseFloat(newPagValor.replace(",", ".")) || saldoPendente;
                 if (!v || v <= 0) return;
@@ -3673,11 +3668,9 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                 const body: Record<string, unknown> = { forma: newPagForma, valor: v, parcelas };
                 if (newPagForma === "Cartão de Crédito" || newPagForma === "Pix") body.gateway = newPagGateway;
                 if (newPagForma === "Vale-Troca") {
-                  const valeNum = valeNumero.trim();
-                  body.vale_numero = valeNum;
-                  // 2a confirmacao do dono (codigo WhatsApp, brecha #1) — mesma
-                  // regra do fluxo principal. Cancelar lanca "Confirmacao..." (catch abaixo).
-                  Object.assign(body, await obterConfirmacaoVale(valeNum));
+                  // Promocional (sem dono) aplica direto. Vale COM dono passa pelo painel
+                  // ValeCodigoInline (onAplicarVale=aplicarValeSingleComCodigo) — nao cai aqui.
+                  body.vale_numero = valeNumero.trim();
                 }
                 if (newPagForma === "Ouro") {
                   const peso = parseFloat(ouroPeso.replace(",", "."));
@@ -3706,24 +3699,43 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               finally { setUpdating(false); }
             };
 
-            // Vale-Troca dentro de Múltiplas (detalhe): registra NA HORA, igual ao
-            // Ouro (handleAddMultOuro). Passa pela 2a confirmacao do dono (token
-            // WhatsApp) via obterConfirmacaoVale. Sem isso, o vale em Múltiplas
-            // so entrava na lista visual e nunca era enviado.
-            const handleAddValeMultiplaEdicao = async (valeNumeroArg: string, valor: number) => {
+            // POST de um pagamento Vale-Troca no detalhe (registra na hora). codigo
+            // presente = vale COM dono (2a confirmacao); ausente = promocional.
+            const postPagamentoVale = async (valeNum: string, valor: number, codigo?: string) => {
               if (!venda) return;
-              setUpdating(true);
-              try {
-                const body: Record<string, unknown> = { forma: "Vale-Troca", valor, parcelas: 1, vale_numero: valeNumeroArg };
-                Object.assign(body, await obterConfirmacaoVale(valeNumeroArg));
-                const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
-                  method: "POST", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(body),
-                });
-                if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
-                await load();
-              } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao aplicar vale-troca"); }
+              const body: Record<string, unknown> = { forma: "Vale-Troca", valor, parcelas: 1, vale_numero: valeNum };
+              if (codigo) body.vale_codigo = codigo;
+              const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+              });
+              if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+              await load();
+            };
+
+            // Múltiplas PROMOCIONAL (sem dono): plain "Adicionar" — erro vai pro banner.
+            const aplicarValeMultPromo = async (valeNum: string, valor: number) => {
+              setUpdating(true); setSaveErr("");
+              try { await postPagamentoVale(valeNum, valor); }
+              catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao aplicar vale-troca"); }
               finally { setUpdating(false); }
+            };
+
+            // Múltiplas COM dono: chamado pelo painel — RELANCA o erro pra aparecer inline no painel.
+            const aplicarValeMultComCodigo = async (valeNum: string, valor: number, codigo: string) => {
+              setUpdating(true); setSaveErr("");
+              try { await postPagamentoVale(valeNum, valor, codigo); }
+              finally { setUpdating(false); }
+            };
+
+            // Single COM dono: chamado pelo painel — RELANCA o erro pra aparecer inline no painel.
+            const aplicarValeSingleComCodigo = async (valeNum: string, codigo: string) => {
+              setUpdating(true); setSaveErr("");
+              try {
+                const valor = parseFloat((newPagValor || "").replace(",", ".")) || saldoPendente;
+                await postPagamentoVale(valeNum, valor, codigo);
+                setNewPagValor(""); setValeNumero(""); setValeValidacao(null); setAddingPag(false);
+              } finally { setUpdating(false); }
             };
 
             return venda.pagamentos.length === 0 ? (
@@ -3802,7 +3814,9 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao registrar pagamento em ouro"); }
                     finally { setUpdating(false); }
                   }}
-                  handleAddValeMultipla={handleAddValeMultiplaEdicao}
+                  handleAddValeMultipla={aplicarValeMultPromo}
+                  onAplicarMultVale={aplicarValeMultComCodigo}
+                  onAplicarVale={aplicarValeSingleComCodigo}
                   onPaymentSaved={load}
                   cartaoBloqueado={cartaoBloqueado}
                   onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}
@@ -3896,7 +3910,9 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                         } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao registrar pagamento em ouro"); }
                         finally { setUpdating(false); }
                       }}
-                      handleAddValeMultipla={handleAddValeMultiplaEdicao}
+                      handleAddValeMultipla={aplicarValeMultPromo}
+                  onAplicarMultVale={aplicarValeMultComCodigo}
+                  onAplicarVale={aplicarValeSingleComCodigo}
                       onPaymentSaved={() => { load(); setAddingPag(false); }}
                       cartaoBloqueado={cartaoBloqueado}
                       onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}

@@ -1,6 +1,24 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.3 <!-- Revisado 19/06/2026 -->
+> 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
+
+## feat(vendas): painel embutido do código do vale-troca (sem pop-up) + reuso de código (v2.68.4)
+
+Resolve o atrito do código do vale relatado pelo Jonathan (cliente demora a responder; ao sair da
+página/gerar de novo, dava "código incorreto" mesmo com o número certo).
+- **Backend ([`vale-troca-codigo.ts`]):** `solicitarCodigoVale` agora **reusa o código ativo** (não
+  expirado/confirmado/bloqueado) em vez de gerar um novo a cada pedido. "Reenviar" manda o **mesmo**
+  número → o que o dono recebeu sempre vale dentro dos 15 min. Sem mudança no banco.
+- **Painel embutido (`ValeCodigoInline`):** substitui o `window.prompt`. Dentro do formulário de
+  pagamento: [Enviar código ao dono] → "código enviado para ****1234" → campo do código + [Reenviar] +
+  botão de aplicar. Não trava a tela; o atendente pode esperar o cliente. Ligado na **nova venda** e no
+  **detalhe** (single + Múltiplas). Promocional (sem dono) aplica direto, sem painel.
+- **Código OBRIGATÓRIO, sem bypass de gerente** (decisão do Jonathan): removida a opção "liberar sem
+  código". Se a entrega falhar (sem celular / WhatsApp fora), o vale não é aplicado até o cliente informar.
+- **Erro falso corrigido:** os handlers de pagamento agora fazem `setSaveErr("")` no início — um sucesso
+  não deixa mais o banner de erro de uma tentativa anterior preso na tela.
+- Nova venda: o código é coletado no painel e aplicado no "Concluir" (lá a venda é criada); detalhe aplica
+  na hora. `window.prompt` removido de vez (`obterConfirmacaoVale` → `enviarCodigoVale`).
 
 ## fix(vendas): pedir o código (token) do vale-troca também no detalhe da venda (v2.68.3)
 
