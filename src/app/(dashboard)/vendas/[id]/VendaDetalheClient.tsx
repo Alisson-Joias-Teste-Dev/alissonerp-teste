@@ -26,6 +26,9 @@ import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 import MarcarEntregaModal from "@/components/entregas/MarcarEntregaModal";
 import { useErrorStore } from "@/stores/errorStore";
 import { getPublicUrl } from "@/lib/storage-url";
+// REGRA DE NEGOCIO: 2a confirmacao do dono do vale (codigo WhatsApp, brecha #1).
+// Mesma funcao usada na nova venda — fonte unica, NUNCA duplicar.
+import { obterConfirmacaoVale } from "@/lib/vale-troca-confirmacao";
 // REGRA DE NEGOCIO: helpers de rodio (Frente A — 30/05/2026)
 import { isServicoRodioProduto, calcularPreviewRodioPorSkuBase, getPctRodio, round2, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
 
@@ -1291,7 +1294,12 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
         body.gateway = newPagGateway;
       }
       if (newPagForma === "Vale-Troca") {
-        body.vale_numero = newPagValeNumero.trim();
+        const valeNum = newPagValeNumero.trim();
+        body.vale_numero = valeNum;
+        // 2a confirmacao do dono (codigo WhatsApp, brecha #1): vale COM dono so
+        // aplica apos o dono confirmar o codigo. Vale promocional volta vazio.
+        // Cancelar o prompt lanca "Confirmacao..." e cai no catch abaixo.
+        Object.assign(body, await obterConfirmacaoVale(valeNum));
       }
       if (newPagForma === "Ouro") {
         const peso = parseFloat(ouroPeso.replace(",", "."));
@@ -3664,7 +3672,13 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                 const parcelas = newPagCondicao === "À vista" ? 1 : parseInt(newPagCondicao) || 1;
                 const body: Record<string, unknown> = { forma: newPagForma, valor: v, parcelas };
                 if (newPagForma === "Cartão de Crédito" || newPagForma === "Pix") body.gateway = newPagGateway;
-                if (newPagForma === "Vale-Troca") body.vale_numero = valeNumero.trim();
+                if (newPagForma === "Vale-Troca") {
+                  const valeNum = valeNumero.trim();
+                  body.vale_numero = valeNum;
+                  // 2a confirmacao do dono (codigo WhatsApp, brecha #1) — mesma
+                  // regra do fluxo principal. Cancelar lanca "Confirmacao..." (catch abaixo).
+                  Object.assign(body, await obterConfirmacaoVale(valeNum));
+                }
                 if (newPagForma === "Ouro") {
                   const peso = parseFloat(ouroPeso.replace(",", "."));
                   const valorGrama = parseFloat(ouroValorGrama.replace(",", "."));
@@ -3689,6 +3703,26 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                 setNewPagValor(""); setValeNumero(""); setValeValidacao(null);
                 setOuroPeso(""); setOuroValorGrama(""); setOuroFotoFile(null); setOuroFotoPreview(null); setOuroValidacaoIA(null);
               } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro"); }
+              finally { setUpdating(false); }
+            };
+
+            // Vale-Troca dentro de Múltiplas (detalhe): registra NA HORA, igual ao
+            // Ouro (handleAddMultOuro). Passa pela 2a confirmacao do dono (token
+            // WhatsApp) via obterConfirmacaoVale. Sem isso, o vale em Múltiplas
+            // so entrava na lista visual e nunca era enviado.
+            const handleAddValeMultiplaEdicao = async (valeNumeroArg: string, valor: number) => {
+              if (!venda) return;
+              setUpdating(true);
+              try {
+                const body: Record<string, unknown> = { forma: "Vale-Troca", valor, parcelas: 1, vale_numero: valeNumeroArg };
+                Object.assign(body, await obterConfirmacaoVale(valeNumeroArg));
+                const res = await fetch(`/api/vendas/${venda.id}/pagamentos`, {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(body),
+                });
+                if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`); }
+                await load();
+              } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao aplicar vale-troca"); }
               finally { setUpdating(false); }
             };
 
@@ -3768,6 +3802,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                     } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao registrar pagamento em ouro"); }
                     finally { setUpdating(false); }
                   }}
+                  handleAddValeMultipla={handleAddValeMultiplaEdicao}
                   onPaymentSaved={load}
                   cartaoBloqueado={cartaoBloqueado}
                   onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}
@@ -3861,6 +3896,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                         } catch (e) { setSaveErr(e instanceof Error ? e.message : "Erro ao registrar pagamento em ouro"); }
                         finally { setUpdating(false); }
                       }}
+                      handleAddValeMultipla={handleAddValeMultiplaEdicao}
                       onPaymentSaved={() => { load(); setAddingPag(false); }}
                       cartaoBloqueado={cartaoBloqueado}
                       onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}

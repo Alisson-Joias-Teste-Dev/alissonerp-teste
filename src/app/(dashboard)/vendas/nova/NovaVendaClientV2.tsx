@@ -16,6 +16,8 @@ import { normalizarCampoPersonalizacao } from "@/lib/personalizacao-validacao";
 import NovaOrdemServicoBaseModal from "@/components/ordens/NovaOrdemServicoBaseModal";
 import UpgradeItemFields, { type UpgradeFieldsData } from "@/components/vendas/UpgradeItemFields";
 import { createClient } from "@/lib/supabase/client";
+// REGRA DE NEGOCIO: 2a confirmacao do dono do vale (codigo WhatsApp, brecha #1) — fonte unica.
+import { obterConfirmacaoVale } from "@/lib/vale-troca-confirmacao";
 // REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
 // Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos frontends.
 import { isServicoRodioProduto, descricaoItemComBaseRodio, calcularPreviewRodioPorSkuBase, getPctRodio, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
@@ -1541,42 +1543,12 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   async function aplicarValeNaVenda(vendaIdLocal: number, valor: number, numero?: string) {
     const valeNum = (numero ?? valeNumero).trim();
 
-    let valeCodigo: string | undefined;
-    let valeExcecao = false;
-
-    // 1. Solicita o código ao dono. precisa_codigo=false => vale promocional (segue direto).
-    try {
-      const sres = await fetch(`/api/vale-troca/solicitar-codigo`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vale_numero: valeNum }),
-      });
-      const sd = await sres.json() as {
-        ok: boolean; precisa_codigo?: boolean; precisa_excecao?: boolean;
-        telefone_mascarado?: string; erro?: string;
-      };
-      if (sres.ok && sd.precisa_codigo) {
-        const onde = sd.telefone_mascarado ? ` (${sd.telefone_mascarado})` : "";
-        const msg = sd.precisa_excecao
-          ? `Não foi possível enviar o código pelo WhatsApp do dono${sd.erro ? ` — ${sd.erro}` : ""}.\n\nSe o dono recebeu mesmo assim, digite o código; ou deixe em branco para pedir liberação de um responsável.`
-          : `Um código foi enviado ao WhatsApp do dono do vale${onde}.\n\nDigite o código informado pelo cliente:`;
-        const cod = window.prompt(msg, "");
-        if (cod && cod.trim()) {
-          valeCodigo = cod.trim();
-        } else if (sd.precisa_excecao) {
-          valeExcecao = window.confirm(
-            "Liberar o vale SEM o código? Exige autorização de um responsável (gerente/aprovador configurado). Continuar?",
-          );
-          if (!valeExcecao) throw new Error("Confirmação do vale cancelada.");
-        } else {
-          throw new Error("Confirmação do vale cancelada — código não informado.");
-        }
-      }
-    } catch (e) {
-      // Só interrompe se for o cancelamento explícito; falha de rede ao solicitar
-      // segue (o backend ainda barra a aplicação se o código faltar).
-      if (e instanceof Error && e.message.startsWith("Confirmação")) throw e;
-    }
+    // 1. Solicita o código ao dono e obtém a 2a confirmação (código/exceção).
+    // Lógica extraída para src/lib/vale-troca-confirmacao.ts (fonte única, usada
+    // também na tela de detalhe da venda). precisa_codigo=false => vale promocional.
+    const conf = await obterConfirmacaoVale(valeNum);
+    const valeCodigo = conf.vale_codigo;
+    const valeExcecao = conf.vale_excecao ?? false;
 
     // 2. Aplica o vale — o backend valida código/exceção em definitivo.
     const res = await fetch(`/api/vendas/${vendaIdLocal}/pagamentos`, {
