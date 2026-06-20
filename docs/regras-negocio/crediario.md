@@ -32,11 +32,21 @@ Cliente leva a joia **sem pagar tudo**. **Qualquer entrega sem o pagamento TOTAL
   - **"Em meses"** = N parcelas no mesmo dia do mês; a **1ª parcela só no mês seguinte** (venda 20/06, 3x → 20/07, 20/08, 20/09).
 - Cada parcela é uma **conta a receber** com vencimento próprio.
 - **Inadimplência (a joia já saiu): COBRANÇA, não vira vale.**
+- **Diferença para ③:** aqui a peça **SAIU da loja** (entregue), por isso é sempre cobrança — **nunca vira VC**. Se a peça **não saiu** (reservada), cai em ③ (vira VC no estouro).
 
-### ③ Sinal para segurar (reserva)
-Cliente paga uma **entrada (sinal)**. A joia fica **reservada** (não sai, não vende duas vezes).
-- **Prazo: 7 dias úteis, firme.** Pode esticar só com aprovação do dono.
-- **Não pagou no prazo:** o que pagou (mesmo 90%) vira **vale VC-** (proporcional ao pago) + a venda expira + a joia volta ao estoque (ver §3).
+### ③ A Receber com peça reservada (não entregue)
+> **REGRA NOVA — desenho aprovado 20/06/2026.** Substitui a antiga "Sinal pra segurar". A aba **"Sinal" foi removida**: o que decide **VC × cobrança é SE A PEÇA SAIU DA LOJA**, não uma opção que o usuário escolhe.
+
+Cliente fica devendo um saldo **"A Receber"** e **NÃO leva a peça** (fica reservada, não vende duas vezes). A reserva tem prazo:
+- O relógio dos **7 dias corridos** só **começa** quando a **data de entrega da venda passou** **E** **não há ordem (fabricação/serviço) aberta** ligada à venda.
+  - Ainda há ordem aberta → **espera a ordem fechar**; conta os 7 dias **a partir do fechamento da ordem** (peça pronta na loja).
+- Ao começar: **notifica a consultora** ("o cliente tem 7 dias pra finalizar o pagamento").
+- **Faltando 3 dias:** avisa **todo dia** até o fim. No último dia: *"amanhã esse pedido vira VC se o pagamento não for constatado"*.
+- **Não quitou 100% no prazo** (pagamento **parcial NÃO para nem reinicia** o relógio — só finalizar 100%) → o que pagou vira **vale VC-** (proporcional) + a venda expira + a joia **volta ao estoque** (ver §3).
+- **Parcelou (Mensal/Em X dias) mas não levou:** enquanto a peça está reservada vale a regra dos 7 dias acima; o **parcelamento só "ativa" quando a peça é entregue** (aí vira ②, cobrança).
+- **Corte:** esta regra vale **só para vendas criadas a partir do deploy na main**. Vendas anteriores seguem a regra antiga (motor `sinal`/`sinal-cron`, legado).
+
+> ❌ ~~REGRA VELHA (descontinuada): "Sinal pra segurar — paga entrada, peça reservada, **7 dias úteis** a partir do sinal."~~ Foi mal entendida; não usar mais.
 
 ### ④ Pagou e não buscou
 Cliente **pagou tudo** mas não veio retirar. **A joia é dele** — fica reservada para ele **sem prazo**, independente dos dias. **NÃO vira vale, NÃO volta ao estoque.** Único tratamento: a cada ~20-30 dias (a definir), um lembrete para a consultora chamar o cliente para retirar.
@@ -44,23 +54,29 @@ Cliente **pagou tudo** mas não veio retirar. **A joia é dele** — fica reserv
 
 ---
 
-## 2. Gatilho do prazo de 7 dias úteis (③)
+## 2. Quando o relógio dos 7 dias começa (③ — peça reservada)
 
-- **Fabricação / serviço / reposição:** conta a partir do **protocolo de volta concluído** (`protocolos.etapas='concluido'` + `data_conclusao`) = "peça pronta em loja".
-- **Peça de estoque (pronta entrega):** conta a partir da **data do sinal**.
-- **Venda mista (estoque + fabricação):** manda a regra da **ordem** (espera o protocolo de volta). A entrega pode ser **parcial** (cliente leva a parte pronta) ou tudo junto — já previsto no módulo de entregas.
+> **Regra nova (20/06).** Base = **data de entrega da venda** + **ordens abertas**. (Antes era "a partir do sinal/protocolo, em dias úteis" — descontinuado.)
 
-Cálculo de dias úteis reusa `src/lib/dias-uteis.ts` (feriados nacionais + CE + Fortaleza + móveis). A função SQL `fn_adicionar_dias_uteis` NÃO considera feriados — usar o JS.
+1. A venda tem **A Receber** pendente e a peça **não foi entregue** (reservada).
+2. **A data de entrega já passou?** Não → não conta (espera a data chegar).
+3. **Tem ordem (fabricação/serviço) aberta na venda?** Sim → espera a ordem fechar; o relógio conta a partir do **fechamento da ordem** (peça pronta). Não → começa agora.
+4. São **7 dias corridos** (NÃO úteis) a partir desse início.
+
+A checagem roda no **robô diário** (novo motor de reserva; o `sinal-cron` vira legado, só p/ vendas antigas).
+
+> ⚠️ Esta regra usa **dias corridos**. O `src/lib/dias-uteis.ts` (feriados CE/nacional) continua valendo para OUTROS cálculos do sistema, mas **não** para o prazo de ③.
 
 ---
 
-## 3. Estouro do prazo do sinal (③) — 3 passos
+## 3. Estouro do prazo da reserva (③) — 3 passos
 
-1. O sinal vira **vale VC-** (automático, proporcional ao pago).
+(Quando passam os **7 dias corridos** sem o pagamento **TOTAL** ser constatado.)
+1. O que foi pago vira **vale VC-** (automático, proporcional ao pago).
 2. O sistema **notifica o responsável do estoque**: "esta peça precisa voltar ao estoque".
 3. A joia volta ao **saldo disponível** (volta a poder ser vendida) **somente depois** que o estoque **confirma a recolocação física** (aprovação do estoque).
 
-Um **robô diário** checa os vencimentos (mesmo padrão do aging-cron já existente).
+Um **robô diário** checa os prazos (novo motor de reserva; mesmo padrão do aging-cron).
 
 ---
 

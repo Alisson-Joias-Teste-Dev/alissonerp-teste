@@ -24,6 +24,14 @@ nunca era configurado e a aprovação caía no `ELSE` do gatilho (1 conta única
 `parcelas=1`; aprovação (rollback) gera conta vencendo +60 dias. Ramos 'meses' (3 parcelas) e
 'sinal' (7 dias úteis) validados via SQL com ROLLBACK. `tsc` zero erros.
 
+**Redesenho da regra ③ (aprovado 20/06) — Fase 0+1:** a aba **Sinal** foi removida do painel
+(fica só Mensal / Em X dias). A regra de virar vale-crédito deixa de ser uma opção "Sinal" e passa
+a depender de **a peça ter saído ou não da loja**: peça entregue devendo = cobrança (nunca VC);
+peça reservada (não entregue) → após a **data de entrega** passar e **sem ordem aberta**, conta
+**7 dias corridos** → avisa a consultora → vira VC se não quitar 100%. Vale só p/ vendas criadas
+após o deploy. Regra detalhada em `docs/regras-negocio/crediario.md` (§③/§2/§3). **Motor novo
+de reserva (robô) = Fase 2, ainda a construir;** o `sinal-cron` atual fica legado (vendas antigas).
+
 ---
 
 ## fix(estoque): SLE vira auditoria — trava de saldo negativo passa a ler da view (v2.69.0)
