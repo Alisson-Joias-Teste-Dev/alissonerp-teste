@@ -741,17 +741,19 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const totalComissao = itens.reduce((s, i) => s + i.valor_comissao, 0);
   const totalVenda = totalProdutos + totalFrete;
   const totalPago = pagamentos.reduce((s, p) => s + p.valor, 0);
-  const pagamentoCobre = pagForma === "Múltiplas" ? Math.abs(totalPago - totalVenda) < 0.01 : true;
-  const temAReceber = pagForma === "A Receber" || (pagForma === "Múltiplas" && pagamentos.some(p => p.forma === "A Receber"));
+  // "A Receber" usa a MESMA mecânica do Múltiplas: a consultora monta TODAS as formas
+  // (A Receber é só uma das linhas) e a venda só fecha quando o restante = 0.
+  const ehMultiForma = pagForma === "Múltiplas" || pagForma === "A Receber";
+  const pagamentoCobre = ehMultiForma ? Math.abs(totalPago - totalVenda) < 0.01 : true;
+  const temAReceber = ehMultiForma && pagamentos.some(p => p.forma === "A Receber");
   // Preview das parcelas do crediário — delega ao helper compartilhado
   // calcularCrediPreview (src/lib/credi-preview.ts), que espelha o gatilho
   // fn_venda_gerar_conta_receber (migrations 317/318). No Múltiplas, parcela só o
   // valor das linhas "A Receber" (o resto já foi pago); na forma única = total.
   const crediPreview = useMemo(() => {
     if (!temAReceber) return [];
-    const saldo = pagForma === "Múltiplas"
-      ? pagamentos.filter(p => p.forma === "A Receber").reduce((s, p) => s + p.valor, 0)
-      : totalVenda;
+    // Parcela só o saldo das linhas "A Receber" (o resto já é coberto por outras formas).
+    const saldo = pagamentos.filter(p => p.forma === "A Receber").reduce((s, p) => s + p.valor, 0);
     return calcularCrediPreview({ tipo: crediTipo, valorBase: saldo, parcelas: crediParcelas, diaVenc: crediDiaVenc, dias: crediDias });
   }, [temAReceber, pagForma, pagamentos, crediTipo, crediParcelas, crediDiaVenc, crediDias, totalVenda]);
   const LIMITE_DESCONTO_CARTAO = 20;
@@ -782,7 +784,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
 
   // Reset parcelas se valor ou cap mudam
   useEffect(() => {
-    if (pagForma === "Múltiplas") return;
+    if (pagForma === "Múltiplas" || pagForma === "A Receber") return;
     if (pagForma === "Cartão de Crédito") {
       const base = pagGateway === "Mercado Pago" ? condicoesMp(totalVenda) : null;
       // Cap por promoção (string como "Nx") — vira no máximo Nx no select
@@ -795,7 +797,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   }, [totalVenda, pagGateway, pagForma, maxParcelasPromoVenda]);
 
   useEffect(() => {
-    if (pagForma === "Múltiplas") return;
+    if (pagForma === "Múltiplas" || pagForma === "A Receber") return;
     const n = pagCondicao === "À vista" ? 1 : parseInt(pagCondicao);
     const base = totalVenda > 0 ? +(totalVenda / n).toFixed(2) : 0;
     const rows: ParcelaRow[] = Array.from({ length: n }, (_, i) => ({
@@ -1467,7 +1469,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       endereco_entrega_uf: enderecoEntrega.uf || null,
     } : {};
 
-    const pagamentosBody = skipPagamentos ? [] : pagForma === "Múltiplas"
+    const pagamentosBody = skipPagamentos ? [] : ehMultiForma
       ? pagamentos
           .filter(p => p.forma !== "Vale-Troca" && p.forma !== "Ouro")
           .map(p => ({
@@ -1751,7 +1753,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     if (step === 4 && tipoVenda === "servico" && !modoEntrega) { setSaveErr("Selecione o modo de entrega"); return; }
 
     if (step === 5) {
-      if (pagForma === "Múltiplas" && !pagamentoCobre) {
+      if (ehMultiForma && !pagamentoCobre) {
         setSaveErr("Os pagamentos não cobrem o total da venda"); return;
       }
       if (pagForma === "Vale-Troca" && !valeValidacao?.ok) {
@@ -1846,11 +1848,23 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       // Se a venda foi pré-salva (step 4) sem pagamentos, criar agora os pagamentos não-gateway
       if (foiPresalva) {
         const formasGateway = ["Pix", "Cartão de Crédito", "Vale-Troca", "Ouro"];
-        const pagList: Array<{ forma: string; valor: number; parcelas: number }> = [];
-        if (pagForma === "Múltiplas") {
+        const pagList: Array<{ forma: string; valor: number; parcelas: number; credi_tipo?: string | null; credi_param?: number | null }> = [];
+        if (ehMultiForma) {
+          // Plano de parcelamento do crediário vai junto da linha "A Receber" (migrations 317/318).
+          // Sem isto, neste caminho (venda pré-salva no passo 4) o plano se perderia.
           pagamentos
             .filter(p => !formasGateway.includes(p.forma))
-            .forEach(p => pagList.push({ forma: p.forma, valor: p.valor, parcelas: p.parcelas || 1 }));
+            .forEach(p => pagList.push(
+              p.forma === "A Receber"
+                ? {
+                    forma: p.forma,
+                    valor: p.valor,
+                    parcelas: crediTipo === "meses" ? Math.max(1, crediParcelas) : 1,
+                    credi_tipo: crediTipo,
+                    credi_param: crediTipo === "meses" ? crediDiaVenc : crediTipo === "dias" ? crediDias : null,
+                  }
+                : { forma: p.forma, valor: p.valor, parcelas: p.parcelas || 1 }
+            ));
         } else if (!formasGateway.includes(pagForma)) {
           pagList.push({
             forma: pagForma,
@@ -1881,7 +1895,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
         if (!ouroFotoFile) throw new Error("Foto da balança obrigatória.");
         if (!ouroValidacaoIA?.match) throw new Error("O peso precisa ser confirmado pela IA antes de salvar.");
         ouroPags.push({ peso, vg, valor: peso * vg, file: ouroFotoFile });
-      } else if (pagForma === "Múltiplas") {
+      } else if (ehMultiForma) {
         for (const p of pagamentos.filter(p => p.forma === "Ouro")) {
           if (!p.ouro_foto_file || !p.ouro_peso || !p.ouro_valor_grama) {
             throw new Error("Pagamento em ouro inválido — foto/peso/valor da grama obrigatórios.");
@@ -1904,7 +1918,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       }
 
       // Aplicar Vale-Troca se necessário
-      const pagValeItem = pagForma === "Múltiplas" ? pagamentos.find(p => p.forma === "Vale-Troca") : null;
+      const pagValeItem = ehMultiForma ? pagamentos.find(p => p.forma === "Vale-Troca") : null;
       const usaVale = pagForma === "Vale-Troca" || !!pagValeItem;
       if (usaVale) {
         const valeNumeroFinal = pagForma === "Vale-Troca" ? valeNumero.trim() : (pagValeItem?.vale_numero ?? "");
@@ -3432,7 +3446,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               ) : (
                 <button
                   onClick={() => concluirVenda()}
-                  disabled={concluindo || (pagForma === "Múltiplas" && !pagamentoCobre)}
+                  disabled={concluindo || (ehMultiForma && !pagamentoCobre)}
                   className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
                   style={{ backgroundColor: C.esmeralda, color: C.creme }}
                 >

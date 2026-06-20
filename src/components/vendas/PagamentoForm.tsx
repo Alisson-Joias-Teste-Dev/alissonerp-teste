@@ -383,15 +383,12 @@ export default function PagamentoForm({
         </div>
       )}
 
-      {/* A Receber */}
-      {pagForma === "A Receber" && totalVenda > 0 && (
+      {/* A Receber — modo EDIÇÃO (detalhe): mantém a caixa simples (1 linha A Receber + painel
+          de plano ao lado). No modo CRIAÇÃO (wizard) o A Receber usa o bloco multi-forma abaixo. */}
+      {pagForma === "A Receber" && mode === "edicao" && totalVenda > 0 && (
         <div className="rounded-xl border p-4 space-y-2" style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB" }}>
           <p className="text-sm font-medium" style={{ color: "#374151" }}>A Receber — {fmt(totalVenda)}</p>
-          <p className="text-xs" style={{ color: "#92400E" }}>
-            {mode === "criacao"
-              ? "Ao concluir, será solicitada aprovação do gerente de loja."
-              : "Pagamento a receber. Aprovação de crédito necessária."}
-          </p>
+          <p className="text-xs" style={{ color: "#92400E" }}>Pagamento a receber. Aprovação de crédito necessária.</p>
         </div>
       )}
 
@@ -675,8 +672,9 @@ export default function PagamentoForm({
         </div>
       )}
 
-      {/* Múltiplas */}
-      {pagForma === "Múltiplas" && (() => {
+      {/* Múltiplas (e "A Receber": mesma mecânica multi-forma — montar todas as formas
+          até o restante fechar; "A Receber" é uma das linhas, com seu plano no painel). */}
+      {(pagForma === "Múltiplas" || (pagForma === "A Receber" && mode === "criacao")) && (() => {
         const multFormas = formasPagamento.filter(f => f !== "Múltiplas");
         return (
           <div>

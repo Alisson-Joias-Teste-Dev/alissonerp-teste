@@ -24,6 +24,16 @@ nunca era configurado e a aprovação caía no `ELSE` do gatilho (1 conta única
 `parcelas=1`; aprovação (rollback) gera conta vencendo +60 dias. Ramos 'meses' (3 parcelas) e
 'sinal' (7 dias úteis) validados via SQL com ROLLBACK. `tsc` zero erros.
 
+**Fase 1 — "A Receber" vira pagamento multi-forma (wizard):** ao escolher "A Receber" na criação da
+venda, a consultora monta TODAS as formas (A Receber é só uma linha, valor digitado) e a venda só
+fecha com **restante = 0** — mesma mecânica do "Múltiplas" (reusada, sem duplicar: `pagForma==="A Receber"`
+passou a ser tratado como `ehMultiForma`). O plano (Mensal/Em X dias) vai na linha A Receber, inclusive
+no caminho pré-salvo (passo 4). `PagamentoForm`: bloco multi-forma vale p/ A Receber só em `mode="criacao"`;
+o detalhe (`edicao`) segue com a caixa simples + painel (multi-forma no detalhe = Fase 1b). Testado no
+homolog (venda 15481): Dinheiro 1.890 + A Receber 2.000 (plano meses 3/dia 10), restante R$ 0; aprovação
+(rollback) gerou 3 parcelas de R$ 666,66 só sobre os 2.000. `tsc` zero. **Múltiplas** segue vivo (será
+descontinuado depois). _(continua o redesenho da regra ③ abaixo.)_
+
 **Redesenho da regra ③ (aprovado 20/06) — Fase 0+1:** a aba **Sinal** foi removida do painel
 (fica só Mensal / Em X dias). A regra de virar vale-crédito deixa de ser uma opção "Sinal" e passa
 a depender de **a peça ter saído ou não da loja**: peça entregue devendo = cobrança (nunca VC);
