@@ -19,6 +19,8 @@ import PagBankQrInline from "@/components/vendas/PagBankQrInline";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import CartaoInline from "@/components/vendas/CartaoInline";
 import PagamentoForm, { type PagamentoEntry, fmt as fmtPagamento } from "@/components/vendas/PagamentoForm";
+import PainelCrediario from "@/components/vendas/PainelCrediario";
+import { calcularCrediPreview, type CrediTipo } from "@/lib/credi-preview";
 import UpgradeItemFields from "@/components/vendas/UpgradeItemFields";
 import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
@@ -524,6 +526,13 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [newPagParcelas, setNewPagParcelas] = useState(1);
   const [newPagCondicao, setNewPagCondicao] = useState("À vista");
   const [newPagValeNumero, setNewPagValeNumero] = useState("");
+  // Plano do crediário (forma "A Receber") no detalhe — espelha o wizard.
+  // Grava credi_tipo/credi_param no pagamento; o gatilho gera as parcelas/sinal na
+  // aprovação (migrations 317/318). Só aparece em rascunho (regra da porta única).
+  const [crediTipo, setCrediTipo] = useState<CrediTipo>("meses");
+  const [crediParcelas, setCrediParcelas] = useState(3);
+  const [crediDiaVenc, setCrediDiaVenc] = useState(10);
+  const [crediDias, setCrediDias] = useState(15);
   const [parcelasRows, setParcelasRows] = useState<ParcelaRow[]>([]);
   const [multPagForma, setMultPagForma] = useState("Dinheiro");
   const [multPagValor, setMultPagValor] = useState("");
@@ -3702,6 +3711,15 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           {edit.pagamento && (() => {
             const saldoPendente = Math.max(0, totalVenda - (venda?.total_pago ?? 0));
 
+            // Painel de parcelamento do crediário: aparece quando a forma é "A Receber".
+            // valorBase = o que está sendo lançado a prazo (valor digitado ou o saldo).
+            // Cobre A Receber sozinho E A Receber parcial (depois de outros pagamentos).
+            const mostrarCrediDet = newPagForma === "A Receber";
+            const crediValorBaseDet = (parseFloat((newPagValor || "").replace(",", ".")) || saldoPendente);
+            const crediPreviewDet = mostrarCrediDet
+              ? calcularCrediPreview({ tipo: crediTipo, valorBase: crediValorBaseDet, parcelas: crediParcelas, diaVenc: crediDiaVenc, dias: crediDias })
+              : [];
+
             // Função de add pagamento (modo edição: salva imediato)
             // Aceita valor opcional — útil quando chamado do Múltiplas (usa multValor)
             const handleEdicaoAdd = async (valorManual?: string) => {
@@ -3711,9 +3729,19 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               try {
                 const v = valorManual ? parseFloat(valorManual.replace(",", ".")) : parseFloat(newPagValor.replace(",", ".")) || saldoPendente;
                 if (!v || v <= 0) return;
-                const parcelas = newPagCondicao === "À vista" ? 1 : parseInt(newPagCondicao) || 1;
+                // A Receber: nº de parcelas vem do plano mensal (igual wizard); demais formas
+                // usam a condição de parcelamento normal.
+                const parcelas = newPagForma === "A Receber"
+                  ? (crediTipo === "meses" ? Math.max(1, crediParcelas) : 1)
+                  : (newPagCondicao === "À vista" ? 1 : parseInt(newPagCondicao) || 1);
                 const body: Record<string, unknown> = { forma: newPagForma, valor: v, parcelas };
                 if (newPagForma === "Cartão de Crédito" || newPagForma === "Pix") body.gateway = newPagGateway;
+                if (newPagForma === "A Receber") {
+                  // Plano de parcelamento/sinal do crediário (migrations 317/318). Mesmo
+                  // mapeamento do wizard: 'meses'→dia do vencimento; 'dias'→nº de dias; 'sinal'→null.
+                  body.credi_tipo = crediTipo;
+                  body.credi_param = crediTipo === "meses" ? crediDiaVenc : crediTipo === "dias" ? crediDias : null;
+                }
                 if (newPagForma === "Vale-Troca") {
                   // Promocional (sem dono) aplica direto. Vale COM dono passa pelo painel
                   // ValeCodigoInline (onAplicarVale=aplicarValeSingleComCodigo) — nao cai aqui.
@@ -3869,6 +3897,17 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                   onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}
                   solicitandoAprovacaoCartao={updating}
                 />
+                {mostrarCrediDet && (
+                  <div className="mt-3">
+                    <PainelCrediario
+                      tipo={crediTipo} setTipo={setCrediTipo}
+                      parcelas={crediParcelas} setParcelas={setCrediParcelas}
+                      diaVenc={crediDiaVenc} setDiaVenc={setCrediDiaVenc}
+                      dias={crediDias} setDias={setCrediDias}
+                      preview={crediPreviewDet}
+                    />
+                  </div>
+                )}
               </div>
             ) : (
               // Já tem pagamentos: botão + formulário colapsável padronizado
@@ -3965,6 +4004,17 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}
                       solicitandoAprovacaoCartao={updating}
                     />
+                    {mostrarCrediDet && (
+                      <div className="mt-3">
+                        <PainelCrediario
+                          tipo={crediTipo} setTipo={setCrediTipo}
+                          parcelas={crediParcelas} setParcelas={setCrediParcelas}
+                          diaVenc={crediDiaVenc} setDiaVenc={setCrediDiaVenc}
+                          dias={crediDias} setDias={setCrediDias}
+                          preview={crediPreviewDet}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </>

@@ -2,6 +2,30 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(crediario): painel de parcelamento/sinal também no detalhe da venda (v2.70.0)
+
+**O quê:** o painel "Pagamento a prazo (crediário)" (Mensal / Em X dias / Sinal), que só
+existia no wizard de Nova Venda, agora aparece também na **tela de detalhe da venda**
+quando ela é rascunho e a forma escolhida é "A Receber" — tanto sozinha quanto como
+pagamento parcial (após outras formas). Antes, ao pôr "A Receber" pelo detalhe, o plano
+nunca era configurado e a aprovação caía no `ELSE` do gatilho (1 conta única).
+
+**Como (sem duplicar código):**
+- Painel extraído para componente único `src/components/vendas/PainelCrediario.tsx`
+  (substitui as 2 cópias inline do wizard) + preview em `src/lib/credi-preview.ts`
+  (espelha o gatilho `fn_venda_gerar_conta_receber`, migrations 317/318).
+- `POST /api/vendas/[id]/pagamentos` passa a aceitar e gravar `credi_tipo`/`credi_param`
+  (teto de `credi_param` = 180, pra caber 'dias'). Só grava quando a forma é "A Receber".
+- Detalhe (`VendaDetalheClient.tsx`) mostra o painel e manda o plano no pagamento.
+
+**Não mexe em:** banco (colunas já existem — mig 317/318), gatilho, porta única, comissão.
+
+**Testado (homolog):** detalhe → A Receber 'dias' 60 → grava `credi_tipo=dias`, `credi_param=60`,
+`parcelas=1`; aprovação (rollback) gera conta vencendo +60 dias. Ramos 'meses' (3 parcelas) e
+'sinal' (7 dias úteis) validados via SQL com ROLLBACK. `tsc` zero erros.
+
+---
+
 ## fix(estoque): SLE vira auditoria — trava de saldo negativo passa a ler da view (v2.69.0)
 
 **Problema raiz (recorrente):** o trigger `fn_prevent_negative_sle` lia o saldo do

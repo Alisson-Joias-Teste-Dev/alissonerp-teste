@@ -88,6 +88,8 @@ Já está correta e é **regime de caixa**: a comissão é proporcional ao valor
 - **A consultora** registra o pagamento (todas as formas permitidas) e **acompanha seus próprios pendentes**.
 - Segue o **fluxo de pagamento atual da venda**: dinheiro entra no cofre com o número da venda + nome da consultora; ela se responsabiliza na conferência.
 
+**Onde o plano (parcelamento/sinal) é escolhido:** ao selecionar a forma **"A Receber"**, o painel "Pagamento a prazo (crediário)" (Mensal / Em X dias / Sinal) aparece em DOIS lugares — no **wizard de Nova Venda** (passos Pagamento e Revisão) e na **tela de detalhe da venda enquanto ela é rascunho**. Componente único: `src/components/vendas/PainelCrediario.tsx`; preview em `src/lib/credi-preview.ts` (espelha o gatilho). O plano vai gravado em `pagamentos_venda.credi_tipo`/`credi_param` (o detalhe usa `POST /api/vendas/[id]/pagamentos`); o gatilho `fn_venda_gerar_conta_receber` lê na aprovação. Venda **já aprovada** não mostra o painel — baixa só pela porta única do Crediário.
+
 ---
 
 ## 7. Aprovações (reuso de Config › Aprovadores)

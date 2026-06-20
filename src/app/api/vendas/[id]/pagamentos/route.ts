@@ -24,6 +24,14 @@ const PagamentoPostSchema = z.object({
   ouro_peso: z.number().positive().optional(),
   ouro_valor_grama: z.number().positive().optional(),
   ouro_foto_path: z.string().max(500).optional(),
+  // Plano do crediário (forma "A Receber") — migrations 317/318. O gatilho
+  // fn_venda_gerar_conta_receber lê estes campos pra gerar as parcelas/sinal na
+  // aprovação. 'meses' usa credi_param=dia do vencimento; 'dias' usa credi_param=
+  // nº de dias; 'sinal' ignora credi_param (vencimento = 7 dias úteis no gatilho).
+  credi_tipo: z.enum(["meses", "dias", "sinal"]).nullable().optional(),
+  // 'meses' = dia do vencimento (1-31); 'dias' = nº de dias até o vencimento (até 180).
+  // Por isso o teto é 180 (não 31): cobre os dois usos. 'sinal' manda null.
+  credi_param: z.number().int().min(0).max(180).nullable().optional(),
 }).passthrough();
 
 async function checkOwnership(userId: string, vendaId: number) {
@@ -148,6 +156,8 @@ export async function POST(
     ouro_peso?:       number;
     ouro_valor_grama?: number;
     ouro_foto_path?:  string;
+    credi_tipo?:      "meses" | "dias" | "sinal" | null;
+    credi_param?:     number | null;
   };
 
   // Bloqueia "Múltiplas" como forma única — deve ser decomposto em pagamentos individuais
@@ -354,9 +364,17 @@ export async function POST(
     }
   }
 
+  // Plano do crediário só faz sentido na forma "A Receber" — nas demais grava null
+  // (evita poluir pagamentos de Dinheiro/Pix/etc. com plano de parcelamento).
+  // O gatilho fn_venda_gerar_conta_receber (mig 317/318) lê estes campos na aprovação.
+  const isAReceber = body.forma === "A Receber";
+  const crediTipo  = isAReceber ? (body.credi_tipo ?? null) : null;
+  const crediParam = isAReceber ? (body.credi_param ?? null) : null;
+
   const [novo] = await sql`
     INSERT INTO alissonerp.pagamentos_venda (
-      venda_id, forma, gateway, valor, parcelas, status, data_confirmacao
+      venda_id, forma, gateway, valor, parcelas, status, data_confirmacao,
+      credi_tipo, credi_param
     ) VALUES (
       ${vendaId},
       ${body.forma},
@@ -364,7 +382,9 @@ export async function POST(
       ${body.valor},
       ${body.parcelas ?? 1},
       ${isDinheiro ? 'confirmado' : 'pendente'},
-      ${isDinheiro ? sql`now()` : null}
+      ${isDinheiro ? sql`now()` : null},
+      ${crediTipo},
+      ${crediParam}
     )
     RETURNING id
   `;

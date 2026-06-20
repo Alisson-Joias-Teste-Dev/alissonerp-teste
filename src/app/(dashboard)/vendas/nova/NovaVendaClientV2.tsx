@@ -11,6 +11,8 @@ import Link from "next/link";
 import CartaoInline from "@/components/vendas/CartaoInline";
 import PixQrInline from "@/components/vendas/PixQrInline";
 import PagamentoForm from "@/components/vendas/PagamentoForm";
+import PainelCrediario from "@/components/vendas/PainelCrediario";
+import { calcularCrediPreview } from "@/lib/credi-preview";
 import { maskCpfCnpj, formatDateBR } from "@/lib/formatters";
 import { normalizarCampoPersonalizacao } from "@/lib/personalizacao-validacao";
 import NovaOrdemServicoBaseModal from "@/components/ordens/NovaOrdemServicoBaseModal";
@@ -741,33 +743,16 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const totalPago = pagamentos.reduce((s, p) => s + p.valor, 0);
   const pagamentoCobre = pagForma === "Múltiplas" ? Math.abs(totalPago - totalVenda) < 0.01 : true;
   const temAReceber = pagForma === "A Receber" || (pagForma === "Múltiplas" && pagamentos.some(p => p.forma === "A Receber"));
-  // Preview das parcelas do crediário (espelha a geração da migration 317):
-  // 'meses' → N parcelas mensais, 1ª no mês seguinte, dia clampado ao fim do mês,
-  // última parcela absorve o centavo. 'dias' → 1 parcela vencendo em X dias.
+  // Preview das parcelas do crediário — delega ao helper compartilhado
+  // calcularCrediPreview (src/lib/credi-preview.ts), que espelha o gatilho
+  // fn_venda_gerar_conta_receber (migrations 317/318). No Múltiplas, parcela só o
+  // valor das linhas "A Receber" (o resto já foi pago); na forma única = total.
   const crediPreview = useMemo(() => {
-    if (!temAReceber) return [] as { num: number; data: Date; valor: number }[];
-    // No Múltiplas, parcela só o valor do A Receber (o resto já foi pago); single = total.
+    if (!temAReceber) return [];
     const saldo = pagForma === "Múltiplas"
       ? pagamentos.filter(p => p.forma === "A Receber").reduce((s, p) => s + p.valor, 0)
       : totalVenda;
-    if (saldo <= 0) return [] as { num: number; data: Date; valor: number }[];
-    if (crediTipo === "sinal") {
-      // Sinal: peça reservada, saldo vence em 7 dias úteis (aprox. no preview, sem feriados; o backend usa o cálculo exato)
-      const d = new Date(); let u = 0;
-      while (u < 7) { d.setDate(d.getDate() + 1); const dow = d.getDay(); if (dow !== 0 && dow !== 6) u++; }
-      return [{ num: 1, data: d, valor: saldo }];
-    }
-    if (crediTipo === "dias") return [{ num: 1, data: new Date(Date.now() + crediDias * 86400000), valor: saldo }];
-    const n = Math.max(1, crediParcelas);
-    const base = Math.trunc((saldo / n) * 100) / 100;
-    const hoje = new Date();
-    return Array.from({ length: n }, (_, i) => {
-      const ultimoDia = new Date(hoje.getFullYear(), hoje.getMonth() + 2 + i, 0).getDate();
-      const dia = Math.min(crediDiaVenc, ultimoDia);
-      const data = new Date(hoje.getFullYear(), hoje.getMonth() + 1 + i, dia);
-      const valor = i === n - 1 ? +(saldo - base * (n - 1)).toFixed(2) : base;
-      return { num: i + 1, data, valor };
-    });
+    return calcularCrediPreview({ tipo: crediTipo, valorBase: saldo, parcelas: crediParcelas, diaVenc: crediDiaVenc, dias: crediDias });
   }, [temAReceber, pagForma, pagamentos, crediTipo, crediParcelas, crediDiaVenc, crediDias, totalVenda]);
   const LIMITE_DESCONTO_CARTAO = 20;
   // Só precisa aprovação se desconto > maxDesconto (exceto admin = bypass com 100)
@@ -3242,39 +3227,13 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
             />
 
             {temAReceber && (
-              <div className="rounded-xl border px-4 py-3" style={{ borderColor: C.cremeBorder }}>
-                <p className="text-sm font-medium mb-3" style={{ color: "#374151" }}>Pagamento a prazo (crediário)</p>
-                <div className="flex gap-2 mb-3">
-                  <button type="button" onClick={() => setCrediTipo("meses")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "meses" ? C.esmeralda : C.cremeBorder, color: crediTipo === "meses" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "meses" ? 600 : 400 }}>Mensal</button>
-                  <button type="button" onClick={() => setCrediTipo("dias")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "dias" ? C.esmeralda : C.cremeBorder, color: crediTipo === "dias" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "dias" ? 600 : 400 }}>Em X dias</button>
-                  <button type="button" onClick={() => setCrediTipo("sinal")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "sinal" ? C.esmeralda : C.cremeBorder, color: crediTipo === "sinal" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "sinal" ? 600 : 400 }}>Sinal</button>
-                </div>
-                {crediTipo === "meses" ? (
-                  <div className="flex gap-3 mb-3">
-                    <label className="flex-1 text-xs" style={{ color: "#6B7280" }}>Parcelas
-                      <input type="number" min={1} max={24} value={crediParcelas} onChange={e => setCrediParcelas(Math.max(1, parseInt(e.target.value) || 1))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
-                    </label>
-                    <label className="flex-1 text-xs" style={{ color: "#6B7280" }}>Vence todo dia
-                      <input type="number" min={1} max={31} value={crediDiaVenc} onChange={e => setCrediDiaVenc(Math.min(31, Math.max(1, parseInt(e.target.value) || 1)))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
-                    </label>
-                  </div>
-                ) : crediTipo === "dias" ? (
-                  <label className="block text-xs mb-3" style={{ color: "#6B7280" }}>Pagar em (dias)
-                    <input type="number" min={1} max={180} value={crediDias} onChange={e => setCrediDias(Math.max(1, parseInt(e.target.value) || 1))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
-                  </label>
-                ) : (
-                  <p className="text-xs mb-3" style={{ color: "#6B7280" }}>A peça fica reservada. O cliente tem 7 dias úteis para pagar o saldo — senão vira vale-crédito e a peça volta ao estoque.</p>
-                )}
-                <div className="space-y-1">
-                  {crediPreview.map(p => (
-                    <div key={p.num} className="flex justify-between text-xs px-3 py-2 rounded-lg border" style={{ borderColor: C.cremeBorder }}>
-                      <span style={{ color: "#6B7280" }}>{crediTipo === "meses" ? `Parcela ${p.num}/${crediPreview.length} · ` : ""}vence {p.data.toLocaleDateString("pt-BR")}</span>
-                      <span className="font-medium tabular-nums" style={{ color: C.esmeralda }}>{fmt(p.valor)}</span>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-xs mt-2" style={{ color: "#92400E" }}>A peça só sai da loja com tudo pago. Liberar entrega devendo precisa de aprovação do dono.</p>
-              </div>
+              <PainelCrediario
+                tipo={crediTipo} setTipo={setCrediTipo}
+                parcelas={crediParcelas} setParcelas={setCrediParcelas}
+                diaVenc={crediDiaVenc} setDiaVenc={setCrediDiaVenc}
+                dias={crediDias} setDias={setCrediDias}
+                preview={crediPreview}
+              />
             )}
 
             {/* Resumo totais */}
@@ -3383,39 +3342,13 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
             </div>
 
             {temAReceber && (
-              <div className="rounded-xl border px-4 py-3" style={{ borderColor: C.cremeBorder }}>
-                <p className="text-sm font-medium mb-3" style={{ color: "#374151" }}>Pagamento a prazo (crediário)</p>
-                <div className="flex gap-2 mb-3">
-                  <button type="button" onClick={() => setCrediTipo("meses")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "meses" ? C.esmeralda : C.cremeBorder, color: crediTipo === "meses" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "meses" ? 600 : 400 }}>Mensal</button>
-                  <button type="button" onClick={() => setCrediTipo("dias")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "dias" ? C.esmeralda : C.cremeBorder, color: crediTipo === "dias" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "dias" ? 600 : 400 }}>Em X dias</button>
-                  <button type="button" onClick={() => setCrediTipo("sinal")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "sinal" ? C.esmeralda : C.cremeBorder, color: crediTipo === "sinal" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "sinal" ? 600 : 400 }}>Sinal</button>
-                </div>
-                {crediTipo === "meses" ? (
-                  <div className="flex gap-3 mb-3">
-                    <label className="flex-1 text-xs" style={{ color: "#6B7280" }}>Parcelas
-                      <input type="number" min={1} max={24} value={crediParcelas} onChange={e => setCrediParcelas(Math.max(1, parseInt(e.target.value) || 1))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
-                    </label>
-                    <label className="flex-1 text-xs" style={{ color: "#6B7280" }}>Vence todo dia
-                      <input type="number" min={1} max={31} value={crediDiaVenc} onChange={e => setCrediDiaVenc(Math.min(31, Math.max(1, parseInt(e.target.value) || 1)))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
-                    </label>
-                  </div>
-                ) : crediTipo === "dias" ? (
-                  <label className="block text-xs mb-3" style={{ color: "#6B7280" }}>Pagar em (dias)
-                    <input type="number" min={1} max={180} value={crediDias} onChange={e => setCrediDias(Math.max(1, parseInt(e.target.value) || 1))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
-                  </label>
-                ) : (
-                  <p className="text-xs mb-3" style={{ color: "#6B7280" }}>A peça fica reservada. O cliente tem 7 dias úteis para pagar o saldo — senão vira vale-crédito e a peça volta ao estoque.</p>
-                )}
-                <div className="space-y-1">
-                  {crediPreview.map(p => (
-                    <div key={p.num} className="flex justify-between text-xs px-3 py-2 rounded-lg border" style={{ borderColor: C.cremeBorder }}>
-                      <span style={{ color: "#6B7280" }}>{crediTipo === "meses" ? `Parcela ${p.num}/${crediPreview.length} · ` : ""}vence {p.data.toLocaleDateString("pt-BR")}</span>
-                      <span className="font-medium tabular-nums" style={{ color: C.esmeralda }}>{fmt(p.valor)}</span>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-xs mt-2" style={{ color: "#92400E" }}>A peça só sai da loja com tudo pago. Liberar entrega devendo precisa de aprovação do dono.</p>
-              </div>
+              <PainelCrediario
+                tipo={crediTipo} setTipo={setCrediTipo}
+                parcelas={crediParcelas} setParcelas={setCrediParcelas}
+                diaVenc={crediDiaVenc} setDiaVenc={setCrediDiaVenc}
+                dias={crediDias} setDias={setCrediDias}
+                preview={crediPreview}
+              />
             )}
 
             {temAReceber && !aprovacaoEnviada && (
