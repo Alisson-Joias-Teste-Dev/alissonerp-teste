@@ -34,7 +34,7 @@ BEGIN
     AND local_estoque_id = NEW.warehouse_id
     AND status = 'efetivado';
 
-  IF saldo_atual + NEW.actual_qty < 0 THEN
+  IF saldo_atual < 0 THEN  -- saida ja contada em movimentacoes_estoque_comercial
     RAISE EXCEPTION 'STOCK_NEGATIVE: Saldo insuficiente no almoxarifado. Item=%, Warehouse=%',
       NEW.item_id, NEW.warehouse_id;
   END IF;
