@@ -745,8 +745,12 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   // 'meses' → N parcelas mensais, 1ª no mês seguinte, dia clampado ao fim do mês,
   // última parcela absorve o centavo. 'dias' → 1 parcela vencendo em X dias.
   const crediPreview = useMemo(() => {
-    if (pagForma !== "A Receber") return [] as { num: number; data: Date; valor: number }[];
-    const saldo = totalVenda;
+    if (!temAReceber) return [] as { num: number; data: Date; valor: number }[];
+    // No Múltiplas, parcela só o valor do A Receber (o resto já foi pago); single = total.
+    const saldo = pagForma === "Múltiplas"
+      ? pagamentos.filter(p => p.forma === "A Receber").reduce((s, p) => s + p.valor, 0)
+      : totalVenda;
+    if (saldo <= 0) return [] as { num: number; data: Date; valor: number }[];
     if (crediTipo === "sinal") {
       // Sinal: peça reservada, saldo vence em 7 dias úteis (aprox. no preview, sem feriados; o backend usa o cálculo exato)
       const d = new Date(); let u = 0;
@@ -764,7 +768,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       const valor = i === n - 1 ? +(saldo - base * (n - 1)).toFixed(2) : base;
       return { num: i + 1, data, valor };
     });
-  }, [pagForma, crediTipo, crediParcelas, crediDiaVenc, crediDias, totalVenda]);
+  }, [temAReceber, pagForma, pagamentos, crediTipo, crediParcelas, crediDiaVenc, crediDias, totalVenda]);
   const LIMITE_DESCONTO_CARTAO = 20;
   // Só precisa aprovação se desconto > maxDesconto (exceto admin = bypass com 100)
   const precisaAprovacaoDesconto = maxDesconto < 100 && itens.some(i => i.pct_desconto > maxDesconto);
@@ -1481,7 +1485,18 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     const pagamentosBody = skipPagamentos ? [] : pagForma === "Múltiplas"
       ? pagamentos
           .filter(p => p.forma !== "Vale-Troca" && p.forma !== "Ouro")
-          .map(p => ({ forma: p.forma, valor: p.valor, parcelas: p.parcelas, status: "pendente" }))
+          .map(p => ({
+            forma: p.forma,
+            valor: p.valor,
+            parcelas: p.forma === "A Receber"
+              ? (crediTipo === "meses" ? Math.max(1, crediParcelas) : 1)
+              : p.parcelas,
+            status: "pendente",
+            // Plano de parcelamento/sinal do A Receber dentro de Múltiplas (migrations 317/318).
+            ...(p.forma === "A Receber"
+              ? { credi_tipo: crediTipo, credi_param: crediTipo === "meses" ? crediDiaVenc : crediTipo === "dias" ? crediDias : null }
+              : {}),
+          }))
       : pagForma === "Vale-Troca" || pagForma === "Ouro"
       ? []
       : [{
@@ -3331,7 +3346,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               </div>
             </div>
 
-            {pagForma === "A Receber" && (
+            {temAReceber && (
               <div className="rounded-xl border px-4 py-3" style={{ borderColor: C.cremeBorder }}>
                 <p className="text-sm font-medium mb-3" style={{ color: "#374151" }}>Pagamento a prazo (crediário)</p>
                 <div className="flex gap-2 mb-3">
