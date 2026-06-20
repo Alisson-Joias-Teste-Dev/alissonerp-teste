@@ -449,6 +449,11 @@ interface PendingAuth {
 export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAccess, maxDesconto, descontoAuthThreshold }: Props) {
   const router = useRouter();
 
+  // Só a direção reatribui o vendedor da venda (afeta comissão). Consultora e
+  // gerente_loja não podem trocar — fica só leitura. Casa com o backend
+  // (CAMPOS_ADMIN_ONLY / ROLES_FINANCEIRO em /api/vendas/[id]).
+  const podeTrocarVendedor = ["diretor", "admin", "desenvolvedor"].includes(role);
+
   // ── Server data ─────────────────────────────────────────────────────────────
   const [venda, setVenda] = useState<Venda | null>(null);
   const [loadingVenda, setLoadingVenda] = useState(true);
@@ -714,9 +719,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     fetch("/api/vendas/forma-envio").then(r => r.json()).then((d: { envio: FormaEnvio[]; frete: FormaFrete[] }) => {
       setFormaEnvioOpts(d.envio ?? []); setFormaFreteAll(d.frete ?? []);
     }).catch(() => push("Erro ao carregar formas de envio/frete", { level: "warning" }));
-    if (isFullAccess) fetch("/api/vendedores").then(r => r.json()).then(setVendedores)
+    if (isFullAccess || podeTrocarVendedor) fetch("/api/vendedores").then(r => r.json()).then(setVendedores)
       .catch(() => push("Erro ao carregar vendedores", { level: "warning" }));
-  }, [isFullAccess]);
+  }, [isFullAccess, podeTrocarVendedor]);
 
   // ── Hydrate form from venda ─────────────────────────────────────────────────
   useEffect(() => {
@@ -2523,7 +2528,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
             </div>
             <div>
               <Label required>Vendedor</Label>
-              {isFullAccess && edit.full ? (
+              {podeTrocarVendedor && edit.full ? (
                 <Select value={vendedorSel} onChange={e => { setVendedorSel(e.target.value === "" ? "" : Number(e.target.value)); markDirty(); }}>
                   <option value="">Selecione um vendedor</option>
                   {vendedores.map(v => <option key={v.id_vendedor} value={v.id_vendedor}>{v.nome}</option>)}
@@ -2719,7 +2724,8 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <Label required>Data da Venda</Label>
-              <Input type="date" value={dataVenda} disabled={!edit.full}
+              {/* Data da venda é fixa: não editável nem em rascunho (decisão Jonathan). */}
+              <Input type="date" value={dataVenda} disabled
                 onChange={e => { setDataVenda(e.target.value); markDirty(); }} />
             </div>
             <div>
