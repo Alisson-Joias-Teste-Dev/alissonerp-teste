@@ -170,12 +170,12 @@ export async function POST(req: NextRequest) {
         SELECT alissonerp.proximo_sku_pz() AS sku
       `;
 
-      // 3) INSERT public.produtos (minimo necessario)
+      // 3) INSERT alissonerp.erp_produtos (minimo necessario)
       //    categoria='Personalizado' para facilitar filtro/agrupamento
       //    situacao='A', qtd_estoque=0 (sob encomenda)
       await tx`
-        INSERT INTO public.produtos (
-          id_produto, sku, nome,
+        INSERT INTO alissonerp.erp_produtos (
+          produto_id, sku, nome,
           tipo_metal, situacao, categoria,
           qtd_estoque, tem_pedra_preciosa
         ) VALUES (

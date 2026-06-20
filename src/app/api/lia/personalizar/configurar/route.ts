@@ -115,9 +115,9 @@ export async function POST(req: NextRequest) {
       // Se descricao_produto foi enviada, atualiza nome
       if (body.descricao_produto && typeof body.descricao_produto === "string") {
         await tx`
-          UPDATE public.produtos
+          UPDATE alissonerp.erp_produtos
           SET nome = ${body.descricao_produto.trim().slice(0, 500)}
-          WHERE id_produto = ${produtoId}
+          WHERE produto_id = ${produtoId}
         `;
       }
 

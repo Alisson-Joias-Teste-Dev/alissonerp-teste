@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
   if (regra !== "ouro") return NextResponse.json({ error: "Regra desconhecida" }, { status: 400 });
 
   const rows = await sql<{ id_produto: number }[]>`
-    UPDATE public.produtos
+    UPDATE alissonerp.erp_produtos
     SET tipo_metal = 'Ouro 18k'
     WHERE situacao = 'A'
       AND (tipo_metal IS NULL OR TRIM(tipo_metal) = '')

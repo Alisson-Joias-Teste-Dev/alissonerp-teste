@@ -123,34 +123,34 @@ export async function POST(req: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (sql as any).begin(async (tx: any) => {
       if (up.nome !== undefined) {
-        await tx`UPDATE public.produtos SET nome = ${up.nome as string} WHERE id_produto = ANY(${ids})`;
+        await tx`UPDATE alissonerp.erp_produtos SET nome = ${up.nome as string} WHERE produto_id = ANY(${ids})`;
       }
       if (up.tipo_metal !== undefined) {
-        await tx`UPDATE public.produtos SET tipo_metal = ${up.tipo_metal as string | null} WHERE id_produto = ANY(${ids})`;
+        await tx`UPDATE alissonerp.erp_produtos SET tipo_metal = ${up.tipo_metal as string | null} WHERE produto_id = ANY(${ids})`;
       }
       if (up.categoria !== undefined) {
-        await tx`UPDATE public.produtos SET categoria = ${up.categoria as string | null} WHERE id_produto = ANY(${ids})`;
+        await tx`UPDATE alissonerp.erp_produtos SET categoria = ${up.categoria as string | null} WHERE produto_id = ANY(${ids})`;
       }
       if (up.situacao !== undefined) {
-        await tx`UPDATE public.produtos SET situacao = ${up.situacao as string} WHERE id_produto = ANY(${ids})`;
+        await tx`UPDATE alissonerp.erp_produtos SET situacao = ${up.situacao as string} WHERE produto_id = ANY(${ids})`;
       }
       if (up.tem_pedra_preciosa !== undefined) {
-        await tx`UPDATE public.produtos SET tem_pedra_preciosa = ${up.tem_pedra_preciosa as boolean} WHERE id_produto = ANY(${ids})`;
+        await tx`UPDATE alissonerp.erp_produtos SET tem_pedra_preciosa = ${up.tem_pedra_preciosa as boolean} WHERE produto_id = ANY(${ids})`;
       }
       if (up.peso_precificado !== undefined) {
-        await tx`UPDATE public.produtos SET peso_precificado = ${up.peso_precificado as number | null} WHERE id_produto = ANY(${ids})`;
+        await tx`UPDATE alissonerp.erp_produtos SET peso_precificado = ${up.peso_precificado as number | null} WHERE produto_id = ANY(${ids})`;
       }
       if (up.markup !== undefined) {
-        await tx`UPDATE public.produtos SET markup = ${up.markup as number | null} WHERE id_produto = ANY(${ids})`;
+        await tx`UPDATE alissonerp.erp_produtos SET markup = ${up.markup as number | null} WHERE produto_id = ANY(${ids})`;
       }
       if (up.fator !== undefined) {
-        await tx`UPDATE public.produtos SET fator = ${up.fator as number | null} WHERE id_produto = ANY(${ids})`;
+        await tx`UPDATE alissonerp.erp_produtos SET fator = ${up.fator as number | null} WHERE produto_id = ANY(${ids})`;
       }
       if (up.categoria_precificacao !== undefined) {
-        await tx`UPDATE public.produtos SET categoria_precificacao = ${up.categoria_precificacao as string | null} WHERE id_produto = ANY(${ids})`;
+        await tx`UPDATE alissonerp.erp_produtos SET categoria_precificacao = ${up.categoria_precificacao as string | null} WHERE produto_id = ANY(${ids})`;
       }
       if (up.preco_tiny !== undefined) {
-        await tx`UPDATE public.produtos SET preco_tiny = ${up.preco_tiny as number | null} WHERE id_produto = ANY(${ids})`;
+        await tx`UPDATE alissonerp.erp_produtos SET preco_tiny = ${up.preco_tiny as number | null} WHERE produto_id = ANY(${ids})`;
       }
       if (tipoItem !== undefined) {
         if (tipoItem === null) {
@@ -164,7 +164,7 @@ export async function POST(req: NextRequest) {
         }
       }
       const rows: { id_produto: number }[] = await tx`
-        SELECT id_produto FROM public.produtos WHERE id_produto = ANY(${ids})
+        SELECT id_produto FROM public.produtos WHERE produto_id = ANY(${ids})
       `;
       afetados.push(...rows.map((r: { id_produto: number }) => Number(r.id_produto)));
     });

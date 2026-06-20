@@ -447,42 +447,42 @@ export async function PATCH(
     // ── public.produtos ────────────────────────────────────────────────────
     if (pubUpdate.tem_pedra_preciosa !== undefined) {
       await sql`
-        UPDATE public.produtos
+        UPDATE alissonerp.erp_produtos
         SET tem_pedra_preciosa = ${pubUpdate.tem_pedra_preciosa as boolean}
-        WHERE id_produto = ${produtoId}
+        WHERE produto_id = ${produtoId}
       `;
       await recalcularPrecoPedras(produtoId);
     }
     if (pubUpdate.nome !== undefined) {
-      await sql`UPDATE public.produtos SET nome = ${pubUpdate.nome as string} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET nome = ${pubUpdate.nome as string} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.tipo_metal !== undefined) {
-      await sql`UPDATE public.produtos SET tipo_metal = ${pubUpdate.tipo_metal as string | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET tipo_metal = ${pubUpdate.tipo_metal as string | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.categoria !== undefined) {
-      await sql`UPDATE public.produtos SET categoria = ${pubUpdate.categoria as string | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET categoria = ${pubUpdate.categoria as string | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.situacao !== undefined) {
-      await sql`UPDATE public.produtos SET situacao = ${pubUpdate.situacao as string} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET situacao = ${pubUpdate.situacao as string} WHERE produto_id = ${produtoId}`;
     }
     // Precificação — campos de entrada. Trigger em public.produtos recalcula preco_sync.
     if (pubUpdate.peso_precificado !== undefined) {
-      await sql`UPDATE public.produtos SET peso_precificado = ${pubUpdate.peso_precificado as number | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET peso_precificado = ${pubUpdate.peso_precificado as number | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.markup !== undefined) {
-      await sql`UPDATE public.produtos SET markup = ${pubUpdate.markup as number | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET markup = ${pubUpdate.markup as number | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.fator !== undefined) {
-      await sql`UPDATE public.produtos SET fator = ${pubUpdate.fator as number | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET fator = ${pubUpdate.fator as number | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.categoria_precificacao !== undefined) {
-      await sql`UPDATE public.produtos SET categoria_precificacao = ${pubUpdate.categoria_precificacao as string | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET categoria_precificacao = ${pubUpdate.categoria_precificacao as string | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.preco_tiny !== undefined) {
-      await sql`UPDATE public.produtos SET preco_tiny = ${pubUpdate.preco_tiny as number | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET preco_tiny = ${pubUpdate.preco_tiny as number | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.preco_pedras !== undefined) {
-      await sql`UPDATE public.produtos SET preco_pedras = ${pubUpdate.preco_pedras as number | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET preco_pedras = ${pubUpdate.preco_pedras as number | null} WHERE produto_id = ${produtoId}`;
     }
     // tipo_item: upsert ou delete em alissonerp.produto_tipo_item
     if (tipoItem !== undefined) {
@@ -573,7 +573,7 @@ export async function PATCH(
       const fileName = `produto-${produtoId}-${Date.now()}.${ext}`;
       const uploaded = await uploadFile("produto-fotos", fileName, fotoBase64, mimeType);
       if (!("error" in uploaded)) {
-        await sql`UPDATE public.produtos SET imagem = ${uploaded.url} WHERE id_produto = ${produtoId}`;
+        await sql`UPDATE alissonerp.erp_produtos SET imagem = ${uploaded.url} WHERE produto_id = ${produtoId}`;
       }
     }
 
@@ -713,7 +713,7 @@ export async function PATCH(
                 pubRepl[k] = v;
               }
               if (Object.keys(pubRepl).length > 0) {
-                await sql`UPDATE public.produtos SET ${sql(pubRepl)} WHERE id_produto = ANY(${filhoIds})`;
+                await sql`UPDATE alissonerp.erp_produtos SET ${sql(pubRepl)} WHERE produto_id = ANY(${filhoIds})`;
               }
 
               // nome: mantém o "nº X" de cada variação (troca só a base vinda do pai).
@@ -725,7 +725,7 @@ export async function PATCH(
                 for (const s of sufs) {
                   const num = (s.sufixo_variacao ?? "").replace(/\D/g, "");
                   const novoNome = num ? `${baseNome} nº ${num}` : baseNome;
-                  await sql`UPDATE public.produtos SET nome = ${novoNome} WHERE id_produto = ${s.produto_id as number}`;
+                  await sql`UPDATE alissonerp.erp_produtos SET nome = ${novoNome} WHERE produto_id = ${s.produto_id as number}`;
                 }
               }
 
@@ -767,10 +767,10 @@ export async function PATCH(
                   `;
                 }
                 await sql`
-                  UPDATE public.produtos
+                  UPDATE alissonerp.erp_produtos
                   SET preco_pedras     = ${subtotalPedras},
                       preco_total_sync = COALESCE(preco_sync, 0) + ${subtotalPedras}
-                  WHERE id_produto = ${fid}
+                  WHERE produto_id = ${fid}
                 `;
               }
             }
@@ -825,7 +825,7 @@ export async function PATCH(
             markup = Number(fb?.markup ?? 2.0);
           }
           const precoCalc = precoCompraUsd * cotDolar * markup;
-          await sql`UPDATE public.produtos SET preco_tiny = ${precoCalc} WHERE id_produto = ${produtoId}`;
+          await sql`UPDATE alissonerp.erp_produtos SET preco_tiny = ${precoCalc} WHERE produto_id = ${produtoId}`;
         }
       }
     }

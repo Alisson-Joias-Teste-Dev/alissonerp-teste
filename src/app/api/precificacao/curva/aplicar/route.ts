@@ -131,14 +131,14 @@ export async function POST(req: NextRequest) {
 
     // ── 1. UPDATE markup em public.produtos (trigger recalcula preco_sync) ──
     const resMarkup = await sql`
-      UPDATE public.produtos AS p SET markup = u.markup
+      UPDATE alissonerp.erp_produtos AS p SET markup = u.markup
       FROM (
         SELECT * FROM UNNEST(
           ${ids}::bigint[],
           ${markups}::numeric[]
-        ) AS t(id_produto, markup)
+        ) AS t(produto_id, markup)
       ) AS u
-      WHERE p.id_produto = u.id_produto
+      WHERE p.produto_id = u.produto_id
     `;
 
     // ── 2. UPSERT comissao e max_desconto em alissonerp.produto_curva_aplicada ──

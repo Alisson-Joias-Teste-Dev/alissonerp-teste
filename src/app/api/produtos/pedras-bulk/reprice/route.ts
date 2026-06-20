@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
       const antes = Number(prod.preco_tiny ?? 0);
       if (Math.abs(antes - novoPreco) < 0.5) continue; // sem mudança
 
-      await sql`UPDATE public.produtos SET preco_tiny = ${novoPreco} WHERE id_produto = ${prod.id_produto}`;
+      await sql`UPDATE alissonerp.erp_produtos SET preco_tiny = ${novoPreco} WHERE produto_id = ${prod.id_produto}`;
       // Atualiza tb peso_ct (caso ct tenha mudado)
       await sql`
         INSERT INTO alissonerp.produto_pedra_extras (produto_id, peso_ct)

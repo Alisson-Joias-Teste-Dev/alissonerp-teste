@@ -291,7 +291,7 @@ export async function POST(
     pesoPorLetra = Math.round(n * 100) / 100;
   }
 
-  // descricao_produto: se presente, faz UPDATE public.produtos.nome
+  // descricao_produto: se presente, faz UPDATE alissonerp.erp_produtos.nome
   const descricaoProduto =
     typeof body.descricao_produto === "string" && body.descricao_produto.trim().length > 0
       ? body.descricao_produto.trim().slice(0, 500)
@@ -310,9 +310,9 @@ export async function POST(
       // Se descricao_produto foi enviada, atualiza public.produtos.nome
       if (descricaoProduto) {
         await tx`
-          UPDATE public.produtos
+          UPDATE alissonerp.erp_produtos
           SET nome = ${descricaoProduto}
-          WHERE id_produto = ${produtoId}
+          WHERE produto_id = ${produtoId}
         `;
       }
 

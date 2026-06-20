@@ -2,7 +2,7 @@
  * POST /api/precificacao/aprovar
  *
  * Aprova uma alteração de markup pendente e aplica imediatamente:
- *   - Ouro: UPDATE public.produtos SET markup = markup_novo WHERE categoria_precificacao = faixa_nome
+ *   - Ouro: UPDATE alissonerp.erp_produtos SET markup = markup_novo WHERE categoria_precificacao = faixa_nome
  *           → trigger_atualizar_preco_produto recalcula preço de cada produto automaticamente
  *   - Pedra: UPDATE alissonerp.markup_pedras SET markup = markup_novo
  *            → recalcularPrecoPedras chamado para cada produto afetado (após commit)
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
       // Atualizar markup de todos os produtos desta categoria.
       // O trigger trigger_atualizar_preco_produto recalcula preco_sync automaticamente.
       const res = await sql`
-        UPDATE public.produtos
+        UPDATE alissonerp.erp_produtos
         SET markup = ${Number(alt.markup_novo)}
         WHERE categoria_precificacao = ${alt.faixa_nome}
           AND situacao = 'A'

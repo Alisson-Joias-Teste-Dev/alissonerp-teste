@@ -108,9 +108,9 @@ export async function POST(req: NextRequest) {
         const precoAntes = Number(dup.preco_tiny ?? 0);
         if (Math.abs(precoAntes - precoVenda) >= 0.5) {
           await tx`
-            UPDATE public.produtos
+            UPDATE alissonerp.erp_produtos
             SET preco_tiny = ${precoVenda}
-            WHERE id_produto = ${idProduto}
+            WHERE produto_id = ${idProduto}
           `;
         }
         await tx`
@@ -162,8 +162,8 @@ export async function POST(req: NextRequest) {
       const idProduto = Number(seq.id);
 
       await tx`
-        INSERT INTO public.produtos
-          (id_produto, sku, nome, tipo_metal, situacao,
+        INSERT INTO alissonerp.erp_produtos
+          (produto_id, sku, nome, tipo_metal, situacao,
            peso_precificado, markup, fator,
            categoria_precificacao, categoria, tem_pedra_preciosa,
            preco_tiny)

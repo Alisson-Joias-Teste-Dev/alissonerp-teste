@@ -609,17 +609,17 @@ export async function POST(req: NextRequest) {
       const [seqPai] = await tx<{ id: string }[]>`SELECT nextval('alissonerp.seq_produto_id') AS id`;
       const paiId = Number(seqPai.id);
 
-      // INSERT pai em public.produtos (trigger calcula preco_sync automaticamente)
+      // INSERT pai em alissonerp.erp_produtos
       const [prodPai] = await tx<{ id_produto: number; sku: string; nome: string; preco_sync: string | null }[]>`
-        INSERT INTO public.produtos
-          (id_produto, sku, nome, tipo_metal, situacao,
+        INSERT INTO alissonerp.erp_produtos
+          (produto_id, sku, nome, tipo_metal, situacao,
            peso_precificado, markup, fator,
            categoria_precificacao, categoria, tem_pedra_preciosa)
         VALUES
           (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
            ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
            ${categoria_precificacao ?? null}, ${categoria_geral ?? null}, ${tem_pedra_preciosa ?? false})
-        RETURNING id_produto, sku, nome, preco_sync
+        RETURNING produto_id AS id_produto, sku, nome, preco_sync
       `;
 
       // INSERT pai em erp_produtos — fornecedor só entra se a coluna existir
@@ -736,10 +736,10 @@ export async function POST(req: NextRequest) {
         if (combo.comprimento != null) sufixos.push(`${combo.comprimento}cm`);
         const nomeVar = sufixos.length > 0 ? `${nome.trim()} ${sufixos.join(" ")}` : `${nome.trim()} ${contador}`;
 
-        // INSERT variação em public.produtos
+        // INSERT variação em alissonerp.erp_produtos
         await tx`
-          INSERT INTO public.produtos
-            (id_produto, sku, nome, tipo_metal, situacao,
+          INSERT INTO alissonerp.erp_produtos
+            (produto_id, sku, nome, tipo_metal, situacao,
              peso_precificado, markup, fator,
              categoria_precificacao, tem_pedra_preciosa)
           VALUES
@@ -890,7 +890,7 @@ export async function POST(req: NextRequest) {
         const fileName = `produto-${result.pai.id_produto}-${Date.now()}.${ext}`;
         const uploaded = await uploadFile("produto-fotos", fileName, foto_base64, mimeType);
         if (!("error" in uploaded)) {
-          await sql`UPDATE public.produtos SET imagem = ${uploaded.url} WHERE id_produto = ${result.pai.id_produto}`;
+          await sql`UPDATE alissonerp.erp_produtos SET imagem = ${uploaded.url} WHERE produto_id = ${result.pai.id_produto}`;
         }
       } catch (err) {
         console.warn("[POST /api/produtos] falha ao fazer upload da foto:", err);

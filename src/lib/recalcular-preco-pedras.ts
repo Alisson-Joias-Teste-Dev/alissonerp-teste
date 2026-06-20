@@ -45,10 +45,10 @@ export async function recalcularPrecoPedras(produto_id: number): Promise<number>
     }
     // Sem pedra nenhuma → zera de fato e sincroniza com o preco_sync do ouro.
     await sql`
-      UPDATE public.produtos
+      UPDATE alissonerp.erp_produtos
       SET preco_pedras     = 0,
           preco_total_sync = COALESCE(preco_sync, 0)
-      WHERE id_produto = ${produto_id}
+      WHERE produto_id = ${produto_id}
     `;
     return 0;
   }
@@ -97,10 +97,10 @@ export async function recalcularPrecoPedras(produto_id: number): Promise<number>
 
   // 4. Persistir no produto
   await sql`
-    UPDATE public.produtos
+    UPDATE alissonerp.erp_produtos
     SET preco_pedras     = ${totalPedras},
         preco_total_sync = COALESCE(preco_sync, 0) + ${totalPedras}
-    WHERE id_produto = ${produto_id}
+    WHERE produto_id = ${produto_id}
   `;
 
   return totalPedras;

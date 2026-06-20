@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
           const precoAntes = Number(dup.preco_tiny ?? 0);
           const novoPreco = Math.round(Number(it.preco_venda));
           if (Math.abs(precoAntes - novoPreco) >= 0.5) {
-            await tx`UPDATE public.produtos SET preco_tiny = ${novoPreco} WHERE id_produto = ${dup.id_produto}`;
+            await tx`UPDATE alissonerp.erp_produtos SET preco_tiny = ${novoPreco} WHERE produto_id = ${dup.id_produto}`;
           }
           await tx`
             INSERT INTO alissonerp.produto_pedra_extras (produto_id, peso_ct)
@@ -177,11 +177,10 @@ export async function POST(req: NextRequest) {
         `;
         const paiId = Number(seq.id);
 
-        // INSERT public.produtos (trigger atualizar_preco_produto deixa preco_sync NULL
-        // pois tipo_metal=NULL não casa com 'ouro'/'prata')
+        // INSERT alissonerp.erp_produtos
         await tx`
-          INSERT INTO public.produtos
-            (id_produto, sku, nome, tipo_metal, situacao,
+          INSERT INTO alissonerp.erp_produtos
+            (produto_id, sku, nome, tipo_metal, situacao,
              peso_precificado, markup, fator,
              categoria_precificacao, categoria, tem_pedra_preciosa,
              preco_tiny)
@@ -459,9 +458,9 @@ export async function DELETE(req: NextRequest) {
       if (idsInativar.length > 0) {
         try {
           await tx`
-            UPDATE public.produtos
+            UPDATE alissonerp.erp_produtos
             SET situacao = 'I'
-            WHERE id_produto = ANY(${idsInativar})
+            WHERE produto_id = ANY(${idsInativar})
               AND categoria ILIKE 'Pedras%'
           `;
           etapas.push(`inativadas: ${idsInativar.length}`);
@@ -509,8 +508,8 @@ export async function DELETE(req: NextRequest) {
         // 6. public.produtos (com proteção dupla: só Pedras)
         try {
           await tx`
-            DELETE FROM public.produtos
-            WHERE id_produto = ANY(${idsDel})
+            DELETE FROM alissonerp.erp_produtos
+            WHERE produto_id = ANY(${idsDel})
               AND categoria ILIKE 'Pedras%'
           `;
           etapas.push(`deletadas: ${idsDel.length}`);

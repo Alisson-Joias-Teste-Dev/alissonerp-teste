@@ -140,7 +140,7 @@ export async function syncProdutoToTiny(produtoId: number, operacao: string): Pr
           const data = await res.json() as { id?: number; data?: { id?: number } };
           tinyId = data?.id ?? data?.data?.id;
           if (tinyId) {
-            await sql`UPDATE public.produtos SET id_api_produto = ${tinyId} WHERE id_produto = ${produtoId}`;
+            await sql`UPDATE alissonerp.erp_produtos SET id_api_produto = ${tinyId} WHERE produto_id = ${produtoId}`;
           }
         } catch { /* ignorar */ }
       }

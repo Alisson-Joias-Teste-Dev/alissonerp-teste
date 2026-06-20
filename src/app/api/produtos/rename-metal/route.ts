@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
   const toValue = typeof to === "string" ? (to.trim() || null) : null;
 
   const rows = await sql<{ id_produto: number }[]>`
-    UPDATE public.produtos
+    UPDATE alissonerp.erp_produtos
     SET tipo_metal = ${toValue}
     WHERE tipo_metal = ANY(${from})
     RETURNING id_produto

@@ -120,10 +120,10 @@ export async function PUT(
     WHERE produto_id = ${produtoId}
   `;
   await sql`
-    UPDATE public.produtos
+    UPDATE alissonerp.erp_produtos
     SET preco_pedras     = ${Number(subtotal)},
         preco_total_sync = COALESCE(preco_sync, 0) + ${Number(subtotal)}
-    WHERE id_produto = ${produtoId}
+    WHERE produto_id = ${produtoId}
   `;
 
   return NextResponse.json({ ok: true, count: pedras.length });
