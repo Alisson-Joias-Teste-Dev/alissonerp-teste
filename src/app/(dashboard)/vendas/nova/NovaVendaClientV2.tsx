@@ -668,6 +668,12 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [pagCondicao, setPagCondicao] = useState("À vista");
   const [parcelasRows, setParcelasRows] = useState<ParcelaRow[]>([]);
   const [pagamentos, setPagamentos] = useState<Pagamento[]>([]);
+  // Crediário (forma "A Receber"): plano de parcelamento. Backend: migration 317.
+  // 'meses' = N parcelas mensais no mesmo dia; 'dias' = 1 pagamento futuro.
+  const [crediTipo, setCrediTipo] = useState<"meses" | "dias">("meses");
+  const [crediParcelas, setCrediParcelas] = useState(3);
+  const [crediDiaVenc, setCrediDiaVenc] = useState(10);
+  const [crediDias, setCrediDias] = useState(15);
   const [pagMultForma, setPagMultForma] = useState("Dinheiro");
   const [pagMultParcelas, setPagMultParcelas] = useState(1);
   const [pagValor, setPagValor] = useState("");
@@ -735,6 +741,24 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const totalPago = pagamentos.reduce((s, p) => s + p.valor, 0);
   const pagamentoCobre = pagForma === "Múltiplas" ? Math.abs(totalPago - totalVenda) < 0.01 : true;
   const temAReceber = pagForma === "A Receber" || (pagForma === "Múltiplas" && pagamentos.some(p => p.forma === "A Receber"));
+  // Preview das parcelas do crediário (espelha a geração da migration 317):
+  // 'meses' → N parcelas mensais, 1ª no mês seguinte, dia clampado ao fim do mês,
+  // última parcela absorve o centavo. 'dias' → 1 parcela vencendo em X dias.
+  const crediPreview = useMemo(() => {
+    if (pagForma !== "A Receber") return [] as { num: number; data: Date; valor: number }[];
+    const saldo = totalVenda;
+    if (crediTipo === "dias") return [{ num: 1, data: new Date(Date.now() + crediDias * 86400000), valor: saldo }];
+    const n = Math.max(1, crediParcelas);
+    const base = Math.trunc((saldo / n) * 100) / 100;
+    const hoje = new Date();
+    return Array.from({ length: n }, (_, i) => {
+      const ultimoDia = new Date(hoje.getFullYear(), hoje.getMonth() + 2 + i, 0).getDate();
+      const dia = Math.min(crediDiaVenc, ultimoDia);
+      const data = new Date(hoje.getFullYear(), hoje.getMonth() + 1 + i, dia);
+      const valor = i === n - 1 ? +(saldo - base * (n - 1)).toFixed(2) : base;
+      return { num: i + 1, data, valor };
+    });
+  }, [pagForma, crediTipo, crediParcelas, crediDiaVenc, crediDias, totalVenda]);
   const LIMITE_DESCONTO_CARTAO = 20;
   // Só precisa aprovação se desconto > maxDesconto (exceto admin = bypass com 100)
   const precisaAprovacaoDesconto = maxDesconto < 100 && itens.some(i => i.pct_desconto > maxDesconto);
@@ -1457,9 +1481,15 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       : [{
           forma: pagForma,
           valor: totalVenda,
-          parcelas: pagCondicao === "À vista" ? 1 : parseInt(pagCondicao),
+          parcelas: pagForma === "A Receber"
+            ? (crediTipo === "meses" ? Math.max(1, crediParcelas) : 1)
+            : (pagCondicao === "À vista" ? 1 : parseInt(pagCondicao)),
           gateway: COM_CARTAO.includes(pagForma) ? pagGateway : null,
           status: "pendente",
+          // Plano de parcelamento do crediário (forma "A Receber") — migration 317.
+          ...(pagForma === "A Receber"
+            ? { credi_tipo: crediTipo, credi_param: crediTipo === "meses" ? crediDiaVenc : crediDias }
+            : {}),
         }];
 
     return {
@@ -3294,6 +3324,39 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                 <span className="text-base font-bold tabular-nums" style={{ color: C.esmeralda }}>{fmt(totalVenda)}</span>
               </div>
             </div>
+
+            {pagForma === "A Receber" && (
+              <div className="rounded-xl border px-4 py-3" style={{ borderColor: C.cremeBorder }}>
+                <p className="text-sm font-medium mb-3" style={{ color: "#374151" }}>Pagamento a prazo (crediário)</p>
+                <div className="flex gap-2 mb-3">
+                  <button type="button" onClick={() => setCrediTipo("meses")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "meses" ? C.esmeralda : C.cremeBorder, color: crediTipo === "meses" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "meses" ? 600 : 400 }}>Mensal</button>
+                  <button type="button" onClick={() => setCrediTipo("dias")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "dias" ? C.esmeralda : C.cremeBorder, color: crediTipo === "dias" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "dias" ? 600 : 400 }}>Em X dias</button>
+                </div>
+                {crediTipo === "meses" ? (
+                  <div className="flex gap-3 mb-3">
+                    <label className="flex-1 text-xs" style={{ color: "#6B7280" }}>Parcelas
+                      <input type="number" min={1} max={24} value={crediParcelas} onChange={e => setCrediParcelas(Math.max(1, parseInt(e.target.value) || 1))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                    </label>
+                    <label className="flex-1 text-xs" style={{ color: "#6B7280" }}>Vence todo dia
+                      <input type="number" min={1} max={31} value={crediDiaVenc} onChange={e => setCrediDiaVenc(Math.min(31, Math.max(1, parseInt(e.target.value) || 1)))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                    </label>
+                  </div>
+                ) : (
+                  <label className="block text-xs mb-3" style={{ color: "#6B7280" }}>Pagar em (dias)
+                    <input type="number" min={1} max={180} value={crediDias} onChange={e => setCrediDias(Math.max(1, parseInt(e.target.value) || 1))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  </label>
+                )}
+                <div className="space-y-1">
+                  {crediPreview.map(p => (
+                    <div key={p.num} className="flex justify-between text-xs px-3 py-2 rounded-lg border" style={{ borderColor: C.cremeBorder }}>
+                      <span style={{ color: "#6B7280" }}>{crediTipo === "meses" ? `Parcela ${p.num}/${crediPreview.length} · ` : ""}vence {p.data.toLocaleDateString("pt-BR")}</span>
+                      <span className="font-medium tabular-nums" style={{ color: C.esmeralda }}>{fmt(p.valor)}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs mt-2" style={{ color: "#92400E" }}>A peça só sai da loja com tudo pago. Liberar entrega devendo precisa de aprovação do dono.</p>
+              </div>
+            )}
 
             {temAReceber && !aprovacaoEnviada && (
               <div className="rounded-xl border px-4 py-3 text-sm" style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB", color: "#92400E" }}>

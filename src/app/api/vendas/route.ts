@@ -43,6 +43,11 @@ const VendaPagamentoSchema = z.object({
   valor: z.preprocess(toNum, z.number().nonnegative()),
   parcelas: z.preprocess(toNum, z.number().int().min(1).max(99).optional()),
   status: z.string().max(50).optional(),
+  // Plano de parcelamento do crediário (forma "A Receber"). Ver migration 317.
+  // credi_tipo: 'meses' = N parcelas mensais; 'dias' = 1 pagamento futuro.
+  // credi_param: dia do vencimento (meses) ou nº de dias até o vencimento (dias).
+  credi_tipo: z.enum(["meses", "dias"]).nullable().optional(),
+  credi_param: z.preprocess(toNum, z.number().int().min(0).max(31).optional()),
 }).passthrough();
 
 const VendaPostSchema = z.object({
@@ -812,7 +817,8 @@ export async function POST(req: NextRequest) {
         const isDinheiro = pag.forma === 'Dinheiro';
         await tx`
           INSERT INTO alissonerp.pagamentos_venda (
-            venda_id, forma, gateway, valor, parcelas, status, data_confirmacao
+            venda_id, forma, gateway, valor, parcelas, status, data_confirmacao,
+            credi_tipo, credi_param
           ) VALUES (
             ${venda.id},
             ${pag.forma},
@@ -820,7 +826,9 @@ export async function POST(req: NextRequest) {
             ${pag.valor},
             ${pag.parcelas ?? 1},
             ${isDinheiro ? 'confirmado' : (pag.status ?? 'pendente')},
-            ${isDinheiro ? sql`now()` : null}
+            ${isDinheiro ? sql`now()` : null},
+            ${pag.credi_tipo ?? null},
+            ${pag.credi_param ?? null}
           )
         `;
       }
@@ -952,9 +960,11 @@ interface ItemInput {
 }
 
 interface PagamentoInput {
-  forma:     string;
-  gateway?:  string | null;
-  valor:     number;
-  parcelas?: number;
-  status?:   string;
+  forma:        string;
+  gateway?:     string | null;
+  valor:        number;
+  parcelas?:    number;
+  status?:      string;
+  credi_tipo?:  "meses" | "dias" | null;  // plano de parcelamento do crediário (mig 317)
+  credi_param?: number;                    // dia do vencimento (meses) ou nº de dias (dias)
 }
