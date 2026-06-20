@@ -105,7 +105,13 @@ function fmtBRL(v: number) {
 }
 function fmtData(s: string | null) {
   if (!s) return "—";
-  return new Date(s).toLocaleDateString("pt-BR");
+  // Datas DATE (vencimento/recebimento) vem sem hora; new Date(s) as interpreta
+  // como meia-noite UTC e, no fuso BR (-3h), exibia o dia anterior. Monta a data
+  // local a partir de YYYY-MM-DD pra nao deslocar.
+  const [y, m, dd] = String(s).slice(0, 10).split("-").map(Number);
+  const dt = new Date(y, (m || 1) - 1, dd || 1);
+  if (isNaN(dt.getTime())) return "—";
+  return dt.toLocaleDateString("pt-BR");
 }
 function fmtDtHr(s: string) {
   return new Date(s).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
