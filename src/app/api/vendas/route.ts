@@ -46,8 +46,8 @@ const VendaPagamentoSchema = z.object({
   // Plano de parcelamento do crediário (forma "A Receber"). Ver migration 317.
   // credi_tipo: 'meses' = N parcelas mensais; 'dias' = 1 pagamento futuro.
   // credi_param: dia do vencimento (meses) ou nº de dias até o vencimento (dias).
-  credi_tipo: z.enum(["meses", "dias"]).nullable().optional(),
-  credi_param: z.preprocess(toNum, z.number().int().min(0).max(31).optional()),
+  credi_tipo: z.enum(["meses", "dias", "sinal"]).nullable().optional(),
+  credi_param: z.preprocess(toNum, z.number().int().min(0).max(31).nullable().optional()),
 }).passthrough();
 
 const VendaPostSchema = z.object({
@@ -965,6 +965,6 @@ interface PagamentoInput {
   valor:        number;
   parcelas?:    number;
   status?:      string;
-  credi_tipo?:  "meses" | "dias" | null;  // plano de parcelamento do crediário (mig 317)
+  credi_tipo?:  "meses" | "dias" | "sinal" | null;  // plano/sinal do crediário (mig 317/318)
   credi_param?: number;                    // dia do vencimento (meses) ou nº de dias (dias)
 }

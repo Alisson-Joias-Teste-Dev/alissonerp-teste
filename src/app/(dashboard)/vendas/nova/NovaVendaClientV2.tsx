@@ -670,7 +670,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [pagamentos, setPagamentos] = useState<Pagamento[]>([]);
   // Crediário (forma "A Receber"): plano de parcelamento. Backend: migration 317.
   // 'meses' = N parcelas mensais no mesmo dia; 'dias' = 1 pagamento futuro.
-  const [crediTipo, setCrediTipo] = useState<"meses" | "dias">("meses");
+  const [crediTipo, setCrediTipo] = useState<"meses" | "dias" | "sinal">("meses");
   const [crediParcelas, setCrediParcelas] = useState(3);
   const [crediDiaVenc, setCrediDiaVenc] = useState(10);
   const [crediDias, setCrediDias] = useState(15);
@@ -747,6 +747,12 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const crediPreview = useMemo(() => {
     if (pagForma !== "A Receber") return [] as { num: number; data: Date; valor: number }[];
     const saldo = totalVenda;
+    if (crediTipo === "sinal") {
+      // Sinal: peça reservada, saldo vence em 7 dias úteis (aprox. no preview, sem feriados; o backend usa o cálculo exato)
+      const d = new Date(); let u = 0;
+      while (u < 7) { d.setDate(d.getDate() + 1); const dow = d.getDay(); if (dow !== 0 && dow !== 6) u++; }
+      return [{ num: 1, data: d, valor: saldo }];
+    }
     if (crediTipo === "dias") return [{ num: 1, data: new Date(Date.now() + crediDias * 86400000), valor: saldo }];
     const n = Math.max(1, crediParcelas);
     const base = Math.trunc((saldo / n) * 100) / 100;
@@ -1486,9 +1492,9 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
             : (pagCondicao === "À vista" ? 1 : parseInt(pagCondicao)),
           gateway: COM_CARTAO.includes(pagForma) ? pagGateway : null,
           status: "pendente",
-          // Plano de parcelamento do crediário (forma "A Receber") — migration 317.
+          // Plano de parcelamento/sinal do crediário (forma "A Receber") — migrations 317/318.
           ...(pagForma === "A Receber"
-            ? { credi_tipo: crediTipo, credi_param: crediTipo === "meses" ? crediDiaVenc : crediDias }
+            ? { credi_tipo: crediTipo, credi_param: crediTipo === "meses" ? crediDiaVenc : crediTipo === "dias" ? crediDias : null }
             : {}),
         }];
 
@@ -3331,6 +3337,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                 <div className="flex gap-2 mb-3">
                   <button type="button" onClick={() => setCrediTipo("meses")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "meses" ? C.esmeralda : C.cremeBorder, color: crediTipo === "meses" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "meses" ? 600 : 400 }}>Mensal</button>
                   <button type="button" onClick={() => setCrediTipo("dias")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "dias" ? C.esmeralda : C.cremeBorder, color: crediTipo === "dias" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "dias" ? 600 : 400 }}>Em X dias</button>
+                  <button type="button" onClick={() => setCrediTipo("sinal")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "sinal" ? C.esmeralda : C.cremeBorder, color: crediTipo === "sinal" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "sinal" ? 600 : 400 }}>Sinal</button>
                 </div>
                 {crediTipo === "meses" ? (
                   <div className="flex gap-3 mb-3">
@@ -3341,10 +3348,12 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                       <input type="number" min={1} max={31} value={crediDiaVenc} onChange={e => setCrediDiaVenc(Math.min(31, Math.max(1, parseInt(e.target.value) || 1)))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
                     </label>
                   </div>
-                ) : (
+                ) : crediTipo === "dias" ? (
                   <label className="block text-xs mb-3" style={{ color: "#6B7280" }}>Pagar em (dias)
                     <input type="number" min={1} max={180} value={crediDias} onChange={e => setCrediDias(Math.max(1, parseInt(e.target.value) || 1))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
                   </label>
+                ) : (
+                  <p className="text-xs mb-3" style={{ color: "#6B7280" }}>A peça fica reservada. O cliente tem 7 dias úteis para pagar o saldo — senão vira vale-crédito e a peça volta ao estoque.</p>
                 )}
                 <div className="space-y-1">
                   {crediPreview.map(p => (
