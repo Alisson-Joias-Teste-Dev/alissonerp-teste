@@ -85,6 +85,7 @@ Um **robô diário** checa os prazos (novo motor de reserva; mesmo padrão do ag
 **Regra transversal (Jonathan 19/06): toda notificação aparece NA TELA** (faixa/banner visível que some com um "ok"), **nunca só no sino** — as consultoras não olham o sino.
 
 - **③** 2-3 dias antes do prazo → consultora: "esta venda vai virar crédito" (todas as vendas com prazo).
+  - **Implementado (v2.71.0): faixa global `ReservaAlarme`** (montada no `DashboardShell`, aparece em qualquer tela da consultora dona da venda). Busca ao vivo `GET /api/crediario/reserva-alertas` (recalcula a janela dos 7 dias por consultora — NÃO depende da cron). Âmbar = vencendo; vermelho + bip = último dia ("amanhã vira VC"). Some com "ok" por hoje (localStorage por data) e volta no dia seguinte. Chip da venda abre o drawer do crediário (`/crediario?venda=<id>`).
 - **②** no vencimento de cada parcela → lembrete para a consultora + **mensagem pronta de cobrança** (WhatsApp, 1 clique pra enviar; automático 100% = fase 2 configurável).
 - **②** inadimplência a cada **15 dias** → faixa que some com "ok"; passou de **1 mês e meio** → avisa também o dono.
 - **④** a cada **20-30 dias** → lembrar a consultora de chamar o cliente para retirar (não é cobrança, já pagou).
