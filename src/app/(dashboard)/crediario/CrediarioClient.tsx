@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   CreditCard,
   AlertTriangle,
@@ -991,6 +991,32 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   };
 
   const isGerente = ["desenvolvedor", "admin", "gerente_loja"].includes(userRole);
+
+  // Deep-link "Receber no Crediario" (vindo da tela da venda):
+  // /crediario?venda=<id> abre direto o drawer da conta pendente daquela venda,
+  // economizando cliques do colaborador. O SSR traz so as primeiras 50 contas
+  // (vencidas no topo); se a conta da venda nao estiver carregada, busca na API
+  // antes de abrir. Roda uma vez (guard) pra nao reabrir o drawer ao fechar.
+  const deeplinkFeito = useRef(false);
+  useEffect(() => {
+    if (deeplinkFeito.current) return;
+    const vid = Number(new URLSearchParams(window.location.search).get("venda"));
+    if (!vid) return;
+    deeplinkFeito.current = true;
+    const abrir = (lista: CrediarioItem[]) => {
+      const c = lista
+        .filter(i => i.venda_id === vid && i.situacao === "pendente")
+        .sort((a, b) => (a.data_vencimento ?? "9999").localeCompare(b.data_vencimento ?? "9999"))[0];
+      if (c) { setSelectedContaId(c.conta_receber_id); return true; }
+      return false;
+    };
+    if (abrir(loadedItems)) return;
+    const params = new URLSearchParams({ situacao: "pendente", limit: "500" });
+    if (!isGerente && vendedorId) params.set("vendedor_id", String(vendedorId));
+    void apiFetch<{ items: CrediarioItem[] }>(`/api/crediario?${params}`)
+      .then(d => abrir(d.items))
+      .catch(() => {});
+  }, [loadedItems, isGerente, vendedorId]);
 
   const reload = useCallback(async (situacao: string, aging: string) => {
     setLoading(true);

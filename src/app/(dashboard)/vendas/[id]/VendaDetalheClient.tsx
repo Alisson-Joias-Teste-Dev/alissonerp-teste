@@ -3288,7 +3288,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                         {/* A Receber com crédito aprovado → gerenciar no Crediário */}
                         {isAReceber && pag.status === "pendente" && creditoAprovado && (
                           <a
-                            href="/crediario"
+                            href={`/crediario?venda=${venda.id}`}
                             className="text-xs px-2.5 py-1 rounded-lg font-medium inline-flex items-center gap-1"
                             style={{ backgroundColor: C.esmeralda, color: C.creme, textDecoration: "none" }}>
                             Crediário →
@@ -3629,7 +3629,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                     )}
                     {/* Porta única: saldo "A Receber" de venda aprovada só recebe no Crediário */}
                     {aReceberNoCrediario && (
-                      <a href="/crediario"
+                      <a href={`/crediario?venda=${venda.id}`}
                         className="w-full mt-1 py-1.5 rounded-lg text-xs font-semibold border inline-flex items-center justify-center gap-1"
                         style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg, color: C.esmeralda, textDecoration: "none" }}>
                         Receber este saldo no Crediário →
