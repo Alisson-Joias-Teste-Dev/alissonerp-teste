@@ -807,8 +807,15 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       valor: i === n - 1 ? +(totalVenda - base * (n - 1)).toFixed(2) : base,
     }));
     setParcelasRows(rows);
-   
+
   }, [pagCondicao, totalVenda, pagForma]);
+
+  // UX: ao escolher "A Receber", a 1ª linha a montar JÁ vem como "A Receber" (a consultora
+  // só digita o valor a receber). Evita o "apareceu Dinheiro" confuso. Em Múltiplas, volta a Dinheiro.
+  useEffect(() => {
+    if (pagForma === "A Receber") setPagMultForma("A Receber");
+    else if (pagForma === "Múltiplas") setPagMultForma("Dinheiro");
+  }, [pagForma]);
 
   // ─── CEP lookup ──────────────────────────────────────────────────────────
   async function buscaCEP(cep: string, target: "entrega" | "novoCliente") {

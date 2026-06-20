@@ -536,6 +536,11 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [parcelasRows, setParcelasRows] = useState<ParcelaRow[]>([]);
   const [multPagForma, setMultPagForma] = useState("Dinheiro");
   const [multPagValor, setMultPagValor] = useState("");
+  // UX: ao escolher "A Receber", a 1ª linha a montar já vem como "A Receber" (só digita o valor).
+  useEffect(() => {
+    if (newPagForma === "A Receber") setMultPagForma("A Receber");
+    else if (newPagForma === "Múltiplas") setMultPagForma("Dinheiro");
+  }, [newPagForma]);
   const [multPagamentos, setMultPagamentos] = useState<Array<{ _key: string; forma: string; valor: number; ouro_peso?: number; ouro_valor_grama?: number; ouro_foto_path?: string }>>([]);
 
   // ── Manual MP ───────────────────────────────────────────────────────────────
