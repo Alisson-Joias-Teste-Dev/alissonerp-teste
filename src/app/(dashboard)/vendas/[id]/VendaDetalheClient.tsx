@@ -2104,6 +2104,14 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               style={{ backgroundColor: situacaoStyle.bg, color: situacaoStyle.text }}>
               {SITUACAO_LABEL[venda.situacao] ?? venda.situacao}
             </span>
+            {/* Venda aprovada mas ainda com pagamento em aberto (ex.: A Receber no
+                Crediário). O status segue "Aprovado"; a tag avisa que falta receber. */}
+            {venda.situacao === "aprovado" && temPagamentoPendente && (
+              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                Pagamento pendente
+              </span>
+            )}
             {entregueComPendenciaFinanceira && (
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
                 style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
