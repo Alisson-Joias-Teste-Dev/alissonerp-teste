@@ -581,12 +581,24 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className="text-[11px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap"
-                          style={{ backgroundColor: sitStyle.bg, color: sitStyle.color }}
-                        >
-                          {sitLabel}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span
+                            className="text-[11px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap"
+                            style={{ backgroundColor: sitStyle.bg, color: sitStyle.color }}
+                          >
+                            {sitLabel}
+                          </span>
+                          {/* Venda aprovada com saldo em aberto (ex.: A Receber no Crediário):
+                              status segue "Aprovado", a tag avisa que falta receber. */}
+                          {v.situacao === "aprovado" && saldo > 0.01 && (
+                            <span
+                              className="text-[11px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap"
+                              style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}
+                            >
+                              Pagamento pendente
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
