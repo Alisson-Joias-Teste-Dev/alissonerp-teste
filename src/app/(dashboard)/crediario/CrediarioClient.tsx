@@ -110,6 +110,17 @@ function fmtData(s: string | null) {
 function fmtDtHr(s: string) {
   return new Date(s).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
+// Formata telefone BR pra exibicao: (XX) XXXXX-XXXX. O numero vem do celular
+// (vw_crediario), as vezes sem mascara. Para o link do WhatsApp os digitos sao
+// extraidos a parte em montarWhatsappCobranca.
+function fmtTelefone(s: string | null): string {
+  if (!s) return "";
+  const dig = s.replace(/\D/g, "");
+  const n = dig.startsWith("55") && dig.length > 11 ? dig.slice(2) : dig;
+  if (n.length === 11) return `(${n.slice(0, 2)}) ${n.slice(2, 7)}-${n.slice(7)}`;
+  if (n.length === 10) return `(${n.slice(0, 2)}) ${n.slice(2, 6)}-${n.slice(6)}`;
+  return s;
+}
 
 function agingLabel(status: string, dias: number) {
   if (status === "pago") return { text: "Pago", color: C.verde, bg: C.verdeLt };
@@ -407,7 +418,7 @@ function DetalheDrawer({
               <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>Cliente</div>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#1f2937" }}>{detalhe.cliente_nome ?? "—"}</div>
               {detalhe.cliente_telefone && (
-                <div style={{ fontSize: 12, color: C.cinza }}>{detalhe.cliente_telefone}</div>
+                <div style={{ fontSize: 12, color: C.cinza }}>{fmtTelefone(detalhe.cliente_telefone)}</div>
               )}
               {detalhe.cliente_telefone && detalhe.situacao === "pendente" && (
                 <a
