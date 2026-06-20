@@ -138,13 +138,15 @@ export async function POST(req: NextRequest) {
     const warehouseId = body.warehouse_id ?? 2; // default: Loja
 
     await sql.begin(async (tx: any) => {
-      // 1. Registra entrada no stock_ledger_entry
+      // 1. Registra em movimentacoes_estoque_comercial (fonte única de verdade do saldo físico).
+      // O trigger trg_mirror_movimento_to_sle cria o SLE automaticamente como auditoria.
+      // Antes era INSERT direto no SLE, causando divergência com a view e falso STOCK_NEGATIVE.
       await tx`
-        INSERT INTO alissonerp.stock_ledger_entry
-          (item_id, item_type, warehouse_id, actual_qty, voucher_type, obs, created_by)
+        INSERT INTO alissonerp.movimentacoes_estoque_comercial
+          (produto_id, tipo, quantidade, motivo, observacao, local_estoque_id, created_by, status)
         VALUES
-          (${r.produto_id}::bigint, 'produto', ${warehouseId}, 1, 'ajuste_entrada',
-           ${'Entrada por scanner RFID: ' + r.epc}, ${user.id}::uuid)
+          (${r.produto_id}::bigint, 'entrada', 1, 'ajuste_entrada',
+           ${'Entrada por scanner RFID: ' + r.epc}, ${warehouseId}, ${user.id}::uuid, 'efetivado')
       `;
 
       // 2. Marca RFID como ativo na localização correta

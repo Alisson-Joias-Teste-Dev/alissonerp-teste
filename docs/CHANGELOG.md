@@ -2,6 +2,25 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(estoque): SLE vira auditoria — trava de saldo negativo passa a ler da view (v2.69.0)
+
+**Problema raiz (recorrente):** o trigger `fn_prevent_negative_sle` lia o saldo do
+`stock_ledger_entry` (SLE). O SLE podia divergir da tabela `movimentacoes_estoque_comercial`
+(o número que a tela mostra), causando erro `STOCK_NEGATIVE` mesmo com estoque visível.
+A divergência surgia quando um ajuste manual gravava quantidades diferentes nos dois lados.
+O mesmo problema ocorria no RFID: a entrada era inserida direto no SLE, sem passar pela
+tabela de movimentações — o SLE avançava mas a view não sabia, criando assimetria invertida.
+
+**Correção (migration 319):**
+- `fn_prevent_negative_sle` agora lê o saldo de `movimentacoes_estoque_comercial`
+  (mesma fonte que a tela) — trava e UI nunca mais divergem.
+- API RFID `entrada_estoque` passa a inserir em `movimentacoes_estoque_comercial`.
+  O trigger `trg_mirror_movimento_to_sle` cria o SLE automaticamente, igual a todo o resto.
+
+**O SLE continua existindo** como log de auditoria (RPC functions, qty_after, histórico)
+mas deixa de ser fonte de verdade para o bloqueio de saldo negativo.
+
+
 ## feat(vendas): painel embutido do código do vale-troca (sem pop-up) + reuso de código (v2.68.4)
 
 Resolve o atrito do código do vale relatado pelo Jonathan (cliente demora a responder; ao sair da
