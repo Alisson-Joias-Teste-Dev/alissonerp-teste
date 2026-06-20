@@ -2043,9 +2043,19 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
 
   // Crédito A Receber — usa campo próprio (aprovacao_credito_tarefa_id)
   const temAReceber = venda.pagamentos.some(p => p.forma === "A Receber" && p.status === "pendente");
-  const creditoTarefaConcluida = venda.aprovacao_credito_status === "concluida";
+  // A tarefa de aprovação de crédito termina com status "aprovada" (gerente/diretor
+  // aprovou). Tarefas antigas usavam "concluida" — aceitar ambos evita que a venda já
+  // aprovada continue exibindo "Solicitar Aprovação" em vez do link do Crediário.
+  const creditoTarefaConcluida = ["concluida", "aprovada"].includes(venda.aprovacao_credito_status ?? "");
   const aguardandoAprovacaoCredito = !!venda.aprovacao_credito_tarefa_id && venda.aprovacao_credito_status === "aguardando_aprovacao";
   const creditoFoiAprovado = !!venda.aprovacao_credito_tipo && creditoTarefaConcluida;
+
+  // Porta única do Crediário: numa venda já aprovada, o "A Receber" pendente virou uma
+  // conta no Crediário. O recebimento desse saldo acontece SÓ na tela do Crediário — a
+  // venda não oferece "completar/adicionar pagamento" pra ele, senão vira recebimento
+  // fantasma (venda fica "paga" e a conta a receber some sem baixa).
+  const aReceberNoCrediario = temAReceber &&
+    ["aprovado", "confirmado", "concluido", "entregue"].includes(venda.situacao);
 
   // Desconto acima do limite — usa campo próprio (aprovacao_desconto_tarefa_id)
   const isDescontoApproval = !!venda.aprovacao_desconto_tarefa_id && venda.aprovacao_desconto_status === "aguardando_aprovacao";
@@ -3596,7 +3606,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       <span style={{ color: "#D97706" }}>Saldo pendente</span>
                       <span className="tabular-nums" style={{ color: "#D97706" }}>{fmt(venda.total_venda - venda.total_pago)}</span>
                     </div>
-                    {edit.pagamento && !addingPag && (
+                    {edit.pagamento && !addingPag && !aReceberNoCrediario && (
                       <button
                         onClick={() => {
                           const restante = (venda.total_venda - venda.total_pago).toFixed(2).replace(".", ",");
@@ -3608,6 +3618,14 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                         style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB", color: "#92400E" }}>
                         + Completar pagamento — {fmt(venda.total_venda - venda.total_pago)}
                       </button>
+                    )}
+                    {/* Porta única: saldo "A Receber" de venda aprovada só recebe no Crediário */}
+                    {aReceberNoCrediario && (
+                      <a href="/crediario"
+                        className="w-full mt-1 py-1.5 rounded-lg text-xs font-semibold border inline-flex items-center justify-center gap-1"
+                        style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg, color: C.esmeralda, textDecoration: "none" }}>
+                        Receber este saldo no Crediário →
+                      </a>
                     )}
                   </>
                 )}
@@ -3826,7 +3844,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
             ) : (
               // Já tem pagamentos: botão + formulário colapsável padronizado
               <>
-                {!addingPag ? (
+                {aReceberNoCrediario ? null : !addingPag ? (
                   <button onClick={() => {
                       const pendente = Math.max(0, totalVenda - (venda?.total_pago ?? 0));
                       setNewPagValor(pendente > 0 ? pendente.toFixed(2).replace(".", ",") : "");

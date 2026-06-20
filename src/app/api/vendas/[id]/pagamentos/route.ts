@@ -107,6 +107,24 @@ export async function POST(
     throw e;
   }
 
+  // ── Porta única do Crediário ─────────────────────────────────────────────
+  // Venda já aprovada com "A Receber" pendente: esse saldo virou uma conta no
+  // Crediário. Quitá-lo criando outro pagamento pela venda gera recebimento
+  // fantasma (a venda fica "paga", mas a conta a receber some sem baixa). O
+  // recebimento desse saldo é registrado SÓ pela tela do Crediário.
+  if (["aprovado", "confirmado"].includes(venda.situacao)) {
+    const [aReceberPend] = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM alissonerp.pagamentos_venda
+      WHERE venda_id = ${vendaId} AND forma = 'A Receber' AND status = 'pendente'
+    `;
+    if (aReceberPend && aReceberPend.n > 0) {
+      return NextResponse.json(
+        { error: "Esta venda tem saldo 'A Receber', que agora é uma conta no Crediário. Registre o recebimento pela tela do Crediário, não pela venda.", usar_crediario: true },
+        { status: 409 },
+      );
+    }
+  }
+
   // ── Travar venda: sem pagamento enquanto desconto > threshold não aprovado ─
   if (venda.tem_desconto_alto && !venda.desconto_aprovado_por) {
     return NextResponse.json(
