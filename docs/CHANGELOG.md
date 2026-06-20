@@ -24,6 +24,17 @@ nunca era configurado e a aprovação caía no `ELSE` do gatilho (1 conta única
 `parcelas=1`; aprovação (rollback) gera conta vencendo +60 dias. Ramos 'meses' (3 parcelas) e
 'sinal' (7 dias úteis) validados via SQL com ROLLBACK. `tsc` zero erros.
 
+**Fase 2 — motor da reserva → VC (robô novo):** `POST /api/crediario/reserva-cron` (migration 327
+grava o corte `crediario_reserva_corte` = data de aplicação por ambiente). Robô diário: para vendas
+**criadas após o corte**, `aprovado` (peça não entregue/reservada), com "A Receber" pendente, **data de
+entrega passada** e **sem ordem de produção aberta**, conta **7 dias corridos** a partir do início
+(= max(data_entrega, última conclusão de ordem)). Avisa a consultora (início / últimos 3 dias / "amanhã
+vira VC", 1×/dia via `notificacoes` tipo `crediario_reserva`); no estouro gera **VC-** proporcional ao
+pago, cancela as contas a receber pendentes da venda e notifica o estoque (peça volta — confirmação
+física, como no sinal). O `sinal-cron` vira **legado** (só vendas antigas, `credi_tipo='sinal'`). Testado
+no homolog (seleção + janela, cenários +/- dias, ROLLBACK); conversão espelha o sinal-cron. `tsc` zero.
+**Pendente:** agendar o `reserva-cron` no n8n/curl diário; Fase 1b (A Receber multi-forma no detalhe).
+
 **Fase 1 — "A Receber" vira pagamento multi-forma (wizard):** ao escolher "A Receber" na criação da
 venda, a consultora monta TODAS as formas (A Receber é só uma linha, valor digitado) e a venda só
 fecha com **restante = 0** — mesma mecânica do "Múltiplas" (reusada, sem duplicar: `pagForma==="A Receber"`
