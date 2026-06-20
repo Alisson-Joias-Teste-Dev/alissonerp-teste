@@ -383,14 +383,8 @@ export default function PagamentoForm({
         </div>
       )}
 
-      {/* A Receber — modo EDIÇÃO (detalhe): mantém a caixa simples (1 linha A Receber + painel
-          de plano ao lado). No modo CRIAÇÃO (wizard) o A Receber usa o bloco multi-forma abaixo. */}
-      {pagForma === "A Receber" && mode === "edicao" && totalVenda > 0 && (
-        <div className="rounded-xl border p-4 space-y-2" style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB" }}>
-          <p className="text-sm font-medium" style={{ color: "#374151" }}>A Receber — {fmt(totalVenda)}</p>
-          <p className="text-xs" style={{ color: "#92400E" }}>Pagamento a receber. Aprovação de crédito necessária.</p>
-        </div>
-      )}
+      {/* A Receber usa o bloco multi-forma abaixo (criação E edição): monta todas as formas,
+          "A Receber" é uma das linhas, e o restante precisa fechar. */}
 
       {showAReceberWarning && (
         <div className="rounded-lg border px-4 py-3 text-xs" style={{ backgroundColor: "#FEF9C3", borderColor: "#FDE68A", color: "#713F12" }}>
@@ -674,7 +668,7 @@ export default function PagamentoForm({
 
       {/* Múltiplas (e "A Receber": mesma mecânica multi-forma — montar todas as formas
           até o restante fechar; "A Receber" é uma das linhas, com seu plano no painel). */}
-      {(pagForma === "Múltiplas" || (pagForma === "A Receber" && mode === "criacao")) && (() => {
+      {(pagForma === "Múltiplas" || pagForma === "A Receber") && (() => {
         const multFormas = formasPagamento.filter(f => f !== "Múltiplas");
         return (
           <div>
@@ -911,7 +905,7 @@ export default function PagamentoForm({
 
       {/* Botão Registrar (modo edição, formulário simples não-gateway).
           Vale COM dono: o botão fica no painel ValeCodigoInline (acima) — esconde este. */}
-      {mode === "edicao" && vendaId && pagForma !== "Múltiplas" && pagForma !== "Manual (MP)" &&
+      {mode === "edicao" && vendaId && pagForma !== "Múltiplas" && pagForma !== "A Receber" && pagForma !== "Manual (MP)" &&
         !(pagForma === "Vale-Troca" && valeValidacao?.ok && valeValidacao.cliente_id != null && onAplicarVale) && (
         <button
           onClick={() => handleAddPagamento(pagFormValor || undefined)}

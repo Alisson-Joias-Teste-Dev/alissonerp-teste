@@ -3715,7 +3715,12 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
             // valorBase = o que está sendo lançado a prazo (valor digitado ou o saldo).
             // Cobre A Receber sozinho E A Receber parcial (depois de outros pagamentos).
             const mostrarCrediDet = newPagForma === "A Receber";
-            const crediValorBaseDet = (parseFloat((newPagValor || "").replace(",", ".")) || saldoPendente);
+            // valorBase do preview = soma das linhas "A Receber" já adicionadas; se ainda não
+            // tem nenhuma, usa o que está sendo digitado no multi-forma (ou o saldo).
+            const aReceberNasLinhasDet = edicaoPayments.filter(p => p.forma === "A Receber").reduce((s, p) => s + p.valor, 0);
+            const crediValorBaseDet = aReceberNasLinhasDet > 0
+              ? aReceberNasLinhasDet
+              : (parseFloat((multPagValor || "").replace(",", ".")) || saldoPendente);
             const crediPreviewDet = mostrarCrediDet
               ? calcularCrediPreview({ tipo: crediTipo, valorBase: crediValorBaseDet, parcelas: crediParcelas, diaVenc: crediDiaVenc, dias: crediDias })
               : [];
@@ -3729,25 +3734,29 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               try {
                 const v = valorManual ? parseFloat(valorManual.replace(",", ".")) : parseFloat(newPagValor.replace(",", ".")) || saldoPendente;
                 if (!v || v <= 0) return;
+                // No multi-forma (Múltiplas OU A Receber) a forma da LINHA vem do seletor interno
+                // (multPagForma); na forma única, vem da forma de recebimento (newPagForma).
+                const ehMulti = newPagForma === "Múltiplas" || newPagForma === "A Receber";
+                const formaLinha = ehMulti ? multPagForma : newPagForma;
                 // A Receber: nº de parcelas vem do plano mensal (igual wizard); demais formas
                 // usam a condição de parcelamento normal.
-                const parcelas = newPagForma === "A Receber"
+                const parcelas = formaLinha === "A Receber"
                   ? (crediTipo === "meses" ? Math.max(1, crediParcelas) : 1)
                   : (newPagCondicao === "À vista" ? 1 : parseInt(newPagCondicao) || 1);
-                const body: Record<string, unknown> = { forma: newPagForma, valor: v, parcelas };
-                if (newPagForma === "Cartão de Crédito" || newPagForma === "Pix") body.gateway = newPagGateway;
-                if (newPagForma === "A Receber") {
-                  // Plano de parcelamento/sinal do crediário (migrations 317/318). Mesmo
-                  // mapeamento do wizard: 'meses'→dia do vencimento; 'dias'→nº de dias; 'sinal'→null.
+                const body: Record<string, unknown> = { forma: formaLinha, valor: v, parcelas };
+                if (formaLinha === "Cartão de Crédito" || formaLinha === "Pix") body.gateway = newPagGateway;
+                if (formaLinha === "A Receber") {
+                  // Plano de parcelamento do crediário (migrations 317/318). Mesmo mapeamento
+                  // do wizard: 'meses'→dia do vencimento; 'dias'→nº de dias.
                   body.credi_tipo = crediTipo;
                   body.credi_param = crediTipo === "meses" ? crediDiaVenc : crediTipo === "dias" ? crediDias : null;
                 }
-                if (newPagForma === "Vale-Troca") {
+                if (formaLinha === "Vale-Troca") {
                   // Promocional (sem dono) aplica direto. Vale COM dono passa pelo painel
                   // ValeCodigoInline (onAplicarVale=aplicarValeSingleComCodigo) — nao cai aqui.
                   body.vale_numero = valeNumero.trim();
                 }
-                if (newPagForma === "Ouro") {
+                if (formaLinha === "Ouro") {
                   const peso = parseFloat(ouroPeso.replace(",", "."));
                   const valorGrama = parseFloat(ouroValorGrama.replace(",", "."));
                   if (!peso || peso <= 0) { setSaveErr("Informe o peso do ouro."); return; }

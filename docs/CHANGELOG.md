@@ -40,7 +40,8 @@ venda, a consultora monta TODAS as formas (A Receber é só uma linha, valor dig
 fecha com **restante = 0** — mesma mecânica do "Múltiplas" (reusada, sem duplicar: `pagForma==="A Receber"`
 passou a ser tratado como `ehMultiForma`). O plano (Mensal/Em X dias) vai na linha A Receber, inclusive
 no caminho pré-salvo (passo 4). `PagamentoForm`: bloco multi-forma vale p/ A Receber só em `mode="criacao"`;
-o detalhe (`edicao`) segue com a caixa simples + painel (multi-forma no detalhe = Fase 1b). Testado no
+o detalhe (`edicao`) também usa o multi-forma agora (Fase 1b — `handleEdicaoAdd` usa a forma da linha
+`multPagForma`; testado: venda 30155 Dinheiro 1.890 + A Receber 2.000 3×/dia 10 gravados). Testado no
 homolog (venda 15481): Dinheiro 1.890 + A Receber 2.000 (plano meses 3/dia 10), restante R$ 0; aprovação
 (rollback) gerou 3 parcelas de R$ 666,66 só sobre os 2.000. `tsc` zero. **Múltiplas** segue vivo (será
 descontinuado depois). _(continua o redesenho da regra ③ abaixo.)_
