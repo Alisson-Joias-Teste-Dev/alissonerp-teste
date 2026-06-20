@@ -62,7 +62,7 @@ export default function PainelCrediario({
           <input type="number" min={1} max={180} value={dias} onChange={e => setDias(Math.max(1, parseInt(e.target.value) || 1))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
         </label>
       ) : (
-        <p className="text-xs mb-3" style={{ color: "#6B7280" }}>A peça fica reservada. O cliente tem 7 dias úteis para pagar o saldo — senão vira vale-crédito e a peça volta ao estoque.</p>
+        <p className="text-xs mb-3" style={{ color: "#6B7280" }}>A peça fica reservada. O cliente tem 7 dias para pagar o saldo — senão vira vale-crédito e a peça volta ao estoque.</p>
       )}
       <div className="space-y-1">
         {preview.map(p => (
