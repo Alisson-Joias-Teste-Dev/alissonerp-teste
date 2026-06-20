@@ -105,6 +105,54 @@ export async function gerarValeTroca(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// gerarValeCredito — vale VC- de crédito por venda NÃO paga (sinal vencido)
+// Crediário Fase 3: quando o cliente não paga o sinal no prazo, o que ele já
+// pagou vira um vale CRÉDITO. Prefixo VC- (diferencia do VT- de devolução).
+// Reusa a mesma sequence e a auditoria; origem='venda_nao_paga' + origem_venda_id
+// rastreiam de onde veio. NÃO toca gerarValeTroca (usos de devolução intactos).
+// ═══════════════════════════════════════════════════════════════════════════
+export async function gerarValeCredito(
+  clienteId: number | null,
+  valor: number,
+  userId: string,
+  origemVendaId: number | null,
+  txClient?: typeof sql,
+): Promise<ValeTroca> {
+  const runner = txClient ?? sql;
+  if (valor <= 0) throw new Error("Valor do vale crédito deve ser maior que zero");
+
+  const [row] = await runner`
+    INSERT INTO alissonerp.vale_troca (
+      numero, devolucao_id, cliente_id, valor_original, valor_disponivel,
+      status, origem, origem_venda_id, created_by
+    ) VALUES (
+      'VC-' || LPAD(nextval('alissonerp.vale_troca_seq')::text, 5, '0'),
+      NULL, ${clienteId}, ${valor}, ${valor}, 'ativo',
+      'venda_nao_paga', ${origemVendaId}, ${userId}::uuid
+    )
+    RETURNING id, numero, devolucao_id, cliente_id, valor_original, valor_disponivel,
+              status, venda_utilizado_id, utilizado_em, vale_origem_id, created_at, created_by
+  `;
+
+  await logAudit(runner, {
+    tabela: "vale_troca",
+    operacao: "INSERT",
+    registro_id: row.id,
+    usuario_id: userId,
+    dados_depois: {
+      numero: row.numero, valor_original: valor,
+      origem: "venda_nao_paga", origem_venda_id: origemVendaId, cliente_id: clienteId,
+    },
+  });
+
+  return {
+    ...row,
+    valor_original: parseFloat(row.valor_original),
+    valor_disponivel: parseFloat(row.valor_disponivel),
+  } as ValeTroca;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // validarValeTroca — verifica se numero existe, status e saldo
 // ═══════════════════════════════════════════════════════════════════════════
 export async function validarValeTroca(numero: string): Promise<ValidacaoValeTroca> {
