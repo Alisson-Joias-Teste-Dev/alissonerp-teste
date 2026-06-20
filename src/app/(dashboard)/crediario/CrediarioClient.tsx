@@ -118,6 +118,16 @@ function agingLabel(status: string, dias: number) {
   return { text: "Em dia", color: C.esmeralda, bg: C.esmeraldaLt };
 }
 
+// Monta o link de cobrança no WhatsApp com a mensagem pronta (Fase 4 crediário).
+// A consultora revisa e envia — abre o WhatsApp já com o texto preenchido (1 clique).
+function montarWhatsappCobranca(d: ContaDetalhe): string {
+  const tel = (d.cliente_telefone ?? "").replace(/\D/g, "");
+  const num = tel.startsWith("55") ? tel : `55${tel}`;
+  const nome = (d.cliente_nome ?? "").trim().split(" ")[0] || "tudo bem";
+  const msg = `Olá ${nome}! Passando para lembrar do seu pagamento de ${fmtBRL(d.valor)}${d.data_vencimento ? ` com vencimento em ${fmtData(d.data_vencimento)}` : ""} na Alisson Joias. Qualquer dúvida, estou à disposição!`;
+  return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
+}
+
 // ── Drawer de detalhe ─────────────────────────────────────────────────────────
 /**
  * DetalheDrawer — Painel lateral que abre ao clicar em uma conta do crediário.
@@ -398,6 +408,16 @@ function DetalheDrawer({
               <div style={{ fontSize: 14, fontWeight: 600, color: "#1f2937" }}>{detalhe.cliente_nome ?? "—"}</div>
               {detalhe.cliente_telefone && (
                 <div style={{ fontSize: 12, color: C.cinza }}>{detalhe.cliente_telefone}</div>
+              )}
+              {detalhe.cliente_telefone && detalhe.situacao === "pendente" && (
+                <a
+                  href={montarWhatsappCobranca(detalhe)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: "inline-block", marginTop: 8, padding: "6px 12px", borderRadius: 8, background: "#25D366", color: "#fff", fontSize: 12, fontWeight: 600, textDecoration: "none" }}
+                >
+                  Cobrar no WhatsApp
+                </a>
               )}
             </div>
 
