@@ -3361,7 +3361,10 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                           </button>
                         )}
 
-                        {edit.pagamento && pag.status === "pendente" && (
+                        {/* Remover (x) só em rascunho. Nunca remove A Receber com crédito
+                            aprovado (vira conta no Crediário — pagamento só por lá). Depois
+                            de aprovada, nada na venda é mexido. */}
+                        {edit.pagamento && pag.status === "pendente" && vendaEmRascunho && !creditoAprovado && (
                           <button onClick={() => handleRemovePagamento(pag.id)} disabled={updating}
                             className="text-gray-300 hover:text-red-400 disabled:opacity-40"><X size={13} /></button>
                         )}

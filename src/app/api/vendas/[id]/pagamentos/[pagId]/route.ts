@@ -152,7 +152,9 @@ export async function DELETE(
   if (isNaN(vendaId) || isNaN(pId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [pag] = await sql`
-    SELECT p.id, p.status, v.bloqueado, v.situacao AS venda_situacao
+    SELECT p.id, p.status, p.forma, v.bloqueado, v.situacao AS venda_situacao,
+           v.aprovacao_credito_tipo,
+           (SELECT t.status FROM alissonerp.tarefas t WHERE t.id = v.aprovacao_credito_tarefa_id) AS credito_tarefa_status
     FROM alissonerp.pagamentos_venda p
     JOIN alissonerp.vendas_erp v ON v.id = p.venda_id
     WHERE p.id = ${pId} AND p.venda_id = ${vendaId}
@@ -162,6 +164,14 @@ export async function DELETE(
   if (pag.venda_situacao === "cancelado") return NextResponse.json({ error: "Venda cancelada" }, { status: 409 });
   if (pag.venda_situacao === "concluido") return NextResponse.json({ error: "Venda concluída não permite exclusão de pagamento" }, { status: 409 });
   if (pag.status === "confirmado") return NextResponse.json({ error: "Pagamento confirmado não pode ser excluído — estorne primeiro" }, { status: 409 });
+  // Depois de aprovada, a venda não é mais alterada: não exclui pagamento pela venda.
+  if (pag.venda_situacao !== "rascunho") return NextResponse.json({ error: "Venda aprovada não permite excluir pagamento." }, { status: 409 });
+  // A Receber com crédito aprovado já é uma conta no Crediário — o recebimento é
+  // feito por lá; não pode ser removido pela venda (mesmo em rascunho).
+  const creditoAprovado = !!pag.aprovacao_credito_tipo && ["concluida", "aprovada"].includes(pag.credito_tarefa_status ?? "");
+  if (pag.forma === "A Receber" && creditoAprovado) {
+    return NextResponse.json({ error: "A Receber com crédito aprovado não pode ser removido — registre o recebimento pelo Crediário." }, { status: 409 });
+  }
 
   // Onda 1D: consultora so deleta pagamento de venda propria
   try { await checkOwnership(user.id, vendaId); }
