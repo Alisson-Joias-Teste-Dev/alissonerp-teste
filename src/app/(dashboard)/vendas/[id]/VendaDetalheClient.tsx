@@ -2062,6 +2062,13 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   // de cobrança da própria linha (Na Entrega, gateway). Some "adicionar/completar pagamento".
   const vendaEmRascunho = venda.situacao === "rascunho";
 
+  // Soma de TODAS as linhas de pagamento (inclusive pendentes/aguardando aprovação).
+  // Se já cobrem o total da venda, o pagamento está completo — não faz sentido
+  // "adicionar/completar" (ex.: um "A Receber" ainda não confirmado que já bate o total).
+  // Ao remover a linha no "x", a soma cai e os botões liberam de novo.
+  const totalEmPagamentos = venda.pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0);
+  const pagamentoCobreTotal = totalEmPagamentos + 0.01 >= venda.total_venda;
+
   // Desconto acima do limite — usa campo próprio (aprovacao_desconto_tarefa_id)
   const isDescontoApproval = !!venda.aprovacao_desconto_tarefa_id && venda.aprovacao_desconto_status === "aguardando_aprovacao";
 
@@ -3619,7 +3626,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       <span style={{ color: "#D97706" }}>Saldo pendente</span>
                       <span className="tabular-nums" style={{ color: "#D97706" }}>{fmt(venda.total_venda - venda.total_pago)}</span>
                     </div>
-                    {edit.pagamento && !addingPag && vendaEmRascunho && (
+                    {edit.pagamento && !addingPag && vendaEmRascunho && !pagamentoCobreTotal && (
                       <button
                         onClick={() => {
                           const restante = (venda.total_venda - venda.total_pago).toFixed(2).replace(".", ",");
@@ -3857,7 +3864,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
             ) : (
               // Já tem pagamentos: botão + formulário colapsável padronizado
               <>
-                {(aReceberNoCrediario || !vendaEmRascunho) ? null : !addingPag ? (
+                {(aReceberNoCrediario || !vendaEmRascunho || pagamentoCobreTotal) ? null : !addingPag ? (
                   <button onClick={() => {
                       const pendente = Math.max(0, totalVenda - (venda?.total_pago ?? 0));
                       setNewPagValor(pendente > 0 ? pendente.toFixed(2).replace(".", ",") : "");
