@@ -371,19 +371,12 @@ export async function processarAprovacaoCredito(
     WHERE v.id = ${vendaId}
   `;
 
-  await sql`
-    INSERT INTO alissonerp.contas_receber
-      (descricao, cliente_id, cliente_nome, venda_erp_id, valor, data_vencimento, situacao, categoria, created_by)
-    VALUES
-      (${"A Receber — Venda " + vendaInfo.numero_venda},
-       ${vendaInfo.cliente_id},
-       ${vendaInfo.cliente_nome ?? null},
-       ${vendaId},
-       ${valorAReceber},
-       ${vendaInfo.data_entrega ?? null},
-       'pendente', 'venda',
-       ${aprovadorId}::uuid)
-  `;
+  // A conta a receber NAO e mais criada aqui. Quem cria e o gatilho
+  // trg_venda_gerar_conta_receber (AFTER UPDATE), disparado pelo approveVenda
+  // abaixo ao mudar a situacao para 'aprovado'. O gatilho le o plano do A Receber
+  // (credi_tipo/credi_param/credi_vencimento) e gera as contas com o vencimento
+  // correto (mensal / em X dias / sinal 7 dias uteis). Antes, este INSERT criava
+  // 1 conta com vencimento = data_entrega, ignorando o parcelamento/sinal.
 
   // 5. Verificar se TODOS os outros pagamentos (não-A Receber) estão confirmados
   const [outrosPendentes] = await sql`
