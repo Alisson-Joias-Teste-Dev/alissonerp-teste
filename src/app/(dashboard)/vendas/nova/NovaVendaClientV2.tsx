@@ -3241,6 +3241,42 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               nomesPromosNaVenda={nomesPromosNaVenda}
             />
 
+            {temAReceber && (
+              <div className="rounded-xl border px-4 py-3" style={{ borderColor: C.cremeBorder }}>
+                <p className="text-sm font-medium mb-3" style={{ color: "#374151" }}>Pagamento a prazo (crediário)</p>
+                <div className="flex gap-2 mb-3">
+                  <button type="button" onClick={() => setCrediTipo("meses")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "meses" ? C.esmeralda : C.cremeBorder, color: crediTipo === "meses" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "meses" ? 600 : 400 }}>Mensal</button>
+                  <button type="button" onClick={() => setCrediTipo("dias")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "dias" ? C.esmeralda : C.cremeBorder, color: crediTipo === "dias" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "dias" ? 600 : 400 }}>Em X dias</button>
+                  <button type="button" onClick={() => setCrediTipo("sinal")} className="flex-1 py-2 rounded-lg border text-sm" style={{ borderColor: crediTipo === "sinal" ? C.esmeralda : C.cremeBorder, color: crediTipo === "sinal" ? C.esmeralda : "#6B7280", fontWeight: crediTipo === "sinal" ? 600 : 400 }}>Sinal</button>
+                </div>
+                {crediTipo === "meses" ? (
+                  <div className="flex gap-3 mb-3">
+                    <label className="flex-1 text-xs" style={{ color: "#6B7280" }}>Parcelas
+                      <input type="number" min={1} max={24} value={crediParcelas} onChange={e => setCrediParcelas(Math.max(1, parseInt(e.target.value) || 1))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                    </label>
+                    <label className="flex-1 text-xs" style={{ color: "#6B7280" }}>Vence todo dia
+                      <input type="number" min={1} max={31} value={crediDiaVenc} onChange={e => setCrediDiaVenc(Math.min(31, Math.max(1, parseInt(e.target.value) || 1)))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                    </label>
+                  </div>
+                ) : crediTipo === "dias" ? (
+                  <label className="block text-xs mb-3" style={{ color: "#6B7280" }}>Pagar em (dias)
+                    <input type="number" min={1} max={180} value={crediDias} onChange={e => setCrediDias(Math.max(1, parseInt(e.target.value) || 1))} className="mt-1 w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  </label>
+                ) : (
+                  <p className="text-xs mb-3" style={{ color: "#6B7280" }}>A peça fica reservada. O cliente tem 7 dias úteis para pagar o saldo — senão vira vale-crédito e a peça volta ao estoque.</p>
+                )}
+                <div className="space-y-1">
+                  {crediPreview.map(p => (
+                    <div key={p.num} className="flex justify-between text-xs px-3 py-2 rounded-lg border" style={{ borderColor: C.cremeBorder }}>
+                      <span style={{ color: "#6B7280" }}>{crediTipo === "meses" ? `Parcela ${p.num}/${crediPreview.length} · ` : ""}vence {p.data.toLocaleDateString("pt-BR")}</span>
+                      <span className="font-medium tabular-nums" style={{ color: C.esmeralda }}>{fmt(p.valor)}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs mt-2" style={{ color: "#92400E" }}>A peça só sai da loja com tudo pago. Liberar entrega devendo precisa de aprovação do dono.</p>
+              </div>
+            )}
+
             {/* Resumo totais */}
             <div className="pt-4 border-t space-y-1.5" style={{ borderColor: C.cremeBorder }}>
               <div className="flex justify-between text-sm">
