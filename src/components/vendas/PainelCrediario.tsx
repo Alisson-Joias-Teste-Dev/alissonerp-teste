@@ -72,7 +72,7 @@ export default function PainelCrediario({
           </div>
         ))}
       </div>
-      <p className="text-xs mt-2" style={{ color: "#92400E" }}>A peça só sai da loja com tudo pago. Liberar entrega devendo precisa de aprovação do dono.</p>
+      <p className="text-xs mt-2" style={{ color: "#92400E" }}>A peça só sai da loja com tudo pago. Liberar entrega devendo precisa de aprovação do SEO.</p>
     </div>
   );
 }
