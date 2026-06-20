@@ -2057,6 +2057,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const aReceberNoCrediario = temAReceber &&
     ["aprovado", "confirmado", "concluido", "entregue"].includes(venda.situacao);
 
+  // Porta única (parte 2): só rascunho pode ganhar pagamento novo pela tela da venda.
+  // Depois de aprovada, pagamento novo entra pelo Crediário (A Receber) ou pelos botões
+  // de cobrança da própria linha (Na Entrega, gateway). Some "adicionar/completar pagamento".
+  const vendaEmRascunho = venda.situacao === "rascunho";
+
   // Desconto acima do limite — usa campo próprio (aprovacao_desconto_tarefa_id)
   const isDescontoApproval = !!venda.aprovacao_desconto_tarefa_id && venda.aprovacao_desconto_status === "aguardando_aprovacao";
 
@@ -3614,7 +3619,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       <span style={{ color: "#D97706" }}>Saldo pendente</span>
                       <span className="tabular-nums" style={{ color: "#D97706" }}>{fmt(venda.total_venda - venda.total_pago)}</span>
                     </div>
-                    {edit.pagamento && !addingPag && !aReceberNoCrediario && (
+                    {edit.pagamento && !addingPag && vendaEmRascunho && (
                       <button
                         onClick={() => {
                           const restante = (venda.total_venda - venda.total_pago).toFixed(2).replace(".", ",");
@@ -3852,7 +3857,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
             ) : (
               // Já tem pagamentos: botão + formulário colapsável padronizado
               <>
-                {aReceberNoCrediario ? null : !addingPag ? (
+                {(aReceberNoCrediario || !vendaEmRascunho) ? null : !addingPag ? (
                   <button onClick={() => {
                       const pendente = Math.max(0, totalVenda - (venda?.total_pago ?? 0));
                       setNewPagValor(pendente > 0 ? pendente.toFixed(2).replace(".", ",") : "");
