@@ -78,6 +78,8 @@ A checagem roda no **robô diário** (novo motor de reserva; o `sinal-cron` vira
 
 Um **robô diário** checa os prazos (novo motor de reserva; mesmo padrão do aging-cron).
 
+> ✅ **IMPLEMENTADO (v2.72.0, homolog — migration 328 + status novo `virou_credito`):** no estouro o `reserva-cron` gera o VC-, cancela as contas a receber pendentes e marca a venda como **`virou_credito`** (status terminal, NÃO `cancelado`) — assim a peça **fica segurada** (a reserva continua ativa, não devolve sozinha) e a **comissão do que foi pago é preservada** (o pagamento fica `confirmado`; o status entra nas listas de comissão via `SITUACOES_VENDA_ATIVAS`). O passo 3 (peça volta ao saldo) é a **aprovação do estoque**: `POST /api/crediario/reserva/[vendaId]/devolver-peca` cancela a reserva ativa (não mexe na venda/pagamento/VC). Faturamento: a venda `virou_credito` conta na dashboard **só o valor pago** (vw_dash_vendas_todas, mig 328). Ver `docs/plano-status-virou-credito.md`.
+
 ---
 
 ## 4. Alertas — SEMPRE NA TELA
