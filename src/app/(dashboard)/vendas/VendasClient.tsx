@@ -30,6 +30,7 @@ const SITUACAO: Record<string, { label: string; bg: string; color: string }> = {
   entregue:  { label: "Entregue",  bg: "#EDE9FE", color: "#5B21B6" },
   cancelado: { label: "Cancelado", bg: "#FEF2F2", color: "#DC2626" },
   concluido: { label: "Concluído", bg: "#F0FDF4", color: "#16A34A" },
+  virou_credito: { label: "Virou crédito", bg: "#FFFBEB", color: "#B45309" },
 };
 
 const TABS = [
@@ -41,6 +42,7 @@ const TABS = [
   { key: "entregue",  label: "Entregue"  },
   { key: "concluido", label: "Concluído" },
   { key: "cancelado", label: "Cancelado" },
+  { key: "virou_credito", label: "Virou crédito" },
 ];
 
 // ─── Roles com acesso total ──────────────────────────────────────────────────

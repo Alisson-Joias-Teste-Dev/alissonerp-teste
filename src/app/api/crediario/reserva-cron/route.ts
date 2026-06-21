@@ -152,6 +152,15 @@ export async function POST(req: NextRequest) {
                 ${r.created_by}::uuid)
             `;
           }
+          // A venda vai pro status terminal 'virou_credito' (NÃO 'cancelado'):
+          // a peça fica SEGURADA (a reserva continua ativa, não devolve sozinha) até a
+          // estoquista aprovar; o pagamento fica 'confirmado' (comissão preservada).
+          // Só transiciona a partir de 'aprovado' (guarda a máquina de estados / mig 328).
+          await tx`
+            UPDATE alissonerp.vendas_erp
+            SET situacao = 'virou_credito', bloqueado = true
+            WHERE id = ${r.venda_id} AND situacao = 'aprovado'
+          `;
           return { valeNumero };
         });
 

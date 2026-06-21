@@ -188,6 +188,7 @@ interface ParcelaRow { num: number; dias: number; data: string; valor: number; }
 const SITUACAO_LABEL: Record<string, string> = {
   rascunho: "Rascunho", aprovado: "Aprovado", enviado: "Enviado",
   em_rota: "Em Rota", entregue: "Entregue", cancelado: "Cancelado", concluido: "Concluído",
+  virou_credito: "Virou crédito",
 };
 const SITUACAO_COLOR: Record<string, { bg: string; text: string }> = {
   rascunho:  { bg: "#F3F4F6", text: "#6B7280" },
@@ -197,6 +198,7 @@ const SITUACAO_COLOR: Record<string, { bg: string; text: string }> = {
   entregue:  { bg: "#EDE9FE", text: "#5B21B6" },
   cancelado: { bg: "#FEE2E2", text: "#991B1B" },
   concluido: { bg: C.esmeraldaLt, text: C.esmeralda },
+  virou_credito: { bg: "#FFFBEB", text: "#B45309" },
 };
 const PAG_STATUS_COLOR: Record<string, { bg: string; text: string }> = {
   pendente:   { bg: "#FEF9C3", text: "#713F12" },
