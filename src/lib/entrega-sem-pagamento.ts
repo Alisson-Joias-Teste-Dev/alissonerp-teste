@@ -79,7 +79,7 @@ export async function vendaTemPagamentoCompleto(vendaId: number): Promise<boolea
 /**
  * REGRA DE NEGOCIO (crediário ②): a entrega é "levou DEVENDO" quando há A Receber
  * pendente (crédito) — pagamento/forma 'A Receber' ou conta a receber pendente da venda.
- * Isso EXIGE aprovação do dono antes de entregar.
+ * Isso EXIGE aprovação do SEO antes de entregar.
  * NÃO conta 'Na Entrega' (pago na hora da entrega, motoboy na porta) nem outras
  * formas pendentes que são quitadas no ato — só o crédito de verdade.
  */

@@ -11,7 +11,7 @@ import { internalError } from "@/lib/api-error";
 /**
  * POST /api/vendas/[id]/solicitar-aprovacao-entrega
  *
- * Pede ANTECIPADAMENTE a aprovação do dono pra ENTREGAR uma venda DEVENDO
+ * Pede ANTECIPADAMENTE a aprovação do SEO pra ENTREGAR uma venda DEVENDO
  * (A Receber pendente — crediário ②). A consultora clica na tela da venda dias
  * antes da entrega; no dia, o portão do criarEntrega já está liberado.
  * NÃO marca entregue (Model A) — só cria/garante a tarefa de aprovação.

@@ -649,18 +649,18 @@ export async function criarEntrega(
   }
 
   // GATE crediário ② (Jonathan 21/06): NÃO entrega "levou DEVENDO" (A Receber
-  // pendente = crédito) sem APROVAÇÃO DO DONO. Aqui só BARRA — a SOLICITAÇÃO é feita
+  // pendente = crédito) sem APROVAÇÃO DO SEO. Aqui só BARRA — a SOLICITAÇÃO é feita
   // com antecedência na tela da venda ("Solicitar aprovação para entregar devendo"),
-  // pra não travar a consultora no dia/hora da entrega. Depois que o dono aprovar, a
+  // pra não travar a consultora no dia/hora da entrega. Depois que o SEO aprovar, a
   // exceção destrava e a entrega segue o fluxo normal (com código).
   // 'Na Entrega' (pago na porta pelo motoboy) NÃO entra aqui — só o crédito de verdade.
   if (await vendaEntregaDevendo(params.vendaId)) {
     const temExcecao = await vendaTemExcecaoEntregaAprovada(params.vendaId);
     if (!temExcecao) {
       throw new Error(
-        `Esta venda tem valor "A Receber" pendente — entregar devendo precisa da APROVAÇÃO DO DONO. ` +
+        `Esta venda tem valor "A Receber" pendente — entregar devendo precisa da APROVAÇÃO DO SEO. ` +
           `Abra a venda e use "Solicitar aprovação para entregar devendo" (peça com antecedência). ` +
-          `A entrega libera quando o dono aprovar.`,
+          `A entrega libera quando o SEO aprovar.`,
       );
     }
   }

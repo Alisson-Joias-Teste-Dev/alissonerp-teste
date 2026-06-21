@@ -2451,7 +2451,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         </div>
       )}
 
-      {/* ── Entrega "levou devendo" (crediário ②): solicitar aprovação do dono ANTES da entrega ── */}
+      {/* ── Entrega "levou devendo" (crediário ②): solicitar aprovação do SEO ANTES da entrega ── */}
       {venda.entrega_devendo && (venda.situacao === "aprovado" || venda.situacao === "em_rota") && (
         venda.entrega_excecao_status === "aprovado" ? (
           <div className="mb-3 px-4 py-2 rounded-lg border flex items-center gap-2"
@@ -2463,7 +2463,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           <div className="mb-3 px-4 py-2 rounded-lg border flex items-center gap-2"
             style={{ backgroundColor: "#EFF6FF", borderColor: "#93C5FD", color: "#1E40AF" }}>
             <CheckCircle size={14} className="shrink-0" />
-            <p className="text-xs font-medium">Aprovação de entrega solicitada — aguardando o dono.</p>
+            <p className="text-xs font-medium">Aprovação de entrega solicitada — aguardando o SEO.</p>
           </div>
         ) : (
           <button
