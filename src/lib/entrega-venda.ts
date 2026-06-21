@@ -27,6 +27,7 @@
 
 import sql from "@/lib/db";
 import { logAudit } from "@/lib/audit";
+import { vendaEntregaDevendo, vendaTemExcecaoEntregaAprovada, solicitarAprovacaoEntregaSemPagamento } from "@/lib/entrega-sem-pagamento";
 import { enviarCodigoWhatsAppDetalhado, enviarCodigoClienteEmRota, enviarConfirmacaoEntregaConcluida, enviarAvisoDesenvolvedor } from "@/lib/whatsapp";
 import { uploadFile } from "@/lib/storage";
 
@@ -643,6 +644,27 @@ export async function criarEntrega(
       throw new Error(
         `Cobre o pagamento na entrega (R$${Number(naEntrega.total).toFixed(2)}) antes de marcar a retirada — ` +
           `use o botão "Cobrar na entrega".`,
+      );
+    }
+  }
+
+  // GATE crediário ② (Jonathan 21/06): NÃO entrega "levou DEVENDO" (A Receber
+  // pendente = crédito) sem APROVAÇÃO DO DONO. Se há A Receber pendente e ainda não
+  // há exceção aprovada, pede a aprovação e BARRA a montagem da entrega. Depois que
+  // o dono aprovar, a exceção destrava e a entrega segue o fluxo normal (com código).
+  // 'Na Entrega' (pago na porta pelo motoboy) NÃO entra aqui — só o crédito de verdade.
+  if (await vendaEntregaDevendo(params.vendaId)) {
+    const temExcecao = await vendaTemExcecaoEntregaAprovada(params.vendaId);
+    if (!temExcecao) {
+      const { tarefaId, jaExistia } = await solicitarAprovacaoEntregaSemPagamento(
+        params.vendaId,
+        userId,
+        "Entrega com A Receber pendente (levou devendo).",
+      );
+      throw new Error(
+        `Esta venda tem valor "A Receber" pendente — entregar devendo precisa da APROVAÇÃO DO DONO. ` +
+          `Solicitação ${jaExistia ? "já estava enviada" : "enviada"} ao aprovador (tarefa #${tarefaId}). ` +
+          `A entrega libera quando ele aprovar.`,
       );
     }
   }

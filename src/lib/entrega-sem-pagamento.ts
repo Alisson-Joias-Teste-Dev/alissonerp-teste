@@ -76,6 +76,18 @@ export async function vendaTemPagamentoCompleto(vendaId: number): Promise<boolea
   return totais.valor_aberto <= EPS;
 }
 
+/**
+ * REGRA DE NEGOCIO (crediário ②): a entrega é "levou DEVENDO" quando há A Receber
+ * pendente (crédito) — pagamento/forma 'A Receber' ou conta a receber pendente da venda.
+ * Isso EXIGE aprovação do dono antes de entregar.
+ * NÃO conta 'Na Entrega' (pago na hora da entrega, motoboy na porta) nem outras
+ * formas pendentes que são quitadas no ato — só o crédito de verdade.
+ */
+export async function vendaEntregaDevendo(vendaId: number): Promise<boolean> {
+  const totais = await calcularTotais(vendaId);
+  return totais.valor_a_receber_pagamento > EPS || totais.valor_a_receber_conta > EPS;
+}
+
 export async function vendaTemExcecaoEntregaAprovada(vendaId: number): Promise<boolean> {
   const [ex] = await sql`
     SELECT id
@@ -291,6 +303,8 @@ export async function processarAprovacaoEntregaSemPagamento(
   let saldoAberto = 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await sql.begin(async (tx: any) => {
+    // Garante que o saldo aberto exista como A Receber/conta a receber exatamente
+    // uma vez (cobrança rastreável) — idempotente.
     saldoAberto = await garantirAReceberSemDuplicar(Number(ex.venda_id), aprovadorId, tx);
     await tx`
       UPDATE alissonerp.vendas_entrega_excecoes_pagamento
@@ -298,11 +312,9 @@ export async function processarAprovacaoEntregaSemPagamento(
           motivo_decisao = ${motivo ?? null}, respondido_em = NOW(), updated_at = NOW()
       WHERE id = ${ex.id}
     `;
-    await tx`
-      UPDATE alissonerp.vendas_erp
-      SET situacao = 'entregue', updated_at = NOW()
-      WHERE id = ${ex.venda_id} AND situacao != 'entregue'
-    `;
+    // MODEL A (Jonathan 21/06): a aprovação só LIBERA — NÃO marca a venda como
+    // 'entregue'. A consultora faz a entrega normal depois (motoboy/retirada com
+    // código). O `vendaTemExcecaoEntregaAprovada` é o que destrava o criarEntrega.
   });
 
   return { ok: true, decisao, venda_id: Number(ex.venda_id), saldo_aberto: saldoAberto };
