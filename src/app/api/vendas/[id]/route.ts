@@ -99,6 +99,13 @@ export async function GET(
       ve.desconto_cartao_aprovado_por,
       ve.desconto_cartao_aprovado_em,
       (SELECT u.nome FROM alissonerp.usuarios u WHERE u.id = ve.desconto_cartao_aprovado_por) AS desconto_cartao_aprovado_por_nome,
+      -- Entrega "levou devendo" (crediário ②): há A Receber pendente? E status da exceção de aprovação.
+      (EXISTS(SELECT 1 FROM alissonerp.pagamentos_venda p WHERE p.venda_id = ve.id AND p.forma = 'A Receber' AND p.status = 'pendente')
+       OR EXISTS(SELECT 1 FROM alissonerp.contas_receber cr WHERE cr.venda_erp_id = ve.id AND cr.categoria = 'venda' AND cr.situacao = 'pendente')) AS entrega_devendo,
+      (SELECT ex.status FROM alissonerp.vendas_entrega_excecoes_pagamento ex
+        WHERE ex.venda_id = ve.id
+        ORDER BY CASE ex.status WHEN 'aprovado' THEN 1 WHEN 'pendente' THEN 2 ELSE 3 END, ex.id DESC
+        LIMIT 1) AS entrega_excecao_status,
       c.endereco AS cliente_endereco, c.numero AS cliente_numero, c.complemento AS cliente_complemento,
       c.bairro AS cliente_bairro, c.municipio AS cliente_municipio, c.cep AS cliente_cep, c.uf AS cliente_uf,
       c.celular AS cliente_celular,

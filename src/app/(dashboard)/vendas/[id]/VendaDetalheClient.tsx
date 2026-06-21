@@ -123,6 +123,8 @@ interface Venda {
   entrega_sem_pagamento_aprovada?: boolean;
   saldo_financeiro_aberto?: number;
   entregue_com_pendencia_financeira?: boolean;
+  entrega_devendo?: boolean;                  // tem A Receber pendente (levou devendo)
+  entrega_excecao_status?: string | null;     // 'pendente' | 'aprovado' | null
   endereco_entrega?: string | null; endereco_entrega_numero?: string | null;
   endereco_entrega_complemento?: string | null; endereco_entrega_bairro?: string | null;
   endereco_entrega_cidade?: string | null; endereco_entrega_cep?: string | null;
@@ -684,6 +686,24 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   }, [vendaId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // ── Solicitar aprovação para entregar DEVENDO (crediário ②) ──────────────────
+  // A consultora pede com antecedência; no dia da entrega o portão já está liberado.
+  const [solicitandoEntrega, setSolicitandoEntrega] = useState(false);
+  const handleSolicitarAprovacaoEntrega = useCallback(async () => {
+    if (solicitandoEntrega) return;
+    setSolicitandoEntrega(true);
+    try {
+      const res = await fetch(`/api/vendas/${vendaId}/solicitar-aprovacao-entrega`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) { alert(data?.error ?? "Falha ao solicitar aprovação."); return; }
+      await load();
+    } catch {
+      alert("Falha ao solicitar aprovação. Tente novamente.");
+    } finally {
+      setSolicitandoEntrega(false);
+    }
+  }, [vendaId, solicitandoEntrega, load]);
 
   // Saldo de entrega por item (qtd vendida − já entregue) — para mostrar na tela
   // quando houve entrega PARCIAL (ex.: 1 de 2 já entregue). Decisão Jonathan 12/06:
@@ -2431,6 +2451,35 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         </div>
       )}
 
+      {/* ── Entrega "levou devendo" (crediário ②): solicitar aprovação do dono ANTES da entrega ── */}
+      {venda.entrega_devendo && (venda.situacao === "aprovado" || venda.situacao === "em_rota") && (
+        venda.entrega_excecao_status === "aprovado" ? (
+          <div className="mb-3 px-4 py-2 rounded-lg border flex items-center gap-2"
+            style={{ backgroundColor: "#ECFDF5", borderColor: "#A7F3D0", color: "#065F46" }}>
+            <CheckCircle size={14} className="shrink-0" />
+            <p className="text-xs font-medium">Entrega devendo aprovada — pode entregar normalmente.</p>
+          </div>
+        ) : venda.entrega_excecao_status === "pendente" ? (
+          <div className="mb-3 px-4 py-2 rounded-lg border flex items-center gap-2"
+            style={{ backgroundColor: "#EFF6FF", borderColor: "#93C5FD", color: "#1E40AF" }}>
+            <CheckCircle size={14} className="shrink-0" />
+            <p className="text-xs font-medium">Aprovação de entrega solicitada — aguardando o dono.</p>
+          </div>
+        ) : (
+          <button
+            onClick={handleSolicitarAprovacaoEntrega}
+            disabled={solicitandoEntrega}
+            className="mb-3 w-full px-4 py-2.5 rounded-lg border flex items-center gap-2 text-left transition-all disabled:opacity-60 hover:brightness-95"
+            style={{ backgroundColor: "#FFFBEB", borderColor: "#FCD34D", color: "#92400E" }}
+          >
+            <CheckCircle size={15} className="shrink-0" />
+            <span className="text-sm font-medium">
+              {solicitandoEntrega ? "Solicitando..." : "Solicitar aprovação para entregar devendo"}
+            </span>
+            <span className="ml-auto text-xs opacity-80">peça com antecedência</span>
+          </button>
+        )
+      )}
 
       {/* ── Alerta: concluir bloqueado por pagamentos pendentes ── */}
       {podeAprovarConcluir && (
