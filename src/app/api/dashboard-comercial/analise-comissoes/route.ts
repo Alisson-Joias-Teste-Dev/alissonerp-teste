@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { SITUACOES_VENDA_ATIVAS } from "@/lib/vendas-situacoes";
 import { authOr401 } from "@/lib/auth-server";
 import type {
   AnaliseComissoesResponse,
@@ -96,7 +97,7 @@ export async function GET(req: NextRequest) {
         vd.comissao AS comissao_tabela_id
       FROM alissonerp.itens_venda_erp ie
       JOIN alissonerp.vendas_erp ve ON ve.id = ie.venda_id
-        AND ve.situacao IN ('aprovado', 'em_rota', 'enviado', 'entregue', 'concluido')
+        AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
         AND ve.data_venda >= '2026-04-23'
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = ve.vendedor_id
       WHERE ve.data_venda BETWEEN ${from}::date AND ${to}::date
@@ -133,7 +134,7 @@ export async function GET(req: NextRequest) {
         COALESCE(SUM(CASE WHEN pv.forma = 'A Receber' AND pv.status = 'confirmado' THEN pv.valor ELSE 0 END), 0)::text AS valor_a_receber_pago
       FROM alissonerp.pagamentos_venda pv
       JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
-        AND ve.situacao IN ('aprovado', 'em_rota', 'enviado', 'entregue', 'concluido')
+        AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
         AND ve.data_venda >= '2026-04-23'
       WHERE ve.data_venda BETWEEN ${from}::date AND ${to}::date
         AND ve.vendedor_id IS NOT NULL

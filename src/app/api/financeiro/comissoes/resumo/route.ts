@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { SITUACOES_VENDA_ATIVAS } from "@/lib/vendas-situacoes";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
@@ -35,7 +36,7 @@ export async function GET(req: NextRequest) {
       ), 0)::text AS valor
       FROM alissonerp.pagamentos_venda pv
       JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
-        AND ve.situacao IN ('aprovado', 'em_rota', 'enviado', 'entregue', 'concluido')
+        AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
       WHERE pv.status = 'confirmado'
         AND pv.forma NOT IN ('Vale-Troca', 'A Receber')
         AND pv.id NOT IN (

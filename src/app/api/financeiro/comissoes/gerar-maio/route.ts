@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { SITUACOES_VENDA_ATIVAS } from "@/lib/vendas-situacoes";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
         vd.nome
       FROM alissonerp.pagamentos_venda pv
       JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
-        AND ve.situacao IN ('aprovado', 'em_rota', 'enviado', 'entregue', 'concluido')
+        AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = ve.vendedor_id
       WHERE pv.status = 'confirmado'
         AND pv.forma NOT IN ('Vale-Troca', 'A Receber')
@@ -98,7 +99,7 @@ export async function POST(req: NextRequest) {
             c.nome AS cliente_nome
           FROM alissonerp.pagamentos_venda pv
           JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
-            AND ve.situacao IN ('aprovado', 'em_rota', 'enviado', 'entregue', 'concluido')
+            AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
           LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
           WHERE pv.status = 'confirmado'
             AND pv.forma NOT IN ('Vale-Troca', 'A Receber')

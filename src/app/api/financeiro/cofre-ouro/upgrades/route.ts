@@ -35,7 +35,7 @@ export async function GET() {
     JOIN alissonerp.itens_venda_erp ive ON ive.id = iuv.item_venda_id
     JOIN alissonerp.vw_vendas_erp_completa ve ON ve.id = ive.venda_id
     WHERE iuv.cofre_registrado = true
-      AND ve.situacao IN ('aprovado', 'em_rota', 'entregue', 'concluido')
+      AND ve.situacao IN ('aprovado', 'em_rota', 'entregue', 'concluido', 'virou_credito')
     ORDER BY ve.data_venda DESC NULLS LAST, ive.created_at DESC, iuv.item_venda_id DESC
     LIMIT 200
   `;

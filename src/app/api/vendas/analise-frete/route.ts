@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { SITUACOES_VENDA_ATIVAS } from "@/lib/vendas-situacoes";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 // GET /api/vendas/analise-frete?inicio=YYYY-MM-DD&fim=YYYY-MM-DD
@@ -65,7 +66,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN public.vendedores vd ON vd.id_vendedor = v.vendedor_id
     WHERE v.data_venda >= ${inicio}::date
       AND v.data_venda <= ${fim}::date
-      AND v.situacao IN ('aprovado', 'em_rota', 'enviado', 'entregue', 'concluido')
+      AND v.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
     ORDER BY v.data_entrega ASC NULLS LAST, v.data_venda DESC
     LIMIT 200
   `;
