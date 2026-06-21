@@ -35,13 +35,16 @@ export async function POST(
   const [u] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
   if (!u) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
 
-  let autorizado = isFullAccess(u.role as string) || ROLES_ESTOQUE.includes(u.role as string);
+  // Aprovadores configurados em Config › Aprovadores (chave MULTI, UUIDs por vírgula).
+  // Se a lista existir, ela é a AUTORIDADE: só os selecionados (+ acesso pleno como
+  // salvaguarda anti-deadlock). Se estiver vazia, cai no fallback por cargo de estoque.
+  const [cfg] = await sql`SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadores_devolver_peca'`;
+  const listaConfig = String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const autorizado = listaConfig.length > 0
+    ? (listaConfig.includes(user.id) || isFullAccess(u.role as string))
+    : (isFullAccess(u.role as string) || ROLES_ESTOQUE.includes(u.role as string));
   if (!autorizado) {
-    const [cfg] = await sql`SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovador_devolucao_estoque'`;
-    if (cfg?.valor && String(cfg.valor) === user.id) autorizado = true;
-  }
-  if (!autorizado) {
-    return NextResponse.json({ error: "Sem permissão (apenas estoque/gerência)" }, { status: 403 });
+    return NextResponse.json({ error: "Sem permissão — você não está na lista de aprovadores da devolução de peça." }, { status: 403 });
   }
 
   const { vendaId } = await params;

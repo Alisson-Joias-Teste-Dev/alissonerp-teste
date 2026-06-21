@@ -33,6 +33,9 @@ const CHAVES = [
   "aprovador_devolucao_fora_prazo",
   "aprovador_devolucao_estoque",
   "aprovador_vale_troca_excecao",
+  // MULTI (vários UUIDs separados por vírgula): quem aprova a devolução da peça
+  // quando a reserva do crediário vira vale-crédito (endpoint reserva/.../devolver-peca).
+  "aprovadores_devolver_peca",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -120,6 +123,8 @@ export async function GET() {
       aprovador_devolucao_fora_prazo: configMap.get("aprovador_devolucao_fora_prazo") ?? "",
       aprovador_devolucao_estoque: configMap.get("aprovador_devolucao_estoque") ?? "",
       aprovador_vale_troca_excecao: configMap.get("aprovador_vale_troca_excecao") ?? "",
+      // MULTI: lista de UUIDs separados por vírgula.
+      aprovadores_devolver_peca: configMap.get("aprovadores_devolver_peca") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -199,6 +204,14 @@ export async function PUT(req: NextRequest) {
     // A1: aprovador de exceção do vale — libera quando a confirmação por WhatsApp falha.
     if (body.aprovador_vale_troca_excecao !== undefined) {
       updates.push({ chave: "aprovador_vale_troca_excecao", valor: body.aprovador_vale_troca_excecao });
+    }
+    // MULTI: aprovadores da devolução de peça (venda virou crédito). Vários UUIDs
+    // separados por vírgula. Normaliza (tira espaços/vazios/duplicados) antes de gravar.
+    if (body.aprovadores_devolver_peca !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_devolver_peca).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_devolver_peca", valor: lista });
     }
 
     for (const u of updates) {

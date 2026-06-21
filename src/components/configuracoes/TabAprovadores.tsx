@@ -34,6 +34,7 @@ interface AprovadorConfig {
   aprovador_devolucao_fora_prazo?: string;
   aprovador_devolucao_estoque?: string;
   aprovador_vale_troca_excecao?: string;
+  aprovadores_devolver_peca?: string; // MULTI: UUIDs separados por vírgula
 }
 
 interface Usuario {
@@ -178,6 +179,20 @@ const CONFIG_ITENS = [
     usuariosKey: "todos_usuarios" as const,
     icone: "🔓",
   },
+  /**
+   * REGRA DE NEGÓCIO: aprovadores da DEVOLUÇÃO DE PEÇA quando a venda virou crédito (③).
+   * O QUE: quem pode confirmar a recolocação física da peça no estoque (libera a reserva).
+   * MULTI: pode marcar VÁRIOS (UUIDs separados por vírgula) — o estoque pode ter mais de um
+   *   responsável. IMPACTO SE VAZIO: cai no fallback por cargo (estoque/gerência).
+   */
+  {
+    chave: "aprovadores_devolver_peca" as const,
+    titulo: "Devolução de peça — venda virou crédito",
+    descricao: "Quem confirma a recolocação da peça no estoque quando uma reserva vira vale-crédito. Pode marcar vários.",
+    usuariosKey: "todos_usuarios" as const,
+    icone: "📦",
+    multi: true,
+  },
 ];
 
 export default function TabAprovadores() {
@@ -196,6 +211,7 @@ export default function TabAprovadores() {
     aprovador_devolucao_fora_prazo: "",
     aprovador_devolucao_estoque: "",
     aprovador_vale_troca_excecao: "",
+    aprovadores_devolver_peca: "",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
     gerentes: [],
@@ -226,6 +242,7 @@ export default function TabAprovadores() {
           aprovador_devolucao_fora_prazo: d.aprovador_devolucao_fora_prazo ?? "",
           aprovador_devolucao_estoque: d.aprovador_devolucao_estoque ?? "",
           aprovador_vale_troca_excecao: d.aprovador_vale_troca_excecao ?? "",
+          aprovadores_devolver_peca: d.aprovadores_devolver_peca ?? "",
         });
         setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [] });
       })
@@ -235,6 +252,24 @@ export default function TabAprovadores() {
   function onChange(chave: string, valor: string) {
     setConfig((prev) => ({ ...prev, [chave]: valor }));
     setSaved(false);
+  }
+
+  // MULTI: marca/desmarca um usuário na lista (UUIDs separados por vírgula).
+  function toggleMulti(chave: string, userId: string) {
+    setConfig((prev) => {
+      const atual = String((prev as any)[chave] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      const novo = atual.includes(userId) ? atual.filter((x) => x !== userId) : [...atual, userId];
+      return { ...prev, [chave]: novo.join(",") };
+    });
+    setSaved(false);
+  }
+
+  // MULTI: nomes (separados por vírgula) dos usuários selecionados — pra exibição.
+  function getMultiNames(chave: string): string {
+    const ids = new Set(String((config as any)[chave] ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+    if (ids.size === 0) return "";
+    const all = [...usuarios.todos_usuarios];
+    return all.filter((u) => ids.has(u.id)).map((u) => u.nome).join(", ");
   }
 
   function getUserName(chave: string): string {
@@ -313,7 +348,37 @@ export default function TabAprovadores() {
               </div>
             </div>
 
-            {podeEditar ? (
+            {(item as { multi?: boolean }).multi ? (
+              podeEditar ? (
+                <div className="rounded-lg border divide-y" style={{ borderColor: P.border }}>
+                  {lista.map((u) => {
+                    const sel = String(valorAtual).split(",").map((s) => s.trim()).includes(u.id);
+                    return (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => toggleMulti(item.chave, u.id)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors"
+                        style={{ backgroundColor: sel ? "#eff6ff" : "#fff", color: P.texto }}
+                      >
+                        <span style={{ color: sel ? "#2563eb" : "#9ca3af", fontSize: 16, lineHeight: 1 }}>{sel ? "☑" : "☐"}</span>
+                        <span style={{ fontWeight: sel ? 500 : 400 }}>{u.nome}{u.role ? ` (${u.role})` : ""}</span>
+                      </button>
+                    );
+                  })}
+                  <div className="px-3 py-1.5 text-[11px]" style={{ color: P.secundario, backgroundColor: "#fafafa" }}>
+                    {String(valorAtual).split(",").map((s) => s.trim()).filter(Boolean).length} selecionado(s) — marque mais de um se quiser
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className="w-full rounded-lg border px-3 py-2 text-sm"
+                  style={{ borderColor: P.border, backgroundColor: "#f9fafb", color: P.texto }}
+                >
+                  {getMultiNames(item.chave) || "— Nenhum aprovador configurado —"}
+                </div>
+              )
+            ) : podeEditar ? (
               <select
                 value={valorAtual}
                 onChange={(e) => onChange(item.chave, e.target.value)}
