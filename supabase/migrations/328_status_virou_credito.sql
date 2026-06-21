@@ -15,7 +15,9 @@
 --     e cairíamos de volta nas 2 pegadinhas (peça some / consultora perde comissão).
 --
 --   Funções alteradas (CREATE OR REPLACE, sem DROP — Database Safety §2):
---     1. fn_registrar_transicao_venda  (versão anterior: 296)
+--     1. fn_registrar_transicao_venda  (versão anterior VIVA: 297, que supersedeu a 296 —
+--        preserva estorno aprovado/em_rota→rascunho, rota legado e o payload da auditoria;
+--        SÓ acrescenta virou_credito)
 --     2. fn_proteger_itens_venda_fechada (versão anterior: 296)
 --   View recriada (base = migration 304, que tem o dedup por public_venda_id):
 --     3. vw_dash_vendas_todas — inclui 'virou_credito' contando APENAS o valor
@@ -27,8 +29,9 @@
 SET search_path TO alissonerp, directus, public;
 
 -- ──────────────────────────────────────────────────────────────
--- 1. State Machine: permite aprovado → virou_credito; terminal.
---    (base = migration 296; só acrescenta 'virou_credito')
+-- 1. State Machine: permite aprovado → virou_credito; virou_credito terminal.
+--    BASE = migration 297 (versão VIVA — preserva estorno→rascunho, legado e
+--    payload). SÓ acrescenta: aprovado→virou_credito e virou_credito→cancelado.
 -- ──────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION alissonerp.fn_registrar_transicao_venda()
 RETURNS TRIGGER
@@ -46,32 +49,44 @@ BEGIN
   END IF;
 
   IF v_de IS NULL THEN
-    v_ok := v_para = ANY(ARRAY['rascunho','aprovado','cancelado']);
+    v_ok := true;
   ELSIF v_de = 'rascunho' THEN
-    v_ok := v_para = ANY(ARRAY['aprovado','cancelado']);
+    v_ok := v_para = ANY(ARRAY['aprovado','cancelado','concluido']);
   ELSIF v_de = 'aprovado' THEN
-    -- + virou_credito: reserva do crediário estourou e virou vale-crédito.
-    v_ok := v_para = ANY(ARRAY['em_rota','entregue','cancelado','virou_credito']);
+    -- rascunho = estorno; concluido = rota legado; + virou_credito (crediário ③).
+    v_ok := v_para = ANY(ARRAY['em_rota','entregue','cancelado','rascunho','concluido','virou_credito']);
   ELSIF v_de = 'em_rota' THEN
-    v_ok := v_para = ANY(ARRAY['entregue','cancelado']);
+    v_ok := v_para = ANY(ARRAY['entregue','cancelado','rascunho']);
   ELSIF v_de = 'confirmado' THEN
-    v_ok := v_para = ANY(ARRAY['aprovado','em_rota','entregue','cancelado']);
+    v_ok := v_para = ANY(ARRAY['aprovado','em_rota','entregue','cancelado','rascunho','concluido']);
   ELSIF v_de = 'enviado' THEN
-    v_ok := v_para = ANY(ARRAY['entregue','cancelado']);
-  ELSIF v_de IN ('entregue','concluido','cancelado','virou_credito') THEN
-    -- Terminais ('virou_credito' = terminal: a venda virou crédito, fim do fluxo).
+    v_ok := v_para = ANY(ARRAY['entregue','cancelado','rascunho','concluido']);
+  ELSIF v_de = 'entregue' THEN
+    -- PONTO FINAL: não volta pra rascunho. Só cancelamento ou conclusão histórica.
+    v_ok := v_para = ANY(ARRAY['cancelado','concluido']);
+  ELSIF v_de = 'concluido' THEN
+    v_ok := v_para = ANY(ARRAY['cancelado']);
+  ELSIF v_de = 'virou_credito' THEN
+    -- terminal: a venda virou crédito. Só cancelamento (correção/admin), como entregue.
+    v_ok := v_para = ANY(ARRAY['cancelado']);
+  ELSIF v_de = 'cancelado' THEN
     v_ok := false;
   ELSE
     v_ok := true;
   END IF;
 
   IF NOT v_ok THEN
-    RAISE EXCEPTION 'Transição inválida: % → %', COALESCE(v_de, 'NULL'), v_para;
+    RAISE EXCEPTION 'TRANSICAO_INVALIDA: % → % (venda %)', COALESCE(v_de,'NULL'), v_para, NEW.id;
   END IF;
 
+  -- usuario_id fica NULL (backend usa postgres npm; QUEM alterou vem do logAudit).
   INSERT INTO alissonerp.vendas_transicoes
-    (venda_id, de_situacao, para_situacao, created_at)
-  VALUES (NEW.id, v_de, v_para, now());
+    (venda_id, de_situacao, para_situacao, payload, created_at)
+  VALUES (
+    NEW.id, v_de, v_para,
+    jsonb_build_object('total_venda', NEW.total_venda, 'cliente_id', NEW.cliente_id),
+    now()
+  );
 
   RETURN NEW;
 END;

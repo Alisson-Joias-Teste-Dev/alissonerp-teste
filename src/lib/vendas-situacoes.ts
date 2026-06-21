@@ -12,7 +12,7 @@
 //
 // Uso com postgres.js: `ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})`.
 // ─────────────────────────────────────────────────────────────────────────────
-export const SITUACOES_VENDA_ATIVAS: string[] = [
+export const SITUACOES_VENDA_ATIVAS: readonly string[] = [
   "aprovado",
   "em_rota",
   "enviado",

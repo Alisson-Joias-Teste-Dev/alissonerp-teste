@@ -130,6 +130,22 @@ export async function POST(req: NextRequest) {
         // ── ESTOURO: vira VC + cancela as contas pendentes da venda + notifica estoque ──
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const out = await (sql as any).begin(async (tx: typeof sql) => {
+          // 1º (TRAVA DA CORRIDA): marca a venda 'virou_credito' ANTES de gerar VC/cancelar CR.
+          // O `WHERE situacao='aprovado'` + lock da linha garante que, se a venda mudou de
+          // estado entre o SELECT (fora da tx) e aqui — entregue, cancelada, ou outro cron
+          // concorrente já converteu — o UPDATE bate 0 linhas e ABORTAMOS tudo (rollback):
+          // nada de VC órfão nem CR cancelada sem a venda virar crédito. Peça fica SEGURADA
+          // (reserva ativa); pagamento fica 'confirmado' (comissão preservada).
+          const transicao = await tx`
+            UPDATE alissonerp.vendas_erp
+            SET situacao = 'virou_credito', bloqueado = true
+            WHERE id = ${r.venda_id} AND situacao = 'aprovado'
+            RETURNING id
+          `;
+          if (transicao.length === 0) {
+            throw new Error(`venda ${r.venda_id} não está mais 'aprovado' (mudou entre o SELECT e a conversão) — pulada`);
+          }
+
           let valeNumero: string | null = null;
           if (valorPago > 0) {
             const vale = await gerarValeCredito(r.cliente_id, valorPago, r.created_by, r.venda_id, tx);
@@ -152,15 +168,6 @@ export async function POST(req: NextRequest) {
                 ${r.created_by}::uuid)
             `;
           }
-          // A venda vai pro status terminal 'virou_credito' (NÃO 'cancelado'):
-          // a peça fica SEGURADA (a reserva continua ativa, não devolve sozinha) até a
-          // estoquista aprovar; o pagamento fica 'confirmado' (comissão preservada).
-          // Só transiciona a partir de 'aprovado' (guarda a máquina de estados / mig 328).
-          await tx`
-            UPDATE alissonerp.vendas_erp
-            SET situacao = 'virou_credito', bloqueado = true
-            WHERE id = ${r.venda_id} AND situacao = 'aprovado'
-          `;
           return { valeNumero };
         });
 
