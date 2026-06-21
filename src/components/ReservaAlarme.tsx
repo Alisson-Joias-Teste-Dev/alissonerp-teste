@@ -228,12 +228,19 @@ export default function ReservaAlarme() {
 
         <button
           onClick={dispensarHoje}
-          className="ml-auto flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm transition-colors hover:bg-white"
+          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm transition-colors hover:bg-white"
           style={{ background: "#fff", color: cor, border: `1px solid ${borda}` }}
           title="Esconde a faixa só por hoje. Volta amanhã se a reserva continuar pendente."
         >
-          ok
+          ok, entendi
         </button>
+
+        {/* Espaçador inerte no canto: o badge de ambiente (homolog) fica fixo no
+            topo-direito; mantemos o canto livre pra ele não cobrir o "ok". */}
+        <span className="ml-auto" aria-hidden="true" />
+        <span className="text-[11px] italic hidden lg:block opacity-80">
+          finalize o pagamento pra sair daqui
+        </span>
       </div>
     </div>
   );
