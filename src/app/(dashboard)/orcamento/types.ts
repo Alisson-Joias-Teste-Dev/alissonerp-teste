@@ -103,7 +103,8 @@ export interface ConfigOrcamento {
   stone_prices: StonePrice[];
   /** Parâmetros de validação configuráveis (migration 132). Opcional pra compat. */
   calibracao?: CalibracaoDefaults | null;
-  /** Curvatura padrão (%) aplicada a alianças novas (migration 255). */
+  /** Boleamento padrão (%) aplicado a alianças novas (migration 255).
+   *  "Boleamento" é o rótulo visível; a coluna no banco continua dome_percentage. */
   dome_percentage?: number;
   /** Migration 263: teor de ouro padrão (67–75%). Usado pra calcular
    *  densidade dinamicamente no frontend. Default 75 (18k). */

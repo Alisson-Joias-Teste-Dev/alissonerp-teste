@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { formatGravacao } from "@/lib/gravacao";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface ItemPDF {
@@ -250,7 +251,11 @@ export function gerarPDFOrcamento(dados: OrcamentoPDF): jsPDF {
       if (ft.espessura) campos.push({ label: "Espessura", value: `${ft.espessura.toFixed(1)}mm` });
       if (ft.peso_estimado) campos.push({ label: "Peso est.", value: `${ft.peso_estimado.toFixed(1)}g` });
       if (ft.cor_metal) campos.push({ label: "Metal", value: ft.cor_metal });
-      if (ft.texto) campos.push({ label: "Gravacao", value: `${ft.texto} (${ft.tipo_fonte ?? "Forma"})` });
+      // Gravacao: usa formatGravacao (fonte unica de verdade em src/lib/gravacao.ts)
+      // para separar nome/adicionais pelo separador interno U+001F. Sem isso, o PDF
+      // grudava nome e data (ex: "Natalia10.06.2026") porque o glyph de controle some
+      // na fonte do PDF. IMPACTO se removido: gravacao com multiplas linhas volta a sair colada.
+      if (ft.texto) campos.push({ label: "Gravacao", value: `${formatGravacao(ft.texto)} (${ft.tipo_fonte ?? "Forma"})` });
       if (ft.qtd_pedras) {
         campos.push({ label: "Pedras", value: `${ft.qtd_pedras}x ${ft.tamanho_pedra ?? "?"}mm` });
         if (ft.tipo_aplicacao_pedra) campos.push({ label: "Aplicacao", value: ft.tipo_aplicacao_pedra });

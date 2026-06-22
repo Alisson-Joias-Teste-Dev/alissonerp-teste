@@ -71,14 +71,14 @@ export async function PATCH(
     await sql`
       UPDATE alissonerp.fichas_tecnicas
       SET tipo_item = ${body.dados.tipo_item},
-          dados = ${JSON.stringify(body.dados)}::jsonb,
+          dados = ${JSON.stringify(body.dados)}::text::jsonb,
           updated_at = now()
       WHERE ordem_id = ${ordemId}
     `;
   } else {
     await sql`
       INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
-      VALUES (${ordemId}, ${body.dados.tipo_item}, ${JSON.stringify(body.dados)}::jsonb, ${user.id}::uuid)
+      VALUES (${ordemId}, ${body.dados.tipo_item}, ${JSON.stringify(body.dados)}::text::jsonb, ${user.id}::uuid)
     `;
   }
 

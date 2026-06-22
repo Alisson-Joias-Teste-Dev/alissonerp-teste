@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
 
   const [ficha] = await sql`
     INSERT INTO alissonerp.fichas_tecnicas (ordem_id, tipo_item, dados, created_by)
-    VALUES (${ordem_id}, ${tipo_item}, ${JSON.stringify(dados)}::jsonb, ${user.id}::uuid)
+    VALUES (${ordem_id}, ${tipo_item}, ${JSON.stringify(dados)}::text::jsonb, ${user.id}::uuid)
     RETURNING id
   `;
 

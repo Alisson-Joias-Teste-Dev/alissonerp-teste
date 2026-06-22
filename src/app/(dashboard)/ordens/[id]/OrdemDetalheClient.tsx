@@ -55,7 +55,7 @@ const FICHA_LABELS: Record<string, string> = {
   diametro: "Diâmetro Interno (mm)",
   densidade_ouro: "Densidade Ouro (g/cm³)",
   profundidade_concava: "Profundidade Côncava (mm)",
-  dome_porcentagem: "Curvatura (%)",
+  dome_porcentagem: "Boleamento (%)",
   has_friso: "Tem Friso",
   friso_kind: "Tipo (Friso/Risco)",
   friso_tipo: "Posição do Friso",
