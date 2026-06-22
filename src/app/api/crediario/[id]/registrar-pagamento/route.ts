@@ -51,7 +51,14 @@ const RegistrarPagamentoSchema = z.object({
   vale_numero: z.string().max(100).optional(),
   vale_codigo: z.string().max(20).optional(),     // 2ª confirmação (código WhatsApp do dono)
   vale_excecao: z.boolean().optional(),           // liberação por aprovador quando o WhatsApp falha
+  // Comprovante visual — OBRIGATÓRIO na baixa manual de Pix/Cartão (exceção do dev).
+  // Caminho no bucket pagamento-fotos (upload feito no front, igual à foto do Ouro).
+  comprovante_path: z.string().max(500).optional(),
 }).partial();
+
+// Formas cujo fluxo normal no crediário passa pelo Mercado Pago (validado).
+// A baixa MANUAL destas (sem MP) é EXCEÇÃO: só o desenvolvedor, com comprovante.
+const FORMAS_MANUAL_RESTRITO = ["Pix", "Cartão de Crédito", "Cartão"];
 
 export async function POST(
   req: NextRequest,
@@ -106,6 +113,28 @@ export async function POST(
   const ouroPeso = parsed.data.ouro_peso ?? null;
   const ouroValorGrama = parsed.data.ouro_valor_grama ?? null;
   const ouroFotoPath = parsed.data.ouro_foto_path ?? null;
+  const comprovantePath = parsed.data.comprovante_path?.trim() || null;
+
+  // ═══ Pix/Cartão MANUAL = exceção restrita ao desenvolvedor + comprovante ═══
+  // O fluxo normal de Pix/Cartão na baixa do crediário passa pelo Mercado Pago
+  // (QR / maquininha — validado pelo gateway). Cair AQUI (registrar-pagamento)
+  // significa baixa manual SEM validação: liberada só para o desenvolvedor e
+  // sempre com comprovante visual anexado (mesma exigência da foto do Ouro).
+  // Fecha o furo do "Pix avulso sem comprovação nenhuma".
+  if (formaRecebimento && FORMAS_MANUAL_RESTRITO.includes(formaRecebimento)) {
+    if ((usuario.role as string) !== "desenvolvedor") {
+      return NextResponse.json(
+        { error: "Baixa manual de Pix/Cartão é exceção restrita ao desenvolvedor. Use o fluxo do Mercado Pago (QR / maquininha)." },
+        { status: 403 },
+      );
+    }
+    if (!comprovantePath) {
+      return NextResponse.json(
+        { error: "Comprovante obrigatório para baixa manual de Pix/Cartão." },
+        { status: 400 },
+      );
+    }
+  }
 
   // ═══ VALE-TROCA ══════════════════════════════════════════════════════════
   // Baixar "A Receber" com vale segue a MESMA regra da venda (não é só marcar
@@ -437,13 +466,14 @@ export async function POST(
     const msgOuro = ouroPeso && ouroValorGrama
       ? ` (${ouroPeso}g × R$ ${ouroValorGrama}/g)`
       : "";
+    const msgComprovante = comprovantePath ? " — baixa manual (comprovante anexado)" : "";
     await tx`
       INSERT INTO alissonerp.comunicacoes_crediario
         (conta_receber_id, tipo, mensagem, usuario_id)
       VALUES (
         ${contaId},
         'aviso_recebimento',
-        ${obs ?? `Recebido via ${formaRecebimento ?? "não informado"} — R$ ${valorEfetivo.toFixed(2)}${msgOuro} — ${conta.descricao}`},
+        ${(obs ?? `Recebido via ${formaRecebimento ?? "não informado"} — R$ ${valorEfetivo.toFixed(2)}${msgOuro} — ${conta.descricao}`) + msgComprovante},
         ${user.id}::uuid
       )
     `;
@@ -454,7 +484,11 @@ export async function POST(
       registro_id: contaId,
       usuario_id: user.id,
       dados_antes: { situacao: "pendente", valor: Number(conta.valor) },
-      dados_depois: { situacao: "pago", valor: valorEfetivo, ...(novoCreditoId ? { novo_credito_id: novoCreditoId } : {}) },
+      dados_depois: {
+        situacao: "pago", valor: valorEfetivo, forma: formaRecebimento,
+        ...(comprovantePath ? { comprovante_path: comprovantePath, baixa_manual: true } : {}),
+        ...(novoCreditoId ? { novo_credito_id: novoCreditoId } : {}),
+      },
     });
   });
 
