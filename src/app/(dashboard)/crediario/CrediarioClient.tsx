@@ -20,6 +20,7 @@ import {
 import { apiFetch } from "@/lib/apiFetch";
 import { createClient } from "@/lib/supabase/client";
 import { getPublicUrl } from "@/lib/storage-url";
+import ValeCodigoInline from "@/components/vendas/ValeCodigoInline";
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 const C = {
@@ -187,6 +188,12 @@ function DetalheDrawer({
   const [ouroFotoFile, setOuroFotoFile] = useState<File | null>(null);
   const [ouroFotoPreview, setOuroFotoPreview] = useState<string | null>(null);
   const [ouroUploading, setOuroUploading] = useState(false);
+  // Vale-Troca (mesma regra da venda: número + token do dono)
+  const [valeNumero, setValeNumero] = useState("");
+  const [valeValidando, setValeValidando] = useState(false);
+  const [valeValidacao, setValeValidacao] = useState<
+    { ok: boolean; erro?: string; valor_disponivel?: number; cliente_id?: number | null } | null
+  >(null);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -319,6 +326,39 @@ function DetalheDrawer({
     } finally {
       setBaixando(false);
     }
+  }
+
+  async function validarVale() {
+    if (!valeNumero.trim()) return;
+    setValeValidando(true);
+    setErr("");
+    try {
+      const r = await apiFetch<{ ok: boolean; erro?: string; valor_disponivel?: number; cliente_id?: number | null }>(
+        `/api/vale-troca/validar`,
+        { method: "POST", body: JSON.stringify({ numero: valeNumero.trim() }) },
+      );
+      setValeValidacao(r);
+    } catch (e) {
+      setValeValidacao({ ok: false, erro: e instanceof Error ? e.message : "Erro ao validar o vale" });
+    } finally {
+      setValeValidando(false);
+    }
+  }
+
+  // Registra a baixa com vale. O valor vem do vale (server-side). LANÇA em caso
+  // de erro — o ValeCodigoInline exibe a mensagem inline (ex.: "código incorreto").
+  async function registrarVale(vale_codigo?: string) {
+    await apiFetch(`/api/crediario/${contaId}/registrar-pagamento`, {
+      method: "POST",
+      body: JSON.stringify({
+        forma_recebimento: "Vale-Troca",
+        vale_numero: valeNumero.trim(),
+        ...(vale_codigo ? { vale_codigo } : {}),
+        obs: obs.trim() || undefined,
+      }),
+    });
+    onBaixa(contaId);
+    onClose();
   }
 
   async function handleEnviarMensagem() {
@@ -650,8 +690,104 @@ function DetalheDrawer({
                   </>
                 )}
 
+                {/* Vale-Troca → número do vale + token do dono (mesma regra da venda) */}
+                {formaRecebimento === "Vale-Troca" && (
+                  <>
+                    <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>Número do vale</div>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                      <input
+                        value={valeNumero}
+                        onChange={e => { setValeNumero(e.target.value); setValeValidacao(null); setErr(""); }}
+                        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void validarVale(); } }}
+                        placeholder="VT-00000"
+                        style={{
+                          flex: 1, fontSize: 13, padding: "8px 10px",
+                          border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
+                          outline: "none", background: "#fff", boxSizing: "border-box", fontFamily: "monospace",
+                        }}
+                      />
+                      <button
+                        onClick={() => void validarVale()}
+                        disabled={!valeNumero.trim() || valeValidando}
+                        style={{
+                          padding: "8px 14px", border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
+                          background: "#fff", color: C.esmeralda, fontSize: 12, fontWeight: 600,
+                          cursor: !valeNumero.trim() || valeValidando ? "not-allowed" : "pointer",
+                          display: "flex", alignItems: "center", gap: 6,
+                        }}>
+                        {valeValidando ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={13} />}
+                        Validar
+                      </button>
+                    </div>
+
+                    {valeValidacao && (
+                      <div style={{
+                        padding: "8px 10px", borderRadius: 6, marginBottom: 8, fontSize: 12, lineHeight: 1.5,
+                        border: `1px solid ${valeValidacao.ok ? "#A7F3D0" : "#FECACA"}`,
+                        background: valeValidacao.ok ? "#ECFDF5" : "#FEF2F2",
+                        color: valeValidacao.ok ? "#065F46" : "#991B1B",
+                      }}>
+                        {valeValidacao.ok ? (
+                          <>
+                            <div style={{ fontWeight: 700 }}>Vale válido</div>
+                            {valeValidacao.valor_disponivel !== undefined && (
+                              <div>Saldo: <strong>{fmtBRL(valeValidacao.valor_disponivel)}</strong>
+                                {valeValidacao.cliente_id == null ? " · promocional (sem dono)" : ""}</div>
+                            )}
+                            {detalhe && valeValidacao.valor_disponivel !== undefined && valeValidacao.valor_disponivel < detalhe.valor && (
+                              <div style={{ color: C.ambar, fontWeight: 600 }}>
+                                Vale menor que a conta — restante {fmtBRL(detalhe.valor - valeValidacao.valor_disponivel)} fica pendente
+                              </div>
+                            )}
+                          </>
+                        ) : (valeValidacao.erro ?? "Vale inválido")}
+                      </div>
+                    )}
+
+                    {/* Vale COM dono → exige o código enviado ao WhatsApp do cliente */}
+                    {valeValidacao?.ok && valeValidacao.cliente_id != null && (
+                      <ValeCodigoInline
+                        valeNumero={valeNumero.trim()}
+                        botaoLabel="Registrar pagamento"
+                        disabled={baixando}
+                        onAplicar={async ({ vale_codigo }) => { await registrarVale(vale_codigo); }}
+                      />
+                    )}
+
+                    {/* Vale promocional (sem dono) → aplica direto */}
+                    {valeValidacao?.ok && valeValidacao.cliente_id == null && (
+                      <button
+                        onClick={async () => {
+                          setBaixando(true); setErr("");
+                          try { await registrarVale(); }
+                          catch (e) { setErr(e instanceof Error ? e.message : "Erro ao registrar pagamento"); }
+                          finally { setBaixando(false); }
+                        }}
+                        disabled={baixando}
+                        style={{
+                          width: "100%", padding: "10px", background: C.esmeralda, color: C.creme,
+                          border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, marginTop: 4,
+                          cursor: baixando ? "not-allowed" : "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                        }}>
+                        {baixando ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <CheckCircle size={14} />}
+                        Registrar pagamento
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => { setFormaRecebimento(null); setValeNumero(""); setValeValidacao(null); setErr(""); }}
+                      style={{
+                        marginTop: 8, padding: "8px 14px", background: "none",
+                        border: `1px solid ${C.cremeBorder}`, borderRadius: 8, fontSize: 12, color: C.cinza, cursor: "pointer",
+                      }}>
+                      Voltar
+                    </button>
+                  </>
+                )}
+
                 {/* Demais formas → valor + (Ouro: peso/grama/foto) */}
-                {formaRecebimento && formaRecebimento !== "Manual (MP)" && formaRecebimento !== "PagBank" && (
+                {formaRecebimento && formaRecebimento !== "Manual (MP)" && formaRecebimento !== "PagBank" && formaRecebimento !== "Vale-Troca" && (
                   <>
                     {/* Valor pago */}
                     <div style={{ marginBottom: 8 }}>
