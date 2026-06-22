@@ -17,6 +17,7 @@ const BUCKETS_PRIVADOS = new Set([
   'ordem-videos',
   'vendas-videos',
   'insumo-fotos',
+  'compras-comercial-fotos',
 ]);
 
 export function isPrivateBucket(bucket: string): boolean {

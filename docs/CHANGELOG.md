@@ -1,6 +1,34 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 22/06/2026 — Versão: v2.69.0 <!-- Revisado 22/06/2026 -->
+> 📋 Última atualização automática: 22/06/2026 — Versão: v2.75.0 <!-- Revisado 22/06/2026 -->
+
+## feat(compras-comercial): etapa de CHEGADA (lote + 2 fotos + IA na balança) antes do cadastro (v2.75.0)
+
+**Pedido do Jonathan:** rastrear o metal assim que a joia chega na loja, antes de cadastrar peça a peça.
+Na chegada informa-se o **lote** (ex: 5 peças / 10 g / R$ 30.000) e o sistema calcula a **grama**
+(R$ 3.000/g). O cadastro detalhado vem depois.
+
+**Como (sem duplicar tabela/estoque):**
+- **Migration 331:** colunas de lote (`total_pecas`, `peso_total_g`, `valor_total_lote`, `valor_grama`),
+  fotos (`foto_balanca_path`, `foto_pecas_path`) e leitura da IA (`ia_*`) em `compras_comercial`; status novo
+  `recebido_pendente_cadastro`; view `vw_saldo_lote_pendente_comercial` (metal a cadastrar por local =
+  peso do lote − peso já cadastrado); trigger AFTER INSERT `fn_gerar_conta_pagar_chegada_comercial`
+  (conta a pagar nasce na chegada, pelo valor do lote); `fn_concluir_*` passa a aceitar concluir vindo da
+  chegada/aprovado; `fn_bloquear_*` libera `aprovado → concluido`. Config `tolerancia_lote_peso_g` (0,30 g).
+- **Chegada (`POST /api/compras-comercial`):** recebe lote + 2 fotos (base64), calcula a grama, sobe as
+  fotos no bucket privado `compras-comercial-fotos`, roda `validarPesoBalanca` na foto da balança (advisory),
+  nasce em `recebido_pendente_cadastro`. Conta a pagar gerada por trigger.
+- **Cadastro:** cada peça (joia) herda a **grama do lote** (rateio por peso); operador pode ajustar.
+- **Conclusão (`/concluir`):** confere Σ peso das peças × peso do lote. Bateu (≤ tolerância) → conclui;
+  divergiu (diferença de balança) → pede **aprovação** (reusa fluxo da migration 274) e só conclui após `aprovado`.
+- **Front (`ComprasComercialClient.tsx`):** "Nova chegada" com lote + grama calculada + `FotoBalancaInput`
+  (IA) + foto das peças; detalhe mostra o lote, leitura da IA e a conferência de peso; botões Concluir/Solicitar
+  aprovação. Bucket privado registrado em `storage-url.ts` e no proxy `api/storage/[bucket]/[...path]`.
+
+**Doc:** `docs/regras-negocio/compras-comercial.md` (nova). `tsc` zero erros.
+**Pendente de teste (homolog):** aplicar migration 331 (assinada) + criar o bucket `compras-comercial-fotos`
+(privado) no Supabase; testar chegada com foto real de balança (IA), cadastro com rateio, conclusão batendo e
+divergente (→ aprovação).
 
 ## feat(aliancas): aliança em itens separados (ouro+pedras por anel) + fixes comerciais (v2.69.0)
 
