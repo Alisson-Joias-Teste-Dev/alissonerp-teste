@@ -163,11 +163,13 @@ function montarWhatsappCobranca(d: ContaDetalhe): string {
 function DetalheDrawer({
   contaId,
   isGerente,
+  isDev,
   onClose,
   onBaixa,
 }: {
   contaId: number;
   isGerente: boolean;
+  isDev: boolean;
   onClose: () => void;
   onBaixa: (id: number) => void;
 }) {
@@ -194,6 +196,22 @@ function DetalheDrawer({
   const [valeValidacao, setValeValidacao] = useState<
     { ok: boolean; erro?: string; valor_disponivel?: number; cliente_id?: number | null } | null
   >(null);
+  // Pix validado (QR Mercado Pago) — gera o QR, mostra e faz polling até a
+  // conta fechar (o webhook fecha quando o cliente paga).
+  const [pixQr, setPixQr] = useState<{ qr_code: string; qr_code_base64: string; valor: number } | null>(null);
+  const [pixGerando, setPixGerando] = useState(false);
+  const [pixCopiado, setPixCopiado] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Modo manual (só dev) dentro de Pix/Cartão — exige comprovante.
+  const [modoManual, setModoManual] = useState(false);
+  const [comprovanteFile, setComprovanteFile] = useState<File | null>(null);
+  const [comprovantePreview, setComprovantePreview] = useState<string | null>(null);
+  // Cartão validado (maquininha / Point)
+  const [devices, setDevices] = useState<{ device_id: string; nome_legivel: string }[]>([]);
+  const [deviceSel, setDeviceSel] = useState("");
+  const [parcelas, setParcelas] = useState(1);
+  const [cartaoEnviando, setCartaoEnviando] = useState(false);
+  const [cartaoAguardando, setCartaoAguardando] = useState(false);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -209,6 +227,124 @@ function DetalheDrawer({
 
   // Carregar na montagem
   useState(() => { void carregar(); });
+
+  // Para o polling do Pix ao fechar/desmontar o drawer.
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  // Carrega as maquininhas quando entra no fluxo de Cartão.
+  useEffect(() => {
+    if (formaRecebimento === "Cartão de Crédito" && !modoManual && devices.length === 0) void carregarDevices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formaRecebimento, modoManual]);
+
+  // ── Pix validado: gera o QR amarrado ao "A Receber" e faz polling ──────────
+  // Não marca nada como pago aqui — quem fecha a conta é o webhook do MP
+  // (crediario-baixa-automatica.ts). O polling só observa a conta virar 'pago'.
+  // Polling compartilhado (Pix e Cartão): observa a conta fechar pelo webhook.
+  function iniciarPolling() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const d = await apiFetch<ContaDetalhe>(`/api/crediario/${contaId}`);
+        if (d.situacao === "pago") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          onBaixa(contaId);
+          onClose();
+        }
+      } catch { /* transitório — segue tentando */ }
+    }, 4000);
+  }
+
+  async function gerarPixQr() {
+    setPixGerando(true); setErr("");
+    try {
+      const r = await apiFetch<{ qr_code: string; qr_code_base64: string; valor: number }>(
+        `/api/crediario/${contaId}/cobrar-pix`,
+        { method: "POST", body: "{}" },
+      );
+      setPixQr({ qr_code: r.qr_code, qr_code_base64: r.qr_code_base64, valor: r.valor });
+      iniciarPolling();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Erro ao gerar o Pix");
+    } finally {
+      setPixGerando(false);
+    }
+  }
+
+  // ── Cartão validado: maquininha (Point) ────────────────────────────────────
+  async function carregarDevices() {
+    try {
+      const list = await apiFetch<{ device_id: string; nome_legivel: string }[]>(`/api/mercado-pago/devices`);
+      const ativos = (list ?? []).filter(d => d.device_id);
+      setDevices(ativos);
+      if (ativos.length === 1) setDeviceSel(ativos[0].device_id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Erro ao carregar maquininhas");
+    }
+  }
+
+  async function cobrarNaMaquininha() {
+    if (!deviceSel) { setErr("Escolha a maquininha"); return; }
+    setCartaoEnviando(true); setErr("");
+    try {
+      await apiFetch(`/api/crediario/${contaId}/cobrar-cartao`, {
+        method: "POST",
+        body: JSON.stringify({ device_id: deviceSel, installments: parcelas }),
+      });
+      setCartaoAguardando(true);
+      iniciarPolling();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Erro ao enviar para a maquininha");
+    } finally {
+      setCartaoEnviando(false);
+    }
+  }
+
+  async function cancelarMaquininha() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    setCartaoAguardando(false);
+    try { await apiFetch(`/api/crediario/${contaId}/cobrar-cartao`, { method: "DELETE" }); } catch { /* ok */ }
+  }
+
+  async function uploadComprovante(file: File): Promise<string | null> {
+    const supabase = createClient();
+    const ext = file.name.split(".").pop() ?? "jpg";
+    const path = `crediario/${contaId}/comprovante-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from("pagamento-fotos").upload(path, file, { contentType: file.type });
+    if (error) { setErr("Erro ao enviar comprovante: " + error.message); return null; }
+    return path;
+  }
+
+  // Baixa MANUAL de Pix/Cartão — exceção só do dev. O back exige comprovante
+  // + role 'desenvolvedor' (registrar-pagamento), aqui apenas montamos o envio.
+  async function confirmarManualComComprovante() {
+    if (!comprovanteFile) { setErr("Comprovante obrigatório para baixa manual."); return; }
+    const valor = valorPago.trim()
+      ? parseFloat(valorPago.replace(",", "."))
+      : (detalhe?.valor ?? 0);
+    if (!valor || valor <= 0) { setErr("Informe o valor pago."); return; }
+    if (detalhe && valor > detalhe.valor) { setErr("Valor pago maior que o valor da conta."); return; }
+    setBaixando(true); setErr("");
+    try {
+      const path = await uploadComprovante(comprovanteFile);
+      if (!path) { setBaixando(false); return; }
+      await apiFetch(`/api/crediario/${contaId}/registrar-pagamento`, {
+        method: "POST",
+        body: JSON.stringify({
+          forma_recebimento: formaRecebimento,
+          valor_pago: valor,
+          comprovante_path: path,
+          obs: obs.trim() || undefined,
+        }),
+      });
+      onBaixa(contaId);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Erro ao registrar baixa manual");
+    } finally {
+      setBaixando(false);
+    }
+  }
 
   async function handleVerificarMp() {
     if (!mpPaymentId.trim()) {
@@ -786,8 +922,200 @@ function DetalheDrawer({
                   </>
                 )}
 
+                {/* Pix / Cartão → fluxo VALIDADO (igual ao pedido). Pix = QR do
+                    Mercado Pago, confirma sozinho pelo webhook. Manual (sem MP)
+                    = exceção só do dev, com comprovante obrigatório. */}
+                {(formaRecebimento === "Pix" || formaRecebimento === "Cartão de Crédito") && (
+                  <>
+                    {!modoManual && formaRecebimento === "Pix" && (
+                      <>
+                        {!pixQr ? (
+                          <button
+                            onClick={gerarPixQr}
+                            disabled={pixGerando}
+                            style={{
+                              width: "100%", padding: "10px", background: C.esmeralda, color: C.creme,
+                              border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700,
+                              cursor: pixGerando ? "not-allowed" : "pointer",
+                              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                            }}>
+                            {pixGerando
+                              ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Gerando QR...</>
+                              : <><CreditCard size={14} /> Gerar QR Pix</>}
+                          </button>
+                        ) : (
+                          <div style={{ textAlign: "center" }}>
+                            <img
+                              src={`data:image/png;base64,${pixQr.qr_code_base64}`}
+                              alt="QR Code Pix"
+                              style={{ width: 200, height: 200, margin: "0 auto", display: "block", border: `1px solid ${C.cremeBorder}`, borderRadius: 8 }}
+                            />
+                            <button
+                              onClick={async () => {
+                                try { await navigator.clipboard.writeText(pixQr.qr_code); setPixCopiado(true); setTimeout(() => setPixCopiado(false), 2000); } catch { /* noop */ }
+                              }}
+                              style={{
+                                marginTop: 8, padding: "7px 12px", background: "none",
+                                border: `1px solid ${C.cremeBorder}`, borderRadius: 8, fontSize: 12,
+                                color: C.esmeralda, cursor: "pointer", fontWeight: 600,
+                              }}>
+                              {pixCopiado ? "✓ Copiado!" : "Copiar código Pix"}
+                            </button>
+                            <div style={{ marginTop: 10, fontSize: 12, color: C.cinza, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                              <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                              Aguardando o pagamento… a conta baixa sozinha.
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {!modoManual && formaRecebimento === "Cartão de Crédito" && (
+                      !cartaoAguardando ? (
+                        <>
+                          <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>Maquininha</div>
+                          <select
+                            value={deviceSel}
+                            onChange={e => setDeviceSel(e.target.value)}
+                            style={{
+                              width: "100%", fontSize: 13, padding: "8px 10px", marginBottom: 8,
+                              border: `1px solid ${C.cremeBorder}`, borderRadius: 6, background: "#fff",
+                              outline: "none", boxSizing: "border-box",
+                            }}>
+                            <option value="">Escolha a maquininha…</option>
+                            {devices.map(d => <option key={d.device_id} value={d.device_id}>{d.nome_legivel}</option>)}
+                          </select>
+                          <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>Parcelas</div>
+                          <select
+                            value={parcelas}
+                            onChange={e => setParcelas(Number(e.target.value))}
+                            style={{
+                              width: "100%", fontSize: 13, padding: "8px 10px", marginBottom: 8,
+                              border: `1px solid ${C.cremeBorder}`, borderRadius: 6, background: "#fff",
+                              outline: "none", boxSizing: "border-box",
+                            }}>
+                            {Array.from({ length: 12 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}x</option>)}
+                          </select>
+                          <button
+                            onClick={cobrarNaMaquininha}
+                            disabled={cartaoEnviando || !deviceSel}
+                            style={{
+                              width: "100%", padding: "10px", background: C.esmeralda, color: C.creme,
+                              border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700,
+                              cursor: cartaoEnviando || !deviceSel ? "not-allowed" : "pointer",
+                              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                            }}>
+                            {cartaoEnviando
+                              ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Enviando...</>
+                              : <><CreditCard size={14} /> Cobrar na maquininha</>}
+                          </button>
+                        </>
+                      ) : (
+                        <div style={{ textAlign: "center", padding: "8px 0" }}>
+                          <Loader2 size={22} style={{ animation: "spin 1s linear infinite", color: C.esmeralda }} />
+                          <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: C.esmeralda }}>Passe o cartão na maquininha</div>
+                          <div style={{ marginTop: 4, fontSize: 12, color: C.cinza }}>A conta baixa sozinha quando aprovar.</div>
+                          <button
+                            onClick={cancelarMaquininha}
+                            style={{
+                              marginTop: 10, padding: "7px 12px", background: "none",
+                              border: `1px solid ${C.cremeBorder}`, borderRadius: 8, fontSize: 12, color: C.cinza, cursor: "pointer",
+                            }}>
+                            Cancelar cobrança
+                          </button>
+                        </div>
+                      )
+                    )}
+
+                    {/* Manual sem MP — EXCEÇÃO só do desenvolvedor */}
+                    {modoManual && (
+                      <div style={{ marginTop: 4 }}>
+                        <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>Valor pago</div>
+                        <input
+                          type="text" inputMode="decimal"
+                          value={valorPago}
+                          onChange={e => setValorPago(e.target.value)}
+                          placeholder={detalhe ? detalhe.valor.toFixed(2).replace(".", ",") : "0,00"}
+                          style={{
+                            width: "100%", fontSize: 15, fontWeight: 700, padding: "8px 10px",
+                            border: `1px solid ${C.cremeBorder}`, borderRadius: 6, outline: "none",
+                            background: "#fff", boxSizing: "border-box", fontFamily: "monospace", color: C.esmeralda,
+                          }}
+                        />
+                        <div style={{ fontSize: 11, color: C.cinza, margin: "8px 0 3px" }}>Comprovante (obrigatório)</div>
+                        <input
+                          type="file" accept="image/*" capture="environment"
+                          onChange={e => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            setComprovanteFile(file);
+                            setComprovantePreview(URL.createObjectURL(file));
+                          }}
+                          style={{ width: "100%", fontSize: 12 }}
+                        />
+                        {comprovantePreview && (
+                          <img src={comprovantePreview} alt="Comprovante"
+                            style={{ marginTop: 6, height: 80, borderRadius: 6, objectFit: "cover" }} />
+                        )}
+                        <textarea
+                          value={obs}
+                          onChange={e => setObs(e.target.value)}
+                          placeholder="Observação (ex: ID do Pix, motivo da exceção)..."
+                          rows={2}
+                          style={{
+                            marginTop: 6, width: "100%", fontSize: 12, padding: "7px 10px",
+                            border: `1px solid ${C.cremeBorder}`, borderRadius: 6, resize: "none",
+                            outline: "none", background: "#fff", boxSizing: "border-box",
+                          }}
+                        />
+                        <button
+                          onClick={confirmarManualComComprovante}
+                          disabled={baixando}
+                          style={{
+                            marginTop: 8, width: "100%", padding: "10px", background: C.ambar, color: "#fff",
+                            border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700,
+                            cursor: baixando ? "not-allowed" : "pointer",
+                            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                          }}>
+                          {baixando
+                            ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Confirmando...</>
+                            : <><CheckCircle size={14} /> Confirmar baixa manual</>}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Atalho da exceção manual — visível só para o dev */}
+                    {isDev && !pixQr && !cartaoAguardando && (
+                      <button
+                        onClick={() => { setModoManual(m => !m); setErr(""); }}
+                        style={{
+                          marginTop: 8, width: "100%", padding: "7px", background: "none",
+                          border: `1px dashed ${C.cremeBorder}`, borderRadius: 8, fontSize: 11,
+                          color: C.cinza, cursor: "pointer",
+                        }}>
+                        {modoManual ? "← Voltar ao fluxo validado" : "Lançar manual (comprovante) — só dev"}
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => {
+                        setFormaRecebimento(null); setModoManual(false);
+                        setPixQr(null); setComprovanteFile(null); setComprovantePreview(null);
+                        setValorPago(""); setErr("");
+                        setCartaoAguardando(false); setDeviceSel(""); setDevices([]);
+                        if (pollRef.current) clearInterval(pollRef.current);
+                      }}
+                      style={{
+                        marginTop: 8, padding: "8px 14px", background: "none", width: "100%",
+                        border: `1px solid ${C.cremeBorder}`, borderRadius: 8, fontSize: 12, color: C.cinza, cursor: "pointer",
+                      }}>
+                      Voltar
+                    </button>
+                  </>
+                )}
+
                 {/* Demais formas → valor + (Ouro: peso/grama/foto) */}
-                {formaRecebimento && formaRecebimento !== "Manual (MP)" && formaRecebimento !== "PagBank" && formaRecebimento !== "Vale-Troca" && (
+                {formaRecebimento && formaRecebimento !== "Manual (MP)" && formaRecebimento !== "PagBank" && formaRecebimento !== "Vale-Troca" && formaRecebimento !== "Pix" && formaRecebimento !== "Cartão de Crédito" && (
                   <>
                     {/* Valor pago */}
                     <div style={{ marginBottom: 8 }}>
@@ -1421,6 +1749,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
         <DetalheDrawer
           contaId={selectedContaId}
           isGerente={isGerente}
+          isDev={userRole === "desenvolvedor"}
           onClose={() => setSelectedContaId(null)}
           onBaixa={handleBaixaConfirmada}
         />
