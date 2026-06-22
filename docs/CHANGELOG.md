@@ -1,6 +1,17 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
+> 📋 Última atualização automática: 22/06/2026 — Versão: v2.69.0 <!-- Revisado 22/06/2026 -->
+
+## feat(aliancas): aliança em itens separados (ouro+pedras por anel) + fixes comerciais (v2.69.0)
+
+Pedido do Jonathan: ver e descontar **cada parte** da aliança separadamente. Subido direto pra produção (commit f5b0ef57) + 2 migrations aplicadas (315 + 316) em 22/06.
+- **Orçamento→venda** (`api/orcamento/[id]/route.ts`): a aliança (par) deixa de ser 1 item e vira itens próprios — *Aliança 1 (ouro)*, *Pedras Aliança 1*, *Aliança 2 (ouro)*, *Pedras Aliança 2* — cada um com preço/desconto/comissão. Pedra com valor EXATO (`preco_total_rs`); ouro = (total − pedras) rateado por peso (anéis de mesmo peso saem iguais); Σitens = valor do orçamento. Só vendas novas (as antigas ficam intactas). Comissão total inalterada.
+- **Orçamento (rodapé):** espelho da quebra por aliança (ouro + pedras de cada anel), mesmas regras.
+- **Venda (detalhe):** mostra a ficha de cada anel (`aliancaRings`); descrições sem corte; a tela **não recarrega sozinha** ao digitar (autosave/realtime via `load(silent)`).
+- **Boleamento:** rótulo "Curvatura" → "Boleamento" no orçamento e na ficha da ordem.
+- **Ficha técnica (banco):** grava JSONB como objeto (`::text::jsonb`) — corrige double-encode em 7 pontos de escrita. **Migration 316** normaliza as 156 fichas antigas.
+- **PDF da venda:** gravação usa `formatGravacao` (não gruda nome+data; sem caractere de controle).
+- **Friso (migration 315, aplicada em prod):** trigger `trg_normalizar_friso_ficha` + limpeza de 156 fichas com friso residual (anel liso ia pra fábrica com sulco).
 
 ## feat(crediario): painel de parcelamento/sinal também no detalhe da venda (v2.70.0)
 
