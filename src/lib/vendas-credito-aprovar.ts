@@ -10,7 +10,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import sql from "@/lib/db";
-import { getSaldoDisponivel, debitarSaldo } from "@/lib/saldo-credito";
+import { getSaldoDisponivel } from "@/lib/saldo-credito";
 import { approveVenda } from "@/lib/vendas-aprovar";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { criarNotificacao } from "@/lib/notificacoes";
@@ -333,25 +333,11 @@ export async function processarAprovacaoCredito(
     return { ok: true, acao: "rejeitado", message: "Aprovação de crédito rejeitada" };
   }
 
-  // 3. Aprovado — processar conforme tipo
-  const [aReceber] = await sql`
-    SELECT COALESCE(SUM(valor), 0) AS total
-    FROM alissonerp.pagamentos_venda
-    WHERE venda_id = ${vendaId} AND forma = 'A Receber' AND status = 'pendente'
-  `;
-  const valorAReceber = parseFloat(aReceber.total);
-
-  if (tipo === "gerente") {
-    // 3a. Debitar saldo do gerente
-    await debitarSaldo(valorAReceber, vendaId, aprovadorId);
-
-    await sql`
-      UPDATE alissonerp.vendas_erp
-      SET credito_gerente_usado = ${valorAReceber}, updated_at = NOW()
-      WHERE id = ${vendaId}
-    `;
-  } else {
-    // 3b. Diretor: zerar comissão de todos os itens
+  // 3. Aprovado — processar conforme tipo.
+  // tipo 'gerente' → comissão da consultora MANTIDA, nada a fazer: o saldo de crédito
+  // é DERIVADO ao vivo (limite − A Receber pendente, v2.78.0), não há contador a
+  // debitar. tipo 'diretor' (crédito sem saldo) → zera a comissão de todos os itens.
+  if (tipo === "diretor") {
     await sql`
       UPDATE alissonerp.itens_venda_erp
       SET pct_comissao = 0, valor_comissao = 0

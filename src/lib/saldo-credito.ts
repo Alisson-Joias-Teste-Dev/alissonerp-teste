@@ -21,15 +21,6 @@ interface SaldoResult {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Lê o saldo atual do crédito da gerente de loja. */
-export async function getSaldoAtual(): Promise<number> {
-  const [row] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_sistema
-    WHERE chave = 'saldo_gerente_atual'
-  `;
-  return row ? parseFloat(row.valor) : 0;
-}
-
 /** Lê o limite configurado. */
 export async function getSaldoLimite(): Promise<number> {
   const [row] = await sql`
@@ -71,51 +62,6 @@ export async function getSaldoDisponivel(): Promise<{
 }
 
 /**
- * Debita valor do saldo de crédito da loja (usado ao aprovar venda com A Receber).
- * Usa SELECT FOR UPDATE dentro de transação para evitar race condition.
- * @throws se saldo insuficiente
- */
-export async function debitarSaldo(
-  valor: number,
-  vendaId: number,
-  userId: string,
-): Promise<SaldoResult> {
-  return sql.begin(async (tx: any) => {
-    // Lock pessimista na linha de config
-    const [row] = await tx`
-      SELECT valor FROM alissonerp.configuracoes_sistema
-      WHERE chave = 'saldo_gerente_atual'
-      FOR UPDATE
-    `;
-    const saldoAntes = row ? parseFloat(row.valor) : 0;
-
-    if (valor > saldoAntes) {
-      throw new Error(
-        `Saldo insuficiente: R$ ${saldoAntes.toFixed(2)} disponível, R$ ${valor.toFixed(2)} necessário`,
-      );
-    }
-
-    const saldoDepois = Math.round((saldoAntes - valor) * 100) / 100;
-
-    await tx`
-      UPDATE alissonerp.configuracoes_sistema
-      SET valor = ${String(saldoDepois)}, updated_at = now()
-      WHERE chave = 'saldo_gerente_atual'
-    `;
-
-    await tx`
-      INSERT INTO alissonerp.saldo_credito_loja
-        (tipo, valor, saldo_antes, saldo_depois, venda_id, descricao, usuario_id)
-      VALUES
-        ('debito', ${valor}, ${saldoAntes}, ${saldoDepois}, ${vendaId},
-         ${"Aprovação de crédito - venda"}, ${userId}::uuid)
-    `;
-
-    return { saldo_antes: saldoAntes, saldo_depois: saldoDepois };
-  }) as Promise<SaldoResult>;
-}
-
-/**
  * Credita valor de volta ao saldo (quando cliente paga o A Receber).
  *
  * REGRA DE NEGÓCIO (Blindagem 2026-06): aceita transação externa opcional
@@ -123,8 +69,11 @@ export async function debitarSaldo(
  * confirmação de pagamento credita o saldo e baixa contas_receber de forma
  * atômica (tudo ou nada). Sem txClient, abre transação própria (compatível
  * com os chamadores antigos).
- * IMPACTO SE ALTERADO: sem o suporte a txClient, a devolução de crédito pode
- * persistir mesmo quando o resto da confirmação falha (estado inconsistente).
+ *
+ * NOTA (v2.78.0): o saldo passou a ser DERIVADO ao vivo (ver getSaldoDisponivel),
+ * então `saldo_gerente_atual` não é mais lido para decisão/exibição. Esta função
+ * segue mantendo o histórico em `saldo_credito_loja` e o contador legado; é escrita
+ * inofensiva (ninguém lê o contador) até a faxina final removê-la dos pontos de baixa.
  */
 export async function creditarSaldo(
   valor: number,
@@ -164,43 +113,4 @@ export async function creditarSaldo(
   if (txClient) return executar(txClient);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return sql.begin(async (tx: any) => executar(tx)) as Promise<SaldoResult>;
-}
-
-/**
- * Ajuste manual do saldo (admin/diretor apenas).
- */
-export async function ajustarSaldo(
-  valor: number,
-  descricao: string,
-  userId: string,
-): Promise<SaldoResult> {
-  return sql.begin(async (tx: any) => {
-    const [row] = await tx`
-      SELECT valor FROM alissonerp.configuracoes_sistema
-      WHERE chave = 'saldo_gerente_atual'
-      FOR UPDATE
-    `;
-    const saldoAntes = row ? parseFloat(row.valor) : 0;
-    const saldoDepois = Math.round((saldoAntes + valor) * 100) / 100;
-
-    if (saldoDepois < 0) {
-      throw new Error(`Ajuste resultaria em saldo negativo: R$ ${saldoDepois.toFixed(2)}`);
-    }
-
-    await tx`
-      UPDATE alissonerp.configuracoes_sistema
-      SET valor = ${String(saldoDepois)}, updated_at = now()
-      WHERE chave = 'saldo_gerente_atual'
-    `;
-
-    await tx`
-      INSERT INTO alissonerp.saldo_credito_loja
-        (tipo, valor, saldo_antes, saldo_depois, descricao, usuario_id)
-      VALUES
-        ('ajuste', ${Math.abs(valor)}, ${saldoAntes}, ${saldoDepois},
-         ${descricao}, ${userId}::uuid)
-    `;
-
-    return { saldo_antes: saldoAntes, saldo_depois: saldoDepois };
-  }) as Promise<SaldoResult>;
 }

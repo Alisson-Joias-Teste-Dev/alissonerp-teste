@@ -5200,8 +5200,6 @@ function TabCreditoLoja() {
     descricao: string | null; usuario_nome: string | null; numero_venda: string | null; created_at: string;
   }>>([]);
   const [loading, setLoading] = useState(true);
-  const [ajusteValor, setAjusteValor] = useState("");
-  const [ajusteDesc, setAjusteDesc] = useState("");
   const [novoLimite, setNovoLimite] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -5223,23 +5221,6 @@ function TabCreditoLoja() {
   }
 
   useEffect(() => { loadData(); }, []);
-
-  async function handleAjuste() {
-    const valor = parseFloat(ajusteValor.replace(",", "."));
-    if (!valor || !ajusteDesc.trim()) return alert("Valor e descrição obrigatórios");
-    setSaving(true);
-    try {
-      const res = await fetch("/api/saldo-credito", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ valor, descricao: ajusteDesc.trim() }),
-      });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error);
-      setAjusteValor(""); setAjusteDesc("");
-      await loadData();
-    } catch (e) { alert(e instanceof Error ? e.message : "Erro"); }
-    finally { setSaving(false); }
-  }
 
   async function handleLimite() {
     const lim = parseFloat(novoLimite.replace(",", "."));
@@ -5267,7 +5248,7 @@ function TabCreditoLoja() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded-xl border p-5" style={{ borderColor: P.border, backgroundColor: P.card }}>
           <p className="text-xs uppercase tracking-widest mb-1" style={{ color: P.sage }}>Saldo Disponível</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: "#059669" }}>{fmt(saldo ?? 0)}</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: (saldo ?? 0) < 0 ? "#EF4444" : "#059669" }}>{fmt(saldo ?? 0)}</p>
         </div>
         <div className="rounded-xl border p-5" style={{ borderColor: P.border, backgroundColor: P.card }}>
           <p className="text-xs uppercase tracking-widest mb-1" style={{ color: P.sage }}>Limite Configurado</p>
@@ -5284,37 +5265,20 @@ function TabCreditoLoja() {
         </div>
       </div>
 
-      {/* Ajuste manual + alterar limite */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="rounded-xl border p-4" style={{ borderColor: P.border, backgroundColor: P.card }}>
-          <p className="text-sm font-semibold mb-3" style={{ color: P.creme }}>Ajustar Saldo</p>
-          <div className="space-y-2">
-            <input type="text" value={ajusteValor} onChange={e => setAjusteValor(e.target.value)}
-              placeholder="Valor (positivo = crédito, negativo = débito)"
+      {/* Alterar limite (o saldo é derivado ao vivo; não há ajuste manual) */}
+      <div className="rounded-xl border p-4" style={{ borderColor: P.border, backgroundColor: P.card }}>
+        <p className="text-sm font-semibold mb-1" style={{ color: P.creme }}>Alterar Limite</p>
+        <p className="text-xs mb-3" style={{ color: P.sage }}>O saldo disponível é calculado automaticamente: limite − total a receber pendente.</p>
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <input type="text" value={novoLimite} onChange={e => setNovoLimite(e.target.value)}
               className="w-full border rounded-lg px-3 py-2 text-sm" style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }} />
-            <input type="text" value={ajusteDesc} onChange={e => setAjusteDesc(e.target.value)}
-              placeholder="Descrição do ajuste"
-              className="w-full border rounded-lg px-3 py-2 text-sm" style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }} />
-            <button onClick={handleAjuste} disabled={saving}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-              style={{ backgroundColor: P.creme, color: P.card }}>
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Aplicar Ajuste
-            </button>
           </div>
-        </div>
-        <div className="rounded-xl border p-4" style={{ borderColor: P.border, backgroundColor: P.card }}>
-          <p className="text-sm font-semibold mb-3" style={{ color: P.creme }}>Alterar Limite</p>
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
-              <input type="text" value={novoLimite} onChange={e => setNovoLimite(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 text-sm" style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }} />
-            </div>
-            <button onClick={handleLimite} disabled={saving}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-              style={{ backgroundColor: P.creme, color: P.card }}>
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salvar
-            </button>
-          </div>
+          <button onClick={handleLimite} disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+            style={{ backgroundColor: P.creme, color: P.card }}>
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salvar
+          </button>
         </div>
       </div>
 
