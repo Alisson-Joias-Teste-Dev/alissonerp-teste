@@ -566,11 +566,19 @@ export async function PATCH(
   }
 
   // ── Bloquear aprovação se lock pendente ──────────────────────────────────
+  // Só trava se a tarefa de crédito AINDA estiver aguardando aprovação. Se já
+  // foi aprovada/rejeitada (campo apenas não-limpo), não bloqueia — senão a
+  // venda fica presa pra sempre quando o vínculo não é zerado (bug 15545/15616).
   if (body.situacao === "aprovado" && venda.aprovacao_credito_tarefa_id) {
-    return NextResponse.json(
-      { error: "Venda aguarda aprovação pendente. Aprove via aba Tarefas antes de prosseguir." },
-      { status: 409 }
-    );
+    const [credTarefa] = await sql`
+      SELECT status FROM alissonerp.tarefas WHERE id = ${venda.aprovacao_credito_tarefa_id}
+    `;
+    if (credTarefa?.status === "aguardando_aprovacao") {
+      return NextResponse.json(
+        { error: "Venda aguarda aprovação pendente. Aprove via aba Tarefas antes de prosseguir." },
+        { status: 409 }
+      );
+    }
   }
   // ── Bloquear aprovação se há pagamento A Receber sem aprovação de crédito ──
   if (body.situacao === "aprovado") {

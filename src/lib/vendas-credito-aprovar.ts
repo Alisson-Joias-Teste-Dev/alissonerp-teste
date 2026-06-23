@@ -30,6 +30,15 @@ interface AprovacaoResult {
   ordem_criada?: string;
   tiny_erro?: string;
   message?: string;
+  // true quando a venda ficou de fato 'aprovado' (approveVenda rodou ok).
+  // false quando ainda falta confirmar pagamento de entrada (espera legítima)
+  // OU quando o approveVenda falhou (ver erro_aprovacao).
+  venda_aprovada?: boolean;
+  // Só preenchido no caso de FALHA: todos os pagamentos de entrada já estavam
+  // confirmados, o crédito foi aprovado, mas o approveVenda lançou erro (ex.:
+  // cliente sem celular). Sinaliza ao chamador que a aprovação deve ser
+  // revertida pra permitir nova tentativa.
+  erro_aprovacao?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -377,6 +386,11 @@ export async function processarAprovacaoCredito(
   let ordemCriada: string | undefined;
   let tinyErro: string | undefined;
   let vendaAprovada = false;
+  // Preenchido só quando todos os pagamentos já estavam confirmados mas o
+  // approveVenda lançou erro (ex.: cliente sem celular). É o sinal pro chamador
+  // reverter a aprovação da tarefa e deixar reprocessável. NÃO confundir com a
+  // espera legítima por confirmação de pagamento (todosOutrosConfirmados=false).
+  let erroAprovacao: string | undefined;
 
   if (todosOutrosConfirmados) {
     try {
@@ -385,17 +399,30 @@ export async function processarAprovacaoCredito(
       tinyErro = result.tiny_erro;
       vendaAprovada = true;
     } catch (err) {
-      tinyErro = err instanceof Error ? err.message : String(err);
+      erroAprovacao = err instanceof Error ? err.message : String(err);
       console.error(`[processarAprovacaoCredito] approveVenda falhou:`, err);
     }
   }
 
+  // A venda aprovou de fato → limpa o vínculo da tarefa de crédito. Sem isso o
+  // campo ficava preso e o guard de "aprovação pendente" travava a venda pra
+  // sempre (a tarefa fica como histórico, ligada à venda por venda_id).
+  if (vendaAprovada) {
+    await sql`
+      UPDATE alissonerp.vendas_erp
+      SET aprovacao_credito_tarefa_id = NULL, updated_at = NOW()
+      WHERE id = ${vendaId}
+    `;
+  }
+
   // 6. Notificar consultora
-  const msgOk = todosOutrosConfirmados
-    ? (tipo === "gerente"
-        ? `Crédito aprovado pelo gerente — Venda ${vendaInfo.numero_venda} aprovada`
-        : `Crédito aprovado pelo diretor — Venda ${vendaInfo.numero_venda} aprovada (comissão zerada)`)
-    : `Crédito aprovado — aguardando confirmação dos demais pagamentos da Venda ${vendaInfo.numero_venda}`;
+  const msgOk = !todosOutrosConfirmados
+    ? `Crédito aprovado — aguardando confirmação dos demais pagamentos da Venda ${vendaInfo.numero_venda}`
+    : vendaAprovada
+      ? (tipo === "gerente"
+          ? `Crédito aprovado pelo gerente — Venda ${vendaInfo.numero_venda} aprovada`
+          : `Crédito aprovado pelo diretor — Venda ${vendaInfo.numero_venda} aprovada (comissão zerada)`)
+      : `Crédito aprovado, mas a aprovação da venda falhou: ${erroAprovacao}`;
 
   await criarNotificacao({
     usuarioId: String(tarefa.criado_por),
@@ -412,5 +439,7 @@ export async function processarAprovacaoCredito(
     ordem_criada: ordemCriada,
     tiny_erro: tinyErro,
     message: msgOk,
+    venda_aprovada: vendaAprovada,
+    erro_aprovacao: erroAprovacao,
   };
 }
