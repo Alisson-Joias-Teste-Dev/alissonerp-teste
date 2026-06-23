@@ -31,11 +31,14 @@ import { zodError } from "@/lib/schemas/common";
 import { validarValeTroca, aplicarValeTroca } from "@/lib/vale-troca";
 import { confirmarCodigoVale } from "@/lib/vale-troca-codigo";
 import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
+import { requireCrediarioOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { ForbiddenError } from "@/lib/auth-server";
 
 // Quem pode dar baixa manual (emergência ou formas não-MP).
 // ATENÇÃO: Esta rota NÃO verifica Mercado Pago — é confiança pura.
 // Use verificar-mp para baixas com ID do Mercado Pago.
-const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
+// consultora entra, mas SÓ na conta de venda dela (ownership abaixo).
+const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor", "consultora"];
 
 const RegistrarPagamentoSchema = z.object({
   obs: z.string().max(5000).optional(),
@@ -77,6 +80,20 @@ export async function POST(
   `;
   if (!usuario || !PODE_BAIXAR.includes(usuario.role as string)) {
     return NextResponse.json({ error: "Sem permissão para registrar baixa" }, { status: 403 });
+  }
+
+  // Onda 1D / blindagem: consultora só dá baixa na conta de uma venda DELA.
+  // Roles full (gerente/admin/dev/diretor) passam direto. Fecha o vetor de
+  // baixar a venda de um colega (recebimento fantasma / fraude de comissão).
+  try {
+    await requireCrediarioOwnership(
+      { id: user.id, role: usuario.role as string, email: user.email ?? "" },
+      contaId,
+    );
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
   }
 
   const [conta] = await sql`

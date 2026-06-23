@@ -162,13 +162,13 @@ function montarWhatsappCobranca(d: ContaDetalhe): string {
  */
 function DetalheDrawer({
   contaId,
-  isGerente,
+  podeBaixar,
   isDev,
   onClose,
   onBaixa,
 }: {
   contaId: number;
-  isGerente: boolean;
+  podeBaixar: boolean;
   isDev: boolean;
   onClose: () => void;
   onBaixa: (id: number) => void;
@@ -515,7 +515,7 @@ function DetalheDrawer({
   }
 
   const aging = detalhe ? agingLabel(detalhe.status_aging, detalhe.dias_atraso) : null;
-  const podeRegistrarBaixa = isGerente && detalhe?.situacao === "pendente";
+  const podeRegistrarBaixa = podeBaixar && detalhe?.situacao === "pendente";
 
   return (
     <>
@@ -1472,6 +1472,9 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   };
 
   const isGerente = ["desenvolvedor", "admin", "gerente_loja"].includes(userRole);
+  // Quem pode registrar baixa: gerente + consultora (no back, a consultora
+  // só baixa conta de venda DELA — ownership em requireCrediarioOwnership).
+  const podeBaixar = isGerente || userRole === "consultora";
 
   // Deep-link "Receber no Crediario" (vindo da tela da venda):
   // /crediario?venda=<id> abre direto o drawer da conta pendente daquela venda,
@@ -1748,7 +1751,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
       {selectedContaId !== null && (
         <DetalheDrawer
           contaId={selectedContaId}
-          isGerente={isGerente}
+          podeBaixar={podeBaixar}
           isDev={userRole === "desenvolvedor"}
           onClose={() => setSelectedContaId(null)}
           onBaixa={handleBaixaConfirmada}
