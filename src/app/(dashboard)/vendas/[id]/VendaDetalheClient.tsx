@@ -3799,7 +3799,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           )}
 
           {/* ── Cobrança gateway (link online + maquininha) ── */}
-          {newPagGateway === "Mercado Pago" && (
+          {/* Esconde quando as linhas de pagamento já cobrem o total (ex.: A Receber
+              pendente que preenche o saldo): não faz sentido "cobrar" de novo — esse
+              saldo é recebido pela tela do Crediário. Espelha o gate do botão
+              "Completar pagamento" e a trava do banco (migration 333/335). */}
+          {!pagamentoCobreTotal && newPagGateway === "Mercado Pago" && (
             <MercadoPagoCobranca
               vendaId={venda.id}
               numeroVenda={venda.numero_venda}
@@ -3823,7 +3827,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               }}
             />
           )}
-          {newPagGateway === "PagBank" && (
+          {!pagamentoCobreTotal && newPagGateway === "PagBank" && (
             <PagBankCobranca
               vendaId={venda.id}
               numeroVenda={venda.numero_venda}
