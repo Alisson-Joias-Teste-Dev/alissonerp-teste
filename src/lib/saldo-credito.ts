@@ -40,6 +40,37 @@ export async function getSaldoLimite(): Promise<number> {
 }
 
 /**
+ * Saldo de crédito DISPONÍVEL (regra v2.78.0 — Jonathan 23/06):
+ *   disponivel = limite − TODO o A Receber pendente (GERAL, não só o que a gerente
+ *   aprovou).
+ *
+ * O QUE MUDA: antes o "saldo" era o contador `saldo_gerente_atual`, que só era
+ *   debitado/creditado nas vendas aprovadas PELA GERENTE — ignorava o A Receber
+ *   aprovado pelo CEO ou criado por outros caminhos, então mostrava saldo de sobra
+ *   enquanto a loja já carregava muito mais a receber (drift). Agora é DERIVADO ao
+ *   vivo do pendente real (mesma base `vw_crediario` do card "Pendente") — sem
+ *   contador, sem drift. Pode ficar NEGATIVO quando o total a receber passa do
+ *   limite: aí a gerente está "sem saldo" e a aprovação vai pro CEO (regra mantida).
+ *
+ * O limite (R$ 50.000) continua o mesmo — muda só a forma de medir o usado.
+ */
+export async function getSaldoDisponivel(): Promise<{
+  limite: number;
+  pendente: number;
+  disponivel: number;
+}> {
+  const limite = await getSaldoLimite();
+  const [row] = await sql`
+    SELECT COALESCE(SUM(valor), 0) AS total
+    FROM alissonerp.vw_crediario
+    WHERE situacao = 'pendente'
+  `;
+  const pendente = row ? parseFloat(row.total) : 0;
+  const disponivel = Math.round((limite - pendente) * 100) / 100;
+  return { limite, pendente, disponivel };
+}
+
+/**
  * Debita valor do saldo de crédito da loja (usado ao aprovar venda com A Receber).
  * Usa SELECT FOR UPDATE dentro de transação para evitar race condition.
  * @throws se saldo insuficiente

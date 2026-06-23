@@ -3,7 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess, hasRole } from "@/lib/roles";
-import { getSaldoAtual, getSaldoLimite, ajustarSaldo } from "@/lib/saldo-credito";
+import { getSaldoDisponivel, ajustarSaldo } from "@/lib/saldo-credito";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 
@@ -32,12 +32,10 @@ export async function GET() {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const [saldoAtual, limite] = await Promise.all([
-    getSaldoAtual(),
-    getSaldoLimite(),
-  ]);
+  // Saldo GERAL derivado (regra v2.78.0): limite − todo o A Receber pendente.
+  const { disponivel, limite } = await getSaldoDisponivel();
 
-  return NextResponse.json({ saldo_atual: saldoAtual, limite });
+  return NextResponse.json({ saldo_atual: disponivel, limite });
 }
 
 // ─── POST /api/saldo-credito ────────────────────────────────────────────────

@@ -10,7 +10,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import sql from "@/lib/db";
-import { getSaldoAtual, debitarSaldo } from "@/lib/saldo-credito";
+import { getSaldoDisponivel, debitarSaldo } from "@/lib/saldo-credito";
 import { approveVenda } from "@/lib/vendas-aprovar";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { criarNotificacao } from "@/lib/notificacoes";
@@ -69,7 +69,9 @@ export async function submeterVendaParaAprovacaoCredito(
   `;
   if (!venda) throw new Error(`Venda ${vendaId} não encontrada`);
 
-  const saldoAtual = await getSaldoAtual();
+  // Saldo GERAL (regra v2.78.0): limite − todo o A Receber pendente, derivado ao
+  // vivo (não o contador antigo). Cabe no disponível → gerente aprova; senão → CEO.
+  const { disponivel: saldoAtual } = await getSaldoDisponivel();
   const tipo: "gerente" | "diretor" = valorAReceber <= saldoAtual ? "gerente" : "diretor";
 
   // 3. Encontrar aprovador (fora da tx — só leitura)
