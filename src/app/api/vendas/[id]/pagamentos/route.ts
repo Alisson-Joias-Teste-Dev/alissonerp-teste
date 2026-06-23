@@ -10,6 +10,7 @@ import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { confirmarCodigoVale } from "@/lib/vale-troca-codigo";
 import { logAudit } from "@/lib/audit";
 import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
+import { isPagamentoExcedeError, PAGAMENTO_EXCEDE_MSG } from "@/lib/pagamento-excede";
 
 const PagamentoPostSchema = z.object({
   forma: z.string().min(1, "forma obrigatória").max(100),
@@ -371,23 +372,32 @@ export async function POST(
   const crediTipo  = isAReceber ? (body.credi_tipo ?? null) : null;
   const crediParam = isAReceber ? (body.credi_param ?? null) : null;
 
-  const [novo] = await sql`
-    INSERT INTO alissonerp.pagamentos_venda (
-      venda_id, forma, gateway, valor, parcelas, status, data_confirmacao,
-      credi_tipo, credi_param
-    ) VALUES (
-      ${vendaId},
-      ${body.forma},
-      ${body.gateway ?? null},
-      ${body.valor},
-      ${body.parcelas ?? 1},
-      ${isDinheiro ? 'confirmado' : 'pendente'},
-      ${isDinheiro ? sql`now()` : null},
-      ${crediTipo},
-      ${crediParam}
-    )
-    RETURNING id
-  `;
+  let novo;
+  try {
+    [novo] = await sql`
+      INSERT INTO alissonerp.pagamentos_venda (
+        venda_id, forma, gateway, valor, parcelas, status, data_confirmacao,
+        credi_tipo, credi_param
+      ) VALUES (
+        ${vendaId},
+        ${body.forma},
+        ${body.gateway ?? null},
+        ${body.valor},
+        ${body.parcelas ?? 1},
+        ${isDinheiro ? 'confirmado' : 'pendente'},
+        ${isDinheiro ? sql`now()` : null},
+        ${crediTipo},
+        ${crediParam}
+      )
+      RETURNING id
+    `;
+  } catch (err) {
+    // Trava do banco (migration 333): a soma das linhas passaria do total.
+    if (isPagamentoExcedeError(err)) {
+      return NextResponse.json({ error: PAGAMENTO_EXCEDE_MSG }, { status: 409 });
+    }
+    throw err;
+  }
 
   return NextResponse.json({ id: novo.id }, { status: 201 });
 }
