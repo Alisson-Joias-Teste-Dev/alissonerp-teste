@@ -206,7 +206,7 @@ export async function POST(req: NextRequest) {
     // Busca dados do produto
     const [produto] = await sql`
       SELECT p.id_produto, p.nome, p.sku
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       WHERE p.id_produto = ${produtoId}
     `;
     if (!produto) {

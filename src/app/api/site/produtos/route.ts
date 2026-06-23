@@ -2,7 +2,7 @@
  * GET /api/site/produtos
  *
  * Lista produtos do ERP com o status da integração com o site.
-  * Cruza public.produtos × alissonerp.site_produtos.
+  * Cruza alissonerp.produtos_compat × alissonerp.site_produtos.
   * Estoque centralizado em alissonerp.movimentacoes_estoque_comercial.
  *
  * Query params:
@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
             )
             FROM alissonerp.erp_produtos pai_e
             INNER JOIN alissonerp.erp_produtos filho_e ON filho_e.parent_id = pai_e.id
-            INNER JOIN public.produtos fp ON fp.id_produto = filho_e.produto_id
+            INNER JOIN alissonerp.produtos_compat fp ON fp.id_produto = filho_e.produto_id
             WHERE pai_e.produto_id = p.id_produto
           ),
           NULLIF(p.preco_tiny::numeric, 0),
@@ -120,7 +120,7 @@ export async function GET(req: NextRequest) {
         sp.wc_permalink,
         sp.ultimo_erro,
         sp.ultima_tentativa_at
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN alissonerp.erp_produtos ep   ON ep.produto_id = p.id_produto
       LEFT JOIN alissonerp.site_produtos sp  ON sp.produto_id = p.id_produto
       WHERE p.situacao = 'A'

@@ -508,7 +508,7 @@ export async function POST(req: NextRequest) {
           // Impacto: remover este bloco volta a depender de cálculo manual da consultora e reabre risco financeiro.
           const [metaProduto] = await tx`
             SELECT p.sku, p.nome, ti.tipo_item, psc.pct_calculo_servico
-            FROM public.produtos p
+            FROM alissonerp.produtos_compat p
             LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
             LEFT JOIN public.produtos_servico_config psc ON psc.id_produto = p.id_produto
             WHERE p.id_produto = ${item.produto_id}
@@ -528,7 +528,7 @@ export async function POST(req: NextRequest) {
 
             const [baseRow] = await tx`
               SELECT p.id_produto, p.sku, p.nome, v.preco_venda
-              FROM public.produtos p
+              FROM alissonerp.produtos_compat p
               LEFT JOIN alissonerp.vw_produtos_geral_preco v ON v.id_produto = p.id_produto
               WHERE LOWER(p.sku) = LOWER(${skuBase})
                 AND p.situacao = 'A'

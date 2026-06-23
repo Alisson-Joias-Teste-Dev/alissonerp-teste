@@ -96,7 +96,7 @@ export async function PUT(
   }
 
   try {
-    const [prod] = await sql`SELECT id_produto FROM public.produtos WHERE id_produto = ${produtoId}`;
+    const [prod] = await sql`SELECT id_produto FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId}`;
     if (!prod) return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
 
     await sql`

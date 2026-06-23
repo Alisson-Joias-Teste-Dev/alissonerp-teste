@@ -38,7 +38,7 @@ export async function GET(
         p.peso_real    AS produto_peso,
         vc.url_capa    AS produto_imagem
       FROM directus.itens_ordem_1 i
-      LEFT JOIN public.produtos p ON p.id_produto = i.produto_id
+      LEFT JOIN alissonerp.produtos_compat p ON p.id_produto = i.produto_id
       LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       WHERE i.ordem_id = ${ordem.directus_ordem_id}
       ORDER BY i.id

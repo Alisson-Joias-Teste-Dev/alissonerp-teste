@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
     if (idsApi.length > 0) {
       const rows = await sql`
         SELECT id_produto, id_api_produto, sku, nome
-        FROM public.produtos
+        FROM alissonerp.produtos_compat
         WHERE id_api_produto = ANY(${idsApi}::int[])
       `;
       for (const r of rows) {

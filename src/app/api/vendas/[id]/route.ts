@@ -770,7 +770,7 @@ export async function PATCH(
       JOIN alissonerp.itens_ordem io
         ON io.ordem_id = o.id
        AND io.produto_id = r.produto_id
-      LEFT JOIN public.produtos p ON p.id_produto = r.produto_id
+      LEFT JOIN alissonerp.produtos_compat p ON p.id_produto = r.produto_id
       LEFT JOIN alissonerp.stock_ledger_entry sle
         ON sle.item_id = r.produto_id
        AND sle.item_type = 'produto'

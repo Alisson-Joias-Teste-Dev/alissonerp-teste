@@ -52,7 +52,7 @@ export async function GET(
   const itens = await sql`
     SELECT iv.produto_id, p.nome, p.sku, iv.quantidade
     FROM alissonerp.itens_venda_erp iv
-    LEFT JOIN public.produtos p ON p.id_produto = iv.produto_id
+    LEFT JOIN alissonerp.produtos_compat p ON p.id_produto = iv.produto_id
     WHERE iv.venda_id = ${vendaId}
   `;
 

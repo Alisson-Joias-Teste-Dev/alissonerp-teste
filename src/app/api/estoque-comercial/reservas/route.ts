@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     FROM alissonerp.reservas_estoque_comercial r
     LEFT JOIN alissonerp.vendas_erp v ON v.id = r.venda_id
     LEFT JOIN alissonerp.ordens o ON o.id = r.ordem_id
-    LEFT JOIN public.produtos p ON p.id_produto = r.produto_id
+    LEFT JOIN alissonerp.produtos_compat p ON p.id_produto = r.produto_id
     LEFT JOIN alissonerp.locais_estoque le ON le.id = r.local_estoque_id
     LEFT JOIN auth.users uc ON uc.id = r.created_by
     WHERE r.status = ${status}

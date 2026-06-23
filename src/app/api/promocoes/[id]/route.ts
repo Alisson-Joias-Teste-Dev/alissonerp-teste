@@ -1,5 +1,5 @@
 /**
- * GET   /api/promocoes/[id]  - retorna campanha + itens (JOIN com public.produtos)
+ * GET   /api/promocoes/[id]  - retorna campanha + itens (JOIN com alissonerp.produtos_compat)
  * PATCH /api/promocoes/[id]  - edita campanha (apenas se situacao_efetiva='agendada')
  *                              corpo: { nome_campanha?, data_inicio?, data_fim?,
  *                                       observacao?, itens? (substitui se passado) }
@@ -98,7 +98,7 @@ export async function GET(
         ELSE 0
       END AS pct_desconto
     FROM alissonerp.promocao_itens pi
-    LEFT JOIN public.produtos p ON p.id_produto = pi.produto_id
+    LEFT JOIN alissonerp.produtos_compat p ON p.id_produto = pi.produto_id
     WHERE pi.promocao_id = ${idNum}
     ORDER BY p.nome ASC NULLS LAST
   `;

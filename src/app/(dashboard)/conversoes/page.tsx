@@ -67,8 +67,8 @@ export default async function ConversoesPage() {
     JOIN alissonerp.ordens o ON o.id = cs.ordem_id
     LEFT JOIN alissonerp.usuarios u ON u.id = cs.created_by
     LEFT JOIN alissonerp.tarefas t ON t.id = cs.tarefa_aprovacao_id
-    LEFT JOIN public.produtos p_orig ON p_orig.id_produto = cs.sku_origem_id
-    LEFT JOIN public.produtos p_dest ON p_dest.id_produto = cs.sku_destino_id
+    LEFT JOIN alissonerp.produtos_compat p_orig ON p_orig.id_produto = cs.sku_origem_id
+    LEFT JOIN alissonerp.produtos_compat p_dest ON p_dest.id_produto = cs.sku_destino_id
     ORDER BY cs.created_at DESC
     LIMIT 100
   `;

@@ -130,7 +130,7 @@ export async function POST(req: NextRequest) {
     // ── Buscar produtos alvo (ativos com peso + filtros da tela) ──
     const produtos = (await sql`
       SELECT p.id_produto, p.sku, p.nome, p.peso_precificado, p.markup, p.preco_sync
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       WHERE p.peso_precificado IS NOT NULL
         AND p.peso_precificado > 0

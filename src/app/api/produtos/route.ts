@@ -253,7 +253,7 @@ export async function GET(req: NextRequest) {
 
       const [countRow] = await sql<{ total: string }[]>`
         SELECT COUNT(*) AS total
-        FROM public.produtos p
+        FROM alissonerp.produtos_compat p
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
@@ -355,7 +355,7 @@ export async function GET(req: NextRequest) {
               END
             ), 0)
             FROM alissonerp.produto_pedras_componente ppc
-            LEFT JOIN public.produtos pp2 ON pp2.id_produto = ppc.pedra_produto_id
+            LEFT JOIN alissonerp.produtos_compat pp2 ON pp2.id_produto = ppc.pedra_produto_id
             WHERE ppc.produto_id = p.id_produto
               AND pp2.nome NOT ILIKE '%zirconia%'
           ) AS pedras_ct_total,
@@ -363,21 +363,21 @@ export async function GET(req: NextRequest) {
           (
             SELECT COALESCE(SUM(ppc2.quantidade), 0)::int
             FROM alissonerp.produto_pedras_componente ppc2
-            LEFT JOIN public.produtos pp3 ON pp3.id_produto = ppc2.pedra_produto_id
+            LEFT JOIN alissonerp.produtos_compat pp3 ON pp3.id_produto = ppc2.pedra_produto_id
             WHERE ppc2.produto_id = p.id_produto
               AND pp3.nome NOT ILIKE '%zirconia%'
           ) AS pedras_qtd_total,
           (
             SELECT pp3.nome
             FROM alissonerp.produto_pedras_componente ppc2
-            LEFT JOIN public.produtos pp3 ON pp3.id_produto = ppc2.pedra_produto_id
+            LEFT JOIN alissonerp.produtos_compat pp3 ON pp3.id_produto = ppc2.pedra_produto_id
             WHERE ppc2.produto_id = p.id_produto
               AND pp3.nome NOT ILIKE '%zirconia%'
             ORDER BY ppc2.quantidade DESC
             LIMIT 1
           ) AS pedras_nome_principal,
           COALESCE(ecc.controla_estoque, true) AS controla_estoque
-        FROM public.produtos p
+        FROM alissonerp.produtos_compat p
         LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
         LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
@@ -399,7 +399,7 @@ export async function GET(req: NextRequest) {
     // ── Fallback sem erp_produtos (migration 063 pendente) ─────────────────
     const [countRow] = await sql<{ total: string }[]>`
       SELECT COUNT(*) AS total
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
       LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
@@ -468,28 +468,28 @@ export async function GET(req: NextRequest) {
             END
           ), 0)
           FROM alissonerp.produto_pedras_componente ppc
-          LEFT JOIN public.produtos pp2 ON pp2.id_produto = ppc.pedra_produto_id
+          LEFT JOIN alissonerp.produtos_compat pp2 ON pp2.id_produto = ppc.pedra_produto_id
           WHERE ppc.produto_id = p.id_produto
             AND pp2.nome NOT ILIKE '%zirconia%'
         ) AS pedras_ct_total,
         (
           SELECT COALESCE(SUM(ppc2.quantidade), 0)::int
           FROM alissonerp.produto_pedras_componente ppc2
-          LEFT JOIN public.produtos pp3 ON pp3.id_produto = ppc2.pedra_produto_id
+          LEFT JOIN alissonerp.produtos_compat pp3 ON pp3.id_produto = ppc2.pedra_produto_id
           WHERE ppc2.produto_id = p.id_produto
             AND pp3.nome NOT ILIKE '%zirconia%'
         ) AS pedras_qtd_total,
         (
           SELECT pp3.nome
           FROM alissonerp.produto_pedras_componente ppc2
-          LEFT JOIN public.produtos pp3 ON pp3.id_produto = ppc2.pedra_produto_id
+          LEFT JOIN alissonerp.produtos_compat pp3 ON pp3.id_produto = ppc2.pedra_produto_id
           WHERE ppc2.produto_id = p.id_produto
             AND pp3.nome NOT ILIKE '%zirconia%'
           ORDER BY ppc2.quantidade DESC
           LIMIT 1
         ) AS pedras_nome_principal,
         COALESCE(ecc.controla_estoque, true) AS controla_estoque
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
@@ -563,7 +563,7 @@ export async function POST(req: NextRequest) {
     if (!sku) {
       const [skuRow] = await sql<{ next: string }[]>`
         SELECT (COALESCE(MAX(sku::integer), 1603) + 1)::text AS next
-        FROM public.produtos WHERE sku ~ '^[0-9]{1,5}$'
+        FROM alissonerp.produtos_compat WHERE sku ~ '^[0-9]{1,5}$'
       `;
       sku = skuRow?.next ?? "1604";
     }
@@ -575,7 +575,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Verificar SKU único ──────────────────────────────────────────────────
-    const [dupSku] = await sql`SELECT 1 FROM public.produtos WHERE sku = ${sku} LIMIT 1`;
+    const [dupSku] = await sql`SELECT 1 FROM alissonerp.produtos_compat WHERE sku = ${sku} LIMIT 1`;
     if (dupSku) return NextResponse.json({ error: `SKU "${sku}" já existe` }, { status: 409 });
 
     // ── Calcular combinações de variações ────────────────────────────────────
@@ -610,7 +610,7 @@ export async function POST(req: NextRequest) {
       const paiId = Number(seqPai.id);
 
       // INSERT pai — escrita ÚNICA em alissonerp.erp_produtos.
-      // Tudo centralizado aqui; public.produtos é espelhado pela trigger
+      // Tudo centralizado aqui; alissonerp.produtos_compat é espelhado pela trigger
       // trg_sync_erp_to_public_produto (mirror read-only p/ FKs e GET).
       // fornecedor só entra se a coluna existir (migration 159 pendente = silencioso).
       const temColFornecedor = await colunaExiste("alissonerp", "erp_produtos", "fornecedor", tx);

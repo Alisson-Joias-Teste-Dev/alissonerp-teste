@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   try {
     const [skuRow] = await sql<{ next: string }[]>`
       SELECT (COALESCE(MAX(sku::integer), 1603) + 1)::text AS next
-      FROM public.produtos
+      FROM alissonerp.produtos_compat
       WHERE sku ~ '^[0-9]{1,5}$'
     `;
 
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
       SELECT
         'AJ' || LPAD((COALESCE(MAX(CAST(SUBSTRING(sku FROM 3) AS INTEGER)), 1000) + 1)::text, 4, '0') AS next,
         COALESCE(MAX(CAST(SUBSTRING(sku FROM 3) AS INTEGER)), 1000) >= 9999 AS esgotado
-      FROM public.produtos
+      FROM alissonerp.produtos_compat
       WHERE sku ~ '^AJ[0-9]{4}$'
     `;
 

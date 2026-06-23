@@ -2,7 +2,7 @@ import "server-only";
 import sqlDefault from "@/lib/db";
 
 /**
- * Lista de valores de `public.produtos.fornecedor_etl` que indicam
+ * Lista de valores de `alissonerp.produtos_compat.fornecedor_etl` que indicam
  * fabricação Alisson. Produtos cujo fornecedor_etl está aqui ganham
  * rota automática quando há template default cadastrado pra categoria.
  */
@@ -57,7 +57,7 @@ export async function aplicarRotaPadrao(
 
   const [produto] = await db`
     SELECT id_produto, categoria, fornecedor_etl
-    FROM public.produtos
+    FROM alissonerp.produtos_compat
     WHERE id_produto = ${produtoId}
   `;
   if (!produto) return { applied: false, motivo: "produto_nao_encontrado" };

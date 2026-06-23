@@ -21,13 +21,13 @@ const PersonalizadoPostSchema = z.object({
 /**
  * POST /api/produtos/personalizados
  *
- * Cria produto novo em public.produtos (com SKU AP automatico)
+ * Cria produto novo em alissonerp.produtos_compat (com SKU AP automatico)
  * + config de personalizacao em alissonerp.produto_personalizacao.
  * Tudo em transacao atomica.
  *
  * Body:
  *   {
- *     descricao: string,               // obrigatorio — vira public.produtos.nome
+ *     descricao: string,               // obrigatorio — vira alissonerp.produtos_compat.nome
  *     preco_por_letra: number,         // obrigatorio — R$ por letra
  *     max_caracteres?: number,         // default 20
  *     min_caracteres?: number,         // default 1

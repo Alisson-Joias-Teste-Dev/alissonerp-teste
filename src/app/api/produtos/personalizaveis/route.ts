@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
             pp.preco_por_letra,
             pp.peso_por_letra,
             pp.label
-          FROM public.produtos p
+          FROM alissonerp.produtos_compat p
           JOIN alissonerp.produto_personalizacao pp ON pp.produto_id = p.id_produto
           WHERE pp.ativo = true
             AND p.situacao = 'A'
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
             pp.preco_por_letra,
             pp.peso_por_letra,
             pp.label
-          FROM public.produtos p
+          FROM alissonerp.produtos_compat p
           JOIN alissonerp.produto_personalizacao pp ON pp.produto_id = p.id_produto
           WHERE pp.ativo = true
             AND p.situacao = 'A'

@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   const termo = `%${busca}%`;
   const produtos = await sql`
     SELECT id_produto, nome, sku, peso_precificado, tipo_metal
-    FROM public.produtos
+    FROM alissonerp.produtos_compat
     WHERE situacao = 'A'
       AND (nome ILIKE ${termo} OR sku ILIKE ${termo})
     ORDER BY nome

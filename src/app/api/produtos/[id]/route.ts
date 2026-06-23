@@ -1,6 +1,6 @@
 /**
  * GET  /api/produtos/[id]  — detalhe com composição + erp_produtos (medidas, pai/var)
- * PATCH /api/produtos/[id] — campos editáveis: tem_pedra_preciosa (public.produtos)
+ * PATCH /api/produtos/[id] — campos editáveis: tem_pedra_preciosa (alissonerp.produtos_compat)
  *                            + observacao_erp, medidas (erp_produtos upsert)
  */
 
@@ -134,7 +134,7 @@ export async function GET(
              COALESCE(ecc.controla_estoque, true) AS controla_estoque,
              -- Percentual de calculo automatico de servico (Frente C — 30/05/2026)
              COALESCE(psc.pct_calculo_servico, NULL) AS pct_calculo_servico
-            FROM public.produtos p
+            FROM alissonerp.produtos_compat p
             LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
             LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
             LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
@@ -194,7 +194,7 @@ export async function GET(
             ts.erro   AS tiny_sync_erro,
             COALESCE(ecc.controla_estoque, true) AS controla_estoque,
             COALESCE(psc.pct_calculo_servico, NULL) AS pct_calculo_servico
-          FROM public.produtos p
+          FROM alissonerp.produtos_compat p
           LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
           LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
           LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
@@ -246,7 +246,7 @@ export async function GET(
           pp.preco_venda AS preco,
           p.situacao
         FROM alissonerp.erp_produtos ep
-        JOIN public.produtos p ON p.id_produto = ep.produto_id
+        JOIN alissonerp.produtos_compat p ON p.id_produto = ep.produto_id
         LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
         WHERE ep.parent_id = ${produto.erp_id as number}
         ORDER BY
@@ -312,7 +312,7 @@ export async function PATCH(
     ? body.foto_base64
     : null;
 
-  // Campos que vão para public.produtos
+  // Campos que vão para alissonerp.produtos_compat
   const pubUpdate: Record<string, unknown> = {};
   if (typeof body.tem_pedra_preciosa === "boolean") {
     pubUpdate.tem_pedra_preciosa = body.tem_pedra_preciosa;
@@ -444,7 +444,7 @@ export async function PATCH(
   }
 
   try {
-    // ── public.produtos ────────────────────────────────────────────────────
+    // ── alissonerp.produtos_compat ────────────────────────────────────────────────────
     if (pubUpdate.tem_pedra_preciosa !== undefined) {
       await sql`
         UPDATE alissonerp.erp_produtos
@@ -465,7 +465,7 @@ export async function PATCH(
     if (pubUpdate.situacao !== undefined) {
       await sql`UPDATE alissonerp.erp_produtos SET situacao = ${pubUpdate.situacao as string} WHERE produto_id = ${produtoId}`;
     }
-    // Precificação — campos de entrada. Trigger em public.produtos recalcula preco_sync.
+    // Precificação — campos de entrada. Trigger em alissonerp.produtos_compat recalcula preco_sync.
     if (pubUpdate.peso_precificado !== undefined) {
       await sql`UPDATE alissonerp.erp_produtos SET peso_precificado = ${pubUpdate.peso_precificado as number | null} WHERE produto_id = ${produtoId}`;
     }
@@ -521,7 +521,7 @@ export async function PATCH(
             ${erpUpdate.base           !== undefined ? (erpUpdate.base           as number | null) : null}::numeric,
             ${erpUpdate.observacao_erp !== undefined ? (erpUpdate.observacao_erp as string | null) : null}::text,
             ${erpUpdate.fornecedor     !== undefined ? (erpUpdate.fornecedor     as string | null) : null}::text
-          FROM public.produtos
+          FROM alissonerp.produtos_compat
           WHERE id_produto = ${produtoId}
           ON CONFLICT (produto_id) DO UPDATE SET
             largura_aro    = CASE WHEN ${erpUpdate.largura_aro    !== undefined} THEN EXCLUDED.largura_aro    ELSE erp_produtos.largura_aro    END,
@@ -542,7 +542,7 @@ export async function PATCH(
             ${erpUpdate.altura_aro     !== undefined ? (erpUpdate.altura_aro     as number | null) : null}::numeric,
             ${erpUpdate.base           !== undefined ? (erpUpdate.base           as number | null) : null}::numeric,
             ${erpUpdate.observacao_erp !== undefined ? (erpUpdate.observacao_erp as string | null) : null}::text
-          FROM public.produtos
+          FROM alissonerp.produtos_compat
           WHERE id_produto = ${produtoId}
           ON CONFLICT (produto_id) DO UPDATE SET
             largura_aro    = CASE WHEN ${erpUpdate.largura_aro    !== undefined} THEN EXCLUDED.largura_aro    ELSE erp_produtos.largura_aro    END,
@@ -621,7 +621,7 @@ export async function PATCH(
         `;
         if (count === 0) {
           // Fallback: cria linha com SKU unico (evita conflito UNIQUE(sku) com SKUs duplicados)
-          const [p] = await sql`SELECT sku, nome FROM public.produtos WHERE id_produto = ${produtoId}`;
+          const [p] = await sql`SELECT sku, nome FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId}`;
           if (p) {
             await sql`
               INSERT INTO alissonerp.erp_produtos (produto_id, sku, nome, preco_servico)
@@ -706,7 +706,7 @@ export async function PATCH(
               // via trigger); pedras recalculam por variação a partir do BOM.
               // IMPACTO SE REDUZIDO: volta a divergência pai/filhos.
               const IDENT_PUB = new Set(["sku", "id_produto", "id_api_produto"]);
-              // public.produtos: replica tudo que mudou, menos nome (tratado à parte).
+              // alissonerp.produtos_compat: replica tudo que mudou, menos nome (tratado à parte).
               const pubRepl: Record<string, unknown> = {};
               for (const [k, v] of Object.entries(pubUpdate)) {
                 if (k === "nome" || IDENT_PUB.has(k)) continue;
@@ -801,7 +801,7 @@ export async function PATCH(
       if (precoCompraUsd !== undefined) {
         // Identifica pedra e recalcula preco_tiny
         const [prodCat] = await sql<{ categoria: string | null; peso_precificado: string | null }[]>`
-          SELECT categoria, peso_precificado FROM public.produtos WHERE id_produto = ${produtoId} LIMIT 1
+          SELECT categoria, peso_precificado FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId} LIMIT 1
         `;
         const ehPedra = (prodCat?.categoria ?? "").toLowerCase().startsWith("pedras");
         if (ehPedra && precoCompraUsd != null) {
@@ -843,7 +843,7 @@ export async function PATCH(
             p.id_produto, p.nome, p.sku,
             p.tem_pedra_preciosa, p.preco_pedras, p.preco_total_sync,
             ep.largura_aro, ep.altura_aro, ep.base, ep.observacao_erp
-          FROM public.produtos p
+          FROM alissonerp.produtos_compat p
           LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
           WHERE p.id_produto = ${produtoId}
         `
@@ -855,7 +855,7 @@ export async function PATCH(
             NULL::numeric AS altura_aro,
             NULL::numeric AS base,
             NULL::text    AS observacao_erp
-          FROM public.produtos
+          FROM alissonerp.produtos_compat
           WHERE id_produto = ${produtoId}
         `;
     // ── Sincronização com Tiny (síncrona imediata + fila como fallback) ────
@@ -870,7 +870,7 @@ export async function PATCH(
           tentativas = 0,
           updated_at = NOW()
       `;
-      const operacao = (await sql`SELECT id_api_produto FROM public.produtos WHERE id_produto = ${produtoId}`)[0]?.id_api_produto
+      const operacao = (await sql`SELECT id_api_produto FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId}`)[0]?.id_api_produto
         ? 'update' : 'create';
       tinySyncResult = await syncProdutoToTiny(produtoId, operacao);
     } catch (err) {

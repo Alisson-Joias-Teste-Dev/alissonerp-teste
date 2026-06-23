@@ -68,7 +68,7 @@ export async function syncProdutoToTiny(produtoId: number, operacao: string): Pr
         p.unidade, p.tem_pedra_preciosa,
         ep.cor_metal, ep.largura_aro, ep.altura_aro, ep.base, ep.fornecedor,
         ep.eh_pai, ep.eh_variacao, ep.parent_id
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       WHERE p.id_produto = ${produtoId}
     `;

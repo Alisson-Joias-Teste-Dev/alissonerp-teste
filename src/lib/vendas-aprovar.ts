@@ -217,7 +217,7 @@ export async function sendToTiny(vendaId: number): Promise<void> {
 
   const produtoIds = itens.map(i => i.produto_id).filter(Boolean);
   const produtosTiny = produtoIds.length > 0 ? await sql`
-    SELECT id_produto, id_api_produto FROM public.produtos WHERE id_produto = ANY(${produtoIds}) AND id_api_produto IS NOT NULL
+    SELECT id_produto, id_api_produto FROM alissonerp.produtos_compat WHERE id_produto = ANY(${produtoIds}) AND id_api_produto IS NOT NULL
   ` : [];
   const tinyIdMap = new Map(
     produtosTiny

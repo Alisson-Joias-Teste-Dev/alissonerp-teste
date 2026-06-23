@@ -602,7 +602,7 @@ export default function OrcamentoClient({
   const [pecaFotoRef, setPecaFotoRef] = useState<string | null>(null);
   const [pecaDescontoPct, setPecaDescontoPct] = useState(0);
 
-  // Pedras para peça personalizada (vem de public.produtos categoria pedras)
+  // Pedras para peça personalizada (vem de alissonerp.produtos_compat categoria pedras)
   interface PedraProduto {
     id: number; sku: string | null; nome: string; preco: number;
     tipo_de_pedra: string | null; categoria: string | null;

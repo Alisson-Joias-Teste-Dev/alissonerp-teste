@@ -286,7 +286,7 @@ export default function GestaoEstoqueClient() {
             </div>
           )}
           <span className="text-[10px] uppercase tracking-wider text-gray-400 font-mono hidden md:inline">
-            public.produtos
+            alissonerp.produtos_compat
           </span>
           <button
             onClick={() => setIsAIOpen(true)}

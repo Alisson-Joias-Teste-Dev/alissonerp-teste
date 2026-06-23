@@ -44,7 +44,7 @@ export async function POST() {
       p.id_api_tiny,
       COALESCE(s.saldo_fisico, 0) AS saldo
     FROM alissonerp.estoque_comercial_config ec
-    JOIN public.produtos p ON p.id_produto = ec.produto_id
+    JOIN alissonerp.produtos_compat p ON p.id_produto = ec.produto_id
     LEFT JOIN alissonerp.vw_saldo_estoque_comercial_consolidado s ON s.produto_id = ec.produto_id
     WHERE ec.ativo = true
       AND p.id_api_tiny IS NOT NULL

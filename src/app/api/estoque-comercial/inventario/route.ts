@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
       v.produto_id,
       v.saldo_fisico::INTEGER
     FROM alissonerp.vw_saldo_estoque_comercial_v2 v
-    JOIN public.produtos p ON p.id_produto = v.produto_id
+    JOIN alissonerp.produtos_compat p ON p.id_produto = v.produto_id
     WHERE v.local_estoque_id = ${local_estoque_id}
       AND v.saldo_fisico > 0
       ${cat ? sql`AND (p.categoria = ${cat} OR p.categoria LIKE ${cat + ' -> %'})` : sql``}

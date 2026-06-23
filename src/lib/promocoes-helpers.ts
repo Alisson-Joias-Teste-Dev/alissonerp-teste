@@ -38,7 +38,7 @@ export interface ConflitoPromo {
  * Pais com preco_tiny=0 (sem preco cadastrado) sao IGNORADOS porque nao da
  * pra calcular pct. A funcao retorna apenas os filhos nesse caso.
  *
- * Lanca Error com message detalhada se um produto nao for encontrado em public.produtos.
+ * Lanca Error com message detalhada se um produto nao for encontrado em alissonerp.produtos_compat.
  */
 export async function expandirItensComPais(
   tx: postgres.Sql,
@@ -58,7 +58,7 @@ export async function expandirItensComPais(
       vg.preco_venda AS preco_base,
       ep.eh_pai,
       ep.id AS erp_id
-    FROM public.produtos p
+    FROM alissonerp.produtos_compat p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
     LEFT JOIN alissonerp.vw_produtos_geral_preco vg ON vg.id_produto = p.id_produto
     WHERE p.id_produto = ANY(${ids})
@@ -71,7 +71,7 @@ export async function expandirItensComPais(
   for (const item of itens) {
     const base = baseMap.get(item.produto_id);
     if (!base) {
-      throw new Error(`Produto id=${item.produto_id} nao encontrado em public.produtos`);
+      throw new Error(`Produto id=${item.produto_id} nao encontrado em alissonerp.produtos_compat`);
     }
     const precoLista = parseFloat(base.preco_base ?? "0");
 
@@ -104,7 +104,7 @@ export async function expandirItensComPais(
         pai_ep.produto_id AS pai_produto_id
       FROM alissonerp.erp_produtos pai_ep
       INNER JOIN alissonerp.erp_produtos filho_ep ON filho_ep.parent_id = pai_ep.id
-      INNER JOIN public.produtos p ON p.id_produto = filho_ep.produto_id
+      INNER JOIN alissonerp.produtos_compat p ON p.id_produto = filho_ep.produto_id
       LEFT JOIN alissonerp.vw_produtos_geral_preco vgf ON vgf.id_produto = filho_ep.produto_id
       WHERE pai_ep.produto_id = ANY(${paiIds})
         AND p.situacao = 'A'
@@ -155,7 +155,7 @@ export async function checarConflitoPromocoes(
       pp.data_fim
     FROM alissonerp.promocao_itens pi
     JOIN alissonerp.promocoes_produtos pp ON pp.id = pi.promocao_id
-    LEFT JOIN public.produtos p ON p.id_produto = pi.produto_id
+    LEFT JOIN alissonerp.produtos_compat p ON p.id_produto = pi.produto_id
     WHERE pi.produto_id = ANY(${produtoIds})
       AND pp.situacao_manual = 'agendada'
       AND pp.data_inicio <= ${dataFim}::date

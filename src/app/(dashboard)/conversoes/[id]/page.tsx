@@ -57,7 +57,7 @@ export default async function ConversaoDetalhePage({
     const itens = await sql`
       SELECT ci.*, p.nome AS produto_nome, p.sku
       FROM alissonerp.conversao_itens ci
-      JOIN public.produtos p ON p.id_produto = ci.produto_id
+      JOIN alissonerp.produtos_compat p ON p.id_produto = ci.produto_id
       WHERE ci.conversao_id = ${conversao.id}
     `;
 
@@ -91,8 +91,8 @@ export default async function ConversaoDetalhePage({
     FROM alissonerp.conversoes_sku cs
     LEFT JOIN alissonerp.locais_estoque lo ON lo.id = cs.local_origem_id
     LEFT JOIN alissonerp.locais_estoque ld ON ld.id = cs.local_destino_id
-    LEFT JOIN public.produtos p_orig ON p_orig.id_produto = cs.sku_origem_id
-    LEFT JOIN public.produtos p_dest ON p_dest.id_produto = cs.sku_destino_id
+    LEFT JOIN alissonerp.produtos_compat p_orig ON p_orig.id_produto = cs.sku_origem_id
+    LEFT JOIN alissonerp.produtos_compat p_dest ON p_dest.id_produto = cs.sku_destino_id
     LEFT JOIN alissonerp.usuarios u_aprov ON u_aprov.id = cs.aprovado_por
     LEFT JOIN alissonerp.usuarios u_recus ON u_recus.id = cs.recusado_por
     LEFT JOIN alissonerp.usuarios u_criador ON u_criador.id = cs.created_by

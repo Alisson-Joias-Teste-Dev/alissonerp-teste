@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     const rows = await sql`
       SELECT DISTINCT p.categoria,
              COUNT(*) OVER (PARTITION BY p.categoria)::int AS total_produtos
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       WHERE p.categoria IS NOT NULL AND p.categoria != ''
       ORDER BY p.categoria
     `;
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
       SELECT p.categoria,
              COUNT(*)::int AS total_produtos
       FROM alissonerp.vw_saldo_estoque_comercial_v2 v
-      JOIN public.produtos p ON p.id_produto = v.produto_id
+      JOIN alissonerp.produtos_compat p ON p.id_produto = v.produto_id
       WHERE v.local_estoque_id = ${localEstoqueId}
         AND p.categoria IS NOT NULL AND p.categoria != ''
         AND v.saldo_fisico > 0

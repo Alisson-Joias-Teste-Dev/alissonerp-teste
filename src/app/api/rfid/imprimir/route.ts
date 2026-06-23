@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
   const produtoId = body.produto_id;
 
   const [prod] = await sql`
-    SELECT id_produto, sku, nome FROM public.produtos WHERE id_produto = ${produtoId}::bigint
+    SELECT id_produto, sku, nome FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId}::bigint
   `;
   if (!prod) return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
 
