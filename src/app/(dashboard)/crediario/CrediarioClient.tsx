@@ -176,6 +176,7 @@ function DetalheDrawer({
   const [detalhe, setDetalhe] = useState<ContaDetalhe | null>(null);
   const [loading, setLoading] = useState(true);
   const [mpPaymentId, setMpPaymentId] = useState("");
+  const [mpParcial, setMpParcial] = useState<{ valor_pago: number; valor_restante: number } | null>(null);
   const [pbPaymentId, setPbPaymentId] = useState("");
   const [formaRecebimento, setFormaRecebimento] = useState<string | null>(null);
   const [valorPago, setValorPago] = useState("");
@@ -354,15 +355,24 @@ function DetalheDrawer({
     setBaixando(true);
     setErr("");
     try {
-      await apiFetch(`/api/crediario/${contaId}/verificar-mp`, {
-        method: "POST",
-        body: JSON.stringify({
-          payment_id: mpPaymentId.trim(),
-          obs: obs.trim() || undefined,
-        }),
-      });
+      const r = await apiFetch<{ pagamento_parcial?: boolean; valor_pago?: number; valor_restante?: number }>(
+        `/api/crediario/${contaId}/verificar-mp`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            payment_id: mpPaymentId.trim(),
+            obs: obs.trim() || undefined,
+          }),
+        },
+      );
+      // Atualiza a lista nos dois casos. No parcial, mantém o drawer aberto
+      // mostrando o resultado (quanto entrou e quanto virou nova conta).
       onBaixa(contaId);
-      onClose();
+      if (r?.pagamento_parcial && r.valor_restante != null) {
+        setMpParcial({ valor_pago: r.valor_pago ?? 0, valor_restante: r.valor_restante });
+      } else {
+        onClose();
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Erro ao verificar pagamento");
     } finally {
@@ -706,10 +716,40 @@ function DetalheDrawer({
                 )}
 
                 {/* Manual (MP) → campo ID + verificação */}
-                {formaRecebimento === "Manual (MP)" && (
+                {formaRecebimento === "Manual (MP)" && mpParcial && (
+                  <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#1D9E75", fontWeight: 700, marginBottom: 8 }}>
+                      <CheckCircle size={16} /> Baixa parcial registrada
+                    </div>
+                    <div style={{ background: "#EBF5FB", borderRadius: 8, padding: "10px 12px", color: "#185FA5" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span>Pago agora (MP)</span>
+                        <b>R$ {mpParcial.valor_pago.toFixed(2).replace(".", ",")}</b>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #0070E040", marginTop: 6, paddingTop: 6 }}>
+                        <span>Nova conta pendente</span>
+                        <b>R$ {mpParcial.valor_restante.toFixed(2).replace(".", ",")}</b>
+                      </div>
+                    </div>
+                    <div style={{ color: C.cinza, marginTop: 8 }}>
+                      O restante virou uma nova conta "Saldo restante", que continua cobrável no crediário.
+                    </div>
+                    <button
+                      onClick={onClose}
+                      style={{
+                        marginTop: 10, width: "100%", padding: "10px",
+                        background: "#0070E0", color: "#fff", border: "none",
+                        borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                      }}>
+                      Fechar
+                    </button>
+                  </div>
+                )}
+
+                {formaRecebimento === "Manual (MP)" && !mpParcial && (
                   <>
                     <div style={{ fontSize: 11, color: "#4A6FA5", marginBottom: 10, lineHeight: 1.5 }}>
-                      Informe o ID do pagamento MP recebido do cliente. O sistema consulta a API do Mercado Pago e só confirma se o status for <b>approved</b>.
+                      Informe o ID do pagamento MP recebido do cliente. O sistema consulta a API do Mercado Pago e só confirma se o status for <b>approved</b>. Se o valor pago for <b>menor que a conta</b>, registra baixa parcial e abre uma nova conta com o restante.
                     </div>
                     <input
                       value={mpPaymentId}
