@@ -42,17 +42,21 @@ export async function GET(req: NextRequest) {
     ? sql`AND vendedor_id = ${vendedorId}`
     : sql``;
 
-  // CREDIÁRIO = só vendas que foram "A Receber" (fiado). EXCLUI as pagas pelo
-  // PEDIDO via gateway (cartão/Pix do Mercado Pago, source='webhook_mp') que
-  // nunca tiveram "A Receber" — ex.: venda 15643. MANTÉM o legado (fiado antigo
-  // sem pagamento registrado) e o fiado moderno (tem "A Receber"). Filtro de
+  // CREDIÁRIO = só vendas que foram "A Receber" (fiado). MANTÉM se: tem "A
+  // Receber" (fiado moderno) OU não tem pagamento_venda (legado, ex.: Ruth 28537
+  // sem o registro novo) OU foi BAIXADA pelo crediário (tem comunicacao). EXCLUI
+  // o resto = paga pelo PEDIDO (cartão/Pix no pedido, sem histórico de baixa no
+  // crediário — ex.: 15639 Pix MP Manual, 15643 cartão MP Online). Filtro de
   // EXIBIÇÃO — não altera nada no banco.
   const whereCrediario = sql`
     AND (
       EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
               WHERE p.venda_id = vw_crediario.venda_id AND p.forma = 'A Receber')
       OR NOT EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
-                     WHERE p.venda_id = vw_crediario.venda_id AND p.source = 'webhook_mp')
+                     WHERE p.venda_id = vw_crediario.venda_id)
+      OR EXISTS (SELECT 1 FROM alissonerp.comunicacoes_crediario c
+                 JOIN alissonerp.contas_receber cr2 ON cr2.id = c.conta_receber_id
+                 WHERE cr2.venda_erp_id = vw_crediario.venda_id)
     )
   `;
 

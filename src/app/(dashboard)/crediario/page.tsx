@@ -29,15 +29,18 @@ export default async function CrediarioPage() {
     ? sql`AND vendedor_id = ${vendedorId}`
     : sql``;
 
-  // CREDIÁRIO = só vendas "A Receber" (fiado). EXCLUI as pagas pelo PEDIDO via
-  // gateway (source='webhook_mp') sem nunca terem tido "A Receber". Mantém o
-  // legado e o fiado moderno. Filtro de exibição (igual ao /api/crediario).
+  // CREDIÁRIO = só vendas "A Receber" (fiado). MANTÉM se: tem "A Receber" OU é
+  // legado (sem pagamento_venda) OU foi baixada pelo crediário (tem comunicacao).
+  // EXCLUI o resto = paga pelo PEDIDO. Filtro de exibição (igual ao /api/crediario).
   const whereCrediario = sql`
     AND (
       EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
               WHERE p.venda_id = vw_crediario.venda_id AND p.forma = 'A Receber')
       OR NOT EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
-                     WHERE p.venda_id = vw_crediario.venda_id AND p.source = 'webhook_mp')
+                     WHERE p.venda_id = vw_crediario.venda_id)
+      OR EXISTS (SELECT 1 FROM alissonerp.comunicacoes_crediario c
+                 JOIN alissonerp.contas_receber cr2 ON cr2.id = c.conta_receber_id
+                 WHERE cr2.venda_erp_id = vw_crediario.venda_id)
     )
   `;
 
