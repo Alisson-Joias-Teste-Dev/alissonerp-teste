@@ -44,6 +44,7 @@ export async function GET(
         situacao, status_aging, dias_atraso, obs, created_at,
         venda_id, numero_venda, total_venda, venda_situacao, venda_bloqueada,
         credito_gerente_usado, venda_created_at,
+        (SELECT v.data_venda FROM alissonerp.vendas_erp v WHERE v.id = venda_id) AS data_venda,
         cliente_id, cliente_nome, cliente_telefone, cliente_email,
         vendedor_id, vendedor_nome,
         consultora_uuid, consultora_nome

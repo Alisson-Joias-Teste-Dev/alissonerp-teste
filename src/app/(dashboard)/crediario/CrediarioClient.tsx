@@ -59,6 +59,7 @@ export interface CrediarioItem {
   venda_bloqueada: boolean | null;
   credito_gerente_usado: number | null;
   venda_created_at: string | null;
+  data_venda: string | null;
   cliente_id: number | null;
   cliente_nome: string | null;
   cliente_telefone: string | null;
@@ -1595,19 +1596,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   const [loading, setLoading] = useState(false);
   const [selectedContaId, setSelectedContaId] = useState<number | null>(null);
 
-  // Faixa de alerta de vencidos NA TELA (Fase 4 crediário): aparece se há contas
-  // vencidas e some com "ok"; reaparece no dia seguinte. Regra do Jonathan:
-  // "todas as notificações na tela, senão elas não olham". Começa escondida no
-  // SSR (sem localStorage) e o effect a mostra se ainda não deu "ok" hoje.
-  const [faixaOk, setFaixaOk] = useState(true);
-  useEffect(() => {
-    const hoje = new Date().toISOString().slice(0, 10);
-    setFaixaOk(localStorage.getItem("crediario_faixa_ok") === hoje);
-  }, []);
-  const dispensarFaixa = () => {
-    localStorage.setItem("crediario_faixa_ok", new Date().toISOString().slice(0, 10));
-    setFaixaOk(true);
-  };
+  // O alerta de vencidos agora é GLOBAL (VencidosAlarme no DashboardShell).
 
   const isGerente = ["desenvolvedor", "admin", "gerente_loja"].includes(userRole);
   // Quem pode registrar baixa: gerente + consultora (no back, a consultora
@@ -1788,18 +1777,8 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
           </button>
         </div>
 
-        {/* ── Faixa de alerta de vencidos (some com "ok", volta no dia seguinte) ── */}
-        {contagensView.vencido > 0 && !faixaOk && (
-          <div style={{ display: "flex", alignItems: "center", gap: 12, background: C.vermelho, color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 16 }}>
-            <AlertTriangle size={18} style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>
-              {consultoraSelNome ? `${consultoraSelNome} tem` : "Você tem"} {contagensView.vencido} conta{contagensView.vencido !== 1 ? "s" : ""} vencida{contagensView.vencido !== 1 ? "s" : ""} ({fmtBRL(contagensView.valor_vencido)}). Cobre os clientes!
-            </div>
-            <button onClick={dispensarFaixa} style={{ background: "rgba(255,255,255,0.25)", border: "none", color: "#fff", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
-              ok
-            </button>
-          </div>
-        )}
+        {/* O alerta de vencidos virou GLOBAL (VencidosAlarme no DashboardShell,
+            aparece em toda a tela do sistema) — não fica mais inline aqui. */}
 
         {/* ── Cards de resumo ───────────────────────────────────────────────── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12, marginBottom: 20 }}>
@@ -1995,7 +1974,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
                 numeroVenda={first.numero_venda}
                 clienteNome={first.cliente_nome}
                 vendedorNome={first.vendedor_nome}
-                dataVenda={first.venda_created_at}
+                dataVenda={first.data_venda ?? first.venda_created_at ?? first.created_at}
                 parcelas={parcelas}
                 isGerente={isGerente}
                 onSelectParcela={setSelectedContaId}

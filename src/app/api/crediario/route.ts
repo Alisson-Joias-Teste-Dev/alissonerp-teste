@@ -81,7 +81,8 @@ export async function GET(req: NextRequest) {
         SELECT
           COALESCE(SUM(valor) FILTER (
             WHERE situacao <> 'cancelado'
-              AND venda_created_at::date BETWEEN ${periodoFrom}::date AND ${periodoTo}::date), 0) AS vendido,
+              AND COALESCE((SELECT v.data_venda FROM alissonerp.vendas_erp v WHERE v.id = venda_id), venda_created_at::date)
+                  BETWEEN ${periodoFrom}::date AND ${periodoTo}::date), 0) AS vendido,
           COALESCE(SUM(valor) FILTER (
             WHERE situacao = 'pago'
               AND data_recebimento BETWEEN ${periodoFrom}::date AND ${periodoTo}::date), 0) AS recebido
@@ -114,6 +115,7 @@ export async function GET(req: NextRequest) {
         venda_bloqueada,
         credito_gerente_usado,
         venda_created_at,
+        (SELECT v.data_venda FROM alissonerp.vendas_erp v WHERE v.id = venda_id) AS data_venda,
         cliente_id,
         cliente_nome,
         cliente_telefone,
