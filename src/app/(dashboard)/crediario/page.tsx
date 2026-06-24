@@ -29,6 +29,18 @@ export default async function CrediarioPage() {
     ? sql`AND vendedor_id = ${vendedorId}`
     : sql``;
 
+  // CREDIÁRIO = só vendas "A Receber" (fiado). EXCLUI as pagas pelo PEDIDO via
+  // gateway (source='webhook_mp') sem nunca terem tido "A Receber". Mantém o
+  // legado e o fiado moderno. Filtro de exibição (igual ao /api/crediario).
+  const whereCrediario = sql`
+    AND (
+      EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
+              WHERE p.venda_id = vw_crediario.venda_id AND p.forma = 'A Receber')
+      OR NOT EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
+                     WHERE p.venda_id = vw_crediario.venda_id AND p.source = 'webhook_mp')
+    )
+  `;
+
   const [itemsResult, countResult, saldoResult] = await Promise.all([
     sql`
       SELECT
@@ -43,6 +55,7 @@ export default async function CrediarioPage() {
       FROM alissonerp.vw_crediario
       WHERE situacao = 'pendente'
         ${whereVendedor}
+        ${whereCrediario}
       ORDER BY
         CASE WHEN status_aging = 'vencido' THEN 0
              WHEN status_aging = 'vence_em_breve' THEN 1
@@ -59,7 +72,7 @@ export default async function CrediarioPage() {
         COALESCE(SUM(valor) FILTER (WHERE situacao='pendente'), 0) AS valor_pendente,
         COALESCE(SUM(valor) FILTER (WHERE status_aging='vencido' AND situacao='pendente'), 0) AS valor_vencido
       FROM alissonerp.vw_crediario
-      WHERE 1=1 ${whereVendedor}
+      WHERE 1=1 ${whereVendedor} ${whereCrediario}
     `,
     isConsultora
       ? sql`SELECT NULL::numeric AS saldo_atual, NULL::numeric AS saldo_limite`

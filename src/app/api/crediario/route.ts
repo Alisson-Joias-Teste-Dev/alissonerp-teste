@@ -42,6 +42,20 @@ export async function GET(req: NextRequest) {
     ? sql`AND vendedor_id = ${vendedorId}`
     : sql``;
 
+  // CREDIÁRIO = só vendas que foram "A Receber" (fiado). EXCLUI as pagas pelo
+  // PEDIDO via gateway (cartão/Pix do Mercado Pago, source='webhook_mp') que
+  // nunca tiveram "A Receber" — ex.: venda 15643. MANTÉM o legado (fiado antigo
+  // sem pagamento registrado) e o fiado moderno (tem "A Receber"). Filtro de
+  // EXIBIÇÃO — não altera nada no banco.
+  const whereCrediario = sql`
+    AND (
+      EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
+              WHERE p.venda_id = vw_crediario.venda_id AND p.forma = 'A Receber')
+      OR NOT EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
+                     WHERE p.venda_id = vw_crediario.venda_id AND p.source = 'webhook_mp')
+    )
+  `;
+
   const whereSituacao = situacao
     ? sql`AND situacao = ${situacao}`
     : sql``;
@@ -81,7 +95,7 @@ export async function GET(req: NextRequest) {
           COALESCE(SUM(valor) FILTER (WHERE situacao='pendente'), 0)                              AS valor_pendente,
           COALESCE(SUM(valor) FILTER (WHERE status_aging='vencido' AND situacao='pendente'), 0)   AS valor_vencido
         FROM alissonerp.vw_crediario
-        WHERE 1=1 ${whereVendedor}
+        WHERE 1=1 ${whereVendedor} ${whereCrediario}
       `
     : Promise.resolve(null);
 
@@ -104,7 +118,7 @@ export async function GET(req: NextRequest) {
             WHERE situacao = 'pago'
               AND data_recebimento BETWEEN ${periodoFrom}::date AND ${periodoTo}::date), 0) AS recebido
         FROM alissonerp.vw_crediario
-        WHERE 1=1 ${whereVendedor}
+        WHERE 1=1 ${whereVendedor} ${whereCrediario}
       `
     : Promise.resolve(null);
 
@@ -143,6 +157,7 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.vw_crediario
       WHERE 1=1
         ${whereVendedor}
+        ${whereCrediario}
         ${whereLista}
       ORDER BY
         CASE WHEN ${isPago} THEN 0 ELSE
@@ -160,6 +175,7 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.vw_crediario
       WHERE 1=1
         ${whereVendedor}
+        ${whereCrediario}
         ${whereLista}
     `,
     contagensQuery,
