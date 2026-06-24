@@ -532,6 +532,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const resultado = await processarAprovacaoCredito(
         Number(id), user.id, body.decisao, body.motivo,
       );
+
+      // Se o crédito foi aprovado mas a aprovação da venda FALHOU (ex.: cliente
+      // sem celular), desfaz a marcação da tarefa pra permitir nova tentativa.
+      // Sem isto a tarefa ficava 'aprovada' e a venda presa em rascunho pra
+      // sempre, sem caminho de reprocesso (bug das vendas 15545/15616/etc).
+      if (body.decisao === "aprovado" && resultado.erro_aprovacao) {
+        await sql`
+          UPDATE alissonerp.tarefas
+          SET status = 'aguardando_aprovacao', concluida_em = NULL, updated_at = now()
+          WHERE id = ${Number(id)}
+        `;
+        await sql`
+          UPDATE alissonerp.aprovacoes_tarefa
+          SET status = 'pendente', respondido_em = NULL
+          WHERE id = ${body.aprovacao_id}
+        `;
+        return NextResponse.json(
+          { ok: false, error: resultado.erro_aprovacao, credito: resultado },
+          { status: 409 },
+        );
+      }
+
       return NextResponse.json({ ok: true, credito: resultado });
     } catch (err) {
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] credito`, err);

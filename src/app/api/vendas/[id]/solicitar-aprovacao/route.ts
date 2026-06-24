@@ -253,6 +253,11 @@ export async function POST(
     // Precisa aprovação de crédito
     try {
       const result = await submeterVendaParaAprovacaoCredito(vendaId, user.id);
+      // Camada 2: bloqueio de validação (ex.: cliente sem celular) — não cria
+      // a tarefa e devolve 409 com a mensagem pra consultora corrigir antes.
+      if (result.erro) {
+        return NextResponse.json({ error: result.erro }, { status: 409 });
+      }
       return NextResponse.json({
         ok: true,
         aguardando_aprovacao_credito: result.precisa_aprovacao,
