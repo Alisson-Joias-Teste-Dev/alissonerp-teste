@@ -1803,7 +1803,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
 
         {/* ── Cards de resumo ───────────────────────────────────────────────── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12, marginBottom: 20 }}>
-          <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
+          <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 12, padding: "14px 16px" }}>
             <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
               <Clock size={12} /> Pendente
               {consultoraSelNome && <span style={chipConsultora}>{primeiroNome(consultoraSelNome)}</span>}
@@ -1813,7 +1813,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
           </div>
 
           {contagensView.vencido > 0 && (
-            <div style={{ background: C.vermelhoLt, border: `1px solid ${C.vermelho}30`, borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ background: "#fff", border: `1px solid ${C.vermelho}40`, borderRadius: 12, padding: "14px 16px" }}>
               <div style={{ fontSize: 11, color: C.vermelho, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
                 <AlertTriangle size={12} /> Vencido
                 {consultoraSelNome && <span style={{ ...chipConsultora, background: C.vermelhoLt, color: C.vermelho }}>{primeiroNome(consultoraSelNome)}</span>}
@@ -1825,7 +1825,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
 
           {/* Saldo da gerente — só visível para gerente/admin */}
           {saldo && (
-            <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 12, padding: "14px 16px" }}>
               <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
                 <Wallet size={12} /> Saldo Crédito
               </div>
@@ -1893,20 +1893,21 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
 
         {/* ── Filtros ───────────────────────────────────────────────────────── */}
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-          {tabs.map(t => (
-            <button
-              key={t.key}
-              onClick={() => handleFiltroSituacao(t.key)}
-              style={{
-                padding: "6px 14px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
-                background: filtroSituacao === t.key ? C.esmeralda : "#fff",
-                color:      filtroSituacao === t.key ? "#fff" : C.cinza,
-                boxShadow:  filtroSituacao === t.key ? "none" : `0 0 0 1px ${C.cremeBorder}`,
-              }}
-            >
-              {t.label} {t.count > 0 && <span style={{ opacity: 0.7 }}>({t.count})</span>}
-            </button>
-          ))}
+          <div style={{ display: "inline-flex", background: C.cremeBg, borderRadius: 10, padding: 3, gap: 2 }}>
+            {tabs.map(t => (
+              <button
+                key={t.key}
+                onClick={() => handleFiltroSituacao(t.key)}
+                style={{
+                  padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
+                  background: filtroSituacao === t.key ? C.esmeralda : "transparent",
+                  color:      filtroSituacao === t.key ? "#fff" : C.cinza,
+                }}
+              >
+                {t.label} {t.count > 0 && <span style={{ opacity: 0.7 }}>({t.count})</span>}
+              </button>
+            ))}
+          </div>
 
           {filtroSituacao === "pendente" && (
             <>
