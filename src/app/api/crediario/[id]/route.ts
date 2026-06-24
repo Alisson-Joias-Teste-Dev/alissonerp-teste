@@ -51,12 +51,24 @@ export async function GET(
       WHERE conta_receber_id = ${contaId}
       LIMIT 1
     `,
+    // Histórico CONSOLIDADO da venda: junta os recebimentos/avisos de TODAS as
+    // contas da mesma venda — não só a conta aberta. Sem isso, a baixa parcial
+    // (que fecha a conta original e abre uma "Saldo restante") faz o histórico
+    // do que já foi pago "sumir" ao abrir a conta nova. Se a conta não tiver
+    // venda vinculada, mostra só a dela (o subselect de venda fica NULL).
     sql`
       SELECT cc.id, cc.tipo, cc.mensagem, cc.created_at,
         u.nome AS usuario_nome
       FROM alissonerp.comunicacoes_crediario cc
       LEFT JOIN alissonerp.usuarios u ON u.id = cc.usuario_id
-      WHERE cc.conta_receber_id = ${contaId}
+      WHERE cc.conta_receber_id IN (
+        SELECT cr.id FROM alissonerp.contas_receber cr
+        WHERE cr.id = ${contaId}
+           OR cr.venda_erp_id = (
+                SELECT venda_erp_id FROM alissonerp.contas_receber
+                WHERE id = ${contaId} AND venda_erp_id IS NOT NULL
+              )
+      )
       ORDER BY cc.created_at ASC
     `,
     // Query 3 — Dados do Ouro (se recebimento foi com balança)
