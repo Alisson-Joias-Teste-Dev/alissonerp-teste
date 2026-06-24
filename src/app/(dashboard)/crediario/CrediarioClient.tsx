@@ -13,6 +13,7 @@ import {
   Loader2,
   Wallet,
   User,
+  Calendar,
   X,
   MessageSquare,
   ExternalLink,
@@ -1370,6 +1371,7 @@ function VendaCard({
   numeroVenda,
   clienteNome,
   vendedorNome,
+  dataVenda,
   parcelas,
   isGerente,
   onSelectParcela,
@@ -1378,6 +1380,7 @@ function VendaCard({
   numeroVenda: string | null;
   clienteNome: string | null;
   vendedorNome: string | null;
+  dataVenda: string | null;
   parcelas: CrediarioItem[];
   isGerente: boolean;
   onSelectParcela: (id: number) => void;
@@ -1427,6 +1430,12 @@ function VendaCard({
               <span><User size={11} style={{ display: "inline", marginRight: 3 }} />{clienteNome ?? "—"}</span>
               {isGerente && vendedorNome && (
                 <span style={{ color: C.esmeralda }}>• {vendedorNome}</span>
+              )}
+              {dataVenda && (
+                <span style={{ color: C.cinza }}>
+                  <Calendar size={11} style={{ display: "inline", marginRight: 3 }} />
+                  Venda {fmtData(dataVenda)}
+                </span>
               )}
             </div>
           </div>
@@ -1493,6 +1502,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   const [filtroSituacao, setFiltroSituacao] = useState<string>("pendente");
   const [filtroAging, setFiltroAging] = useState<string>("");
   const [busca, setBusca] = useState("");
+  const [filtroConsultora, setFiltroConsultora] = useState<string>("");
   const [loadedItems, setLoadedItems] = useState<CrediarioItem[]>(items);
   const [loading, setLoading] = useState(false);
   const [selectedContaId, setSelectedContaId] = useState<number | null>(null);
@@ -1575,15 +1585,28 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
     void reload(filtroSituacao, filtroAging);
   }, [filtroSituacao, filtroAging, reload]);
 
+  // Lista de consultoras presentes (para o filtro — só faz sentido p/ gerente,
+  // que enxerga várias; a consultora já recebe só as vendas dela).
+  const consultoras = useMemo(() => {
+    const set = new Set<string>();
+    for (const i of loadedItems) {
+      if (i.vendedor_nome) set.add(i.vendedor_nome);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [loadedItems]);
+
   // Agrupa por venda
   const vendaGroups = useMemo(() => {
-    const filtered = busca.trim()
-      ? loadedItems.filter(i =>
-          (i.cliente_nome ?? "").toLowerCase().includes(busca.toLowerCase()) ||
-          (i.numero_venda ?? "").toLowerCase().includes(busca.toLowerCase()) ||
-          (i.vendedor_nome ?? "").toLowerCase().includes(busca.toLowerCase())
-        )
-      : loadedItems;
+    const buscaLc = busca.trim().toLowerCase();
+    const filtered = loadedItems.filter(i => {
+      if (filtroConsultora && i.vendedor_nome !== filtroConsultora) return false;
+      if (!buscaLc) return true;
+      return (
+        (i.cliente_nome ?? "").toLowerCase().includes(buscaLc) ||
+        (i.numero_venda ?? "").toLowerCase().includes(buscaLc) ||
+        (i.vendedor_nome ?? "").toLowerCase().includes(buscaLc)
+      );
+    });
 
     const map = new Map<string, CrediarioItem[]>();
     for (const item of filtered) {
@@ -1592,7 +1615,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
       map.get(key)!.push(item);
     }
     return Array.from(map.entries()).map(([key, parcelas]) => ({ key, parcelas }));
-  }, [loadedItems, busca]);
+  }, [loadedItems, busca, filtroConsultora]);
 
   const saldoUsado = saldo ? saldo.limite - saldo.atual : 0;
   const saldoPct = saldo ? Math.min(100, (saldoUsado / saldo.limite) * 100) : 0;
@@ -1737,19 +1760,43 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
           )}
         </div>
 
-        {/* ── Busca ─────────────────────────────────────────────────────────── */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 8,
-          padding: "8px 12px", marginBottom: 16,
-        }}>
-          <Search size={15} color={C.cinza} />
-          <input
-            value={busca}
-            onChange={e => setBusca(e.target.value)}
-            placeholder="Buscar por cliente, venda ou consultora..."
-            style={{ border: "none", outline: "none", flex: 1, fontSize: 13, background: "transparent", color: "#1f2937" }}
-          />
+        {/* ── Busca + filtro de consultora ──────────────────────────────────── */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+          <div style={{
+            flex: 1, minWidth: 200,
+            display: "flex", alignItems: "center", gap: 8,
+            background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 8,
+            padding: "8px 12px",
+          }}>
+            <Search size={15} color={C.cinza} />
+            <input
+              value={busca}
+              onChange={e => setBusca(e.target.value)}
+              placeholder="Buscar por cliente, venda ou consultora..."
+              style={{ border: "none", outline: "none", flex: 1, fontSize: 13, background: "transparent", color: "#1f2937" }}
+            />
+          </div>
+
+          {/* Filtro por consultora — só gerente/admin (a consultora já vê só as dela) */}
+          {isGerente && consultoras.length > 1 && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6, minWidth: 200,
+              background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 8,
+              padding: "8px 12px",
+            }}>
+              <User size={15} color={C.cinza} />
+              <select
+                value={filtroConsultora}
+                onChange={e => setFiltroConsultora(e.target.value)}
+                style={{ border: "none", outline: "none", flex: 1, fontSize: 13, background: "transparent", color: "#1f2937", cursor: "pointer" }}
+              >
+                <option value="">Todas as consultoras</option>
+                {consultoras.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* ── Lista de vendas agrupadas ─────────────────────────────────────── */}
@@ -1772,6 +1819,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
                 numeroVenda={first.numero_venda}
                 clienteNome={first.cliente_nome}
                 vendedorNome={first.vendedor_nome}
+                dataVenda={first.venda_created_at}
                 parcelas={parcelas}
                 isGerente={isGerente}
                 onSelectParcela={setSelectedContaId}
