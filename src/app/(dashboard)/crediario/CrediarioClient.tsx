@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, type CSSProperties } from "react";
 import {
   CreditCard,
   AlertTriangle,
@@ -82,6 +82,7 @@ interface ContaDetalhe extends CrediarioItem {
   ouro_peso?: number | null;
   ouro_valor_grama?: number | null;
   ouro_foto_path?: string | null;
+  fotos?: { path: string; conta_id: number; nome: string }[];
 }
 
 interface Contagens {
@@ -105,6 +106,16 @@ interface Props {
 function fmtBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
+
+function primeiroNome(nome: string) {
+  return nome.trim().split(/\s+/)[0];
+}
+
+// Chip que marca um card como "da consultora X" quando o filtro está ativo.
+const chipConsultora: CSSProperties = {
+  background: C.esmeraldaLt, color: C.esmeralda,
+  borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 600,
+};
 function fmtData(s: string | null) {
   if (!s) return "—";
   // Datas DATE (vencimento/recebimento) vem sem hora; new Date(s) as interpreta
@@ -1315,6 +1326,35 @@ function DetalheDrawer({
               <div style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
                 <MessageSquare size={13} /> Histórico ({detalhe.comunicacoes.length})
               </div>
+
+              {/* Comprovantes/fotos anexados nas baixas desta venda (bucket) */}
+              {detalhe.fotos && detalhe.fotos.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: C.cinza, marginBottom: 6 }}>
+                    Comprovantes anexados ({detalhe.fotos.length})
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {detalhe.fotos.map(f => (
+                      <a
+                        key={f.path}
+                        href={getPublicUrl("pagamento-fotos", f.path)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Abrir comprovante"
+                        style={{ display: "block", width: 64, height: 64, borderRadius: 6, overflow: "hidden", border: `1px solid ${C.cremeBorder}`, flexShrink: 0 }}
+                      >
+                        <img
+                          src={getPublicUrl("pagamento-fotos", f.path)}
+                          alt="Comprovante anexado"
+                          loading="lazy"
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {detalhe.comunicacoes.length === 0 && (
                 <div style={{ fontSize: 12, color: C.cinza, fontStyle: "italic" }}>Sem registros ainda.</div>
               )}
@@ -1503,6 +1543,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   const [filtroAging, setFiltroAging] = useState<string>("");
   const [busca, setBusca] = useState("");
   const [filtroConsultora, setFiltroConsultora] = useState<string>("");
+  const [contagensConsultora, setContagensConsultora] = useState<Contagens | null>(null);
   const [loadedItems, setLoadedItems] = useState<CrediarioItem[]>(items);
   const [loading, setLoading] = useState(false);
   const [selectedContaId, setSelectedContaId] = useState<number | null>(null);
@@ -1567,6 +1608,18 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
     }
   }, [isGerente, vendedorId]);
 
+  // Resumo (cards/abas/alerta) por consultora: ao escolher uma, busca os números
+  // DELA no servidor; em "Todas", volta ao global (prop). O Saldo Crédito NÃO
+  // entra aqui — é da loja (sempre global).
+  useEffect(() => {
+    if (!filtroConsultora || !isGerente) { setContagensConsultora(null); return; }
+    let cancelado = false;
+    void apiFetch<{ contagens?: Contagens }>(`/api/crediario?vendedor_id=${filtroConsultora}&counts=1&limit=1`)
+      .then(d => { if (!cancelado) setContagensConsultora(d.contagens ?? null); })
+      .catch(() => { if (!cancelado) setContagensConsultora(null); });
+    return () => { cancelado = true; };
+  }, [filtroConsultora, isGerente]);
+
   const handleFiltroSituacao = (s: string) => {
     setFiltroSituacao(s);
     setFiltroAging("");
@@ -1588,18 +1641,20 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   // Lista de consultoras presentes (para o filtro — só faz sentido p/ gerente,
   // que enxerga várias; a consultora já recebe só as vendas dela).
   const consultoras = useMemo(() => {
-    const set = new Set<string>();
+    const map = new Map<number, string>();
     for (const i of loadedItems) {
-      if (i.vendedor_nome) set.add(i.vendedor_nome);
+      if (i.vendedor_id != null && i.vendedor_nome) map.set(i.vendedor_id, i.vendedor_nome);
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
+    return Array.from(map.entries())
+      .map(([id, nome]) => ({ id, nome }))
+      .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
   }, [loadedItems]);
 
   // Agrupa por venda
   const vendaGroups = useMemo(() => {
     const buscaLc = busca.trim().toLowerCase();
     const filtered = loadedItems.filter(i => {
-      if (filtroConsultora && i.vendedor_nome !== filtroConsultora) return false;
+      if (filtroConsultora && String(i.vendedor_id) !== filtroConsultora) return false;
       if (!buscaLc) return true;
       return (
         (i.cliente_nome ?? "").toLowerCase().includes(buscaLc) ||
@@ -1620,10 +1675,18 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   const saldoUsado = saldo ? saldo.limite - saldo.atual : 0;
   const saldoPct = saldo ? Math.min(100, (saldoUsado / saldo.limite) * 100) : 0;
 
+  // Resumo exibido: o da consultora escolhida, ou o global (prop). O Saldo
+  // Crédito é à parte (sempre global — da loja).
+  const contagensView = contagensConsultora ?? contagens;
+  const consultoraSelNome = filtroConsultora
+    ? consultoras.find(c => String(c.id) === filtroConsultora)?.nome ?? null
+    : null;
+  const contasFiltradas = vendaGroups.reduce((s, g) => s + g.parcelas.length, 0);
+
   const tabs = [
-    { key: "pendente", label: "Pendentes", count: contagens.pendente },
-    { key: "pago",     label: "Pagos",     count: contagens.pago },
-    { key: "",         label: "Todos",     count: contagens.total },
+    { key: "pendente", label: "Pendentes", count: contagensView.pendente },
+    { key: "pago",     label: "Pagos",     count: contagensView.pago },
+    { key: "",         label: "Todos",     count: contagensView.total },
   ];
 
   return (
@@ -1655,11 +1718,11 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
         </div>
 
         {/* ── Faixa de alerta de vencidos (some com "ok", volta no dia seguinte) ── */}
-        {contagens.vencido > 0 && !faixaOk && (
+        {contagensView.vencido > 0 && !faixaOk && (
           <div style={{ display: "flex", alignItems: "center", gap: 12, background: C.vermelho, color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 16 }}>
             <AlertTriangle size={18} style={{ flexShrink: 0 }} />
             <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>
-              Você tem {contagens.vencido} conta{contagens.vencido !== 1 ? "s" : ""} vencida{contagens.vencido !== 1 ? "s" : ""} ({fmtBRL(contagens.valor_vencido)}). Cobre os clientes!
+              {consultoraSelNome ? `${consultoraSelNome} tem` : "Você tem"} {contagensView.vencido} conta{contagensView.vencido !== 1 ? "s" : ""} vencida{contagensView.vencido !== 1 ? "s" : ""} ({fmtBRL(contagensView.valor_vencido)}). Cobre os clientes!
             </div>
             <button onClick={dispensarFaixa} style={{ background: "rgba(255,255,255,0.25)", border: "none", color: "#fff", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
               ok
@@ -1672,26 +1735,29 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
           <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
             <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
               <Clock size={12} /> Pendente
+              {consultoraSelNome && <span style={chipConsultora}>{primeiroNome(consultoraSelNome)}</span>}
             </div>
-            <div style={{ fontWeight: 700, fontSize: 20, color: C.esmeralda }}>{fmtBRL(contagens.valor_pendente)}</div>
-            <div style={{ fontSize: 11, color: C.cinza }}>{contagens.pendente} conta{contagens.pendente !== 1 ? "s" : ""}</div>
+            <div style={{ fontWeight: 700, fontSize: 20, color: C.esmeralda }}>{fmtBRL(contagensView.valor_pendente)}</div>
+            <div style={{ fontSize: 11, color: C.cinza }}>{contagensView.pendente} conta{contagensView.pendente !== 1 ? "s" : ""}</div>
           </div>
 
-          {contagens.vencido > 0 && (
+          {contagensView.vencido > 0 && (
             <div style={{ background: C.vermelhoLt, border: `1px solid ${C.vermelho}30`, borderRadius: 10, padding: "14px 16px" }}>
               <div style={{ fontSize: 11, color: C.vermelho, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
                 <AlertTriangle size={12} /> Vencido
+                {consultoraSelNome && <span style={{ ...chipConsultora, background: C.vermelhoLt, color: C.vermelho }}>{primeiroNome(consultoraSelNome)}</span>}
               </div>
-              <div style={{ fontWeight: 700, fontSize: 20, color: C.vermelho }}>{fmtBRL(contagens.valor_vencido)}</div>
-              <div style={{ fontSize: 11, color: C.vermelho }}>{contagens.vencido} conta{contagens.vencido !== 1 ? "s" : ""}</div>
+              <div style={{ fontWeight: 700, fontSize: 20, color: C.vermelho }}>{fmtBRL(contagensView.valor_vencido)}</div>
+              <div style={{ fontSize: 11, color: C.vermelho }}>{contagensView.vencido} conta{contagensView.vencido !== 1 ? "s" : ""}</div>
             </div>
           )}
 
           <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
             <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
               <CheckCircle size={12} /> Recebidos
+              {consultoraSelNome && <span style={chipConsultora}>{primeiroNome(consultoraSelNome)}</span>}
             </div>
-            <div style={{ fontWeight: 700, fontSize: 20, color: C.verde }}>{contagens.pago}</div>
+            <div style={{ fontWeight: 700, fontSize: 20, color: C.verde }}>{contagensView.pago}</div>
             <div style={{ fontSize: 11, color: C.cinza }}>contas pagas</div>
           </div>
 
@@ -1792,7 +1858,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
               >
                 <option value="">Todas as consultoras</option>
                 {consultoras.map(c => (
-                  <option key={c} value={c}>{c}</option>
+                  <option key={c.id} value={String(c.id)}>{c.nome}</option>
                 ))}
               </select>
             </div>
@@ -1830,7 +1896,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
 
         {vendaGroups.length > 0 && (
           <p style={{ textAlign: "center", fontSize: 12, color: C.cinza, marginTop: 16 }}>
-            {vendaGroups.length} venda{vendaGroups.length !== 1 ? "s" : ""} — {loadedItems.length} conta{loadedItems.length !== 1 ? "s" : ""}
+            {vendaGroups.length} venda{vendaGroups.length !== 1 ? "s" : ""} — {contasFiltradas} conta{contasFiltradas !== 1 ? "s" : ""}
           </p>
         )}
       </div>

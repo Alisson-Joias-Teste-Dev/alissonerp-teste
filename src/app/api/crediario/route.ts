@@ -50,11 +50,29 @@ export async function GET(req: NextRequest) {
     ? sql`AND status_aging = ${statusAging}`
     : sql``;
 
+  // Resumo (cards): pendente/vencido/recebidos com o MESMO filtro de vendedor,
+  // ignorando situacao/aging — usado quando a tela troca de consultora. Só
+  // computa se pedido (counts=1) para não pesar as listagens normais.
+  const wantCounts = url.searchParams.get("counts") === "1";
+  const contagensQuery = wantCounts
+    ? sql`
+        SELECT
+          COUNT(*)::integer                                                                       AS total,
+          COUNT(*) FILTER (WHERE situacao='pendente')::integer                                    AS pendente,
+          COUNT(*) FILTER (WHERE situacao='pago')::integer                                        AS pago,
+          COUNT(*) FILTER (WHERE status_aging='vencido' AND situacao='pendente')::integer         AS vencido,
+          COALESCE(SUM(valor) FILTER (WHERE situacao='pendente'), 0)                              AS valor_pendente,
+          COALESCE(SUM(valor) FILTER (WHERE status_aging='vencido' AND situacao='pendente'), 0)   AS valor_vencido
+        FROM alissonerp.vw_crediario
+        WHERE 1=1 ${whereVendedor}
+      `
+    : Promise.resolve(null);
+
   // Pagos: ordenar por data_recebimento DESC (mais recente primeiro)
   // Pendentes/todos: urgência (vencido→breve→em_dia), depois vencimento ASC
   const isPago = situacao === "pago";
 
-  const [items, countResult] = await Promise.all([
+  const [items, countResult, contagensResult] = await Promise.all([
     sql`
       SELECT
         conta_receber_id,
@@ -105,9 +123,21 @@ export async function GET(req: NextRequest) {
         ${whereSituacao}
         ${whereAging}
     `,
+    contagensQuery,
   ]);
 
   const total = countResult[0].total as number;
+
+  const contagens = contagensResult?.[0]
+    ? {
+        total:          Number(contagensResult[0].total),
+        pendente:       Number(contagensResult[0].pendente),
+        pago:           Number(contagensResult[0].pago),
+        vencido:        Number(contagensResult[0].vencido),
+        valor_pendente: Number(contagensResult[0].valor_pendente),
+        valor_vencido:  Number(contagensResult[0].valor_vencido),
+      }
+    : undefined;
 
   return NextResponse.json({
     items: items.map((r) => ({
@@ -121,5 +151,6 @@ export async function GET(req: NextRequest) {
     page,
     limit,
     totalPages: Math.ceil(total / limit),
+    ...(contagens ? { contagens } : {}),
   });
 }
