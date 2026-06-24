@@ -68,11 +68,33 @@ export async function GET(req: NextRequest) {
       `
     : Promise.resolve(null);
 
+  // Período (cards "Vendeu em crediário" / "Recebeu"): só quando vêm from+to.
+  //  - vendido  = crediário GERADO em vendas feitas no período (venda_created_at),
+  //               somando todas as contas não-canceladas da venda (original + splits
+  //               "Saldo restante" = total original); exclui canceladas.
+  //  - recebido = valor BAIXADO no período (data_recebimento de contas pagas).
+  // Ambos respeitam o filtro de vendedor (consultora) já aplicado.
+  const periodoFrom = url.searchParams.get("from");
+  const periodoTo   = url.searchParams.get("to");
+  const periodoQuery = (periodoFrom && periodoTo)
+    ? sql`
+        SELECT
+          COALESCE(SUM(valor) FILTER (
+            WHERE situacao <> 'cancelado'
+              AND venda_created_at::date BETWEEN ${periodoFrom}::date AND ${periodoTo}::date), 0) AS vendido,
+          COALESCE(SUM(valor) FILTER (
+            WHERE situacao = 'pago'
+              AND data_recebimento BETWEEN ${periodoFrom}::date AND ${periodoTo}::date), 0) AS recebido
+        FROM alissonerp.vw_crediario
+        WHERE 1=1 ${whereVendedor}
+      `
+    : Promise.resolve(null);
+
   // Pagos: ordenar por data_recebimento DESC (mais recente primeiro)
   // Pendentes/todos: urgência (vencido→breve→em_dia), depois vencimento ASC
   const isPago = situacao === "pago";
 
-  const [items, countResult, contagensResult] = await Promise.all([
+  const [items, countResult, contagensResult, periodoResult] = await Promise.all([
     sql`
       SELECT
         conta_receber_id,
@@ -124,6 +146,7 @@ export async function GET(req: NextRequest) {
         ${whereAging}
     `,
     contagensQuery,
+    periodoQuery,
   ]);
 
   const total = countResult[0].total as number;
@@ -136,6 +159,13 @@ export async function GET(req: NextRequest) {
         vencido:        Number(contagensResult[0].vencido),
         valor_pendente: Number(contagensResult[0].valor_pendente),
         valor_vencido:  Number(contagensResult[0].valor_vencido),
+      }
+    : undefined;
+
+  const periodo = periodoResult?.[0]
+    ? {
+        vendido:  Number(periodoResult[0].vendido),
+        recebido: Number(periodoResult[0].recebido),
       }
     : undefined;
 
@@ -152,5 +182,6 @@ export async function GET(req: NextRequest) {
     limit,
     totalPages: Math.ceil(total / limit),
     ...(contagens ? { contagens } : {}),
+    ...(periodo ? { periodo } : {}),
   });
 }
