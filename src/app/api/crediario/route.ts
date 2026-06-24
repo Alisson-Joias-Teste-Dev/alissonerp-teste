@@ -50,6 +50,23 @@ export async function GET(req: NextRequest) {
     ? sql`AND status_aging = ${statusAging}`
     : sql``;
 
+  // Drill-down dos cards de período (clicar em "Vendeu"/"Recebeu"):
+  //  - drill=vendido  → contas de vendas FEITAS no período (data_venda), não canceladas.
+  //  - drill=recebido → contas PAGAS no período (data_recebimento).
+  // Quando presente, SUBSTITUI o filtro de situacao/aging na lista.
+  const drill     = url.searchParams.get("drill"); // 'vendido' | 'recebido'
+  const drillFrom = url.searchParams.get("from");
+  const drillTo   = url.searchParams.get("to");
+  const whereDrill =
+    (drill === "recebido" && drillFrom && drillTo)
+      ? sql`AND situacao = 'pago' AND data_recebimento BETWEEN ${drillFrom}::date AND ${drillTo}::date`
+      : (drill === "vendido" && drillFrom && drillTo)
+        ? sql`AND situacao <> 'cancelado'
+              AND COALESCE((SELECT v.data_venda FROM alissonerp.vendas_erp v WHERE v.id = venda_id), venda_created_at::date)
+                  BETWEEN ${drillFrom}::date AND ${drillTo}::date`
+        : null;
+  const whereLista = whereDrill ?? sql`${whereSituacao} ${whereAging}`;
+
   // Resumo (cards): pendente/vencido/recebidos com o MESMO filtro de vendedor,
   // ignorando situacao/aging — usado quando a tela troca de consultora. Só
   // computa se pedido (counts=1) para não pesar as listagens normais.
@@ -93,7 +110,7 @@ export async function GET(req: NextRequest) {
 
   // Pagos: ordenar por data_recebimento DESC (mais recente primeiro)
   // Pendentes/todos: urgência (vencido→breve→em_dia), depois vencimento ASC
-  const isPago = situacao === "pago";
+  const isPago = situacao === "pago" || drill === "recebido";
 
   const [items, countResult, contagensResult, periodoResult] = await Promise.all([
     sql`
@@ -126,8 +143,7 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.vw_crediario
       WHERE 1=1
         ${whereVendedor}
-        ${whereSituacao}
-        ${whereAging}
+        ${whereLista}
       ORDER BY
         CASE WHEN ${isPago} THEN 0 ELSE
           CASE WHEN status_aging = 'vencido' THEN 0
@@ -144,8 +160,7 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.vw_crediario
       WHERE 1=1
         ${whereVendedor}
-        ${whereSituacao}
-        ${whereAging}
+        ${whereLista}
     `,
     contagensQuery,
     periodoQuery,

@@ -1592,6 +1592,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   const [periodoPreset, setPeriodoPreset] = useState("mes");
   const [periodoCustom, setPeriodoCustom] = useState<{ from: string; to: string }>({ from: "", to: "" });
   const [periodoMetrics, setPeriodoMetrics] = useState<{ vendido: number; recebido: number } | null>(null);
+  const [drill, setDrill] = useState<"vendido" | "recebido" | null>(null);
   const [loadedItems, setLoadedItems] = useState<CrediarioItem[]>(items);
   const [loading, setLoading] = useState(false);
   const [selectedContaId, setSelectedContaId] = useState<number | null>(null);
@@ -1675,13 +1676,38 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
     return () => { cancelado = true; };
   }, [periodoPreset, periodoCustom, filtroConsultora, isGerente]);
 
+  // Drill-down: quando ativo, a lista mostra as contas do período (vendido =
+  // por data da venda; recebido = por data do recebimento). Recarrega ao mudar
+  // período/consultora. Sair do drill = volta à lista normal (handlers abaixo).
+  useEffect(() => {
+    if (!drill) return;
+    const { from, to } = rangeDoPeriodo(periodoPreset, periodoCustom);
+    if (!from || !to) return;
+    const params = new URLSearchParams({ limit: "1500", drill, from, to });
+    if (filtroConsultora && isGerente) params.set("vendedor_id", filtroConsultora);
+    let cancelado = false;
+    setLoading(true);
+    void apiFetch<{ items: CrediarioItem[] }>(`/api/crediario?${params}`)
+      .then(d => { if (!cancelado) { setLoadedItems(d.items); setPagina(1); } })
+      .catch(() => { /* mantém a lista atual em caso de erro */ })
+      .finally(() => { if (!cancelado) setLoading(false); });
+    return () => { cancelado = true; };
+  }, [drill, periodoPreset, periodoCustom, filtroConsultora, isGerente]);
+
+  const toggleDrill = (modo: "vendido" | "recebido") => {
+    if (drill === modo) { setDrill(null); void reload(filtroSituacao, filtroAging); }
+    else setDrill(modo);
+  };
+
   const handleFiltroSituacao = (s: string) => {
+    setDrill(null);
     setFiltroSituacao(s);
     setFiltroAging("");
     void reload(s, "");
   };
 
   const handleFiltroAging = (a: string) => {
+    setDrill(null);
     const next = filtroAging === a ? "" : a;
     setFiltroAging(next);
     void reload(filtroSituacao, next);
@@ -1855,18 +1881,32 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
             )}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-            <div style={{ background: C.cremeBg, borderRadius: 10, padding: "12px 14px" }}>
+            <button
+              onClick={() => toggleDrill("vendido")}
+              title="Clique para ver as vendas do período na lista"
+              style={{
+                textAlign: "left", cursor: "pointer", background: C.cremeBg, borderRadius: 10, padding: "12px 14px",
+                border: drill === "vendido" ? `2px solid ${C.esmeralda}` : "2px solid transparent",
+              }}
+            >
               <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
                 <CreditCard size={12} /> Vendeu em crediário
               </div>
               <div style={{ fontWeight: 700, fontSize: 20, color: C.esmeralda }}>{periodoMetrics ? fmtBRL(periodoMetrics.vendido) : "—"}</div>
-            </div>
-            <div style={{ background: C.cremeBg, borderRadius: 10, padding: "12px 14px" }}>
+            </button>
+            <button
+              onClick={() => toggleDrill("recebido")}
+              title="Clique para ver os recebimentos do período na lista"
+              style={{
+                textAlign: "left", cursor: "pointer", background: C.cremeBg, borderRadius: 10, padding: "12px 14px",
+                border: drill === "recebido" ? `2px solid ${C.verde}` : "2px solid transparent",
+              }}
+            >
               <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
                 <CheckCircle size={12} /> Recebeu
               </div>
               <div style={{ fontWeight: 700, fontSize: 20, color: C.verde }}>{periodoMetrics ? fmtBRL(periodoMetrics.recebido) : "—"}</div>
-            </div>
+            </button>
           </div>
         </div>
 
@@ -1953,6 +1993,29 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
             </div>
           )}
         </div>
+
+        {/* Faixa de drill ativo (lista mostrando o período, não a cobrança) */}
+        {drill && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+            background: C.esmeraldaLt, border: `1px solid ${C.esmeralda}40`, borderRadius: 10,
+            padding: "8px 14px", marginBottom: 12,
+          }}>
+            <span style={{ fontSize: 13, color: C.esmeralda, fontWeight: 600 }}>
+              {drill === "vendido" ? "Vendas do período" : "Recebimentos do período"}
+              {consultoraSelNome ? ` — ${primeiroNome(consultoraSelNome)}` : ""} · {contasFiltradas} conta{contasFiltradas !== 1 ? "s" : ""}
+            </span>
+            <button
+              onClick={() => { setDrill(null); void reload(filtroSituacao, filtroAging); }}
+              style={{
+                marginLeft: "auto", background: "#fff", border: `1px solid ${C.esmeralda}40`,
+                borderRadius: 8, padding: "4px 12px", fontSize: 12, color: C.esmeralda, cursor: "pointer", fontWeight: 600,
+              }}
+            >
+              ✕ voltar à lista
+            </button>
+          </div>
+        )}
 
         {/* ── Lista de vendas agrupadas ─────────────────────────────────────── */}
         {loading ? (
