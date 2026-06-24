@@ -1544,6 +1544,8 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   const [busca, setBusca] = useState("");
   const [filtroConsultora, setFiltroConsultora] = useState<string>("");
   const [contagensConsultora, setContagensConsultora] = useState<Contagens | null>(null);
+  const [pagina, setPagina] = useState(1);
+  const [porPagina, setPorPagina] = useState(15);
   const [loadedItems, setLoadedItems] = useState<CrediarioItem[]>(items);
   const [loading, setLoading] = useState(false);
   const [selectedContaId, setSelectedContaId] = useState<number | null>(null);
@@ -1597,7 +1599,9 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
     setLoading(true);
     try {
       // Pagos: busca mais itens pois pode acumular histórico longo
-      const params = new URLSearchParams({ limit: situacao === "pago" ? "500" : "200" });
+      // Carrega tudo (a loja é pequena) e a paginação é client-side por venda —
+      // assim o agrupamento não quebra entre páginas e funciona com os filtros.
+      const params = new URLSearchParams({ limit: "1500" });
       if (situacao) params.set("situacao", situacao);
       if (aging)    params.set("status_aging", aging);
       if (!isGerente && vendedorId) params.set("vendedor_id", String(vendedorId));
@@ -1619,6 +1623,9 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
       .catch(() => { if (!cancelado) setContagensConsultora(null); });
     return () => { cancelado = true; };
   }, [filtroConsultora, isGerente]);
+
+  // Volta pra 1ª página sempre que o conjunto exibido muda (filtro/busca/tamanho).
+  useEffect(() => { setPagina(1); }, [filtroSituacao, filtroAging, busca, filtroConsultora, porPagina]);
 
   const handleFiltroSituacao = (s: string) => {
     setFiltroSituacao(s);
@@ -1682,6 +1689,11 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
     ? consultoras.find(c => String(c.id) === filtroConsultora)?.nome ?? null
     : null;
   const contasFiltradas = vendaGroups.reduce((s, g) => s + g.parcelas.length, 0);
+
+  // Paginação (client-side, por venda): fatia os grupos já filtrados.
+  const totalPaginas = Math.max(1, Math.ceil(vendaGroups.length / porPagina));
+  const paginaSegura = Math.min(pagina, totalPaginas);
+  const vendaGroupsPagina = vendaGroups.slice((paginaSegura - 1) * porPagina, paginaSegura * porPagina);
 
   const tabs = [
     { key: "pendente", label: "Pendentes", count: contagensView.pendente },
@@ -1876,7 +1888,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
             <p style={{ margin: 0, fontSize: 14 }}>Nenhum registro encontrado</p>
           </div>
         ) : (
-          vendaGroups.map(({ key, parcelas }) => {
+          vendaGroupsPagina.map(({ key, parcelas }) => {
             const first = parcelas[0];
             return (
               <VendaCard
@@ -1895,9 +1907,53 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
         )}
 
         {vendaGroups.length > 0 && (
-          <p style={{ textAlign: "center", fontSize: 12, color: C.cinza, marginTop: 16 }}>
-            {vendaGroups.length} venda{vendaGroups.length !== 1 ? "s" : ""} — {contasFiltradas} conta{contasFiltradas !== 1 ? "s" : ""}
-          </p>
+          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+            {totalPaginas > 1 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                <button
+                  onClick={() => setPagina(p => Math.max(1, p - 1))}
+                  disabled={paginaSegura <= 1}
+                  style={{
+                    padding: "6px 12px", borderRadius: 8, border: `1px solid ${C.cremeBorder}`,
+                    background: "#fff", fontSize: 13, color: C.cinza,
+                    cursor: paginaSegura <= 1 ? "not-allowed" : "pointer", opacity: paginaSegura <= 1 ? 0.5 : 1,
+                  }}
+                >
+                  ‹ Anterior
+                </button>
+                <span style={{ fontSize: 13, color: C.cinza, minWidth: 110, textAlign: "center" }}>
+                  Página {paginaSegura} de {totalPaginas}
+                </span>
+                <button
+                  onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))}
+                  disabled={paginaSegura >= totalPaginas}
+                  style={{
+                    padding: "6px 12px", borderRadius: 8, border: `1px solid ${C.cremeBorder}`,
+                    background: "#fff", fontSize: 13, color: C.cinza,
+                    cursor: paginaSegura >= totalPaginas ? "not-allowed" : "pointer", opacity: paginaSegura >= totalPaginas ? 0.5 : 1,
+                  }}
+                >
+                  Próxima ›
+                </button>
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: C.cinza, flexWrap: "wrap", justifyContent: "center" }}>
+              <span>{vendaGroups.length} venda{vendaGroups.length !== 1 ? "s" : ""} — {contasFiltradas} conta{contasFiltradas !== 1 ? "s" : ""}</span>
+              <span style={{ color: C.cremeBorder }}>|</span>
+              <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                Por página:
+                <select
+                  value={porPagina}
+                  onChange={e => setPorPagina(Number(e.target.value))}
+                  style={{ border: `1px solid ${C.cremeBorder}`, borderRadius: 6, padding: "2px 6px", fontSize: 12, background: "#fff", cursor: "pointer" }}
+                >
+                  <option value={10}>10</option>
+                  <option value={15}>15</option>
+                  <option value={25}>25</option>
+                </select>
+              </label>
+            </div>
+          </div>
         )}
       </div>
 
