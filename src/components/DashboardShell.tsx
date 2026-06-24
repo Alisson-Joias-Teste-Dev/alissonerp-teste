@@ -10,6 +10,7 @@ import ServiceApp from "@/components/service/ServiceApp";
 import GlobalErrorToast from "@/components/ui/GlobalErrorToast";
 import MencaoAlarme from "@/components/MencaoAlarme";
 import ReservaAlarme from "@/components/ReservaAlarme";
+import VencidosAlarme from "@/components/VencidosAlarme";
 import InstallPrompt from "@/components/InstallPrompt";
 import EnvironmentBadge from "@/components/EnvironmentBadge";
 import { Toaster } from "sonner";
@@ -56,6 +57,8 @@ export default function DashboardShell({ children }: { children: React.ReactNode
       <MencaoAlarme />
       {/* Faixa global de reservas (crediário ③) perto de virar vale-crédito */}
       <ReservaAlarme />
+      {/* Faixa global de contas VENCIDAS do crediário (em toda a tela) */}
+      <VencidosAlarme />
       {/* Toast de erros global — visível em todas as páginas */}
       <GlobalErrorToast />
       {/* Banner de instalação PWA — só aparece em browsers que disparam beforeinstallprompt */}

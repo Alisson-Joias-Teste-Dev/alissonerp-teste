@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, type CSSProperties } from "react";
 import {
   CreditCard,
   AlertTriangle,
@@ -59,6 +59,7 @@ export interface CrediarioItem {
   venda_bloqueada: boolean | null;
   credito_gerente_usado: number | null;
   venda_created_at: string | null;
+  data_venda: string | null;
   cliente_id: number | null;
   cliente_nome: string | null;
   cliente_telefone: string | null;
@@ -82,6 +83,7 @@ interface ContaDetalhe extends CrediarioItem {
   ouro_peso?: number | null;
   ouro_valor_grama?: number | null;
   ouro_foto_path?: string | null;
+  fotos?: { path: string; conta_id: number; nome: string }[];
 }
 
 interface Contagens {
@@ -105,6 +107,46 @@ interface Props {
 function fmtBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
+
+function primeiroNome(nome: string) {
+  return nome.trim().split(/\s+/)[0];
+}
+
+// Presets do filtro de período (padrão da casa: Hoje/Ontem/7d/30d/Mês/Personalizado).
+const PERIODOS = [
+  { key: "hoje",  label: "Hoje" },
+  { key: "ontem", label: "Ontem" },
+  { key: "7d",    label: "7 dias" },
+  { key: "30d",   label: "30 dias" },
+  { key: "mes",   label: "Mês" },
+  { key: "custom", label: "Personalizado" },
+];
+
+function isoDia(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Converte o preset em { from, to } (YYYY-MM-DD). "Mês" = do dia 1 até hoje.
+function rangeDoPeriodo(preset: string, custom: { from: string; to: string }): { from: string; to: string } {
+  const hoje = new Date();
+  const menos = (n: number) => { const d = new Date(hoje); d.setDate(d.getDate() - n); return d; };
+  const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  switch (preset) {
+    case "hoje":   return { from: isoDia(hoje), to: isoDia(hoje) };
+    case "ontem":  { const o = menos(1); return { from: isoDia(o), to: isoDia(o) }; }
+    case "7d":     return { from: isoDia(menos(6)), to: isoDia(hoje) };
+    case "30d":    return { from: isoDia(menos(29)), to: isoDia(hoje) };
+    case "custom": return custom.from && custom.to ? custom : { from: "", to: "" };
+    case "mes":
+    default:       return { from: isoDia(inicioMes), to: isoDia(hoje) };
+  }
+}
+
+// Chip que marca um card como "da consultora X" quando o filtro está ativo.
+const chipConsultora: CSSProperties = {
+  background: C.esmeraldaLt, color: C.esmeralda,
+  borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 600,
+};
 function fmtData(s: string | null) {
   if (!s) return "—";
   // Datas DATE (vencimento/recebimento) vem sem hora; new Date(s) as interpreta
@@ -1315,6 +1357,35 @@ function DetalheDrawer({
               <div style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
                 <MessageSquare size={13} /> Histórico ({detalhe.comunicacoes.length})
               </div>
+
+              {/* Comprovantes/fotos anexados nas baixas desta venda (bucket) */}
+              {detalhe.fotos && detalhe.fotos.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: C.cinza, marginBottom: 6 }}>
+                    Comprovantes anexados ({detalhe.fotos.length})
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {detalhe.fotos.map(f => (
+                      <a
+                        key={f.path}
+                        href={getPublicUrl("pagamento-fotos", f.path)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Abrir comprovante"
+                        style={{ display: "block", width: 64, height: 64, borderRadius: 6, overflow: "hidden", border: `1px solid ${C.cremeBorder}`, flexShrink: 0 }}
+                      >
+                        <img
+                          src={getPublicUrl("pagamento-fotos", f.path)}
+                          alt="Comprovante anexado"
+                          loading="lazy"
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {detalhe.comunicacoes.length === 0 && (
                 <div style={{ fontSize: 12, color: C.cinza, fontStyle: "italic" }}>Sem registros ainda.</div>
               )}
@@ -1390,13 +1461,21 @@ function VendaCard({
   const totalPendente = parcelas.filter(p => p.situacao === "pendente").reduce((s, p) => s + p.valor, 0);
   const totalVencido  = parcelas.filter(p => p.status_aging === "vencido" && p.situacao === "pendente").reduce((s, p) => s + p.valor, 0);
   const hasVencido    = totalVencido > 0;
+  const hasBreve      = !hasVencido && parcelas.some(p => p.status_aging === "vence_em_breve" && p.situacao === "pendente");
   const qtdPendentes  = parcelas.filter(p => p.situacao === "pendente").length;
+  const temPendente   = qtdPendentes > 0;
+
+  // Status do card (faixa lateral + badge): vencido > vence em breve > em dia.
+  const statusCor   = hasVencido ? C.vermelho : hasBreve ? C.ambar : C.esmeralda;
+  const statusBg    = hasVencido ? C.vermelhoLt : hasBreve ? C.ambarLt : C.esmeraldaLt;
+  const statusLabel = hasVencido ? "vencido" : hasBreve ? "vence em breve" : "em dia";
 
   return (
     <div style={{
-      border: `1px solid ${hasVencido ? C.vermelho + "40" : C.cremeBorder}`,
-      borderRadius: 10,
-      background: hasVencido ? C.vermelhoLt + "40" : "#fff",
+      border: `1px solid ${C.cremeBorder}`,
+      borderLeft: `3px solid ${temPendente ? statusCor : C.cremeBorder}`,
+      borderRadius: 12,
+      background: "#fff",
       marginBottom: 10,
     }}>
       {/* Header da venda */}
@@ -1405,7 +1484,7 @@ function VendaCard({
         style={{
           width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "12px 16px", background: "transparent", border: "none", cursor: "pointer",
-          borderRadius: expanded ? "10px 10px 0 0" : 10,
+          borderRadius: expanded ? "0 12px 0 0" : "0 12px 12px 0",
           borderBottom: expanded ? `1px solid ${C.cremeBorder}` : "none",
         }}
       >
@@ -1416,14 +1495,18 @@ function VendaCard({
               <span style={{ fontWeight: 600, fontSize: 14, color: C.esmeralda }}>
                 {numeroVenda ? `Venda ${numeroVenda}` : "Sem venda"}
               </span>
-              {qtdPendentes > 0 && (
-                <span style={{
-                  fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 20,
-                  background: hasVencido ? C.vermelhoLt : C.esmeraldaLt,
-                  color: hasVencido ? C.vermelho : C.esmeralda,
-                }}>
-                  {qtdPendentes} pendente{qtdPendentes > 1 ? "s" : ""}
-                </span>
+              {temPendente && (
+                <>
+                  <span style={{
+                    fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20,
+                    background: statusBg, color: statusCor,
+                  }}>
+                    {statusLabel}
+                  </span>
+                  <span style={{ fontSize: 11, color: C.cinza }}>
+                    {qtdPendentes} pendente{qtdPendentes > 1 ? "s" : ""}
+                  </span>
+                </>
               )}
             </div>
             <div style={{ fontSize: 12, color: C.cinza, marginTop: 2, display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -1503,23 +1586,18 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   const [filtroAging, setFiltroAging] = useState<string>("");
   const [busca, setBusca] = useState("");
   const [filtroConsultora, setFiltroConsultora] = useState<string>("");
+  const [contagensConsultora, setContagensConsultora] = useState<Contagens | null>(null);
+  const [pagina, setPagina] = useState(1);
+  const [porPagina, setPorPagina] = useState(15);
+  const [periodoPreset, setPeriodoPreset] = useState("mes");
+  const [periodoCustom, setPeriodoCustom] = useState<{ from: string; to: string }>({ from: "", to: "" });
+  const [periodoMetrics, setPeriodoMetrics] = useState<{ vendido: number; recebido: number } | null>(null);
+  const [drill, setDrill] = useState<"vendido" | "recebido" | null>(null);
   const [loadedItems, setLoadedItems] = useState<CrediarioItem[]>(items);
   const [loading, setLoading] = useState(false);
   const [selectedContaId, setSelectedContaId] = useState<number | null>(null);
 
-  // Faixa de alerta de vencidos NA TELA (Fase 4 crediário): aparece se há contas
-  // vencidas e some com "ok"; reaparece no dia seguinte. Regra do Jonathan:
-  // "todas as notificações na tela, senão elas não olham". Começa escondida no
-  // SSR (sem localStorage) e o effect a mostra se ainda não deu "ok" hoje.
-  const [faixaOk, setFaixaOk] = useState(true);
-  useEffect(() => {
-    const hoje = new Date().toISOString().slice(0, 10);
-    setFaixaOk(localStorage.getItem("crediario_faixa_ok") === hoje);
-  }, []);
-  const dispensarFaixa = () => {
-    localStorage.setItem("crediario_faixa_ok", new Date().toISOString().slice(0, 10));
-    setFaixaOk(true);
-  };
+  // O alerta de vencidos agora é GLOBAL (VencidosAlarme no DashboardShell).
 
   const isGerente = ["desenvolvedor", "admin", "gerente_loja"].includes(userRole);
   // Quem pode registrar baixa: gerente + consultora (no back, a consultora
@@ -1556,7 +1634,9 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
     setLoading(true);
     try {
       // Pagos: busca mais itens pois pode acumular histórico longo
-      const params = new URLSearchParams({ limit: situacao === "pago" ? "500" : "200" });
+      // Carrega tudo (a loja é pequena) e a paginação é client-side por venda —
+      // assim o agrupamento não quebra entre páginas e funciona com os filtros.
+      const params = new URLSearchParams({ limit: "1500" });
       if (situacao) params.set("situacao", situacao);
       if (aging)    params.set("status_aging", aging);
       if (!isGerente && vendedorId) params.set("vendedor_id", String(vendedorId));
@@ -1567,13 +1647,67 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
     }
   }, [isGerente, vendedorId]);
 
+  // Resumo (cards/abas/alerta) por consultora: ao escolher uma, busca os números
+  // DELA no servidor; em "Todas", volta ao global (prop). O Saldo Crédito NÃO
+  // entra aqui — é da loja (sempre global).
+  useEffect(() => {
+    if (!filtroConsultora || !isGerente) { setContagensConsultora(null); return; }
+    let cancelado = false;
+    void apiFetch<{ contagens?: Contagens }>(`/api/crediario?vendedor_id=${filtroConsultora}&counts=1&limit=1`)
+      .then(d => { if (!cancelado) setContagensConsultora(d.contagens ?? null); })
+      .catch(() => { if (!cancelado) setContagensConsultora(null); });
+    return () => { cancelado = true; };
+  }, [filtroConsultora, isGerente]);
+
+  // Volta pra 1ª página sempre que o conjunto exibido muda (filtro/busca/tamanho).
+  useEffect(() => { setPagina(1); }, [filtroSituacao, filtroAging, busca, filtroConsultora, porPagina]);
+
+  // Período (Vendeu/Recebeu): busca os valores do período escolhido, respeitando
+  // a consultora selecionada (gerente). Consultora logada já vê só os dela.
+  useEffect(() => {
+    const { from, to } = rangeDoPeriodo(periodoPreset, periodoCustom);
+    if (!from || !to) { setPeriodoMetrics(null); return; }
+    const params = new URLSearchParams({ limit: "1", from, to });
+    if (filtroConsultora && isGerente) params.set("vendedor_id", filtroConsultora);
+    let cancelado = false;
+    void apiFetch<{ periodo?: { vendido: number; recebido: number } }>(`/api/crediario?${params}`)
+      .then(d => { if (!cancelado) setPeriodoMetrics(d.periodo ?? null); })
+      .catch(() => { if (!cancelado) setPeriodoMetrics(null); });
+    return () => { cancelado = true; };
+  }, [periodoPreset, periodoCustom, filtroConsultora, isGerente]);
+
+  // Drill-down: quando ativo, a lista mostra as contas do período (vendido =
+  // por data da venda; recebido = por data do recebimento). Recarrega ao mudar
+  // período/consultora. Sair do drill = volta à lista normal (handlers abaixo).
+  useEffect(() => {
+    if (!drill) return;
+    const { from, to } = rangeDoPeriodo(periodoPreset, periodoCustom);
+    if (!from || !to) return;
+    const params = new URLSearchParams({ limit: "1500", drill, from, to });
+    if (filtroConsultora && isGerente) params.set("vendedor_id", filtroConsultora);
+    let cancelado = false;
+    setLoading(true);
+    void apiFetch<{ items: CrediarioItem[] }>(`/api/crediario?${params}`)
+      .then(d => { if (!cancelado) { setLoadedItems(d.items); setPagina(1); } })
+      .catch(() => { /* mantém a lista atual em caso de erro */ })
+      .finally(() => { if (!cancelado) setLoading(false); });
+    return () => { cancelado = true; };
+  }, [drill, periodoPreset, periodoCustom, filtroConsultora, isGerente]);
+
+  const toggleDrill = (modo: "vendido" | "recebido") => {
+    if (drill === modo) { setDrill(null); void reload(filtroSituacao, filtroAging); }
+    else setDrill(modo);
+  };
+
   const handleFiltroSituacao = (s: string) => {
+    setDrill(null);
     setFiltroSituacao(s);
     setFiltroAging("");
     void reload(s, "");
   };
 
   const handleFiltroAging = (a: string) => {
+    setDrill(null);
     const next = filtroAging === a ? "" : a;
     setFiltroAging(next);
     void reload(filtroSituacao, next);
@@ -1588,18 +1722,20 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   // Lista de consultoras presentes (para o filtro — só faz sentido p/ gerente,
   // que enxerga várias; a consultora já recebe só as vendas dela).
   const consultoras = useMemo(() => {
-    const set = new Set<string>();
+    const map = new Map<number, string>();
     for (const i of loadedItems) {
-      if (i.vendedor_nome) set.add(i.vendedor_nome);
+      if (i.vendedor_id != null && i.vendedor_nome) map.set(i.vendedor_id, i.vendedor_nome);
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
+    return Array.from(map.entries())
+      .map(([id, nome]) => ({ id, nome }))
+      .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
   }, [loadedItems]);
 
   // Agrupa por venda
   const vendaGroups = useMemo(() => {
     const buscaLc = busca.trim().toLowerCase();
     const filtered = loadedItems.filter(i => {
-      if (filtroConsultora && i.vendedor_nome !== filtroConsultora) return false;
+      if (filtroConsultora && String(i.vendedor_id) !== filtroConsultora) return false;
       if (!buscaLc) return true;
       return (
         (i.cliente_nome ?? "").toLowerCase().includes(buscaLc) ||
@@ -1620,10 +1756,23 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   const saldoUsado = saldo ? saldo.limite - saldo.atual : 0;
   const saldoPct = saldo ? Math.min(100, (saldoUsado / saldo.limite) * 100) : 0;
 
+  // Resumo exibido: o da consultora escolhida, ou o global (prop). O Saldo
+  // Crédito é à parte (sempre global — da loja).
+  const contagensView = contagensConsultora ?? contagens;
+  const consultoraSelNome = filtroConsultora
+    ? consultoras.find(c => String(c.id) === filtroConsultora)?.nome ?? null
+    : null;
+  const contasFiltradas = vendaGroups.reduce((s, g) => s + g.parcelas.length, 0);
+
+  // Paginação (client-side, por venda): fatia os grupos já filtrados.
+  const totalPaginas = Math.max(1, Math.ceil(vendaGroups.length / porPagina));
+  const paginaSegura = Math.min(pagina, totalPaginas);
+  const vendaGroupsPagina = vendaGroups.slice((paginaSegura - 1) * porPagina, paginaSegura * porPagina);
+
   const tabs = [
-    { key: "pendente", label: "Pendentes", count: contagens.pendente },
-    { key: "pago",     label: "Pagos",     count: contagens.pago },
-    { key: "",         label: "Todos",     count: contagens.total },
+    { key: "pendente", label: "Pendentes", count: contagensView.pendente },
+    { key: "pago",     label: "Pagos",     count: contagensView.pago },
+    { key: "",         label: "Todos",     count: contagensView.total },
   ];
 
   return (
@@ -1654,50 +1803,34 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
           </button>
         </div>
 
-        {/* ── Faixa de alerta de vencidos (some com "ok", volta no dia seguinte) ── */}
-        {contagens.vencido > 0 && !faixaOk && (
-          <div style={{ display: "flex", alignItems: "center", gap: 12, background: C.vermelho, color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 16 }}>
-            <AlertTriangle size={18} style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>
-              Você tem {contagens.vencido} conta{contagens.vencido !== 1 ? "s" : ""} vencida{contagens.vencido !== 1 ? "s" : ""} ({fmtBRL(contagens.valor_vencido)}). Cobre os clientes!
-            </div>
-            <button onClick={dispensarFaixa} style={{ background: "rgba(255,255,255,0.25)", border: "none", color: "#fff", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
-              ok
-            </button>
-          </div>
-        )}
+        {/* O alerta de vencidos virou GLOBAL (VencidosAlarme no DashboardShell,
+            aparece em toda a tela do sistema) — não fica mais inline aqui. */}
 
         {/* ── Cards de resumo ───────────────────────────────────────────────── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12, marginBottom: 20 }}>
-          <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
+          <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 12, padding: "14px 16px" }}>
             <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
               <Clock size={12} /> Pendente
+              {consultoraSelNome && <span style={chipConsultora}>{primeiroNome(consultoraSelNome)}</span>}
             </div>
-            <div style={{ fontWeight: 700, fontSize: 20, color: C.esmeralda }}>{fmtBRL(contagens.valor_pendente)}</div>
-            <div style={{ fontSize: 11, color: C.cinza }}>{contagens.pendente} conta{contagens.pendente !== 1 ? "s" : ""}</div>
+            <div style={{ fontWeight: 700, fontSize: 20, color: C.esmeralda }}>{fmtBRL(contagensView.valor_pendente)}</div>
+            <div style={{ fontSize: 11, color: C.cinza }}>{contagensView.pendente} conta{contagensView.pendente !== 1 ? "s" : ""}</div>
           </div>
 
-          {contagens.vencido > 0 && (
-            <div style={{ background: C.vermelhoLt, border: `1px solid ${C.vermelho}30`, borderRadius: 10, padding: "14px 16px" }}>
+          {contagensView.vencido > 0 && (
+            <div style={{ background: "#fff", border: `1px solid ${C.vermelho}40`, borderRadius: 12, padding: "14px 16px" }}>
               <div style={{ fontSize: 11, color: C.vermelho, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
                 <AlertTriangle size={12} /> Vencido
+                {consultoraSelNome && <span style={{ ...chipConsultora, background: C.vermelhoLt, color: C.vermelho }}>{primeiroNome(consultoraSelNome)}</span>}
               </div>
-              <div style={{ fontWeight: 700, fontSize: 20, color: C.vermelho }}>{fmtBRL(contagens.valor_vencido)}</div>
-              <div style={{ fontSize: 11, color: C.vermelho }}>{contagens.vencido} conta{contagens.vencido !== 1 ? "s" : ""}</div>
+              <div style={{ fontWeight: 700, fontSize: 20, color: C.vermelho }}>{fmtBRL(contagensView.valor_vencido)}</div>
+              <div style={{ fontSize: 11, color: C.vermelho }}>{contagensView.vencido} conta{contagensView.vencido !== 1 ? "s" : ""}</div>
             </div>
           )}
 
-          <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
-            <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
-              <CheckCircle size={12} /> Recebidos
-            </div>
-            <div style={{ fontWeight: 700, fontSize: 20, color: C.verde }}>{contagens.pago}</div>
-            <div style={{ fontSize: 11, color: C.cinza }}>contas pagas</div>
-          </div>
-
           {/* Saldo da gerente — só visível para gerente/admin */}
           {saldo && (
-            <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 12, padding: "14px 16px" }}>
               <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
                 <Wallet size={12} /> Saldo Crédito
               </div>
@@ -1716,22 +1849,84 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
           )}
         </div>
 
-        {/* ── Filtros ───────────────────────────────────────────────────────── */}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-          {tabs.map(t => (
+        {/* ── Período: quanto vendeu em crediário x quanto recebeu ──────────────
+            "Vendeu" = crediário gerado em vendas do período; "Recebeu" = baixado
+            no período. Segue a consultora filtrada (ou global / a própria). */}
+        <div style={{ marginBottom: 20, background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 12, padding: "14px 16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 12 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginRight: 2 }}>
+              Período{consultoraSelNome ? ` — ${primeiroNome(consultoraSelNome)}` : ""}:
+            </span>
+            {PERIODOS.map(p => (
+              <button
+                key={p.key}
+                onClick={() => setPeriodoPreset(p.key)}
+                style={{
+                  padding: "4px 11px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                  background: periodoPreset === p.key ? C.esmeralda : C.cremeBg,
+                  color:      periodoPreset === p.key ? "#fff" : C.cinza,
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+            {periodoPreset === "custom" && (
+              <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <input type="date" value={periodoCustom.from} onChange={e => setPeriodoCustom(c => ({ ...c, from: e.target.value }))}
+                  style={{ fontSize: 12, padding: "3px 6px", border: `1px solid ${C.cremeBorder}`, borderRadius: 6 }} />
+                <span style={{ fontSize: 12, color: C.cinza }}>até</span>
+                <input type="date" value={periodoCustom.to} onChange={e => setPeriodoCustom(c => ({ ...c, to: e.target.value }))}
+                  style={{ fontSize: 12, padding: "3px 6px", border: `1px solid ${C.cremeBorder}`, borderRadius: 6 }} />
+              </span>
+            )}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
             <button
-              key={t.key}
-              onClick={() => handleFiltroSituacao(t.key)}
+              onClick={() => toggleDrill("vendido")}
+              title="Clique para ver as vendas do período na lista"
               style={{
-                padding: "6px 14px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
-                background: filtroSituacao === t.key ? C.esmeralda : "#fff",
-                color:      filtroSituacao === t.key ? "#fff" : C.cinza,
-                boxShadow:  filtroSituacao === t.key ? "none" : `0 0 0 1px ${C.cremeBorder}`,
+                textAlign: "left", cursor: "pointer", background: C.cremeBg, borderRadius: 10, padding: "12px 14px",
+                border: drill === "vendido" ? `2px solid ${C.esmeralda}` : "2px solid transparent",
               }}
             >
-              {t.label} {t.count > 0 && <span style={{ opacity: 0.7 }}>({t.count})</span>}
+              <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
+                <CreditCard size={12} /> Vendeu em crediário
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 20, color: C.esmeralda }}>{periodoMetrics ? fmtBRL(periodoMetrics.vendido) : "—"}</div>
             </button>
-          ))}
+            <button
+              onClick={() => toggleDrill("recebido")}
+              title="Clique para ver os recebimentos do período na lista"
+              style={{
+                textAlign: "left", cursor: "pointer", background: C.cremeBg, borderRadius: 10, padding: "12px 14px",
+                border: drill === "recebido" ? `2px solid ${C.verde}` : "2px solid transparent",
+              }}
+            >
+              <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
+                <CheckCircle size={12} /> Recebeu
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 20, color: C.verde }}>{periodoMetrics ? fmtBRL(periodoMetrics.recebido) : "—"}</div>
+            </button>
+          </div>
+        </div>
+
+        {/* ── Filtros ───────────────────────────────────────────────────────── */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+          <div style={{ display: "inline-flex", background: C.cremeBg, borderRadius: 10, padding: 3, gap: 2 }}>
+            {tabs.map(t => (
+              <button
+                key={t.key}
+                onClick={() => handleFiltroSituacao(t.key)}
+                style={{
+                  padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
+                  background: filtroSituacao === t.key ? C.esmeralda : "transparent",
+                  color:      filtroSituacao === t.key ? "#fff" : C.cinza,
+                }}
+              >
+                {t.label} {t.count > 0 && <span style={{ opacity: 0.7 }}>({t.count})</span>}
+              </button>
+            ))}
+          </div>
 
           {filtroSituacao === "pendente" && (
             <>
@@ -1792,12 +1987,35 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
               >
                 <option value="">Todas as consultoras</option>
                 {consultoras.map(c => (
-                  <option key={c} value={c}>{c}</option>
+                  <option key={c.id} value={String(c.id)}>{c.nome}</option>
                 ))}
               </select>
             </div>
           )}
         </div>
+
+        {/* Faixa de drill ativo (lista mostrando o período, não a cobrança) */}
+        {drill && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+            background: C.esmeraldaLt, border: `1px solid ${C.esmeralda}40`, borderRadius: 10,
+            padding: "8px 14px", marginBottom: 12,
+          }}>
+            <span style={{ fontSize: 13, color: C.esmeralda, fontWeight: 600 }}>
+              {drill === "vendido" ? "Vendas do período" : "Recebimentos do período"}
+              {consultoraSelNome ? ` — ${primeiroNome(consultoraSelNome)}` : ""} · {contasFiltradas} conta{contasFiltradas !== 1 ? "s" : ""}
+            </span>
+            <button
+              onClick={() => { setDrill(null); void reload(filtroSituacao, filtroAging); }}
+              style={{
+                marginLeft: "auto", background: "#fff", border: `1px solid ${C.esmeralda}40`,
+                borderRadius: 8, padding: "4px 12px", fontSize: 12, color: C.esmeralda, cursor: "pointer", fontWeight: 600,
+              }}
+            >
+              ✕ voltar à lista
+            </button>
+          </div>
+        )}
 
         {/* ── Lista de vendas agrupadas ─────────────────────────────────────── */}
         {loading ? (
@@ -1810,7 +2028,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
             <p style={{ margin: 0, fontSize: 14 }}>Nenhum registro encontrado</p>
           </div>
         ) : (
-          vendaGroups.map(({ key, parcelas }) => {
+          vendaGroupsPagina.map(({ key, parcelas }) => {
             const first = parcelas[0];
             return (
               <VendaCard
@@ -1819,7 +2037,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
                 numeroVenda={first.numero_venda}
                 clienteNome={first.cliente_nome}
                 vendedorNome={first.vendedor_nome}
-                dataVenda={first.venda_created_at}
+                dataVenda={first.data_venda ?? first.venda_created_at ?? first.created_at}
                 parcelas={parcelas}
                 isGerente={isGerente}
                 onSelectParcela={setSelectedContaId}
@@ -1829,9 +2047,53 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
         )}
 
         {vendaGroups.length > 0 && (
-          <p style={{ textAlign: "center", fontSize: 12, color: C.cinza, marginTop: 16 }}>
-            {vendaGroups.length} venda{vendaGroups.length !== 1 ? "s" : ""} — {loadedItems.length} conta{loadedItems.length !== 1 ? "s" : ""}
-          </p>
+          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+            {totalPaginas > 1 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                <button
+                  onClick={() => setPagina(p => Math.max(1, p - 1))}
+                  disabled={paginaSegura <= 1}
+                  style={{
+                    padding: "6px 12px", borderRadius: 8, border: `1px solid ${C.cremeBorder}`,
+                    background: "#fff", fontSize: 13, color: C.cinza,
+                    cursor: paginaSegura <= 1 ? "not-allowed" : "pointer", opacity: paginaSegura <= 1 ? 0.5 : 1,
+                  }}
+                >
+                  ‹ Anterior
+                </button>
+                <span style={{ fontSize: 13, color: C.cinza, minWidth: 110, textAlign: "center" }}>
+                  Página {paginaSegura} de {totalPaginas}
+                </span>
+                <button
+                  onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))}
+                  disabled={paginaSegura >= totalPaginas}
+                  style={{
+                    padding: "6px 12px", borderRadius: 8, border: `1px solid ${C.cremeBorder}`,
+                    background: "#fff", fontSize: 13, color: C.cinza,
+                    cursor: paginaSegura >= totalPaginas ? "not-allowed" : "pointer", opacity: paginaSegura >= totalPaginas ? 0.5 : 1,
+                  }}
+                >
+                  Próxima ›
+                </button>
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: C.cinza, flexWrap: "wrap", justifyContent: "center" }}>
+              <span>{vendaGroups.length} venda{vendaGroups.length !== 1 ? "s" : ""} — {contasFiltradas} conta{contasFiltradas !== 1 ? "s" : ""}</span>
+              <span style={{ color: C.cremeBorder }}>|</span>
+              <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                Por página:
+                <select
+                  value={porPagina}
+                  onChange={e => setPorPagina(Number(e.target.value))}
+                  style={{ border: `1px solid ${C.cremeBorder}`, borderRadius: 6, padding: "2px 6px", fontSize: 12, background: "#fff", cursor: "pointer" }}
+                >
+                  <option value={10}>10</option>
+                  <option value={15}>15</option>
+                  <option value={25}>25</option>
+                </select>
+              </label>
+            </div>
+          </div>
         )}
       </div>
 
