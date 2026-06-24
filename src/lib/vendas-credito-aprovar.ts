@@ -22,6 +22,10 @@ interface SubmissaoResult {
   tipo?: "gerente" | "diretor";
   tarefa_id?: number;
   message?: string;
+  // Camada 2 (prevenção): bloqueio de validação ANTES de criar a tarefa — ex.:
+  // cliente sem celular. Quando preenchido, o chamador deve devolver 409 com
+  // esta mensagem e NÃO seguir o fluxo de aprovação.
+  erro?: string;
 }
 
 interface AprovacaoResult {
@@ -71,12 +75,26 @@ export async function submeterVendaParaAprovacaoCredito(
   // 2. Buscar dados da venda + determinar tipo
   const [venda] = await sql`
     SELECT v.id, v.numero_venda, v.total_venda, v.total_comissao,
-           c.nome AS cliente_nome
+           c.nome AS cliente_nome, c.celular AS cliente_celular
     FROM alissonerp.vendas_erp v
     LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
     WHERE v.id = ${vendaId}
   `;
   if (!venda) throw new Error(`Venda ${vendaId} não encontrada`);
+
+  // Camada 2 (prevenção na origem): NÃO deixa nem PEDIR aprovação de crédito se
+  // o cliente não tem celular. O approveVenda (no fim do fluxo) exige celular
+  // pra mandar o código de entrega por WhatsApp e falharia lá na frente,
+  // deixando a venda presa em rascunho. Barrando aqui, a consultora cadastra o
+  // celular ANTES de mandar pro aprovador — o problema não chega a nascer.
+  // (O telefone fixo NÃO conta — WhatsApp exige celular; mesma regra do approveVenda.)
+  const celularCliente = String(venda.cliente_celular ?? "").trim();
+  if (!celularCliente) {
+    return {
+      precisa_aprovacao: false,
+      erro: "Cadastre o celular do cliente antes de pedir aprovação de crédito — o código de entrega é enviado por WhatsApp.",
+    };
+  }
 
   // Saldo GERAL (regra v2.78.0): limite − todo o A Receber pendente, derivado ao
   // vivo (não o contador antigo). Cabe no disponível → gerente aprova; senão → CEO.
