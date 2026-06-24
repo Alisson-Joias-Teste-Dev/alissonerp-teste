@@ -20,7 +20,7 @@ import UpgradeItemFields, { type UpgradeFieldsData } from "@/components/vendas/U
 import { createClient } from "@/lib/supabase/client";
 // REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
 // Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos frontends.
-import { isServicoRodioProduto, descricaoItemComBaseRodio, calcularPreviewRodioPorSkuBase, getPctRodio, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
+import { isServicoRodioProduto, descricaoItemComBaseRodio, calcularPreviewRodioPorSkuBase, getPctRodio, round2, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
 import { useErrorStore } from "@/stores/errorStore";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -561,6 +561,50 @@ function PrecoUnitarioInput({ precoUnit, onCommit }: {
   );
 }
 
+/**
+ * REGRA DE NEGÓCIO (24/06/2026) — Seleção da PEÇA BASE do serviço de ródio.
+ * O QUE: ao adicionar o serviço "Ródio" (SKU srv-rodio), a consultora SELECIONA a
+ *        joia que vai receber o banho. O valor do ródio = 30% do preço dessa peça
+ *        (getPctRodio), exibido na hora como preview.
+ * POR QUE: Jonathan pediu "selecionar o produto" no lugar de digitar o SKU base às
+ *          cegas (fonte de erro). Usado nos DOIS layouts (fluxo serviço e produto).
+ * IMPACTO SE REMOVIDO: volta o input de SKU digitado; no fluxo de produto o botão
+ *          Confirmar voltava a travar por não ter onde informar a peça base.
+ */
+function RodioBaseSelector({ pct, valorPreview, baseLabel, erro, onSelectBase, onClear }: {
+  pct: number;
+  valorPreview: number | null;
+  baseLabel: string | null;
+  erro: string;
+  onSelectBase: (p: Produto) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="min-w-[280px] flex-1">
+      <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Peça base (recebe o ródio)</label>
+      <Autocomplete<Produto>
+        placeholder="Buscar a joia por nome ou SKU..."
+        onSearch={async q => { const r = await fetch(`/api/vendas/produtos/busca?q=${encodeURIComponent(q)}&limit=15`); return r.json(); }}
+        renderItem={p => (
+          <div>
+            <p className="font-medium text-sm">{p.nome}</p>
+            <p className="text-xs" style={{ color: "#9CA3AF" }}>{p.sku} · {p.preco_venda != null ? fmt(p.preco_venda) : "sem preço"}</p>
+          </div>
+        )}
+        onSelect={onSelectBase}
+        selectedLabel={baseLabel}
+        onClear={onClear}
+      />
+      {erro && <p className="text-[11px] mt-0.5" style={{ color: "#DC2626" }}>{erro}</p>}
+      {valorPreview != null && !erro && (
+        <p className="text-[11px] mt-0.5" style={{ color: "#065F46" }}>
+          Valor do ródio ({Math.round(pct * 100)}%): {fmt(valorPreview)}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -629,9 +673,28 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
   const [descontoErr, setDescontoErr] = useState("");
   const [addingItem, setAddingItem] = useState(false);
   const [rodioSkuBase, setRodioSkuBase] = useState("");
+  // Peça base selecionada (joia que recebe o ródio). O valor do serviço = 30% do
+  // preço dela. Jonathan pediu SELECIONAR a peça (não digitar o SKU às cegas).
+  const [rodioBaseProduto, setRodioBaseProduto] = useState<Produto | null>(null);
   const [rodioPreviewValor, setRodioPreviewValor] = useState<number | null>(null);
   const [rodioValidando, setRodioValidando] = useState(false);
   const [rodioErro, setRodioErro] = useState("");
+  // Ao selecionar a PEÇA BASE do ródio: guarda a peça, deriva o SKU base e calcula
+  // o preview (30% do preço da peça). O handleAddItem revalida o valor no servidor.
+  function selecionarPecaBaseRodio(p: Produto) {
+    setRodioBaseProduto(p);
+    setRodioSkuBase(p.sku);
+    setRodioErro("");
+    const pct = getPctRodio(produtoSel);
+    setRodioPreviewValor(p.preco_venda != null ? round2(p.preco_venda * pct) : null);
+  }
+  function limparPecaBaseRodio() {
+    setRodioBaseProduto(null); setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro("");
+  }
+  // Trocar o produto principal zera a peça base do ródio (evita herdar base da venda anterior).
+  useEffect(() => {
+    setRodioBaseProduto(null); setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro("");
+  }, [produtoSel?.id]);
   const [pendingAuths, setPendingAuths] = useState<Record<string, PendingAuth>>({});
   // Cache de configs de personalização por produto_id.
   //   null  → ja consultado, produto NAO tem config
@@ -1447,7 +1510,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     void fetchPersonalizacaoConfig(produtoSel.id);
     setProdutoSel(null); setQtd(1); setPctDesconto(0); setDescontoErr(""); setAddingItem(false);
     resetUpgradeState();
-    setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro("");
+    setRodioSkuBase(""); setRodioPreviewValor(null); setRodioErro(""); setRodioBaseProduto(null);
   }
 
   function handleAddServico() {
@@ -2394,23 +2457,14 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                 {produtoSel && (
                   <div className="mt-3 flex items-end gap-3 flex-wrap">
                     {isServicoRodioProduto(produtoSel) && (
-                      <div className="min-w-[260px]">
-                        <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>SKU da joia base</label>
-                        <input
-                          type="text"
-                          value={rodioSkuBase}
-                          onChange={(e) => { setRodioSkuBase(e.target.value.toUpperCase()); setRodioErro(""); }}
-                          placeholder="Ex: AJ1519"
-                          className="w-full border rounded-lg px-2 py-1.5 text-sm outline-none"
-                          style={{ borderColor: rodioErro ? "#DC2626" : C.cremeBorder }}
-                        />
-                        {rodioErro && <p className="text-[11px] mt-0.5" style={{ color: "#DC2626" }}>{rodioErro}</p>}
-                        {rodioPreviewValor != null && !rodioErro && (
-                          <p className="text-[11px] mt-0.5" style={{ color: "#065F46" }}>
-                            Valor automático do ródio (30%): {fmt(rodioPreviewValor)}
-                          </p>
-                        )}
-                      </div>
+                      <RodioBaseSelector
+                        pct={getPctRodio(produtoSel)}
+                        valorPreview={rodioPreviewValor}
+                        baseLabel={rodioBaseProduto ? `${rodioBaseProduto.nome} · ${fmt(rodioBaseProduto.preco_venda ?? 0)}` : null}
+                        erro={rodioErro}
+                        onSelectBase={selecionarPecaBaseRodio}
+                        onClear={limparPecaBaseRodio}
+                      />
                     )}
                     <div>
                       <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Qtd</label>
@@ -2430,7 +2484,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                         ? fmt(rodioPreviewValor)
                         : produtoSel ? fmt(calcItem(produtoSel, qtd, pctDesconto).preco_unitario) : "—"}
                     </div>
-                    <button onClick={() => void handleAddItem()} disabled={rodioValidando}
+                    <button onClick={() => void handleAddItem()} disabled={rodioValidando || (isServicoRodioProduto(produtoSel) && rodioPreviewValor == null)}
                       className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50"
                       style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                       <Plus size={14} /> {rodioValidando ? "Validando..." : "Adicionar"}
@@ -3030,7 +3084,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                       selectedLabel={produtoSel ? `${produtoSel.nome} · ${fmt(produtoSel.preco_venda ?? 0)}` : null}
                       onClear={() => { setProdutoSel(null); setDescontoErr(""); resetUpgradeState(); }}
                     />
-                    {produtoSel && !isUpgradeProduto && (
+                    {produtoSel && !isUpgradeProduto && !isServicoRodioProduto(produtoSel) && (
                       <div className="mt-3 grid grid-cols-4 gap-2 items-end">
                         <div>
                           <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Qtd</label>
@@ -3055,6 +3109,40 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                           className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium disabled:opacity-40"
                           style={{ backgroundColor: C.esmeralda, color: C.creme }}>
                           <Plus size={14} /> Confirmar
+                        </button>
+                      </div>
+                    )}
+                    {/* Serviço de ródio: seleciona a peça base + 30% (mesmo seletor do fluxo serviço) */}
+                    {produtoSel && isServicoRodioProduto(produtoSel) && (
+                      <div className="mt-3 flex items-end gap-3 flex-wrap">
+                        <RodioBaseSelector
+                          pct={getPctRodio(produtoSel)}
+                          valorPreview={rodioPreviewValor}
+                          baseLabel={rodioBaseProduto ? `${rodioBaseProduto.nome} · ${fmt(rodioBaseProduto.preco_venda ?? 0)}` : null}
+                          erro={rodioErro}
+                          onSelectBase={selecionarPecaBaseRodio}
+                          onClear={limparPecaBaseRodio}
+                        />
+                        <div>
+                          <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>Qtd</label>
+                          <input type="number" min={1} value={qtd} onChange={e => setQtd(Math.max(1, Number(e.target.value)))}
+                            className="w-16 border rounded-lg px-2 py-1.5 text-sm outline-none text-center" style={{ borderColor: C.cremeBorder }} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1" style={{ color: "#6B7280" }}>% Desconto</label>
+                          <input type="number" min={0} step={1} value={pctDesconto}
+                            onChange={e => { const v = Number(e.target.value) || 0; setPctDesconto(v); setDescontoErr(""); }}
+                            className="w-20 border rounded-lg px-2 py-1.5 text-sm outline-none text-center"
+                            style={{ borderColor: pctDesconto > maxDesconto ? "#F97316" : C.cremeBorder, color: pctDesconto > maxDesconto ? "#EA580C" : undefined }} />
+                          {pctDesconto > maxDesconto && <p className="text-[11px] mt-0.5" style={{ color: "#EA580C" }}>Precisa aprovação</p>}
+                        </div>
+                        <div className="text-xs" style={{ color: "#6B7280" }}>
+                          = {rodioPreviewValor != null ? fmt(rodioPreviewValor) : "—"}
+                        </div>
+                        <button onClick={() => void handleAddItem()} disabled={rodioValidando || rodioPreviewValor == null}
+                          className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                          style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                          {rodioValidando ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Confirmar
                         </button>
                       </div>
                     )}

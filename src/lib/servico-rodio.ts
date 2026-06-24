@@ -55,20 +55,25 @@ export interface ProdutoMinimo {
   nome: string;
 }
 
-/** Forma minima para isServicoRodio — server-side, parametros diretos. */
+/**
+ * REGRA DE NEGOCIO (24/06/2026 — correcao de falso positivo):
+ * O QUE: so e servico de rodio o produto cujo SKU e exatamente `srv-rodio`.
+ * POR QUE: a deteccao antiga olhava o NOME ("rodio"/"rhodio") e o SKU de forma
+ *          frouxa, entao ~74 JOIAS com banho de rodio no nome (ex: "Crucifixo
+ *          Ouro 18k Detalhado e Rodio", SKU AJ4313) eram tratadas como o SERVICO
+ *          de rodio. No PDV isso travava o botao Confirmar (passava a exigir uma
+ *          "peca base" que nem sempre era renderizada). O servico real e um unico
+ *          produto cadastrado: SKU `srv-rodio` (SKU_RODIO_CANONICO).
+ * IMPACTO SE ALTERADO/REMOVIDO: volta o falso positivo — qualquer joia com
+ *          "rodio" no nome reabre o bug de nao conseguir adicionar na venda.
+ * NOTA: o `nome` e mantido na assinatura por compatibilidade dos callers, mas
+ *       NAO entra mais na deteccao (era a fonte do bug).
+ */
 export function isServicoRodio(
   sku: string | null | undefined,
-  nome: string | null | undefined,
+  _nome?: string | null | undefined,
 ): boolean {
-  const skuNorm = normalizarTextoBusca(sku);
-  const nomeNorm = normalizarTextoBusca(nome);
-  return (
-    skuNorm === SKU_RODIO_CANONICO ||
-    skuNorm.includes("rodio") ||
-    skuNorm.includes("rhodio") ||
-    nomeNorm.includes("rodio") ||
-    nomeNorm.includes("rhodio")
-  );
+  return normalizarTextoBusca(sku) === SKU_RODIO_CANONICO;
 }
 
 /**
