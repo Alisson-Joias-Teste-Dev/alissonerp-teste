@@ -2,6 +2,29 @@
 
 > 📋 Última atualização automática: 22/06/2026 — Versão: v2.75.0 <!-- Revisado 22/06/2026 -->
 
+## fix(vendas): venda travada em rascunho após reeditar desconto já aprovado (v2.77.x)
+
+**Sintoma (venda 15628):** ação de marketing zerou os itens (100% de desconto) de uma venda
+cujo desconto de 30% **já tinha sido aprovado**. A venda ficou impossível de aprovar — nenhum
+botão aparecia na tela.
+
+**Causa:** ao reeditar/adicionar item acima do limite, as rotas de itens limpavam
+`desconto_aprovado_por`/`_em` mas **deixavam `aprovacao_desconto_tarefa_id`** apontando para a
+tarefa antiga (já `aprovada`). Com o ponteiro preenchido, o front escondia o botão "Solicitar
+Aprovação de Desconto" (`precisaSolicitarDesconto` exige o campo NULL); e como a tarefa não estava
+mais "aguardando", o banner de "aguardando aprovação"/"Ver Tarefa" também sumia → beco sem saída.
+O cancelamento da tarefa ainda filtrava pela tag errada (`aprovacao_desconto`, sendo a real
+`aprov_desconto_acima`), então nunca cancelava nada.
+
+**Correção** (`POST` e `PATCH /api/vendas/[id]/itens`):
+- ao invalidar a aprovação, zera também `aprovacao_desconto_tarefa_id`;
+- cancela a tarefa vinculada **pelo ID** e **só se ainda estava pendente** (`aguardando_aprovacao`) —
+  tarefa já aprovada/rejeitada é histórico, não se reescreve.
+
+**Dado:** venda 15628 destravada em produção (update assinado, escopo mínimo, 25/06). Outras 4
+vendas estavam no mesmo estado: 15300, 15312, 15399, 15562 (rascunhos antigos). Regra documentada
+em `docs/regras-negocio/comercial.md §6`.
+
 ## feat(compras-comercial): etapa de CHEGADA (lote + 2 fotos + IA na balança) antes do cadastro (v2.75.0)
 
 **Pedido do Jonathan:** rastrear o metal assim que a joia chega na loja, antes de cadastrar peça a peça.

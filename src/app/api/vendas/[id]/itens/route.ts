@@ -444,21 +444,33 @@ export async function POST(
   // Se novo item tem desconto > threshold numa venda em rascunho, invalida aprovação anterior
   const thresholdNovoItem = await getDescontoThreshold(vendaId);
   if (venda.situacao === "rascunho" && (body.pct_desconto ?? 0) > thresholdNovoItem) {
+    // BUG FIX (jun/2026, venda 15628): captura o ponteiro da tarefa ANTES de zerar.
+    // Soltar aprovacao_desconto_tarefa_id é obrigatório — senão, se a tarefa antiga
+    // já estava 'aprovada', o front esconde o botão de solicitar e o banner de
+    // aguardando, e a venda trava em rascunho sem como reaprovar.
+    const [vDesc] = await sql`
+      SELECT aprovacao_desconto_tarefa_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    `;
+    const tarefaAnteriorId = vDesc?.aprovacao_desconto_tarefa_id as number | null;
     await sql`
       UPDATE alissonerp.vendas_erp
       SET desconto_aprovado_por           = NULL,
           desconto_aprovado_em            = NULL,
+          aprovacao_desconto_tarefa_id    = NULL,
           desconto_revalidacao_necessaria = true,
           updated_at                      = NOW()
       WHERE id = ${vendaId}
     `;
-    await sql`
-      UPDATE alissonerp.tarefas
-      SET status = 'cancelado', updated_at = NOW()
-      WHERE venda_id = ${vendaId}
-        AND status = 'aguardando_aprovacao'
-        AND tags @> ARRAY['aprovacao_desconto']::text[]
-    `.catch((err) => console.error("[vendas/itens] tarefa cancel falhou", err));
+    // Cancela a tarefa vinculada SÓ se ainda estava pendente. Mira pelo ID (o filtro
+    // por tag 'aprovacao_desconto' antigo nunca batia: a tag real é 'aprov_desconto_acima').
+    if (tarefaAnteriorId) {
+      await sql`
+        UPDATE alissonerp.tarefas
+        SET status = 'cancelado', updated_at = NOW()
+        WHERE id = ${tarefaAnteriorId}
+          AND status = 'aguardando_aprovacao'
+      `.catch((err) => console.error("[vendas/itens] tarefa cancel falhou", err));
+    }
   }
 
   return NextResponse.json({ id: novoItem.id }, { status: 201 });
