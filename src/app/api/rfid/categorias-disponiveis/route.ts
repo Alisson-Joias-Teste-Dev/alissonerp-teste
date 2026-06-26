@@ -31,7 +31,7 @@ export async function GET(_req: NextRequest) {
     // Query 1: total geral (produtos ativos com estoque)
     const [totalRow] = await sql`
       SELECT COUNT(*)::INT AS total
-      FROM alissonerp.produtos_compat
+      FROM public.produtos
       WHERE qtd_estoque >= 1
         AND situacao = 'A'
     `;
@@ -43,7 +43,7 @@ export async function GET(_req: NextRequest) {
       SELECT
         SPLIT_PART(categoria, ' -> ', 1) AS base,
         COUNT(*)::INT AS total
-      FROM alissonerp.produtos_compat
+      FROM public.produtos
       WHERE qtd_estoque >= 1
         AND situacao = 'A'
         AND categoria IS NOT NULL

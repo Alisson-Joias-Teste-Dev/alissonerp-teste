@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     FROM alissonerp.transferencias_estoque_comercial t
     LEFT JOIN alissonerp.locais_estoque lo ON lo.id = t.local_origem_id
     LEFT JOIN alissonerp.locais_estoque ld ON ld.id = t.local_destino_id
-    LEFT JOIN alissonerp.produtos_compat p ON p.id_produto = t.produto_id
+    LEFT JOIN public.produtos p ON p.id_produto = t.produto_id
     LEFT JOIN auth.users ue ON ue.id = t.enviado_por
     LEFT JOIN auth.users ur ON ur.id = t.recebido_por
     WHERE (${status}::text IS NULL OR t.status = ${status})

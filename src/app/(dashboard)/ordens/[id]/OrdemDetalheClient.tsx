@@ -6,7 +6,6 @@ import Link from "next/link";
 import ComentariosOrdem from "@/components/ComentariosOrdem";
 import GaleriaFotosOrdem from "@/components/ordem/GaleriaFotosOrdem";
 import ItensOrdemSection from "@/components/ordens/ItensOrdemSection";
-import ConversaoSkuItensSection from "@/components/ordens/ConversaoSkuItensSection";
 import FichaTecnicaForm, { TIPOS_ITEM, type TipoItem, type FichaTecnicaDados, validarFichaTecnica } from "@/components/ordens/FichaTecnicaForm";
 import Ver3DAliancaButton from "@/components/ordens/Ver3DAliancaButton";
 import { Pencil, X, Save, Loader2, AlertCircle, Ban } from "lucide-react";
@@ -800,13 +799,8 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
             </div>
           </div>
 
-          {/* Itens da Ordem (produtos da venda) — conversao_sku tem fonte
-              própria (conversoes_sku), os demais usam itens_ordem. */}
-          {ordem.tipo_ordem === "conversao_sku" && conversaoSku ? (
-            <ConversaoSkuItensSection conversao={conversaoSku} />
-          ) : (
-            <ItensOrdemSection ordemId={ordem.id} />
-          )}
+          {/* Itens da Ordem (produtos da venda) */}
+          <ItensOrdemSection ordemId={ordem.id} />
 
           {/* Detalhes da Ordem — só exibe quando preenchido */}
           {ordem.detalhes_ordem && (

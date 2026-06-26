@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 
     const rows = await sql`
       SELECT id_produto, id_api_produto, sku, nome
-      FROM alissonerp.produtos_compat
+      FROM public.produtos
       WHERE id_api_produto = ${idApi}
       LIMIT 1
     `;

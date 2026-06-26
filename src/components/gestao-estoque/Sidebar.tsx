@@ -84,7 +84,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onViewChange, onToggleAI
         <p className="text-[10px] text-gray-400 uppercase tracking-wider">
           Fonte de dados
         </p>
-        <p className="text-xs text-gray-700 mt-1 font-mono">alissonerp.produtos_compat</p>
+        <p className="text-xs text-gray-700 mt-1 font-mono">public.produtos</p>
       </div>
     </div>
   );

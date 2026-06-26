@@ -130,7 +130,7 @@ export async function GET(req: NextRequest) {
         AND pr.ordem = COALESCE(pcp.rota_etapa_atual, 1)
       LEFT JOIN alissonerp.setores sr ON sr.id = pr.setor_id
       LEFT JOIN alissonerp.depositos dop ON dop.id = pcp.operador_atribuido_id
-      LEFT JOIN alissonerp.produtos_compat prod ON prod.id_produto = COALESCE(o.produto_reposicao_id, io.produto_id)
+      LEFT JOIN public.produtos prod ON prod.id_produto = COALESCE(o.produto_reposicao_id, io.produto_id)
       WHERE
         -- Filtro por STATUS:
         -- ativas: ativas (nada concluido/cancelado)

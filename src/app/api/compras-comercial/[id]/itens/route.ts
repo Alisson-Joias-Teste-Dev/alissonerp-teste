@@ -38,7 +38,7 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
       ppe.peso_ct AS peso_pedra_ct,
       (ppe.produto_id IS NOT NULL) AS tem_registro_pedra_extras
     FROM alissonerp.itens_compra_comercial ic
-    JOIN alissonerp.produtos_compat p ON p.id_produto = ic.produto_id
+    JOIN public.produtos p ON p.id_produto = ic.produto_id
     LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
     WHERE ic.compra_comercial_id = ${compraId}
     ORDER BY ic.id
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
   const [produto] = await sql`
     SELECT p.id_produto, p.categoria, p.categoria_precificacao, p.nome, p.tem_pedra_preciosa, ppe.peso_ct AS peso_pedra_ct,
       (ppe.produto_id IS NOT NULL) AS tem_registro_pedra_extras
-    FROM alissonerp.produtos_compat p
+    FROM public.produtos p
     LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
     WHERE p.id_produto = ${produto_id}
     LIMIT 1

@@ -51,7 +51,7 @@ export async function GET(
       ep.comprimento,
       ep.largura_aro,
       ep.observacao_erp
-    FROM alissonerp.produtos_compat p
+    FROM public.produtos p
     LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
     LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
@@ -76,7 +76,7 @@ export async function GET(
         ep.numeracao,
         ep.cor_metal
       FROM alissonerp.erp_produtos ep
-      JOIN alissonerp.produtos_compat p ON p.id_produto = ep.produto_id
+      JOIN public.produtos p ON p.id_produto = ep.produto_id
       WHERE ep.parent_sku = ${produto.sku} AND ep.eh_variacao = true
       ORDER BY ep.numeracao ASC
     `);

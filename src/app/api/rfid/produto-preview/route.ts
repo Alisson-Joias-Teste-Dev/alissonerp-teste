@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
         p.peso_precificado,
         pp.preco_venda AS preco,
         p.imagem
-      FROM alissonerp.produtos_compat p
+      FROM public.produtos p
       LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
       WHERE p.id_produto = ${id}
     `;

@@ -10,7 +10,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import sql from "@/lib/db";
-import { getSaldoDisponivel } from "@/lib/saldo-credito";
+import { getSaldoAtual, debitarSaldo } from "@/lib/saldo-credito";
 import { approveVenda } from "@/lib/vendas-aprovar";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { criarNotificacao } from "@/lib/notificacoes";
@@ -22,10 +22,6 @@ interface SubmissaoResult {
   tipo?: "gerente" | "diretor";
   tarefa_id?: number;
   message?: string;
-  // Camada 2 (prevenção): bloqueio de validação ANTES de criar a tarefa — ex.:
-  // cliente sem celular. Quando preenchido, o chamador deve devolver 409 com
-  // esta mensagem e NÃO seguir o fluxo de aprovação.
-  erro?: string;
 }
 
 interface AprovacaoResult {
@@ -34,15 +30,6 @@ interface AprovacaoResult {
   ordem_criada?: string;
   tiny_erro?: string;
   message?: string;
-  // true quando a venda ficou de fato 'aprovado' (approveVenda rodou ok).
-  // false quando ainda falta confirmar pagamento de entrada (espera legítima)
-  // OU quando o approveVenda falhou (ver erro_aprovacao).
-  venda_aprovada?: boolean;
-  // Só preenchido no caso de FALHA: todos os pagamentos de entrada já estavam
-  // confirmados, o crédito foi aprovado, mas o approveVenda lançou erro (ex.:
-  // cliente sem celular). Sinaliza ao chamador que a aprovação deve ser
-  // revertida pra permitir nova tentativa.
-  erro_aprovacao?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -75,30 +62,14 @@ export async function submeterVendaParaAprovacaoCredito(
   // 2. Buscar dados da venda + determinar tipo
   const [venda] = await sql`
     SELECT v.id, v.numero_venda, v.total_venda, v.total_comissao,
-           c.nome AS cliente_nome, c.celular AS cliente_celular
+           c.nome AS cliente_nome
     FROM alissonerp.vendas_erp v
     LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
     WHERE v.id = ${vendaId}
   `;
   if (!venda) throw new Error(`Venda ${vendaId} não encontrada`);
 
-  // Camada 2 (prevenção na origem): NÃO deixa nem PEDIR aprovação de crédito se
-  // o cliente não tem celular. O approveVenda (no fim do fluxo) exige celular
-  // pra mandar o código de entrega por WhatsApp e falharia lá na frente,
-  // deixando a venda presa em rascunho. Barrando aqui, a consultora cadastra o
-  // celular ANTES de mandar pro aprovador — o problema não chega a nascer.
-  // (O telefone fixo NÃO conta — WhatsApp exige celular; mesma regra do approveVenda.)
-  const celularCliente = String(venda.cliente_celular ?? "").trim();
-  if (!celularCliente) {
-    return {
-      precisa_aprovacao: false,
-      erro: "Cadastre o celular do cliente antes de pedir aprovação de crédito — o código de entrega é enviado por WhatsApp.",
-    };
-  }
-
-  // Saldo GERAL (regra v2.78.0): limite − todo o A Receber pendente, derivado ao
-  // vivo (não o contador antigo). Cabe no disponível → gerente aprova; senão → CEO.
-  const { disponivel: saldoAtual } = await getSaldoDisponivel();
+  const saldoAtual = await getSaldoAtual();
   const tipo: "gerente" | "diretor" = valorAReceber <= saldoAtual ? "gerente" : "diretor";
 
   // 3. Encontrar aprovador (fora da tx — só leitura)
@@ -360,11 +331,25 @@ export async function processarAprovacaoCredito(
     return { ok: true, acao: "rejeitado", message: "Aprovação de crédito rejeitada" };
   }
 
-  // 3. Aprovado — processar conforme tipo.
-  // tipo 'gerente' → comissão da consultora MANTIDA, nada a fazer: o saldo de crédito
-  // é DERIVADO ao vivo (limite − A Receber pendente, v2.78.0), não há contador a
-  // debitar. tipo 'diretor' (crédito sem saldo) → zera a comissão de todos os itens.
-  if (tipo === "diretor") {
+  // 3. Aprovado — processar conforme tipo
+  const [aReceber] = await sql`
+    SELECT COALESCE(SUM(valor), 0) AS total
+    FROM alissonerp.pagamentos_venda
+    WHERE venda_id = ${vendaId} AND forma = 'A Receber' AND status = 'pendente'
+  `;
+  const valorAReceber = parseFloat(aReceber.total);
+
+  if (tipo === "gerente") {
+    // 3a. Debitar saldo do gerente
+    await debitarSaldo(valorAReceber, vendaId, aprovadorId);
+
+    await sql`
+      UPDATE alissonerp.vendas_erp
+      SET credito_gerente_usado = ${valorAReceber}, updated_at = NOW()
+      WHERE id = ${vendaId}
+    `;
+  } else {
+    // 3b. Diretor: zerar comissão de todos os itens
     await sql`
       UPDATE alissonerp.itens_venda_erp
       SET pct_comissao = 0, valor_comissao = 0
@@ -404,11 +389,6 @@ export async function processarAprovacaoCredito(
   let ordemCriada: string | undefined;
   let tinyErro: string | undefined;
   let vendaAprovada = false;
-  // Preenchido só quando todos os pagamentos já estavam confirmados mas o
-  // approveVenda lançou erro (ex.: cliente sem celular). É o sinal pro chamador
-  // reverter a aprovação da tarefa e deixar reprocessável. NÃO confundir com a
-  // espera legítima por confirmação de pagamento (todosOutrosConfirmados=false).
-  let erroAprovacao: string | undefined;
 
   if (todosOutrosConfirmados) {
     try {
@@ -417,30 +397,17 @@ export async function processarAprovacaoCredito(
       tinyErro = result.tiny_erro;
       vendaAprovada = true;
     } catch (err) {
-      erroAprovacao = err instanceof Error ? err.message : String(err);
+      tinyErro = err instanceof Error ? err.message : String(err);
       console.error(`[processarAprovacaoCredito] approveVenda falhou:`, err);
     }
   }
 
-  // A venda aprovou de fato → limpa o vínculo da tarefa de crédito. Sem isso o
-  // campo ficava preso e o guard de "aprovação pendente" travava a venda pra
-  // sempre (a tarefa fica como histórico, ligada à venda por venda_id).
-  if (vendaAprovada) {
-    await sql`
-      UPDATE alissonerp.vendas_erp
-      SET aprovacao_credito_tarefa_id = NULL, updated_at = NOW()
-      WHERE id = ${vendaId}
-    `;
-  }
-
   // 6. Notificar consultora
-  const msgOk = !todosOutrosConfirmados
-    ? `Crédito aprovado — aguardando confirmação dos demais pagamentos da Venda ${vendaInfo.numero_venda}`
-    : vendaAprovada
-      ? (tipo === "gerente"
-          ? `Crédito aprovado pelo gerente — Venda ${vendaInfo.numero_venda} aprovada`
-          : `Crédito aprovado pelo diretor — Venda ${vendaInfo.numero_venda} aprovada (comissão zerada)`)
-      : `Crédito aprovado, mas a aprovação da venda falhou: ${erroAprovacao}`;
+  const msgOk = todosOutrosConfirmados
+    ? (tipo === "gerente"
+        ? `Crédito aprovado pelo gerente — Venda ${vendaInfo.numero_venda} aprovada`
+        : `Crédito aprovado pelo diretor — Venda ${vendaInfo.numero_venda} aprovada (comissão zerada)`)
+    : `Crédito aprovado — aguardando confirmação dos demais pagamentos da Venda ${vendaInfo.numero_venda}`;
 
   await criarNotificacao({
     usuarioId: String(tarefa.criado_por),
@@ -457,7 +424,5 @@ export async function processarAprovacaoCredito(
     ordem_criada: ordemCriada,
     tiny_erro: tinyErro,
     message: msgOk,
-    venda_aprovada: vendaAprovada,
-    erro_aprovacao: erroAprovacao,
   };
 }

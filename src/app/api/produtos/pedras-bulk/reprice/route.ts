@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
 
       const [prod] = await sql<{ id_produto: string; sku: string; preco_tiny: string | null }[]>`
         SELECT id_produto, sku, preco_tiny
-        FROM alissonerp.produtos_compat
+        FROM public.produtos
         WHERE LOWER(TRIM(nome)) = LOWER(${nome})
           AND categoria ILIKE 'Pedras%'
           AND situacao = 'A'

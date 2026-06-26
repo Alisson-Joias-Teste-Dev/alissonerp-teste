@@ -44,7 +44,7 @@ async function resumo() {
     total: number; publicados: number; ok: number; pendentes: number; erros: number;
   }[]>`
     SELECT
-      (SELECT COUNT(*)::int FROM alissonerp.produtos_compat WHERE situacao = 'A')                         AS total,
+      (SELECT COUNT(*)::int FROM public.produtos WHERE situacao = 'A')                         AS total,
       COUNT(*) FILTER (WHERE publicado_no_site = true)::int                                    AS publicados,
       COUNT(*) FILTER (WHERE publicado_no_site = true AND status_sync = 'ok')::int             AS ok,
       COUNT(*) FILTER (WHERE publicado_no_site = true AND status_sync = 'pendente')::int       AS pendentes,
@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
         COALESCE(est.disponivel, 0)::int AS saldo,
         sp.wc_product_id
       FROM alissonerp.site_produtos sp
-      JOIN alissonerp.produtos_compat p ON p.id_produto = sp.produto_id
+      JOIN public.produtos p ON p.id_produto = sp.produto_id
       LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
       LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
       WHERE sp.publicado_no_site = true AND p.situacao = 'A'
@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
             SELECT p.sku,
                    COALESCE(pp.preco_venda, 0)::float AS preco,
                    COALESCE(est.disponivel, 0)::int   AS saldo
-            FROM alissonerp.produtos_compat p
+            FROM public.produtos p
             LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
             LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
             WHERE p.sku LIKE ${alvo.sku + "-%"}

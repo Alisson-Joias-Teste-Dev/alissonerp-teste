@@ -29,10 +29,10 @@ export async function GET(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  // Verificar existência do produto em alissonerp.produtos_compat
+  // Verificar existência do produto em public.produtos
   const [produto] = await sql`
     SELECT id_produto, nome, sku
-    FROM alissonerp.produtos_compat
+    FROM public.produtos
     WHERE id_produto = ${produtoId}
     LIMIT 1
   `;
@@ -67,7 +67,7 @@ export async function GET(
       ep.sufixo_variacao,
       ep.numeracao
     FROM alissonerp.erp_produtos ep
-    JOIN alissonerp.produtos_compat p ON p.id_produto = ep.produto_id
+    JOIN public.produtos p ON p.id_produto = ep.produto_id
     WHERE ep.parent_id = ${erpProduto.id as number}
       AND p.situacao = 'A'
     ORDER BY

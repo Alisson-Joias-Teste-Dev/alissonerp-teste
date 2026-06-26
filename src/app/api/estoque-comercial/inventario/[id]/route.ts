@@ -36,7 +36,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       p.nome AS nome_produto, p.sku,
       uc.email AS contado_por_email
     FROM alissonerp.itens_inventario_comercial ii
-    LEFT JOIN alissonerp.produtos_compat p ON p.id_produto = ii.produto_id
+    LEFT JOIN public.produtos p ON p.id_produto = ii.produto_id
     LEFT JOIN auth.users uc ON uc.id = ii.contado_por
     WHERE ii.inventario_id = ${invId}
       ${soDivergentes ? sql`AND ii.diferenca != 0` : sql``}
@@ -68,7 +68,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     ids_do_inventario AS (
       SELECT p.id_api_produto
       FROM alissonerp.itens_inventario_comercial ii
-      JOIN alissonerp.produtos_compat p ON p.id_produto = ii.produto_id
+      JOIN public.produtos p ON p.id_produto = ii.produto_id
       WHERE ii.inventario_id = ${invId}
         AND p.id_api_produto IS NOT NULL
     )
@@ -78,7 +78,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       p.nome AS nome_produto,
       COUNT(*)::int AS quantidade
     FROM epcs_lidos el
-    JOIN alissonerp.produtos_compat p ON p.id_api_produto = el.id_api_produto
+    JOIN public.produtos p ON p.id_api_produto = el.id_api_produto
     WHERE el.id_api_produto IS NOT NULL
       AND el.id_api_produto NOT IN (SELECT id_api_produto FROM ids_do_inventario)
     GROUP BY el.id_api_produto, p.sku, p.nome

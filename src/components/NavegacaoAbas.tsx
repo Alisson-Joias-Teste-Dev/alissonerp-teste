@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import type { ElementType } from "react";
+import type { ComponentType } from "react";
+
+type LucideIcon = ComponentType<{ size?: number; strokeWidth?: number }>;
 
 export interface Aba {
   key: string;
   label: string;
   href: string;
-  icon: ElementType;
+  icon: LucideIcon;
 }
 
 interface Props {

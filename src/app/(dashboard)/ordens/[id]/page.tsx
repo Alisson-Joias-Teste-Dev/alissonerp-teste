@@ -67,8 +67,8 @@ export default async function OrdemDetalhePage({
       SELECT cs.*, p_orig.nome AS sku_origem_nome, p_orig.sku AS sku_origem_cod,
              p_dest.nome AS sku_destino_nome, p_dest.sku AS sku_destino_cod
       FROM alissonerp.conversoes_sku cs
-      LEFT JOIN alissonerp.produtos_compat p_orig ON p_orig.id_produto = cs.sku_origem_id
-      LEFT JOIN alissonerp.produtos_compat p_dest ON p_dest.id_produto = cs.sku_destino_id
+      LEFT JOIN public.produtos p_orig ON p_orig.id_produto = cs.sku_origem_id
+      LEFT JOIN public.produtos p_dest ON p_dest.id_produto = cs.sku_destino_id
       WHERE cs.ordem_id = ${ordemId}
       LIMIT 1
     `,

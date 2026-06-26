@@ -15,9 +15,6 @@ export default async function ComprasComercialPage() {
       c.local_estoque_id, c.numero_nf, c.data_compra, c.data_recebimento,
       c.recebido_por, c.created_at, c.fornecedor_id,
       c.qtd_parcelas, c.primeiro_vencimento,
-      c.total_pecas, c.peso_total_g, c.valor_total_lote, c.valor_grama,
-      c.foto_balanca_path, c.foto_pecas_path,
-      c.ia_peso_balanca, c.ia_match, c.ia_confianca, c.ia_mensagem,
       ct.nome AS fornecedor_nome,
       le.nome AS local_nome,
       u_recebedor.nome AS recebido_por_nome,
@@ -31,7 +28,7 @@ export default async function ComprasComercialPage() {
     ORDER BY c.id DESC
   `;
 
-  const numericFields = ["total", "total_itens", "local_estoque_id", "fornecedor_id", "qtd_parcelas", "total_pecas", "peso_total_g", "valor_total_lote", "valor_grama", "ia_peso_balanca"];
+  const numericFields = ["total", "total_itens", "local_estoque_id", "fornecedor_id", "qtd_parcelas"];
   const compras = rows.map((r) => normalizeRow(r as Record<string, unknown>, numericFields));
 
   return <ComprasComercialClient compras={compras as never[]} />;

@@ -100,7 +100,7 @@ export async function PATCH(
   if (body.pct_desconto !== undefined && venda.situacao === "rascunho") {
     const thresholdItem = await getDescontoThreshold(vendaId);
     const [vendaAtual] = await sql`
-      SELECT desconto_aprovado_por, aprovacao_desconto_tarefa_id,
+      SELECT desconto_aprovado_por,
         EXISTS(
           SELECT 1 FROM alissonerp.itens_venda_erp
           WHERE venda_id = ${vendaId} AND pct_desconto > ${thresholdItem}
@@ -108,37 +108,25 @@ export async function PATCH(
       FROM alissonerp.vendas_erp WHERE id = ${vendaId}
     `;
     if (vendaAtual?.tem_desconto_alto) {
-      // BUG FIX (jun/2026, venda 15628): além de tirar a aprovação, é PRECISO
-      // soltar o ponteiro da tarefa (aprovacao_desconto_tarefa_id = NULL). Sem isso,
-      // se a tarefa antiga já estava 'aprovada', o front esconde TANTO o botão
-      // "Solicitar Aprovação de Desconto" (precisaSolicitarDesconto exige o campo
-      // NULL) QUANTO o banner de "aguardando" → a venda trava em rascunho sem como
-      // reaprovar. IMPACTO SE REMOVIDO: volta o beco sem saída na tela.
-      const tarefaAnteriorId = vendaAtual.aprovacao_desconto_tarefa_id as number | null;
       await sql`
         UPDATE alissonerp.vendas_erp
-        SET desconto_aprovado_por        = NULL,
-            desconto_aprovado_em         = NULL,
-            aprovacao_desconto_tarefa_id = NULL,
-            updated_at                   = NOW()
+        SET desconto_aprovado_por = NULL,
+            desconto_aprovado_em  = NULL,
+            updated_at            = NOW()
         WHERE id = ${vendaId}
       `;
-      // Cancela a tarefa vinculada SÓ se ainda estava pendente (senão vira órfã).
-      // Tarefa já aprovada/rejeitada é histórico de auditoria — não se reescreve,
-      // basta soltar o ponteiro acima. Mira pelo ID da tarefa (o filtro por tag
-      // 'aprovacao_desconto' antigo nunca batia: a tag real é 'aprov_desconto_acima').
+      // Cancela tarefa de desconto pendente, se houver.
       // Blindagem 2026-06: falha aqui não pode ser silenciosa — é logada.
-      if (tarefaAnteriorId) {
-        try {
-          await sql`
-            UPDATE alissonerp.tarefas
-            SET status = 'cancelado', updated_at = NOW()
-            WHERE id = ${tarefaAnteriorId}
-              AND status = 'aguardando_aprovacao'
-          `;
-        } catch (err) {
-          console.error(`[itens PATCH] Falha ao cancelar tarefa de desconto (venda ${vendaId}):`, err);
-        }
+      try {
+        await sql`
+          UPDATE alissonerp.tarefas
+          SET status = 'cancelado', updated_at = NOW()
+          WHERE venda_id = ${vendaId}
+            AND status = 'aguardando_aprovacao'
+            AND tags @> ARRAY['aprovacao_desconto']::text[]
+        `;
+      } catch (err) {
+        console.error(`[itens PATCH] Falha ao cancelar tarefa de desconto (venda ${vendaId}):`, err);
       }
     }
   }

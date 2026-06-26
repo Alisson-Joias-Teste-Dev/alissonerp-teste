@@ -46,7 +46,7 @@ export async function PATCH(
 
     // Resolve sku do produto (usado como chave de fallback no upsert)
     const [prod] = await sql<{ sku: string }[]>`
-      SELECT sku FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId} LIMIT 1
+      SELECT sku FROM public.produtos WHERE id_produto = ${produtoId} LIMIT 1
     `;
     if (!prod) return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
 

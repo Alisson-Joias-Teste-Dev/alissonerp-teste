@@ -2,7 +2,7 @@
  * POST /api/precificacao/curva/aplicar
  *
  * Aplica a curva salva no DB em todos os produtos ativos:
- *   UPDATE alissonerp.produtos_compat SET markup, comissao_pct, max_desconto_pct
+ *   UPDATE public.produtos SET markup, comissao_pct, max_desconto_pct
  *
  * preco_sync e recalculado pelo trigger legado (trigger_atualizar_preco_produto)
  * quando markup muda. Nao sobrescrevemos preco_sync diretamente para respeitar
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
     // ── Buscar produtos alvo (ativos com peso + filtros da tela) ──
     const produtos = (await sql`
       SELECT p.id_produto, p.peso_precificado
-      FROM alissonerp.produtos_compat p
+      FROM public.produtos p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       WHERE p.peso_precificado IS NOT NULL
         AND p.peso_precificado > 0
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
       maxDescontos.push(Number(factors.maxDiscount.toFixed(2)));
     }
 
-    // ── 1. UPDATE markup em alissonerp.produtos_compat (trigger recalcula preco_sync) ──
+    // ── 1. UPDATE markup em public.produtos (trigger recalcula preco_sync) ──
     const resMarkup = await sql`
       UPDATE alissonerp.erp_produtos AS p SET markup = u.markup
       FROM (

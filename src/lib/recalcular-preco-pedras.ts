@@ -8,7 +8,7 @@
  *
  * Chamado após INSERT/DELETE em produto_composicao.
  * NÃO recalcula preco_sync do ouro — isso é responsabilidade exclusiva do
- * trigger `trigger_atualizar_preco_produto` em alissonerp.produtos_compat.
+ * trigger `trigger_atualizar_preco_produto` em public.produtos.
  */
 
 import sql from "@/lib/db";
@@ -39,7 +39,7 @@ export async function recalcularPrecoPedras(produto_id: number): Promise<number>
       // Tem pedra no BOM, mas sem USD pra precificar → preserva o valor atual.
       // O preço correto entra quando a variação receber o preco_compra_usd (propagado do pai).
       const [row] = await sql<{ preco_pedras: string | null }[]>`
-        SELECT preco_pedras FROM alissonerp.produtos_compat WHERE id_produto = ${produto_id}
+        SELECT preco_pedras FROM public.produtos WHERE id_produto = ${produto_id}
       `;
       return Number(row?.preco_pedras ?? 0);
     }

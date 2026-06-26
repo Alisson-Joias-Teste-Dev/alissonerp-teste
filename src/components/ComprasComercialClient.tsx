@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Loader2, Plus, Search, ShoppingCart, Camera, XCircle } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Loader2, Plus, Search, ShoppingCart } from "lucide-react";
 import { formatMoeda } from "@/lib/formatters";
 import { calcularCustoPorCtPedra, calcularQtdPecasPedra, ehPedraSolta } from "@/lib/compras-pedras";
-import FotoBalancaInput from "@/components/metal/FotoBalancaInput";
 
 // REGRA DE NEGOCIO:
 // - O que faz: orquestra o fluxo de compra comercial (criar, receber, concluir, itens).
@@ -18,7 +17,7 @@ const C = {
   borda: "#E8DCC8",
 };
 
-type Situacao = "rascunho" | "recebida" | "concluido" | "pendente" | "recebido_pendente_cadastro";
+type Situacao = "rascunho" | "recebida" | "concluido" | "pendente";
 
 interface CompraComercial {
   id: number;
@@ -36,30 +35,7 @@ interface CompraComercial {
   total_itens: number;
   qtd_parcelas: number;
   primeiro_vencimento: string;
-  // Dados do lote da chegada (etapa 1)
-  total_pecas?: number;
-  peso_total_g?: number;
-  valor_total_lote?: number;
-  valor_grama?: number;
-  foto_balanca_path?: string;
-  foto_pecas_path?: string;
-  ia_peso_balanca?: number | null;
-  ia_match?: boolean | null;
-  ia_confianca?: string | null;
-  ia_mensagem?: string | null;
 }
-
-// REGRA DE NEGOCIO: rotulos amigaveis dos status (o status novo da chegada e tecnico no banco).
-const SITUACAO_LABEL: Record<string, string> = {
-  rascunho: "rascunho",
-  recebido_pendente_cadastro: "a cadastrar",
-  recebida: "recebida",
-  aguardando_aprovacao: "aguardando aprovação",
-  aprovado: "aprovada",
-  rejeitado: "rejeitada",
-  concluido: "concluída",
-  pendente: "pendente",
-};
 
 interface ItemCompraComercial {
   id: number;
@@ -120,10 +96,8 @@ function SituacaoTag({ s }: { s: string }) {
       ? "bg-red-100 text-red-700"
       : s === "recebida"
       ? "bg-blue-100 text-blue-700"
-      : s === "recebido_pendente_cadastro"
-      ? "bg-teal-100 text-teal-700"
       : "bg-amber-100 text-amber-700";
-  return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${style}`}>{SITUACAO_LABEL[s] ?? s}</span>;
+  return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${style}`}>{s}</span>;
 }
 
 function NovaCompraModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
@@ -139,23 +113,6 @@ function NovaCompraModal({ open, onClose, onCreated }: { open: boolean; onClose:
   const [primeiroVencimento, setPrimeiroVencimento] = useState(new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
-
-  // REGRA DE NEGOCIO (CHEGADA): dados do lote que chega + fotos obrigatorias.
-  // O valor da grama e calculado (valor total / peso total) e mostrado ao operador.
-  const [totalPecas, setTotalPecas] = useState("");
-  const [pesoTotal, setPesoTotal] = useState("");
-  const [valorTotal, setValorTotal] = useState("");
-  const [fotoBalanca, setFotoBalanca] = useState<{ base64: string; mediaType: string } | null>(null);
-  const [iaMatch, setIaMatch] = useState<boolean | null>(null);
-  const [fotoPecas, setFotoPecas] = useState<{ base64: string; mediaType: string } | null>(null);
-  const fotoPecasInputRef = useRef<HTMLInputElement>(null);
-
-  const valorGramaCalc = useMemo(() => {
-    const p = Number(pesoTotal);
-    const v = Number(valorTotal);
-    if (!Number.isFinite(p) || !Number.isFinite(v) || p <= 0 || v <= 0) return null;
-    return v / p;
-  }, [pesoTotal, valorTotal]);
 
   // REGRA DE NEGOCIO:
   // - O que faz: estado do subformulario de cadastro rapido de fornecedor dentro do modal de nova compra.
@@ -286,25 +243,12 @@ function NovaCompraModal({ open, onClose, onCreated }: { open: boolean; onClose:
     return () => clearTimeout(handle);
   }, [open, buscaFornecedor]);
 
-  // REGRA DE NEGOCIO: foto das pecas e so registro visual (sem IA). Le como base64.
-  function handleFotoPecas(file: File | null) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = (e.target?.result as string).split(",")[1];
-      setFotoPecas({ base64, mediaType: file.type || "image/jpeg" });
-    };
-    reader.readAsDataURL(file);
-  }
-
   async function submit() {
     setErr("");
-    if (!localId) { setErr("Selecione o local de estoque."); return; }
-    if (!totalPecas || Number(totalPecas) <= 0) { setErr("Informe a quantidade de peças que chegou."); return; }
-    if (!pesoTotal || Number(pesoTotal) <= 0) { setErr("Informe o peso total (g) do lote."); return; }
-    if (!valorTotal || Number(valorTotal) <= 0) { setErr("Informe o valor total do lote."); return; }
-    if (!fotoBalanca) { setErr("Anexe a foto da balança."); return; }
-    if (!fotoPecas) { setErr("Anexe a foto com todas as peças."); return; }
+    if (!localId) {
+      setErr("Selecione o local de estoque.");
+      return;
+    }
 
     setLoading(true);
     const res = await fetch("/api/compras-comercial", {
@@ -317,19 +261,12 @@ function NovaCompraModal({ open, onClose, onCreated }: { open: boolean; onClose:
         data_compra: dataCompra,
         qtd_parcelas: Number(qtdParcelas),
         primeiro_vencimento: primeiroVencimento,
-        total_pecas: Number(totalPecas),
-        peso_total_g: Number(pesoTotal),
-        valor_total: Number(valorTotal),
-        foto_balanca_base64: fotoBalanca.base64,
-        foto_balanca_media_type: fotoBalanca.mediaType,
-        foto_pecas_base64: fotoPecas.base64,
-        foto_pecas_media_type: fotoPecas.mediaType,
       }),
     });
     const data = await res.json();
     setLoading(false);
     if (!res.ok) {
-      setErr(data.error ?? "Erro ao registrar chegada");
+      setErr(data.error ?? "Erro ao criar compra comercial");
       return;
     }
     onCreated();
@@ -341,8 +278,8 @@ function NovaCompraModal({ open, onClose, onCreated }: { open: boolean; onClose:
     <div className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden" style={{ border: `2px solid ${C.borda}` }} onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b" style={{ background: `linear-gradient(90deg, ${C.creme} 0%, #ffffff 100%)`, borderColor: C.borda }}>
-          <h3 className="font-semibold text-lg" style={{ color: C.verde }}>Nova chegada de mercadoria</h3>
-          <p className="text-xs mt-0.5" style={{ color: "#5B6B67" }}>Registre o lote que chegou (peças, peso e valor) e anexe as 2 fotos. As peças são cadastradas depois.</p>
+          <h3 className="font-semibold text-lg" style={{ color: C.verde }}>Nova Compra Comercial</h3>
+          <p className="text-xs mt-0.5" style={{ color: "#5B6B67" }}>Preencha os dados da compra e defina o plano financeiro.</p>
         </div>
         <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
         <div className="space-y-1">
@@ -601,77 +538,12 @@ function NovaCompraModal({ open, onClose, onCreated }: { open: boolean; onClose:
             <p className="text-xs mt-1">Serao geradas <strong>{Number(qtdParcelas || 1)}</strong> parcela(s) mensal(is) a partir de <strong>{fmtDate(primeiroVencimento)}</strong>.</p>
           </div>
         </div>
-        {/* REGRA DE NEGOCIO (CHEGADA): lote que chegou — qtd de pecas, peso total e valor total.
-            O valor da grama e calculado e sera rateado por peso em cada peca no cadastro. */}
-        <div className="border rounded-xl p-3 space-y-3" style={{ borderColor: C.borda, backgroundColor: `${C.creme}40` }}>
-          <p className="text-xs font-semibold" style={{ color: C.verde }}>Lote que chegou</p>
-          <div className="grid md:grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#5B6B67" }}>Total de peças</label>
-              <input type="number" min={1} step={1} className="border rounded-lg px-3 py-2.5 w-full text-sm focus:outline-none" style={{ borderColor: C.borda, color: C.verde }} placeholder="Ex: 5" value={totalPecas} onChange={(e) => setTotalPecas(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#5B6B67" }}>Peso total (g)</label>
-              <input type="number" min={0} step="0.001" className="border rounded-lg px-3 py-2.5 w-full text-sm focus:outline-none" style={{ borderColor: C.borda, color: C.verde }} placeholder="Ex: 10" value={pesoTotal} onChange={(e) => setPesoTotal(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#5B6B67" }}>Valor total (R$)</label>
-              <input type="number" min={0} step="0.01" className="border rounded-lg px-3 py-2.5 w-full text-sm focus:outline-none" style={{ borderColor: C.borda, color: C.verde }} placeholder="Ex: 30000" value={valorTotal} onChange={(e) => setValorTotal(e.target.value)} />
-            </div>
-          </div>
-          <div className="flex items-center justify-between rounded-lg px-4 py-2.5" style={{ backgroundColor: C.verde, color: C.creme }}>
-            <span className="text-xs" style={{ color: C.dourado }}>Valor da grama (calculado)</span>
-            <span className="text-lg font-bold">{valorGramaCalc != null ? formatMoeda(valorGramaCalc) : "—"}</span>
-          </div>
-        </div>
-
-        {/* REGRA DE NEGOCIO (CHEGADA): 2 fotos obrigatorias. A da balanca passa pela IA (confere o peso
-            informado x display da balanca). A das pecas e registro visual do lote. */}
-        <div className="grid md:grid-cols-2 gap-3">
-          <FotoBalancaInput
-            pesoReferencia={Number(pesoTotal) || 0}
-            tolerancia={0.3}
-            onFotoChange={(base64, mediaType) => setFotoBalanca(base64 ? { base64, mediaType } : null)}
-            onIaResult={(r) => setIaMatch(r ? r.match : null)}
-          />
-          <div className="space-y-2">
-            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: `${C.verde}99` }}>Foto das peças</label>
-            <div
-              onClick={() => fotoPecasInputRef.current?.click()}
-              className="relative bg-white border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all hover:bg-[#F2E8D5]/20"
-              style={{ borderColor: `${C.dourado}66` }}
-            >
-              {fotoPecas ? (
-                <div className="relative">
-                  <img src={`data:${fotoPecas.mediaType};base64,${fotoPecas.base64}`} alt="Peças" className="max-h-48 mx-auto rounded-lg object-contain" />
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setFotoPecas(null); if (fotoPecasInputRef.current) fotoPecasInputRef.current.value = ""; }}
-                    className="absolute top-1 right-1 bg-red-50 text-red-600 p-1 rounded-full hover:bg-red-100"
-                  >
-                    <XCircle size={14} />
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center gap-2 py-4">
-                  <Camera size={32} style={{ color: C.dourado }} />
-                  <p className="text-xs" style={{ color: `${C.verde}99` }}>Foto com todas as peças do lote</p>
-                </div>
-              )}
-              <input ref={fotoPecasInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" capture="environment" onChange={(e) => handleFotoPecas(e.target.files?.[0] ?? null)} className="hidden" />
-            </div>
-            {iaMatch === false && (
-              <p className="text-[11px] text-amber-700">A IA não confirmou o peso da balança — confira antes de registrar (a chegada não fica travada por isso).</p>
-            )}
-          </div>
-        </div>
-
         {err && <p className="text-sm text-red-600">{err}</p>}
         </div>
         <div className="px-5 py-3 border-t bg-gray-50 flex justify-end gap-2" style={{ borderColor: C.borda }}>
           <button className="px-3 py-2 border rounded-lg text-sm" style={{ borderColor: `${C.verde}40`, color: C.verde }} onClick={onClose}>Cancelar</button>
           <button className="px-3 py-2 rounded-lg text-sm font-semibold" style={{ backgroundColor: C.verde, color: C.dourado }} onClick={submit} disabled={loading}>
-            {loading ? "Registrando..." : "Registrar chegada"}
+            {loading ? "Salvando..." : "Criar"}
           </button>
         </div>
       </div>
@@ -694,25 +566,8 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
   const [pesoTotal, setPesoTotal] = useState("");
   const [msg, setMsg] = useState("");
   const [loadingAction, setLoadingAction] = useState(false);
-  // REGRA DE NEGOCIO: vira true quando a conclusao foi barrada por divergencia de peso (precisa aprovacao).
-  const [needsApproval, setNeedsApproval] = useState(false);
 
   const bloqueada = compra.bloqueado || compra.situacao === "concluido";
-
-  // REGRA DE NEGOCIO (CONFERENCIA): soma do peso das pecas cadastradas x peso do lote da chegada.
-  // Enquanto faltar/sobrar peso, o operador ve a diferenca antes de concluir.
-  const pesoCadastrado = useMemo(
-    () => itens.reduce((acc, it) => acc + Number(it.peso_total ?? 0), 0),
-    [itens]
-  );
-  const pesoLote = Number(compra.peso_total_g ?? 0);
-  const difPeso = pesoLote > 0 ? pesoCadastrado - pesoLote : 0;
-  // REGRA DE NEGOCIO: pode concluir a partir da chegada/aprovada/recebida/rascunho, com itens cadastrados.
-  // (Aprovada fica bloqueada, mas a conclusao e liberada pelo backend/trigger.)
-  const podeConcluir =
-    compra.situacao !== "concluido" &&
-    itens.length > 0 &&
-    ["recebido_pendente_cadastro", "aprovado", "recebida", "rascunho", "pendente"].includes(compra.situacao);
   // REGRA DE NEGOCIO: classificacao pedra x joia centralizada em ehPedraSolta (src/lib/compras-pedras.ts).
   // NUNCA usar tem_pedra_preciosa/categoria_precificacao/includes no nome — joia com pedra (ex: AJ5079) vira pedra.
   const ehProdutoPedra = useMemo(
@@ -824,18 +679,13 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
       headers: { "Content-Type": "application/json" },
       body: path === "receber" ? JSON.stringify({}) : undefined,
     });
-    const data = await res.json().catch(() => ({}));
+    const data = await res.json();
     setLoadingAction(false);
     if (!res.ok) {
-      // REGRA DE NEGOCIO: conclusao barrada por divergencia de peso → habilita "Solicitar aprovação".
-      if (path === "concluir" && res.status === 409 && data?.needs_approval) {
-        setNeedsApproval(true);
-      }
       setMsg(data.error ?? "Falha na operação");
       return;
     }
     setMsg(path === "concluir" ? "Compra concluída: estoque e contas a pagar gerados." : "Operação realizada.");
-    setNeedsApproval(false);
     onUpdated();
   }
 
@@ -876,30 +726,6 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
         <p>Parcelas: {compra.qtd_parcelas}x</p>
         <p>1o venc.: {fmtDate(compra.primeiro_vencimento)}</p>
       </div>
-
-      {/* REGRA DE NEGOCIO (CHEGADA + CONFERENCIA): mostra o lote informado na chegada, o valor da grama
-          (que e rateado por peso nas pecas) e a conferencia do peso ja cadastrado x peso do lote. */}
-      {pesoLote > 0 && (
-        <div className="border rounded-xl p-3 space-y-2" style={{ borderColor: C.borda }}>
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium" style={{ color: C.verde }}>Lote da chegada</p>
-            {compra.ia_match === true && <span className="text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">IA confirmou o peso</span>}
-            {compra.ia_match === false && <span className="text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">IA não confirmou ({compra.ia_peso_balanca ?? "?"}g)</span>}
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm" style={{ color: "#5B6B67" }}>
-            <p>Peças: <strong>{compra.total_pecas ?? "-"}</strong></p>
-            <p>Peso lote: <strong>{pesoLote.toFixed(3)} g</strong></p>
-            <p>Valor lote: <strong>{compra.valor_total_lote != null ? formatMoeda(compra.valor_total_lote) : "-"}</strong></p>
-            <p>Valor/g: <strong>{compra.valor_grama != null ? formatMoeda(compra.valor_grama) : "-"}</strong></p>
-          </div>
-          <div className="flex items-center justify-between text-sm rounded-lg px-3 py-2" style={{ backgroundColor: `${C.creme}66` }}>
-            <span style={{ color: "#5B6B67" }}>Cadastrado: <strong>{pesoCadastrado.toFixed(3)} g</strong> de {pesoLote.toFixed(3)} g</span>
-            <span className={Math.abs(difPeso) <= 0.3 ? "text-emerald-700" : "text-amber-700"} style={{ fontWeight: 600 }}>
-              {Math.abs(difPeso) <= 0.001 ? "Bateu" : `${difPeso > 0 ? "+" : ""}${difPeso.toFixed(3)} g`}
-            </span>
-          </div>
-        </div>
-      )}
 
         <div className="border rounded-xl overflow-hidden" style={{ borderColor: C.borda }}>
         <table className="w-full text-sm">
@@ -1025,9 +851,7 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
                           setPesoTotal("");
                           setQtd("");
                           setCotacaoReferencial("");
-                          // REGRA DE NEGOCIO (RATEIO): a peca herda a grama do lote da chegada (custo por peso).
-                          // O operador pode ajustar; pedra usa custo total proprio e ignora este campo.
-                          setValorGrama(compra.valor_grama ? String(compra.valor_grama) : "");
+                          setValorGrama("");
                           setShowSugestoesProduto(false);
                         }}
                       >
@@ -1105,41 +929,14 @@ function CompraDetalhe({ compra, onUpdated }: { compra: CompraComercial; onUpdat
       )}
 
       <div className="flex gap-2 flex-wrap">
-        {/* Concluir: efetiva a entrada no estoque + contas a pagar. Confere o peso antes (backend). */}
-        {podeConcluir && (
+        {!bloqueada && (compra.situacao === "rascunho" || compra.situacao === "pendente" || compra.situacao === "rejeitado") && (
           <button
             className="px-3 py-2 rounded"
             style={{ backgroundColor: C.verde, color: C.dourado }}
-            onClick={() => acao("concluir")}
-            disabled={loadingAction}
+            onClick={solicitarAprovacao}
+            disabled={loadingAction || itens.length === 0}
           >
-            {loadingAction ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} className="inline mr-1" />} Concluir
-          </button>
-        )}
-        {/* Solicitar aprovacao: fluxo padrao OU quando a conclusao foi barrada por divergencia de peso. */}
-        {!bloqueada &&
-          (compra.situacao === "rascunho" ||
-            compra.situacao === "pendente" ||
-            compra.situacao === "rejeitado" ||
-            (needsApproval && compra.situacao === "recebido_pendente_cadastro")) && (
-            <button
-              className="px-3 py-2 rounded border"
-              style={{ borderColor: `${C.verde}40`, color: C.verde }}
-              onClick={solicitarAprovacao}
-              disabled={loadingAction || itens.length === 0}
-            >
-              {loadingAction ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} className="inline mr-1" />} Solicitar Aprovação
-            </button>
-          )}
-        {/* Reverter recebimento (fluxo legado de "recebida"). */}
-        {compra.situacao === "recebida" && !compra.bloqueado && (
-          <button
-            className="px-3 py-2 rounded border"
-            style={{ borderColor: `${C.verde}40`, color: C.verde }}
-            onClick={() => acao("reverter-rascunho")}
-            disabled={loadingAction}
-          >
-            Reverter
+            {loadingAction ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} className="inline mr-1" />} Solicitar Aprovação
           </button>
         )}
       </div>
@@ -1199,7 +996,7 @@ export default function ComprasComercialClient({ compras: initialCompras }: { co
             <p className="text-xs" style={{ color: "#5B6B67" }}>Entrada automatica no estoque comercial e contas a pagar parceladas.</p>
           </div>
         </div>
-        <button className="px-3 py-2 rounded-xl text-sm font-semibold" style={{ backgroundColor: C.verde, color: C.dourado }} onClick={() => setShowNova(true)}><Plus size={14} className="inline mr-1" />Nova chegada</button>
+        <button className="px-3 py-2 rounded-xl text-sm font-semibold" style={{ backgroundColor: C.verde, color: C.dourado }} onClick={() => setShowNova(true)}><Plus size={14} className="inline mr-1" />Nova Compra</button>
       </div>
 
       <div className="grid md:grid-cols-3 gap-2">
@@ -1209,7 +1006,6 @@ export default function ComprasComercialClient({ compras: initialCompras }: { co
         </div>
         <select className="border rounded-lg px-3 py-2" style={{ borderColor: C.borda }} value={situacao} onChange={(e) => setSituacao(e.target.value)}>
           <option value="">Todas situações</option>
-          <option value="recebido_pendente_cadastro">A cadastrar</option>
           <option value="rascunho">Rascunho</option>
           <option value="recebida">Recebida</option>
           <option value="aguardando_aprovacao">Aguardando Aprovação</option>

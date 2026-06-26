@@ -29,7 +29,7 @@ export const buscarProduto: Tool = {
     const rows = await sql`
       SELECT id_produto, sku, nome, tipo_metal, preco_tiny,
              peso_real, prazo_producao, sob_encomenda
-      FROM alissonerp.produtos_compat
+      FROM public.produtos
       WHERE nome ILIKE ${'%' + termo + '%'}
          OR sku ILIKE ${'%' + termo + '%'}
       ORDER BY nome

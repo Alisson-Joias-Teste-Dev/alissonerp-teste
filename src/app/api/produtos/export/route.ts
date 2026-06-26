@@ -22,7 +22,7 @@ export async function GET() {
 
     const produtos = await sql`
       SELECT id_produto, id_api_produto, sku, nome
-      FROM alissonerp.produtos_compat
+      FROM public.produtos
       WHERE situacao = 'A'
       ORDER BY id_api_produto
     `;

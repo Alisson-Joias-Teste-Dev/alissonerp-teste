@@ -47,7 +47,7 @@ export async function GET(_req: NextRequest) {
       p.id_api_produto, p.sku, p.nome, ii.quantidade_sistema,
       ii.quantidade_contada, ii.conferido
     FROM alissonerp.itens_inventario_comercial ii
-    JOIN alissonerp.produtos_compat p ON p.id_produto = ii.produto_id
+    JOIN public.produtos p ON p.id_produto = ii.produto_id
     WHERE ii.inventario_id = ANY(${ids}::int[])
     ORDER BY ii.id
   `;

@@ -28,17 +28,11 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { creditarSaldo } from "@/lib/saldo-credito";
 import { logAudit } from "@/lib/audit";
 import { zodError } from "@/lib/schemas/common";
-import { validarValeTroca, aplicarValeTroca } from "@/lib/vale-troca";
-import { confirmarCodigoVale } from "@/lib/vale-troca-codigo";
-import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
-import { requireCrediarioOwnership, NotFoundError } from "@/lib/auth-vendas";
-import { ForbiddenError } from "@/lib/auth-server";
 
 // Quem pode dar baixa manual (emergência ou formas não-MP).
 // ATENÇÃO: Esta rota NÃO verifica Mercado Pago — é confiança pura.
 // Use verificar-mp para baixas com ID do Mercado Pago.
-// consultora entra, mas SÓ na conta de venda dela (ownership abaixo).
-const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor", "consultora"];
+const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
 
 const RegistrarPagamentoSchema = z.object({
   obs: z.string().max(5000).optional(),
@@ -49,19 +43,7 @@ const RegistrarPagamentoSchema = z.object({
   ouro_peso: z.number().positive().optional(),
   ouro_valor_grama: z.number().positive().optional(),
   ouro_foto_path: z.string().max(500).optional(),
-  // Vale-Troca — mesma regra da venda: número do vale + token do dono (WhatsApp).
-  // O valor NÃO vem daqui: é lido do vale e aplicado até o total da conta (sobra vira troco).
-  vale_numero: z.string().max(100).optional(),
-  vale_codigo: z.string().max(20).optional(),     // 2ª confirmação (código WhatsApp do dono)
-  vale_excecao: z.boolean().optional(),           // liberação por aprovador quando o WhatsApp falha
-  // Comprovante visual — OBRIGATÓRIO na baixa manual de Pix/Cartão (exceção do dev).
-  // Caminho no bucket pagamento-fotos (upload feito no front, igual à foto do Ouro).
-  comprovante_path: z.string().max(500).optional(),
 }).partial();
-
-// Formas cujo fluxo normal no crediário passa pelo Mercado Pago (validado).
-// A baixa MANUAL destas (sem MP) é EXCEÇÃO: só o desenvolvedor, com comprovante.
-const FORMAS_MANUAL_RESTRITO = ["Pix", "Cartão de Crédito", "Cartão"];
 
 export async function POST(
   req: NextRequest,
@@ -80,20 +62,6 @@ export async function POST(
   `;
   if (!usuario || !PODE_BAIXAR.includes(usuario.role as string)) {
     return NextResponse.json({ error: "Sem permissão para registrar baixa" }, { status: 403 });
-  }
-
-  // Onda 1D / blindagem: consultora só dá baixa na conta de uma venda DELA.
-  // Roles full (gerente/admin/dev/diretor) passam direto. Fecha o vetor de
-  // baixar a venda de um colega (recebimento fantasma / fraude de comissão).
-  try {
-    await requireCrediarioOwnership(
-      { id: user.id, role: usuario.role as string, email: user.email ?? "" },
-      contaId,
-    );
-  } catch (e) {
-    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
-    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
-    throw e;
   }
 
   const [conta] = await sql`
@@ -130,218 +98,6 @@ export async function POST(
   const ouroPeso = parsed.data.ouro_peso ?? null;
   const ouroValorGrama = parsed.data.ouro_valor_grama ?? null;
   const ouroFotoPath = parsed.data.ouro_foto_path ?? null;
-  const comprovantePath = parsed.data.comprovante_path?.trim() || null;
-
-  // ═══ Pix/Cartão MANUAL = exceção restrita ao desenvolvedor + comprovante ═══
-  // O fluxo normal de Pix/Cartão na baixa do crediário passa pelo Mercado Pago
-  // (QR / maquininha — validado pelo gateway). Cair AQUI (registrar-pagamento)
-  // significa baixa manual SEM validação: liberada só para o desenvolvedor e
-  // sempre com comprovante visual anexado (mesma exigência da foto do Ouro).
-  // Fecha o furo do "Pix avulso sem comprovação nenhuma".
-  if (formaRecebimento && FORMAS_MANUAL_RESTRITO.includes(formaRecebimento)) {
-    if ((usuario.role as string) !== "desenvolvedor") {
-      return NextResponse.json(
-        { error: "Baixa manual de Pix/Cartão é exceção restrita ao desenvolvedor. Use o fluxo do Mercado Pago (QR / maquininha)." },
-        { status: 403 },
-      );
-    }
-    if (!comprovantePath) {
-      return NextResponse.json(
-        { error: "Comprovante obrigatório para baixa manual de Pix/Cartão." },
-        { status: 400 },
-      );
-    }
-  }
-
-  // ═══ VALE-TROCA ══════════════════════════════════════════════════════════
-  // Baixar "A Receber" com vale segue a MESMA regra da venda (não é só marcar
-  // pago): valida o número, exige o código do dono (WhatsApp) e CONSOME o vale
-  // de verdade. O valor vem do vale (aplica até o total da conta; sobra = troco
-  // em vale novo; vale menor que a conta = pagamento parcial). Isso fecha a
-  // brecha do "recebimento fantasma de vale" (valor digitado, vale não baixado).
-  if (formaRecebimento === "Vale-Troca") {
-    if (!vendaId) {
-      return NextResponse.json({ error: "Conta sem venda vinculada — não é possível aplicar vale-troca" }, { status: 400 });
-    }
-    const valeNumero = parsed.data.vale_numero?.trim();
-    const valeCodigo = parsed.data.vale_codigo;
-    const valeExcecao = parsed.data.vale_excecao === true;
-    if (!valeNumero) {
-      return NextResponse.json({ error: "Informe o número do vale" }, { status: 400 });
-    }
-
-    const valid = await validarValeTroca(valeNumero);
-    if (!valid.ok || !valid.id) {
-      return NextResponse.json({ error: valid.erro ?? "Vale-troca inválido" }, { status: 400 });
-    }
-
-    // 2ª confirmação do dono (igual à venda): vale COM dono exige código (ou
-    // liberação por aprovador via vale_excecao). Vale SEM dono (promo) aplica direto.
-    if (valid.cliente_id != null) {
-      if (valeExcecao) {
-        const [cfg] = await sql<{ valor: string }[]>`
-          SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovador_vale_troca_excecao'
-        `;
-        const autorizado = hasRole(usuario.role as string, ROLES_DEVOLUCAO) || (!!cfg?.valor && cfg.valor === user.id);
-        if (!autorizado) {
-          return NextResponse.json(
-            { error: "Exceção do vale exige um responsável autorizado (gerente ou aprovador configurado)." },
-            { status: 403 },
-          );
-        }
-        await logAudit(sql, {
-          tabela: "vale_troca",
-          operacao: "UPDATE",
-          registro_id: valid.id,
-          usuario_id: user.id,
-          dados_depois: { excecao_aplicacao: true, conta_receber_id: contaId, venda_id: vendaId, motivo: "confirmacao_whatsapp_indisponivel" },
-        });
-      } else {
-        if (!valeCodigo) {
-          return NextResponse.json(
-            { error: "Informe o código de confirmação enviado ao WhatsApp do cliente (ou solicite aprovação de um responsável).", precisa_codigo: true },
-            { status: 400 },
-          );
-        }
-        const conf = await confirmarCodigoVale(valid.id, String(valeCodigo));
-        if (!conf.ok) {
-          return NextResponse.json({ error: conf.erro, bloqueado: conf.bloqueado ?? false }, { status: 409 });
-        }
-      }
-    }
-
-    let novoCreditoIdVale: number | null = null;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const out = await sql.begin(async (tx: any) => {
-        // Consome o vale: aplica até o valor da conta; sobra vira vale novo (troco),
-        // vale menor que a conta → valor_aplicado < total e o restante fica pendente.
-        const aplic = await aplicarValeTroca(valeNumero, vendaId, Number(conta.valor), user.id, tx);
-        const valorEfetivo = aplic.valor_aplicado;
-        const ehParcial = valorEfetivo < Number(conta.valor);
-        const valorRestante = ehParcial ? Math.round((Number(conta.valor) - valorEfetivo) * 100) / 100 : 0;
-
-        // Baixa a conta pelo valor aplicado
-        await tx`
-          UPDATE alissonerp.contas_receber
-          SET valor = ${valorEfetivo}, situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
-          WHERE id = ${contaId}
-        `;
-
-        // Split de crédito (vale cobriu só parte da conta)
-        if (ehParcial) {
-          const [nova] = await tx`
-            INSERT INTO alissonerp.contas_receber
-              (descricao, cliente_id, cliente_nome, venda_erp_id, valor,
-               data_vencimento, situacao, categoria, obs, created_by)
-            SELECT
-              ${`Saldo restante — ${conta.descricao}`},
-              cr.cliente_id, cr.cliente_nome, cr.venda_erp_id,
-              ${valorRestante}, CURRENT_DATE, 'pendente', 'venda',
-              ${`Parcial de R$ ${valorEfetivo.toFixed(2)} via Vale-Troca ${valeNumero}. Restante: R$ ${valorRestante.toFixed(2)}`},
-              ${user.id}::uuid
-            FROM alissonerp.contas_receber cr WHERE cr.id = ${contaId}
-            RETURNING id
-          `;
-          novoCreditoIdVale = nova?.id ?? null;
-        }
-
-        // Confirma o pagamento "A Receber" da venda amarrando o vale consumido
-        if (pagamento) {
-          if (!ehParcial) {
-            await tx`
-              UPDATE alissonerp.pagamentos_venda
-              SET status = 'confirmado', data_confirmacao = NOW(),
-                  gateway = 'Vale-Troca', vale_troca_id = ${aplic.vale_aplicado_id}
-              WHERE id = ${pagamento.id}
-            `;
-          } else {
-            await tx`
-              UPDATE alissonerp.pagamentos_venda
-              SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW(),
-                  gateway = 'Vale-Troca', vale_troca_id = ${aplic.vale_aplicado_id}
-              WHERE id = ${pagamento.id}
-            `;
-            await tx`
-              INSERT INTO alissonerp.pagamentos_venda (venda_id, forma, valor, parcelas, status)
-              VALUES (${vendaId}, 'A Receber', ${valorRestante}, 1, 'pendente')
-            `;
-          }
-        }
-
-        // Histórico
-        const trocoMsg = aplic.novo_vale
-          ? ` Troco gerou o vale ${aplic.novo_vale.numero} (R$ ${aplic.novo_vale.valor_original.toFixed(2)}).`
-          : "";
-        await tx`
-          INSERT INTO alissonerp.comunicacoes_crediario
-            (conta_receber_id, tipo, mensagem, usuario_id)
-          VALUES (
-            ${contaId},
-            'aviso_recebimento',
-            ${obs ?? `Recebido via Vale-Troca ${valeNumero} — R$ ${valorEfetivo.toFixed(2)}.${trocoMsg} — ${conta.descricao}`},
-            ${user.id}::uuid
-          )
-        `;
-
-        await logAudit(tx, {
-          tabela: "contas_receber",
-          operacao: "UPDATE",
-          registro_id: contaId,
-          usuario_id: user.id,
-          dados_antes: { situacao: "pendente", valor: Number(conta.valor) },
-          dados_depois: {
-            situacao: "pago", valor: valorEfetivo, forma: "Vale-Troca",
-            vale_troca_id: aplic.vale_aplicado_id,
-            ...(novoCreditoIdVale ? { novo_credito_id: novoCreditoIdVale } : {}),
-          },
-        });
-
-        return { valorEfetivo, ehParcial, valorRestante, novo_vale: aplic.novo_vale };
-      });
-
-      // REGRA DE OURO #1 (igual às outras formas): devolve saldo ao gerente se a
-      // venda usou crédito — independe da forma de pagamento.
-      let saldoDevolvidoVale = false;
-      if (pagamento) {
-        const [venda] = await sql`
-          SELECT credito_gerente_usado FROM alissonerp.vendas_erp WHERE id = ${vendaId}
-        `;
-        const creditoUsado = parseFloat(venda?.credito_gerente_usado ?? "0");
-        if (creditoUsado > 0) {
-          const valorDevolver = Math.min(out.valorEfetivo, creditoUsado);
-          try {
-            await creditarSaldo(valorDevolver, vendaId, pagamento.id, user.id);
-            await sql`
-              UPDATE alissonerp.vendas_erp
-              SET credito_gerente_usado = GREATEST(credito_gerente_usado - ${valorDevolver}, 0), updated_at = NOW()
-              WHERE id = ${vendaId}
-            `;
-            saldoDevolvidoVale = true;
-          } catch (err) {
-            console.error("[crediario/baixa] vale: erro ao devolver saldo:", err);
-          }
-        }
-      }
-
-      return NextResponse.json({
-        ok: true,
-        forma: "Vale-Troca",
-        saldo_devolvido: saldoDevolvidoVale,
-        valor_pago: out.valorEfetivo,
-        pagamento_parcial: out.ehParcial || undefined,
-        valor_restante: out.ehParcial ? out.valorRestante : undefined,
-        novo_credito_id: novoCreditoIdVale ?? undefined,
-        novo_vale: out.novo_vale,
-      });
-    } catch (err) {
-      if (err instanceof Error && /[Vv]ale-troca/.test(err.message)) {
-        return NextResponse.json({ error: err.message }, { status: 409 });
-      }
-      console.error("[crediario/baixa] vale-troca:", err);
-      return NextResponse.json({ error: "Erro ao aplicar vale-troca" }, { status: 400 });
-    }
-  }
 
   // O valor pago default é o total da conta. Se o front enviar valor_pago
   // menor que o total, será pagamento parcial → split de crédito.
@@ -483,14 +239,13 @@ export async function POST(
     const msgOuro = ouroPeso && ouroValorGrama
       ? ` (${ouroPeso}g × R$ ${ouroValorGrama}/g)`
       : "";
-    const msgComprovante = comprovantePath ? " — baixa manual (comprovante anexado)" : "";
     await tx`
       INSERT INTO alissonerp.comunicacoes_crediario
         (conta_receber_id, tipo, mensagem, usuario_id)
       VALUES (
         ${contaId},
         'aviso_recebimento',
-        ${(obs ?? `Recebido via ${formaRecebimento ?? "não informado"} — R$ ${valorEfetivo.toFixed(2)}${msgOuro} — ${conta.descricao}`) + msgComprovante},
+        ${obs ?? `Recebido via ${formaRecebimento ?? "não informado"} — R$ ${valorEfetivo.toFixed(2)}${msgOuro} — ${conta.descricao}`},
         ${user.id}::uuid
       )
     `;
@@ -501,11 +256,7 @@ export async function POST(
       registro_id: contaId,
       usuario_id: user.id,
       dados_antes: { situacao: "pendente", valor: Number(conta.valor) },
-      dados_depois: {
-        situacao: "pago", valor: valorEfetivo, forma: formaRecebimento,
-        ...(comprovantePath ? { comprovante_path: comprovantePath, baixa_manual: true } : {}),
-        ...(novoCreditoId ? { novo_credito_id: novoCreditoId } : {}),
-      },
+      dados_depois: { situacao: "pago", valor: valorEfetivo, ...(novoCreditoId ? { novo_credito_id: novoCreditoId } : {}) },
     });
   });
 

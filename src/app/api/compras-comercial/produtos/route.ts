@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
       p.tem_pedra_preciosa,
       ppe.peso_ct AS peso_pedra_ct,
       (ppe.produto_id IS NOT NULL) AS tem_registro_pedra_extras
-    FROM alissonerp.produtos_compat p
+    FROM public.produtos p
     LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
     WHERE p.nome IS NOT NULL
       AND (${q}::text = '' OR p.nome ILIKE ${`%${q}%`} OR p.sku ILIKE ${`%${q}%`})
