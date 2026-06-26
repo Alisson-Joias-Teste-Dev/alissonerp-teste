@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { X, Save, Loader2, Camera, Eye, EyeOff, AlertTriangle, CheckCircle, Shield } from "lucide-react";
+import { X, Save, Loader2, Camera, Eye, EyeOff, AlertTriangle, Shield } from "lucide-react";
+import { toast } from "sonner";
 import UserAvatar from "@/components/UserAvatar";
 
 // Roles são carregadas da API (veja estado rolesDisponiveis no componente)
@@ -84,7 +85,6 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
   const [mxDesconto, setMxDesconto] = useState<string>("");
 
   const [salvando, setSalvando] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
   const [uploadando, setUploadando] = useState(false);
   const [fotoVendedorUrl, setFotoVendedorUrl] = useState<string | null>(null);
   const [fotoVendedorUploadando, setFotoVendedorUploadando] = useState(false);
@@ -132,7 +132,6 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
       }
       setNovaSenha("");
       setConfirmar("");
-      setMsg(null);
       setTiposPermitidos(usuario.tipos_ordem_permitidos ?? []);
       setTiposProtocoloPermitidos(usuario.tipos_protocolo_permitidos ?? []);
       setIsOperadorService(usuario.is_operador_service ?? false);
@@ -219,10 +218,10 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
     if (res.ok) {
       const { avatar_url } = await res.json() as { avatar_url: string };
       setFotoUrl(avatar_url);
+      toast.success("Foto alterada com sucesso!");
     } else {
       const b = await res.json().catch(() => ({})) as { error?: string };
-      setMsg({ ok: false, texto: b.error ?? "Erro no upload da foto" });
-      setTimeout(() => setMsg(null), 3000);
+      toast.error(b.error ?? "Erro no upload da foto");
     }
   }
 
@@ -242,12 +241,10 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
     if (res.ok) {
       const { foto_url } = await res.json() as { foto_url: string };
       setFotoVendedorUrl(foto_url);
-      setMsg({ ok: true, texto: "Foto da consultora atualizada!" });
-      setTimeout(() => setMsg(null), 2500);
+      toast.success("Foto da consultora atualizada!");
     } else {
       const b = await res.json().catch(() => ({})) as { error?: string };
-      setMsg({ ok: false, texto: b.error ?? "Erro no upload da foto" });
-      setTimeout(() => setMsg(null), 3000);
+      toast.error(b.error ?? "Erro no upload da foto");
     }
   }
 
@@ -264,26 +261,23 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
     if (res.ok) {
       const { foto_url } = await res.json() as { foto_url: string };
       setFotoVendedorUrl(foto_url);
-      setMsg({ ok: true, texto: "Foto atualizada!" });
-      setTimeout(() => setMsg(null), 2500);
+      toast.success("Foto atualizada!");
     } else {
       const b = await res.json().catch(() => ({})) as { error?: string };
-      setMsg({ ok: false, texto: b.error ?? "URL inválida" });
-      setTimeout(() => setMsg(null), 3000);
+      toast.error(b.error ?? "URL inválida");
     }
   }
 
   async function handleSalvar() {
     if (!usuario) return;
-    if (!nome.trim()) { setMsg({ ok: false, texto: "Nome é obrigatório" }); return; }
-    if (!email.trim()) { setMsg({ ok: false, texto: "E-mail é obrigatório" }); return; }
+    if (!nome.trim()) { toast.error("Nome é obrigatório"); return; }
+    if (!email.trim()) { toast.error("E-mail é obrigatório"); return; }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email.trim())) { setMsg({ ok: false, texto: "E-mail inválido" }); return; }
-    if (novaSenha && novaSenha !== confirmar) { setMsg({ ok: false, texto: "Senhas não conferem" }); return; }
-    if (novaSenha && novaSenha.length < 6)   { setMsg({ ok: false, texto: "Senha mínimo 6 caracteres" }); return; }
+    if (!emailRegex.test(email.trim())) { toast.error("E-mail inválido"); return; }
+    if (novaSenha && novaSenha !== confirmar) { toast.error("Senhas não conferem"); return; }
+    if (novaSenha && novaSenha.length < 6)   { toast.error("Senha mínimo 6 caracteres"); return; }
 
     setSalvando(true);
-    setMsg(null);
 
     const body: Record<string, unknown> = {
       nome:                        nome.trim(),
@@ -323,12 +317,29 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
         body: JSON.stringify({ user_id: usuario.id, permissoes: permPurif }),
       }).catch(() => {});
 
-      setMsg({ ok: true, texto: "Alterações salvas!" });
+      const senhaAlterada = !!novaSenha;
+      const outrosAlterados =
+        nome.trim() !== usuario.nome ||
+        email.trim() !== usuario.email ||
+        role !== usuario.role ||
+        ativo !== usuario.ativo ||
+        depositoId !== String(usuario.deposito_id ?? "") ||
+        vendedorId !== usuario.vendedor_id ||
+        JSON.stringify(tiposPermitidos) !== JSON.stringify(usuario.tipos_ordem_permitidos ?? []) ||
+        JSON.stringify(tiposProtocoloPermitidos) !== JSON.stringify(usuario.tipos_protocolo_permitidos ?? []) ||
+        isOperadorService !== (usuario.is_operador_service ?? false) ||
+        isTransportador !== (usuario.is_transportador ?? false) ||
+        mxDesconto !== String(usuario.mx_desconto_permitido ?? "");
+
+      const msg = senhaAlterada && !outrosAlterados
+        ? "Senha alterada com sucesso!"
+        : "Alterações feitas com sucesso!";
+
+      toast.success(msg);
       onSaved(saved);
-      setTimeout(() => setMsg(null), 2500);
     } else {
       const b = await res.json().catch(() => ({})) as { error?: string };
-      setMsg({ ok: false, texto: b.error ?? "Erro ao salvar" });
+      toast.error(b.error ?? "Erro ao salvar");
     }
   }
 
@@ -797,19 +808,6 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
             )}
           </div>
 
-          {/* Mensagem de retorno */}
-          {msg && (
-            <div
-              className={`flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm ${
-                msg.ok
-                  ? "bg-green-50 text-green-700 border border-green-200"
-                  : "bg-red-50 text-red-700 border border-red-200"
-              }`}
-            >
-              {msg.ok ? <CheckCircle size={14} /> : <AlertTriangle size={14} />}
-              {msg.texto}
-            </div>
-          )}
         </div>
 
         {/* Footer fixo */}

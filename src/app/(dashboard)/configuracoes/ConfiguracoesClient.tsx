@@ -46,6 +46,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
 import UserEditDrawer, { type UsuarioEdit, type Deposito as DepositoEdit } from "@/components/UserEditDrawer";
+import Tabela from "@/components/Tabela";
 import { useAuth } from "@/hooks/useAuth";
 import { isFullAccess } from "@/lib/roles";
 import LocaisEstoqueTab from "@/components/LocaisEstoqueTab";
@@ -729,94 +730,74 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
         </div>
       )}
 
-      {/* Tabela */}
-      <div className="rounded-xl overflow-hidden border border-gray-200 bg-white">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-100 bg-gray-50">
-              {["", "Nome", "E-mail", "Role", "Status", "Desde"].map((h) => (
-                <th
-                  key={h}
-                  className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-semibold text-gray-400"
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {usuarios.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">
-                  Nenhum usuário cadastrado
-                </td>
-              </tr>
-            ) : (
-              usuarios.map((u) => (
-                <tr
-                  key={u.id}
-                  className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors"
-                  onClick={() => abrirDrawer(u)}
-                >
-                  {/* Avatar */}
-                  <td className="px-4 py-3 w-12" onClick={(e) => e.stopPropagation()}>
-                    <div className="relative group w-8 h-8 shrink-0 cursor-pointer" onClick={() => abrirDrawer(u)}>
-                      {u.avatar_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={u.avatar_url}
-                          alt={u.nome}
-                          className="w-8 h-8 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div
-                          className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-semibold select-none"
-                          style={{ backgroundColor: P.border, color: P.sage }}
-                        >
-                          {u.nome.trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                  {/* Nome */}
-                  <td className="px-4 py-3 font-semibold text-gray-800">
-                    {u.nome}
-                  </td>
-                  {/* Email */}
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {u.email}
-                  </td>
-                  {/* Role */}
-                  <td className="px-4 py-3">
-                    <span
-                      className="text-[10px] px-2 py-0.5 rounded-full font-medium"
-                      style={{ backgroundColor: P.dourado + "22", color: "#B37A4A" }}
-                    >
-                      {ROLE_LABEL[u.role] ?? u.role}
-                    </span>
-                  </td>
-                  {/* Status */}
-                  <td className="px-4 py-3">
-                    {u.ativo ? (
-                      <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-500" />Ativo
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1.5 text-xs text-gray-400 font-medium">
-                        <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />Inativo
-                      </span>
-                    )}
-                  </td>
-                  {/* Desde */}
-                  <td className="px-4 py-3 text-xs text-gray-400">
-                    {new Date(u.created_at).toLocaleDateString("pt-BR")}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      <Tabela
+        colunas={[
+          {
+            key: "avatar",
+            header: "",
+            className: "w-12",
+            render: (u) => (
+              <div className="w-8 h-8">
+                {u.avatar_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={u.avatar_url} alt={u.nome} className="w-8 h-8 rounded-full object-cover" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-semibold select-none bg-gray-200 text-gray-500">
+                    {u.nome.trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                  </div>
+                )}
+              </div>
+            ),
+          },
+          {
+            key: "nome",
+            header: "Nome",
+            className: "font-semibold text-gray-800 whitespace-nowrap",
+            render: (u) => <>{u.nome}</>,
+          },
+          {
+            key: "email",
+            header: "E-mail",
+            className: "text-xs text-gray-500 truncate max-w-[200px]",
+            render: (u) => <>{u.email}</>,
+          },
+          {
+            key: "role",
+            header: "Role",
+            render: (u) => (
+              <span
+                className="inline-block text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap"
+                style={{ backgroundColor: "#d9770622", color: "#B37A4A" }}
+              >
+                {ROLE_LABEL[u.role] ?? u.role}
+              </span>
+            ),
+          },
+          {
+            key: "status",
+            header: "Status",
+            render: (u) =>
+              u.ativo ? (
+                <span className="inline-flex items-center gap-1.5 text-xs text-green-600 font-medium whitespace-nowrap">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Ativo
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-xs text-gray-400 font-medium whitespace-nowrap">
+                  <span className="w-1.5 h-1.5 rounded-full bg-gray-300" /> Inativo
+                </span>
+              ),
+          },
+          {
+            key: "desde",
+            header: "Desde",
+            className: "text-xs text-gray-400 whitespace-nowrap",
+            render: (u) => <>{new Date(u.created_at).toLocaleDateString("pt-BR")}</>,
+          },
+        ]}
+        dados={usuarios}
+        onLinhaClick={(u) => abrirDrawer(u)}
+        mensagemVazia="Nenhum usuário cadastrado"
+      />
 
       {/* Drawer de edição */}
       <UserEditDrawer

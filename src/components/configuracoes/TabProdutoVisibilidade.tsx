@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Save, RotateCcw } from "lucide-react";
+import { Save, RotateCcw } from "lucide-react";
+import { Button, Spinner, Toggle } from "@/components/ui";
 import {
   CAMPOS_LABELS,
   CAMPOS_ORDER,
@@ -56,7 +57,7 @@ export default function TabProdutoVisibilidade() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="animate-spin text-gray-400" size={22} />
+        <Spinner size={22} className="text-gray-400" />
       </div>
     );
   }
@@ -70,14 +71,9 @@ export default function TabProdutoVisibilidade() {
             Roles admin, desenvolvedor e diretor sempre veem tudo. Marque o que cada role pode visualizar no drawer de produto.
           </p>
         </div>
-        <button
-          onClick={salvar}
-          disabled={saving}
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#184036] text-white text-sm font-medium rounded-lg hover:bg-[#1e5248] disabled:opacity-50 transition"
-        >
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          {saved ? "Salvo!" : "Salvar"}
-        </button>
+        <Button variant="primary" size="sm" loading={saving} onClick={salvar}>
+          {saved ? "Salvo!" : <><Save size={14} /> Salvar</>}
+        </Button>
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-gray-100">
@@ -105,20 +101,7 @@ export default function TabProdutoVisibilidade() {
                   </td>
                   {CAMPOS_ORDER.map((campo) => (
                     <td key={campo} className="px-3 py-3 text-center border-b border-gray-50">
-                      <button
-                        type="button"
-                        onClick={() => toggle(role, campo)}
-                        className={`w-10 h-5 rounded-full transition-colors relative ${
-                          campos[campo] ? "bg-[#184036]" : "bg-gray-200"
-                        }`}
-                        title={campos[campo] ? "Visível — clique para ocultar" : "Oculto — clique para mostrar"}
-                      >
-                        <span
-                          className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${
-                            campos[campo] ? "left-[22px]" : "left-0.5"
-                          }`}
-                        />
-                      </button>
+                      <Toggle ativo={campos[campo]} onChange={() => toggle(role, campo)} />
                     </td>
                   ))}
                   <td className="px-3 py-3 text-center border-b border-gray-50">
