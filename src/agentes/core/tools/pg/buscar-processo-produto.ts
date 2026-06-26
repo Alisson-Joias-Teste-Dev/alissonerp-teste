@@ -33,7 +33,7 @@ export const buscarProcessoProduto: Tool = {
 
     if (sku && !pid) {
       const prod = await sql`
-        SELECT id_produto FROM alissonerp.produtos_compat WHERE sku = ${sku!} LIMIT 1
+        SELECT id_produto FROM public.produtos WHERE sku = ${sku!} LIMIT 1
       `;
       if (prod.length === 0) return { erro: `Produto SKU "${sku}" não encontrado` };
       pid = prod[0].id_produto as number;

@@ -37,7 +37,6 @@ const BUCKETS_PRIVADOS = new Set([
   "ordem-videos",
   "vendas-videos",
   "insumo-fotos",
-  "compras-comercial-fotos",
 ]);
 
 // Buckets que exigem full access (admin/dev/diretor).

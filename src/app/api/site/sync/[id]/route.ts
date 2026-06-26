@@ -80,7 +80,7 @@ export async function POST(
         pp.preco_venda AS preco,
         COALESCE(est.disponivel, 0)::int AS saldo,
         sp.wc_product_id
-      FROM alissonerp.produtos_compat p
+      FROM public.produtos p
       LEFT JOIN alissonerp.site_produtos sp ON sp.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
       LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
@@ -158,7 +158,7 @@ export async function POST(
               FROM alissonerp.movimentacoes_estoque_comercial m
               WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'
             ), 0)::int                               AS saldo
-          FROM alissonerp.produtos_compat p
+          FROM public.produtos p
           WHERE p.sku LIKE ${alvo.sku + "-%"}
         `;
         const porSku = new Map(filhos.map(r => [r.sku, { preco: Number(r.preco), saldo: Number(r.saldo) }]));

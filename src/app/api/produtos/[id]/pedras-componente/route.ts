@@ -58,7 +58,7 @@ export async function PUT(
 
   // Valida que o produto existe
   const [produto] = await sql<{ id_produto: number }[]>`
-    SELECT id_produto FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId} LIMIT 1
+    SELECT id_produto FROM public.produtos WHERE id_produto = ${produtoId} LIMIT 1
   `;
   if (!produto) return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
 
@@ -150,7 +150,7 @@ export async function GET(
       COALESCE(vp.preco_venda, 0)::numeric AS preco_unitario,
       pe.nome                  AS pedra_nome
     FROM alissonerp.produto_pedras_componente pc
-    JOIN alissonerp.produtos_compat pe ON pe.id_produto = pc.pedra_produto_id
+    JOIN public.produtos pe ON pe.id_produto = pc.pedra_produto_id
     LEFT JOIN alissonerp.vw_pedras_preco vp ON vp.id_produto = pc.pedra_produto_id
     WHERE pc.produto_id = ${produtoId}
     ORDER BY pe.nome

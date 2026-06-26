@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
 
   const rows = comEstoque ? await sql`
     SELECT p.id_produto, p.nome, p.sku, s.disponivel::int
-    FROM alissonerp.produtos_compat p
+    FROM public.produtos p
     JOIN alissonerp.vw_saldo_estoque_comercial_v2 s ON s.produto_id = p.id_produto
       AND s.local_estoque_id = ${localId}
     WHERE
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     LIMIT ${limit}
   ` : await sql`
     SELECT id_produto, nome, sku
-    FROM alissonerp.produtos_compat
+    FROM public.produtos
     WHERE
       nome ILIKE ${"%" + q + "%"}
       OR sku  ILIKE ${"%" + q + "%"}

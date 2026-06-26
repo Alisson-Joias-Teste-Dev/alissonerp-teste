@@ -3,7 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 // GET /api/orcamento/produtos-pedras?q=
-// Lista produtos da categoria "Pedras" (alissonerp.produtos_compat) para orçamento de peça personalizada.
+// Lista produtos da categoria "Pedras" (public.produtos) para orçamento de peça personalizada.
 // Filtra por categoria/categoria_precificacao ILIKE '%pedra%'.
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase();
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
       p.tipo_de_pedra,
       COALESCE(vp.preco_venda, 0)::numeric AS preco,
       p.peso_precificado
-    FROM alissonerp.produtos_compat p
+    FROM public.produtos p
     LEFT JOIN alissonerp.vw_pedras_preco vp ON vp.id_produto = p.id_produto
     WHERE p.situacao = 'A'
       AND (

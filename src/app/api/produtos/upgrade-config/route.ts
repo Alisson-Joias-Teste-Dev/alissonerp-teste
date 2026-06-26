@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
              puc.ativo, puc.created_at, puc.updated_at,
              p.nome AS produto_nome, p.sku AS produto_sku
       FROM alissonerp.produto_upgrade_config puc
-      JOIN alissonerp.produtos_compat p ON p.id_produto = puc.produto_id
+      JOIN public.produtos p ON p.id_produto = puc.produto_id
       WHERE puc.ativo = true
       ORDER BY p.nome
     `;

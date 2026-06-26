@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
 
   const [{ total }] = await sql<{ total: string }[]>`
     SELECT COUNT(*)::text AS total
-    FROM alissonerp.produtos_compat
+    FROM public.produtos
     WHERE tipo_metal = ANY(${from})
   `;
   return NextResponse.json({ from, to, totalAfetados: Number(total) });

@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
   let rfid = await sql`
     SELECT j.*, p.nome AS produto_nome, p.sku AS produto_sku
     FROM alissonerp.joias_rfid j
-    LEFT JOIN alissonerp.produtos_compat p ON p.id_produto = j.produto_id::bigint
+    LEFT JOIN public.produtos p ON p.id_produto = j.produto_id::bigint
     WHERE j.epc = ${code}
   `;
 
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     rfid = await sql`
       SELECT j.*, p.nome AS produto_nome, p.sku AS produto_sku
       FROM alissonerp.joias_rfid j
-      LEFT JOIN alissonerp.produtos_compat p ON p.id_produto = j.produto_id::bigint
+      LEFT JOIN public.produtos p ON p.id_produto = j.produto_id::bigint
       WHERE j.epc LIKE ${'%' + code + '%'}
          OR j.id::text LIKE ${'%' + code + '%'}
       LIMIT 1
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
   let produtoEncontrado: { id_produto: number; nome: string; sku: string } | null = null;
   if (rfid.length === 0) {
     const prods = await sql`
-      SELECT id_produto, nome, sku FROM alissonerp.produtos_compat
+      SELECT id_produto, nome, sku FROM public.produtos
       WHERE sku ILIKE ${'%' + code + '%'}
       LIMIT 1
     `;

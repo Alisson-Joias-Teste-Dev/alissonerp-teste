@@ -253,7 +253,7 @@ export async function GET(req: NextRequest) {
 
       const [countRow] = await sql<{ total: string }[]>`
         SELECT COUNT(*) AS total
-        FROM alissonerp.produtos_compat p
+        FROM public.produtos p
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
         LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
@@ -355,7 +355,7 @@ export async function GET(req: NextRequest) {
               END
             ), 0)
             FROM alissonerp.produto_pedras_componente ppc
-            LEFT JOIN alissonerp.produtos_compat pp2 ON pp2.id_produto = ppc.pedra_produto_id
+            LEFT JOIN public.produtos pp2 ON pp2.id_produto = ppc.pedra_produto_id
             WHERE ppc.produto_id = p.id_produto
               AND pp2.nome NOT ILIKE '%zirconia%'
           ) AS pedras_ct_total,
@@ -363,21 +363,21 @@ export async function GET(req: NextRequest) {
           (
             SELECT COALESCE(SUM(ppc2.quantidade), 0)::int
             FROM alissonerp.produto_pedras_componente ppc2
-            LEFT JOIN alissonerp.produtos_compat pp3 ON pp3.id_produto = ppc2.pedra_produto_id
+            LEFT JOIN public.produtos pp3 ON pp3.id_produto = ppc2.pedra_produto_id
             WHERE ppc2.produto_id = p.id_produto
               AND pp3.nome NOT ILIKE '%zirconia%'
           ) AS pedras_qtd_total,
           (
             SELECT pp3.nome
             FROM alissonerp.produto_pedras_componente ppc2
-            LEFT JOIN alissonerp.produtos_compat pp3 ON pp3.id_produto = ppc2.pedra_produto_id
+            LEFT JOIN public.produtos pp3 ON pp3.id_produto = ppc2.pedra_produto_id
             WHERE ppc2.produto_id = p.id_produto
               AND pp3.nome NOT ILIKE '%zirconia%'
             ORDER BY ppc2.quantidade DESC
             LIMIT 1
           ) AS pedras_nome_principal,
           COALESCE(ecc.controla_estoque, true) AS controla_estoque
-        FROM alissonerp.produtos_compat p
+        FROM public.produtos p
         LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
         LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
@@ -399,7 +399,7 @@ export async function GET(req: NextRequest) {
     // ── Fallback sem erp_produtos (migration 063 pendente) ─────────────────
     const [countRow] = await sql<{ total: string }[]>`
       SELECT COUNT(*) AS total
-      FROM alissonerp.produtos_compat p
+      FROM public.produtos p
       LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
       LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
@@ -468,28 +468,28 @@ export async function GET(req: NextRequest) {
             END
           ), 0)
           FROM alissonerp.produto_pedras_componente ppc
-          LEFT JOIN alissonerp.produtos_compat pp2 ON pp2.id_produto = ppc.pedra_produto_id
+          LEFT JOIN public.produtos pp2 ON pp2.id_produto = ppc.pedra_produto_id
           WHERE ppc.produto_id = p.id_produto
             AND pp2.nome NOT ILIKE '%zirconia%'
         ) AS pedras_ct_total,
         (
           SELECT COALESCE(SUM(ppc2.quantidade), 0)::int
           FROM alissonerp.produto_pedras_componente ppc2
-          LEFT JOIN alissonerp.produtos_compat pp3 ON pp3.id_produto = ppc2.pedra_produto_id
+          LEFT JOIN public.produtos pp3 ON pp3.id_produto = ppc2.pedra_produto_id
           WHERE ppc2.produto_id = p.id_produto
             AND pp3.nome NOT ILIKE '%zirconia%'
         ) AS pedras_qtd_total,
         (
           SELECT pp3.nome
           FROM alissonerp.produto_pedras_componente ppc2
-          LEFT JOIN alissonerp.produtos_compat pp3 ON pp3.id_produto = ppc2.pedra_produto_id
+          LEFT JOIN public.produtos pp3 ON pp3.id_produto = ppc2.pedra_produto_id
           WHERE ppc2.produto_id = p.id_produto
             AND pp3.nome NOT ILIKE '%zirconia%'
           ORDER BY ppc2.quantidade DESC
           LIMIT 1
         ) AS pedras_nome_principal,
         COALESCE(ecc.controla_estoque, true) AS controla_estoque
-      FROM alissonerp.produtos_compat p
+      FROM public.produtos p
       LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
@@ -563,7 +563,7 @@ export async function POST(req: NextRequest) {
     if (!sku) {
       const [skuRow] = await sql<{ next: string }[]>`
         SELECT (COALESCE(MAX(sku::integer), 1603) + 1)::text AS next
-        FROM alissonerp.produtos_compat WHERE sku ~ '^[0-9]{1,5}$'
+        FROM public.produtos WHERE sku ~ '^[0-9]{1,5}$'
       `;
       sku = skuRow?.next ?? "1604";
     }
@@ -575,7 +575,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Verificar SKU único ──────────────────────────────────────────────────
-    const [dupSku] = await sql`SELECT 1 FROM alissonerp.produtos_compat WHERE sku = ${sku} LIMIT 1`;
+    const [dupSku] = await sql`SELECT 1 FROM public.produtos WHERE sku = ${sku} LIMIT 1`;
     if (dupSku) return NextResponse.json({ error: `SKU "${sku}" já existe` }, { status: 409 });
 
     // ── Calcular combinações de variações ────────────────────────────────────
@@ -609,51 +609,48 @@ export async function POST(req: NextRequest) {
       const [seqPai] = await tx<{ id: string }[]>`SELECT nextval('alissonerp.seq_produto_id') AS id`;
       const paiId = Number(seqPai.id);
 
-      // INSERT pai — escrita ÚNICA em alissonerp.erp_produtos.
-      // Tudo centralizado aqui; alissonerp.produtos_compat é espelhado pela trigger
-      // trg_sync_erp_to_public_produto (mirror read-only p/ FKs e GET).
-      // fornecedor só entra se a coluna existir (migration 159 pendente = silencioso).
+      // INSERT pai em alissonerp.erp_produtos
+      const [prodPai] = await tx<{ id_produto: number; sku: string; nome: string; preco_sync: string | null }[]>`
+        INSERT INTO alissonerp.erp_produtos
+          (produto_id, sku, nome, tipo_metal, situacao,
+           peso_precificado, markup, fator,
+           categoria_precificacao, categoria, tem_pedra_preciosa)
+        VALUES
+          (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
+           ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
+           ${categoria_precificacao ?? null}, ${categoria_geral ?? null}, ${tem_pedra_preciosa ?? false})
+        RETURNING produto_id AS id_produto, sku, nome, preco_sync
+      `;
+
+      // INSERT pai em erp_produtos — fornecedor só entra se a coluna existir
+      // (migration 159 pendente = não entra, silencioso).
       const temColFornecedor = await colunaExiste("alissonerp", "erp_produtos", "fornecedor", tx);
       const [erpPai] = temColFornecedor
-        ? await tx<{ id: number; id_produto: number; sku: string; nome: string; preco_sync: string | null }[]>`
+        ? await tx<{ id: number; produto_id: number; sku: string }[]>`
             INSERT INTO alissonerp.erp_produtos
-              (produto_id, sku, nome, tipo_metal, situacao,
-               peso_precificado, markup, fator,
-               categoria_precificacao, categoria, tem_pedra_preciosa,
-               eh_pai, eh_variacao,
+              (produto_id, sku, nome, eh_pai, eh_variacao,
                cor_metal, largura_aro, altura_aro, base, fornecedor)
             VALUES
-              (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
-               ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
-               ${categoria_precificacao ?? null}, ${categoria_geral ?? null}, ${tem_pedra_preciosa ?? false},
-               ${temVariacoes}, false,
+              (${paiId}, ${sku}, ${nome.trim()}, ${temVariacoes}, false,
                ${cor_metal ?? null},
                ${medidas?.largura_aro ?? null},
                ${medidas?.altura_aro  ?? null},
                ${medidas?.base        ?? null},
                ${fornecedor ?? null})
-            RETURNING id, produto_id AS id_produto, sku, nome, preco_sync
+            RETURNING id, produto_id, sku
           `
-        : await tx<{ id: number; id_produto: number; sku: string; nome: string; preco_sync: string | null }[]>`
+        : await tx<{ id: number; produto_id: number; sku: string }[]>`
             INSERT INTO alissonerp.erp_produtos
-              (produto_id, sku, nome, tipo_metal, situacao,
-               peso_precificado, markup, fator,
-               categoria_precificacao, categoria, tem_pedra_preciosa,
-               eh_pai, eh_variacao,
+              (produto_id, sku, nome, eh_pai, eh_variacao,
                cor_metal, largura_aro, altura_aro, base)
             VALUES
-              (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
-               ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
-               ${categoria_precificacao ?? null}, ${categoria_geral ?? null}, ${tem_pedra_preciosa ?? false},
-               ${temVariacoes}, false,
+              (${paiId}, ${sku}, ${nome.trim()}, ${temVariacoes}, false,
                ${cor_metal ?? null},
                ${medidas?.largura_aro ?? null},
                ${medidas?.altura_aro  ?? null},
                ${medidas?.base        ?? null})
-            RETURNING id, produto_id AS id_produto, sku, nome, preco_sync
+            RETURNING id, produto_id, sku
           `;
-      // result.pai usa id_produto/nome/preco_sync; erpPai.id é o parent_id das variações.
-      const prodPai = erpPai;
 
       // Mestre de fornecedores: só UPSERT se a tabela existir.
       if (fornecedor && fornecedor.trim() && await tabelaExiste("alissonerp", "fornecedores", tx)) {
@@ -739,23 +736,30 @@ export async function POST(req: NextRequest) {
         if (combo.comprimento != null) sufixos.push(`${combo.comprimento}cm`);
         const nomeVar = sufixos.length > 0 ? `${nome.trim()} ${sufixos.join(" ")}` : `${nome.trim()} ${contador}`;
 
-        // INSERT variação — escrita ÚNICA em alissonerp.erp_produtos
-        // (fornecedor opcional, conforme coluna existir).
+        // INSERT variação em alissonerp.erp_produtos
+        await tx`
+          INSERT INTO alissonerp.erp_produtos
+            (produto_id, sku, nome, tipo_metal, situacao,
+             peso_precificado, markup, fator,
+             categoria_precificacao, tem_pedra_preciosa)
+          VALUES
+            (${varId}, ${skuVar}, ${nomeVar},
+             ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
+             ${pesoVar}, ${Number(markup)}, ${Number(fator ?? 1)},
+             ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false})
+        `;
+
+        // INSERT variação em erp_produtos (fornecedor opcional)
         if (temColFornecedor) {
           await tx`
             INSERT INTO alissonerp.erp_produtos
-              (produto_id, sku, nome, tipo_metal, situacao,
-               peso_precificado, markup, fator,
-               categoria_precificacao, tem_pedra_preciosa,
+              (produto_id, sku, nome,
                parent_sku, parent_id,
                eh_variacao, eh_pai,
                sufixo_variacao, numeracao, cor_metal, comprimento,
                largura_aro, altura_aro, base, fornecedor)
             VALUES
               (${varId}, ${skuVar}, ${nomeVar},
-               ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
-               ${pesoVar}, ${Number(markup)}, ${Number(fator ?? 1)},
-               ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false},
                ${sku}, ${erpPai.id},
                true, false,
                ${String(contador)},
@@ -770,18 +774,13 @@ export async function POST(req: NextRequest) {
         } else {
           await tx`
             INSERT INTO alissonerp.erp_produtos
-              (produto_id, sku, nome, tipo_metal, situacao,
-               peso_precificado, markup, fator,
-               categoria_precificacao, tem_pedra_preciosa,
+              (produto_id, sku, nome,
                parent_sku, parent_id,
                eh_variacao, eh_pai,
                sufixo_variacao, numeracao, cor_metal, comprimento,
                largura_aro, altura_aro, base)
             VALUES
               (${varId}, ${skuVar}, ${nomeVar},
-               ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
-               ${pesoVar}, ${Number(markup)}, ${Number(fator ?? 1)},
-               ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false},
                ${sku}, ${erpPai.id},
                true, false,
                ${String(contador)},

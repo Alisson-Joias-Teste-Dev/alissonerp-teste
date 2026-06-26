@@ -301,13 +301,13 @@ export async function POST(
     const resultado = await sql.begin(async (tx: any) => {
       // Confirma existencia do produto
       const [produto] = await tx`
-        SELECT id_produto FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId}
+        SELECT id_produto FROM public.produtos WHERE id_produto = ${produtoId}
       `;
       if (!produto) {
         throw new HttpError(404, "Produto nao encontrado");
       }
 
-      // Se descricao_produto foi enviada, atualiza alissonerp.produtos_compat.nome
+      // Se descricao_produto foi enviada, atualiza public.produtos.nome
       if (descricaoProduto) {
         await tx`
           UPDATE alissonerp.erp_produtos

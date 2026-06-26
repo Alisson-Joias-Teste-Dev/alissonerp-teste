@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
 
 // ─── Simulação OURO ──────────────────────────────────────────────────────────
 async function simularOuro(faixa_id: number, markup_novo: number, tipoArredondamento: string) {
-  // Buscar a categoria (nome é o link com alissonerp.produtos_compat.categoria_precificacao)
+  // Buscar a categoria (nome é o link com public.produtos.categoria_precificacao)
   const [categoria] = await sql`
     SELECT * FROM public."categoria_precificação" WHERE id = ${faixa_id}
   `;
@@ -112,7 +112,7 @@ async function simularOuro(faixa_id: number, markup_novo: number, tipoArredondam
       preco_sync,
       preco_na_cotacao,
       markup
-    FROM alissonerp.produtos_compat
+    FROM public.produtos
     WHERE COALESCE(peso_precificado, 0) >= ${pesoMin}
       AND COALESCE(peso_precificado, 0) <= ${pesoMax}
       AND situacao = 'A'
@@ -249,7 +249,7 @@ async function simularPedra(faixa_id: number, markup_novo: number, tipoArredonda
     markup: string | null;
   }[]>`
     SELECT id_produto::text, nome, sku, peso_precificado, preco_sync, preco_pedras, preco_total_sync, markup
-    FROM alissonerp.produtos_compat
+    FROM public.produtos
     WHERE id_produto = ANY(${produtoIds})
       AND situacao = 'A'
   `;

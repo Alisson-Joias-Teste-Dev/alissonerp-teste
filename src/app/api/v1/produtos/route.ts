@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
   // ── Count total ───────────────────────────────────────────────────────────────
   const [{ total }] = await sql<{ total: number }[]>`
     SELECT COUNT(*)::int AS total
-    FROM alissonerp.produtos_compat p
+    FROM public.produtos p
     WHERE 1=1
       ${filtroPorSituacao}
       ${filtroCategoria}
@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
       p.categoria_precificacao            AS categoria_precificacao,
       p.markup,
       p.updated_at
-    FROM alissonerp.produtos_compat p
+    FROM public.produtos p
     LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
     LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
     WHERE 1=1

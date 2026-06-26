@@ -4,7 +4,6 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { fetchPayment, fetchMerchantOrder, getWebhookSecret } from "@/lib/mercado-pago";
 import { estornarVenda } from "@/lib/vendas-aprovar";
-import { fecharContaReceberAposPagamentoMp } from "@/lib/crediario-baixa-automatica";
 
 // Webhook MP — payload do gateway pode vir com campos adicionais (passthrough).
 // Validamos apenas a forma; tipo "merchant_order" usa o mesmo schema.
@@ -386,7 +385,7 @@ export async function POST(req: NextRequest) {
   // ─── 6. Busca pagamento ERP ──────────────────────────────────────────────
   // FOR UPDATE é ineficaz fora de transação — o lock real é feito dentro de cada sql.begin()
   const [pag] = await sql`
-    SELECT id, venda_id, status, valor, forma, gateway_payload
+    SELECT id, venda_id, status, valor, gateway_payload
     FROM alissonerp.pagamentos_venda
     WHERE id = ${pagamentoId} AND venda_id = ${vendaId}
   `;
@@ -436,12 +435,6 @@ export async function POST(req: NextRequest) {
       `;
       return NextResponse.json({ ok: false, ignored: "transaction_amount inválido" });
     }
-    // Crediário: se este é o pagamento "A Receber" de uma venda (baixa pelo
-    // fluxo validado do Crediário), a confirmação do gateway FECHA a conta a
-    // receber dentro da MESMA tx. Calculamos o usuário-sistema FORA da tx —
-    // getSystemUserId lê vendas_erp, que a tx vai travar (evita deadlock).
-    const ehAReceberCredi = pag.forma === "A Receber";
-    const sysUserCredi = ehAReceberCredi ? await getSystemUserId(vendaId) : null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await (sql as any).begin(async (tx: typeof sql) => {
       // C2: SELECT FOR UPDATE dentro da tx — garante atomicidade contra webhooks concorrentes
@@ -486,18 +479,6 @@ export async function POST(req: NextRequest) {
           gateway_payload  = ${JSON.stringify(novoPayload)}::text::jsonb
         WHERE id = ${pagamentoId}
       `;
-
-      // 7a-bis. Crediário: fecha a conta a receber + devolve saldo do gerente,
-      // atômico com a confirmação. No-op se a venda não tiver conta pendente.
-      if (ehAReceberCredi && sysUserCredi) {
-        await fecharContaReceberAposPagamentoMp(tx, {
-          vendaId,
-          pagamentoId,
-          formaPagamento: "A Receber",
-          valorPago: Number(pag.valor),
-          usuarioId: sysUserCredi,
-        });
-      }
 
       // 7b. Verifica se total pago cobre a venda
       const [{ soma_confirmados, total_venda }] = await tx`

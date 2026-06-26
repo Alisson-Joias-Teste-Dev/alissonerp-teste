@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, useRef, type CSSProperties } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   CreditCard,
   AlertTriangle,
@@ -13,7 +13,6 @@ import {
   Loader2,
   Wallet,
   User,
-  Calendar,
   X,
   MessageSquare,
   ExternalLink,
@@ -21,7 +20,6 @@ import {
 import { apiFetch } from "@/lib/apiFetch";
 import { createClient } from "@/lib/supabase/client";
 import { getPublicUrl } from "@/lib/storage-url";
-import ValeCodigoInline from "@/components/vendas/ValeCodigoInline";
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 const C = {
@@ -59,7 +57,6 @@ export interface CrediarioItem {
   venda_bloqueada: boolean | null;
   credito_gerente_usado: number | null;
   venda_created_at: string | null;
-  data_venda: string | null;
   cliente_id: number | null;
   cliente_nome: string | null;
   cliente_telefone: string | null;
@@ -83,7 +80,6 @@ interface ContaDetalhe extends CrediarioItem {
   ouro_peso?: number | null;
   ouro_valor_grama?: number | null;
   ouro_foto_path?: string | null;
-  fotos?: { path: string; conta_id: number; nome: string }[];
 }
 
 interface Contagens {
@@ -107,46 +103,6 @@ interface Props {
 function fmtBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
-
-function primeiroNome(nome: string) {
-  return nome.trim().split(/\s+/)[0];
-}
-
-// Presets do filtro de período (padrão da casa: Hoje/Ontem/7d/30d/Mês/Personalizado).
-const PERIODOS = [
-  { key: "hoje",  label: "Hoje" },
-  { key: "ontem", label: "Ontem" },
-  { key: "7d",    label: "7 dias" },
-  { key: "30d",   label: "30 dias" },
-  { key: "mes",   label: "Mês" },
-  { key: "custom", label: "Personalizado" },
-];
-
-function isoDia(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-// Converte o preset em { from, to } (YYYY-MM-DD). "Mês" = do dia 1 até hoje.
-function rangeDoPeriodo(preset: string, custom: { from: string; to: string }): { from: string; to: string } {
-  const hoje = new Date();
-  const menos = (n: number) => { const d = new Date(hoje); d.setDate(d.getDate() - n); return d; };
-  const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-  switch (preset) {
-    case "hoje":   return { from: isoDia(hoje), to: isoDia(hoje) };
-    case "ontem":  { const o = menos(1); return { from: isoDia(o), to: isoDia(o) }; }
-    case "7d":     return { from: isoDia(menos(6)), to: isoDia(hoje) };
-    case "30d":    return { from: isoDia(menos(29)), to: isoDia(hoje) };
-    case "custom": return custom.from && custom.to ? custom : { from: "", to: "" };
-    case "mes":
-    default:       return { from: isoDia(inicioMes), to: isoDia(hoje) };
-  }
-}
-
-// Chip que marca um card como "da consultora X" quando o filtro está ativo.
-const chipConsultora: CSSProperties = {
-  background: C.esmeraldaLt, color: C.esmeralda,
-  borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 600,
-};
 function fmtData(s: string | null) {
   if (!s) return "—";
   // Datas DATE (vencimento/recebimento) vem sem hora; new Date(s) as interpreta
@@ -205,21 +161,18 @@ function montarWhatsappCobranca(d: ContaDetalhe): string {
  */
 function DetalheDrawer({
   contaId,
-  podeBaixar,
-  isDev,
+  isGerente,
   onClose,
   onBaixa,
 }: {
   contaId: number;
-  podeBaixar: boolean;
-  isDev: boolean;
+  isGerente: boolean;
   onClose: () => void;
   onBaixa: (id: number) => void;
 }) {
   const [detalhe, setDetalhe] = useState<ContaDetalhe | null>(null);
   const [loading, setLoading] = useState(true);
   const [mpPaymentId, setMpPaymentId] = useState("");
-  const [mpParcial, setMpParcial] = useState<{ valor_pago: number; valor_restante: number } | null>(null);
   const [pbPaymentId, setPbPaymentId] = useState("");
   const [formaRecebimento, setFormaRecebimento] = useState<string | null>(null);
   const [valorPago, setValorPago] = useState("");
@@ -234,28 +187,6 @@ function DetalheDrawer({
   const [ouroFotoFile, setOuroFotoFile] = useState<File | null>(null);
   const [ouroFotoPreview, setOuroFotoPreview] = useState<string | null>(null);
   const [ouroUploading, setOuroUploading] = useState(false);
-  // Vale-Troca (mesma regra da venda: número + token do dono)
-  const [valeNumero, setValeNumero] = useState("");
-  const [valeValidando, setValeValidando] = useState(false);
-  const [valeValidacao, setValeValidacao] = useState<
-    { ok: boolean; erro?: string; valor_disponivel?: number; cliente_id?: number | null } | null
-  >(null);
-  // Pix validado (QR Mercado Pago) — gera o QR, mostra e faz polling até a
-  // conta fechar (o webhook fecha quando o cliente paga).
-  const [pixQr, setPixQr] = useState<{ qr_code: string; qr_code_base64: string; valor: number } | null>(null);
-  const [pixGerando, setPixGerando] = useState(false);
-  const [pixCopiado, setPixCopiado] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Modo manual (só dev) dentro de Pix/Cartão — exige comprovante.
-  const [modoManual, setModoManual] = useState(false);
-  const [comprovanteFile, setComprovanteFile] = useState<File | null>(null);
-  const [comprovantePreview, setComprovantePreview] = useState<string | null>(null);
-  // Cartão validado (maquininha / Point)
-  const [devices, setDevices] = useState<{ device_id: string; nome_legivel: string }[]>([]);
-  const [deviceSel, setDeviceSel] = useState("");
-  const [parcelas, setParcelas] = useState(1);
-  const [cartaoEnviando, setCartaoEnviando] = useState(false);
-  const [cartaoAguardando, setCartaoAguardando] = useState(false);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -272,124 +203,6 @@ function DetalheDrawer({
   // Carregar na montagem
   useState(() => { void carregar(); });
 
-  // Para o polling do Pix ao fechar/desmontar o drawer.
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
-
-  // Carrega as maquininhas quando entra no fluxo de Cartão.
-  useEffect(() => {
-    if (formaRecebimento === "Cartão de Crédito" && !modoManual && devices.length === 0) void carregarDevices();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formaRecebimento, modoManual]);
-
-  // ── Pix validado: gera o QR amarrado ao "A Receber" e faz polling ──────────
-  // Não marca nada como pago aqui — quem fecha a conta é o webhook do MP
-  // (crediario-baixa-automatica.ts). O polling só observa a conta virar 'pago'.
-  // Polling compartilhado (Pix e Cartão): observa a conta fechar pelo webhook.
-  function iniciarPolling() {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const d = await apiFetch<ContaDetalhe>(`/api/crediario/${contaId}`);
-        if (d.situacao === "pago") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          onBaixa(contaId);
-          onClose();
-        }
-      } catch { /* transitório — segue tentando */ }
-    }, 4000);
-  }
-
-  async function gerarPixQr() {
-    setPixGerando(true); setErr("");
-    try {
-      const r = await apiFetch<{ qr_code: string; qr_code_base64: string; valor: number }>(
-        `/api/crediario/${contaId}/cobrar-pix`,
-        { method: "POST", body: "{}" },
-      );
-      setPixQr({ qr_code: r.qr_code, qr_code_base64: r.qr_code_base64, valor: r.valor });
-      iniciarPolling();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Erro ao gerar o Pix");
-    } finally {
-      setPixGerando(false);
-    }
-  }
-
-  // ── Cartão validado: maquininha (Point) ────────────────────────────────────
-  async function carregarDevices() {
-    try {
-      const list = await apiFetch<{ device_id: string; nome_legivel: string }[]>(`/api/mercado-pago/devices`);
-      const ativos = (list ?? []).filter(d => d.device_id);
-      setDevices(ativos);
-      if (ativos.length === 1) setDeviceSel(ativos[0].device_id);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Erro ao carregar maquininhas");
-    }
-  }
-
-  async function cobrarNaMaquininha() {
-    if (!deviceSel) { setErr("Escolha a maquininha"); return; }
-    setCartaoEnviando(true); setErr("");
-    try {
-      await apiFetch(`/api/crediario/${contaId}/cobrar-cartao`, {
-        method: "POST",
-        body: JSON.stringify({ device_id: deviceSel, installments: parcelas }),
-      });
-      setCartaoAguardando(true);
-      iniciarPolling();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Erro ao enviar para a maquininha");
-    } finally {
-      setCartaoEnviando(false);
-    }
-  }
-
-  async function cancelarMaquininha() {
-    if (pollRef.current) clearInterval(pollRef.current);
-    setCartaoAguardando(false);
-    try { await apiFetch(`/api/crediario/${contaId}/cobrar-cartao`, { method: "DELETE" }); } catch { /* ok */ }
-  }
-
-  async function uploadComprovante(file: File): Promise<string | null> {
-    const supabase = createClient();
-    const ext = file.name.split(".").pop() ?? "jpg";
-    const path = `crediario/${contaId}/comprovante-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from("pagamento-fotos").upload(path, file, { contentType: file.type });
-    if (error) { setErr("Erro ao enviar comprovante: " + error.message); return null; }
-    return path;
-  }
-
-  // Baixa MANUAL de Pix/Cartão — exceção só do dev. O back exige comprovante
-  // + role 'desenvolvedor' (registrar-pagamento), aqui apenas montamos o envio.
-  async function confirmarManualComComprovante() {
-    if (!comprovanteFile) { setErr("Comprovante obrigatório para baixa manual."); return; }
-    const valor = valorPago.trim()
-      ? parseFloat(valorPago.replace(",", "."))
-      : (detalhe?.valor ?? 0);
-    if (!valor || valor <= 0) { setErr("Informe o valor pago."); return; }
-    if (detalhe && valor > detalhe.valor) { setErr("Valor pago maior que o valor da conta."); return; }
-    setBaixando(true); setErr("");
-    try {
-      const path = await uploadComprovante(comprovanteFile);
-      if (!path) { setBaixando(false); return; }
-      await apiFetch(`/api/crediario/${contaId}/registrar-pagamento`, {
-        method: "POST",
-        body: JSON.stringify({
-          forma_recebimento: formaRecebimento,
-          valor_pago: valor,
-          comprovante_path: path,
-          obs: obs.trim() || undefined,
-        }),
-      });
-      onBaixa(contaId);
-      onClose();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Erro ao registrar baixa manual");
-    } finally {
-      setBaixando(false);
-    }
-  }
-
   async function handleVerificarMp() {
     if (!mpPaymentId.trim()) {
       setErr("Informe o ID do pagamento do Mercado Pago");
@@ -398,24 +211,15 @@ function DetalheDrawer({
     setBaixando(true);
     setErr("");
     try {
-      const r = await apiFetch<{ pagamento_parcial?: boolean; valor_pago?: number; valor_restante?: number }>(
-        `/api/crediario/${contaId}/verificar-mp`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            payment_id: mpPaymentId.trim(),
-            obs: obs.trim() || undefined,
-          }),
-        },
-      );
-      // Atualiza a lista nos dois casos. No parcial, mantém o drawer aberto
-      // mostrando o resultado (quanto entrou e quanto virou nova conta).
+      await apiFetch(`/api/crediario/${contaId}/verificar-mp`, {
+        method: "POST",
+        body: JSON.stringify({
+          payment_id: mpPaymentId.trim(),
+          obs: obs.trim() || undefined,
+        }),
+      });
       onBaixa(contaId);
-      if (r?.pagamento_parcial && r.valor_restante != null) {
-        setMpParcial({ valor_pago: r.valor_pago ?? 0, valor_restante: r.valor_restante });
-      } else {
-        onClose();
-      }
+      onClose();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Erro ao verificar pagamento");
     } finally {
@@ -517,39 +321,6 @@ function DetalheDrawer({
     }
   }
 
-  async function validarVale() {
-    if (!valeNumero.trim()) return;
-    setValeValidando(true);
-    setErr("");
-    try {
-      const r = await apiFetch<{ ok: boolean; erro?: string; valor_disponivel?: number; cliente_id?: number | null }>(
-        `/api/vale-troca/validar`,
-        { method: "POST", body: JSON.stringify({ numero: valeNumero.trim() }) },
-      );
-      setValeValidacao(r);
-    } catch (e) {
-      setValeValidacao({ ok: false, erro: e instanceof Error ? e.message : "Erro ao validar o vale" });
-    } finally {
-      setValeValidando(false);
-    }
-  }
-
-  // Registra a baixa com vale. O valor vem do vale (server-side). LANÇA em caso
-  // de erro — o ValeCodigoInline exibe a mensagem inline (ex.: "código incorreto").
-  async function registrarVale(vale_codigo?: string) {
-    await apiFetch(`/api/crediario/${contaId}/registrar-pagamento`, {
-      method: "POST",
-      body: JSON.stringify({
-        forma_recebimento: "Vale-Troca",
-        vale_numero: valeNumero.trim(),
-        ...(vale_codigo ? { vale_codigo } : {}),
-        obs: obs.trim() || undefined,
-      }),
-    });
-    onBaixa(contaId);
-    onClose();
-  }
-
   async function handleEnviarMensagem() {
     if (!novaMsg.trim()) return;
     setEnviandoMsg(true);
@@ -568,7 +339,7 @@ function DetalheDrawer({
   }
 
   const aging = detalhe ? agingLabel(detalhe.status_aging, detalhe.dias_atraso) : null;
-  const podeRegistrarBaixa = podeBaixar && detalhe?.situacao === "pendente";
+  const podeRegistrarBaixa = isGerente && detalhe?.situacao === "pendente";
 
   return (
     <>
@@ -759,40 +530,10 @@ function DetalheDrawer({
                 )}
 
                 {/* Manual (MP) → campo ID + verificação */}
-                {formaRecebimento === "Manual (MP)" && mpParcial && (
-                  <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#1D9E75", fontWeight: 700, marginBottom: 8 }}>
-                      <CheckCircle size={16} /> Baixa parcial registrada
-                    </div>
-                    <div style={{ background: "#EBF5FB", borderRadius: 8, padding: "10px 12px", color: "#185FA5" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span>Pago agora (MP)</span>
-                        <b>R$ {mpParcial.valor_pago.toFixed(2).replace(".", ",")}</b>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #0070E040", marginTop: 6, paddingTop: 6 }}>
-                        <span>Nova conta pendente</span>
-                        <b>R$ {mpParcial.valor_restante.toFixed(2).replace(".", ",")}</b>
-                      </div>
-                    </div>
-                    <div style={{ color: C.cinza, marginTop: 8 }}>
-                      O restante virou uma nova conta "Saldo restante", que continua cobrável no crediário.
-                    </div>
-                    <button
-                      onClick={onClose}
-                      style={{
-                        marginTop: 10, width: "100%", padding: "10px",
-                        background: "#0070E0", color: "#fff", border: "none",
-                        borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
-                      }}>
-                      Fechar
-                    </button>
-                  </div>
-                )}
-
-                {formaRecebimento === "Manual (MP)" && !mpParcial && (
+                {formaRecebimento === "Manual (MP)" && (
                   <>
                     <div style={{ fontSize: 11, color: "#4A6FA5", marginBottom: 10, lineHeight: 1.5 }}>
-                      Informe o ID do pagamento MP recebido do cliente. O sistema consulta a API do Mercado Pago e só confirma se o status for <b>approved</b>. Se o valor pago for <b>menor que a conta</b>, registra baixa parcial e abre uma nova conta com o restante.
+                      Informe o ID do pagamento MP recebido do cliente. O sistema consulta a API do Mercado Pago e só confirma se o status for <b>approved</b>.
                     </div>
                     <input
                       value={mpPaymentId}
@@ -909,296 +650,8 @@ function DetalheDrawer({
                   </>
                 )}
 
-                {/* Vale-Troca → número do vale + token do dono (mesma regra da venda) */}
-                {formaRecebimento === "Vale-Troca" && (
-                  <>
-                    <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>Número do vale</div>
-                    <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                      <input
-                        value={valeNumero}
-                        onChange={e => { setValeNumero(e.target.value); setValeValidacao(null); setErr(""); }}
-                        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void validarVale(); } }}
-                        placeholder="VT-00000"
-                        style={{
-                          flex: 1, fontSize: 13, padding: "8px 10px",
-                          border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
-                          outline: "none", background: "#fff", boxSizing: "border-box", fontFamily: "monospace",
-                        }}
-                      />
-                      <button
-                        onClick={() => void validarVale()}
-                        disabled={!valeNumero.trim() || valeValidando}
-                        style={{
-                          padding: "8px 14px", border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
-                          background: "#fff", color: C.esmeralda, fontSize: 12, fontWeight: 600,
-                          cursor: !valeNumero.trim() || valeValidando ? "not-allowed" : "pointer",
-                          display: "flex", alignItems: "center", gap: 6,
-                        }}>
-                        {valeValidando ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={13} />}
-                        Validar
-                      </button>
-                    </div>
-
-                    {valeValidacao && (
-                      <div style={{
-                        padding: "8px 10px", borderRadius: 6, marginBottom: 8, fontSize: 12, lineHeight: 1.5,
-                        border: `1px solid ${valeValidacao.ok ? "#A7F3D0" : "#FECACA"}`,
-                        background: valeValidacao.ok ? "#ECFDF5" : "#FEF2F2",
-                        color: valeValidacao.ok ? "#065F46" : "#991B1B",
-                      }}>
-                        {valeValidacao.ok ? (
-                          <>
-                            <div style={{ fontWeight: 700 }}>Vale válido</div>
-                            {valeValidacao.valor_disponivel !== undefined && (
-                              <div>Saldo: <strong>{fmtBRL(valeValidacao.valor_disponivel)}</strong>
-                                {valeValidacao.cliente_id == null ? " · promocional (sem dono)" : ""}</div>
-                            )}
-                            {detalhe && valeValidacao.valor_disponivel !== undefined && valeValidacao.valor_disponivel < detalhe.valor && (
-                              <div style={{ color: C.ambar, fontWeight: 600 }}>
-                                Vale menor que a conta — restante {fmtBRL(detalhe.valor - valeValidacao.valor_disponivel)} fica pendente
-                              </div>
-                            )}
-                          </>
-                        ) : (valeValidacao.erro ?? "Vale inválido")}
-                      </div>
-                    )}
-
-                    {/* Vale COM dono → exige o código enviado ao WhatsApp do cliente */}
-                    {valeValidacao?.ok && valeValidacao.cliente_id != null && (
-                      <ValeCodigoInline
-                        valeNumero={valeNumero.trim()}
-                        botaoLabel="Registrar pagamento"
-                        disabled={baixando}
-                        onAplicar={async ({ vale_codigo }) => { await registrarVale(vale_codigo); }}
-                      />
-                    )}
-
-                    {/* Vale promocional (sem dono) → aplica direto */}
-                    {valeValidacao?.ok && valeValidacao.cliente_id == null && (
-                      <button
-                        onClick={async () => {
-                          setBaixando(true); setErr("");
-                          try { await registrarVale(); }
-                          catch (e) { setErr(e instanceof Error ? e.message : "Erro ao registrar pagamento"); }
-                          finally { setBaixando(false); }
-                        }}
-                        disabled={baixando}
-                        style={{
-                          width: "100%", padding: "10px", background: C.esmeralda, color: C.creme,
-                          border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, marginTop: 4,
-                          cursor: baixando ? "not-allowed" : "pointer",
-                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                        }}>
-                        {baixando ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <CheckCircle size={14} />}
-                        Registrar pagamento
-                      </button>
-                    )}
-
-                    <button
-                      onClick={() => { setFormaRecebimento(null); setValeNumero(""); setValeValidacao(null); setErr(""); }}
-                      style={{
-                        marginTop: 8, padding: "8px 14px", background: "none",
-                        border: `1px solid ${C.cremeBorder}`, borderRadius: 8, fontSize: 12, color: C.cinza, cursor: "pointer",
-                      }}>
-                      Voltar
-                    </button>
-                  </>
-                )}
-
-                {/* Pix / Cartão → fluxo VALIDADO (igual ao pedido). Pix = QR do
-                    Mercado Pago, confirma sozinho pelo webhook. Manual (sem MP)
-                    = exceção só do dev, com comprovante obrigatório. */}
-                {(formaRecebimento === "Pix" || formaRecebimento === "Cartão de Crédito") && (
-                  <>
-                    {!modoManual && formaRecebimento === "Pix" && (
-                      <>
-                        {!pixQr ? (
-                          <button
-                            onClick={gerarPixQr}
-                            disabled={pixGerando}
-                            style={{
-                              width: "100%", padding: "10px", background: C.esmeralda, color: C.creme,
-                              border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700,
-                              cursor: pixGerando ? "not-allowed" : "pointer",
-                              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                            }}>
-                            {pixGerando
-                              ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Gerando QR...</>
-                              : <><CreditCard size={14} /> Gerar QR Pix</>}
-                          </button>
-                        ) : (
-                          <div style={{ textAlign: "center" }}>
-                            <img
-                              src={`data:image/png;base64,${pixQr.qr_code_base64}`}
-                              alt="QR Code Pix"
-                              style={{ width: 200, height: 200, margin: "0 auto", display: "block", border: `1px solid ${C.cremeBorder}`, borderRadius: 8 }}
-                            />
-                            <button
-                              onClick={async () => {
-                                try { await navigator.clipboard.writeText(pixQr.qr_code); setPixCopiado(true); setTimeout(() => setPixCopiado(false), 2000); } catch { /* noop */ }
-                              }}
-                              style={{
-                                marginTop: 8, padding: "7px 12px", background: "none",
-                                border: `1px solid ${C.cremeBorder}`, borderRadius: 8, fontSize: 12,
-                                color: C.esmeralda, cursor: "pointer", fontWeight: 600,
-                              }}>
-                              {pixCopiado ? "✓ Copiado!" : "Copiar código Pix"}
-                            </button>
-                            <div style={{ marginTop: 10, fontSize: 12, color: C.cinza, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                              <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
-                              Aguardando o pagamento… a conta baixa sozinha.
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    )}
-
-                    {!modoManual && formaRecebimento === "Cartão de Crédito" && (
-                      !cartaoAguardando ? (
-                        <>
-                          <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>Maquininha</div>
-                          <select
-                            value={deviceSel}
-                            onChange={e => setDeviceSel(e.target.value)}
-                            style={{
-                              width: "100%", fontSize: 13, padding: "8px 10px", marginBottom: 8,
-                              border: `1px solid ${C.cremeBorder}`, borderRadius: 6, background: "#fff",
-                              outline: "none", boxSizing: "border-box",
-                            }}>
-                            <option value="">Escolha a maquininha…</option>
-                            {devices.map(d => <option key={d.device_id} value={d.device_id}>{d.nome_legivel}</option>)}
-                          </select>
-                          <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>Parcelas</div>
-                          <select
-                            value={parcelas}
-                            onChange={e => setParcelas(Number(e.target.value))}
-                            style={{
-                              width: "100%", fontSize: 13, padding: "8px 10px", marginBottom: 8,
-                              border: `1px solid ${C.cremeBorder}`, borderRadius: 6, background: "#fff",
-                              outline: "none", boxSizing: "border-box",
-                            }}>
-                            {Array.from({ length: 12 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}x</option>)}
-                          </select>
-                          <button
-                            onClick={cobrarNaMaquininha}
-                            disabled={cartaoEnviando || !deviceSel}
-                            style={{
-                              width: "100%", padding: "10px", background: C.esmeralda, color: C.creme,
-                              border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700,
-                              cursor: cartaoEnviando || !deviceSel ? "not-allowed" : "pointer",
-                              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                            }}>
-                            {cartaoEnviando
-                              ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Enviando...</>
-                              : <><CreditCard size={14} /> Cobrar na maquininha</>}
-                          </button>
-                        </>
-                      ) : (
-                        <div style={{ textAlign: "center", padding: "8px 0" }}>
-                          <Loader2 size={22} style={{ animation: "spin 1s linear infinite", color: C.esmeralda }} />
-                          <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: C.esmeralda }}>Passe o cartão na maquininha</div>
-                          <div style={{ marginTop: 4, fontSize: 12, color: C.cinza }}>A conta baixa sozinha quando aprovar.</div>
-                          <button
-                            onClick={cancelarMaquininha}
-                            style={{
-                              marginTop: 10, padding: "7px 12px", background: "none",
-                              border: `1px solid ${C.cremeBorder}`, borderRadius: 8, fontSize: 12, color: C.cinza, cursor: "pointer",
-                            }}>
-                            Cancelar cobrança
-                          </button>
-                        </div>
-                      )
-                    )}
-
-                    {/* Manual sem MP — EXCEÇÃO só do desenvolvedor */}
-                    {modoManual && (
-                      <div style={{ marginTop: 4 }}>
-                        <div style={{ fontSize: 11, color: C.cinza, marginBottom: 3 }}>Valor pago</div>
-                        <input
-                          type="text" inputMode="decimal"
-                          value={valorPago}
-                          onChange={e => setValorPago(e.target.value)}
-                          placeholder={detalhe ? detalhe.valor.toFixed(2).replace(".", ",") : "0,00"}
-                          style={{
-                            width: "100%", fontSize: 15, fontWeight: 700, padding: "8px 10px",
-                            border: `1px solid ${C.cremeBorder}`, borderRadius: 6, outline: "none",
-                            background: "#fff", boxSizing: "border-box", fontFamily: "monospace", color: C.esmeralda,
-                          }}
-                        />
-                        <div style={{ fontSize: 11, color: C.cinza, margin: "8px 0 3px" }}>Comprovante (obrigatório)</div>
-                        <input
-                          type="file" accept="image/*" capture="environment"
-                          onChange={e => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            setComprovanteFile(file);
-                            setComprovantePreview(URL.createObjectURL(file));
-                          }}
-                          style={{ width: "100%", fontSize: 12 }}
-                        />
-                        {comprovantePreview && (
-                          <img src={comprovantePreview} alt="Comprovante"
-                            style={{ marginTop: 6, height: 80, borderRadius: 6, objectFit: "cover" }} />
-                        )}
-                        <textarea
-                          value={obs}
-                          onChange={e => setObs(e.target.value)}
-                          placeholder="Observação (ex: ID do Pix, motivo da exceção)..."
-                          rows={2}
-                          style={{
-                            marginTop: 6, width: "100%", fontSize: 12, padding: "7px 10px",
-                            border: `1px solid ${C.cremeBorder}`, borderRadius: 6, resize: "none",
-                            outline: "none", background: "#fff", boxSizing: "border-box",
-                          }}
-                        />
-                        <button
-                          onClick={confirmarManualComComprovante}
-                          disabled={baixando}
-                          style={{
-                            marginTop: 8, width: "100%", padding: "10px", background: C.ambar, color: "#fff",
-                            border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700,
-                            cursor: baixando ? "not-allowed" : "pointer",
-                            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                          }}>
-                          {baixando
-                            ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Confirmando...</>
-                            : <><CheckCircle size={14} /> Confirmar baixa manual</>}
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Atalho da exceção manual — visível só para o dev */}
-                    {isDev && !pixQr && !cartaoAguardando && (
-                      <button
-                        onClick={() => { setModoManual(m => !m); setErr(""); }}
-                        style={{
-                          marginTop: 8, width: "100%", padding: "7px", background: "none",
-                          border: `1px dashed ${C.cremeBorder}`, borderRadius: 8, fontSize: 11,
-                          color: C.cinza, cursor: "pointer",
-                        }}>
-                        {modoManual ? "← Voltar ao fluxo validado" : "Lançar manual (comprovante) — só dev"}
-                      </button>
-                    )}
-
-                    <button
-                      onClick={() => {
-                        setFormaRecebimento(null); setModoManual(false);
-                        setPixQr(null); setComprovanteFile(null); setComprovantePreview(null);
-                        setValorPago(""); setErr("");
-                        setCartaoAguardando(false); setDeviceSel(""); setDevices([]);
-                        if (pollRef.current) clearInterval(pollRef.current);
-                      }}
-                      style={{
-                        marginTop: 8, padding: "8px 14px", background: "none", width: "100%",
-                        border: `1px solid ${C.cremeBorder}`, borderRadius: 8, fontSize: 12, color: C.cinza, cursor: "pointer",
-                      }}>
-                      Voltar
-                    </button>
-                  </>
-                )}
-
                 {/* Demais formas → valor + (Ouro: peso/grama/foto) */}
-                {formaRecebimento && formaRecebimento !== "Manual (MP)" && formaRecebimento !== "PagBank" && formaRecebimento !== "Vale-Troca" && formaRecebimento !== "Pix" && formaRecebimento !== "Cartão de Crédito" && (
+                {formaRecebimento && formaRecebimento !== "Manual (MP)" && formaRecebimento !== "PagBank" && (
                   <>
                     {/* Valor pago */}
                     <div style={{ marginBottom: 8 }}>
@@ -1357,35 +810,6 @@ function DetalheDrawer({
               <div style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
                 <MessageSquare size={13} /> Histórico ({detalhe.comunicacoes.length})
               </div>
-
-              {/* Comprovantes/fotos anexados nas baixas desta venda (bucket) */}
-              {detalhe.fotos && detalhe.fotos.length > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, color: C.cinza, marginBottom: 6 }}>
-                    Comprovantes anexados ({detalhe.fotos.length})
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {detalhe.fotos.map(f => (
-                      <a
-                        key={f.path}
-                        href={getPublicUrl("pagamento-fotos", f.path)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Abrir comprovante"
-                        style={{ display: "block", width: 64, height: 64, borderRadius: 6, overflow: "hidden", border: `1px solid ${C.cremeBorder}`, flexShrink: 0 }}
-                      >
-                        <img
-                          src={getPublicUrl("pagamento-fotos", f.path)}
-                          alt="Comprovante anexado"
-                          loading="lazy"
-                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                        />
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {detalhe.comunicacoes.length === 0 && (
                 <div style={{ fontSize: 12, color: C.cinza, fontStyle: "italic" }}>Sem registros ainda.</div>
               )}
@@ -1442,7 +866,6 @@ function VendaCard({
   numeroVenda,
   clienteNome,
   vendedorNome,
-  dataVenda,
   parcelas,
   isGerente,
   onSelectParcela,
@@ -1451,7 +874,6 @@ function VendaCard({
   numeroVenda: string | null;
   clienteNome: string | null;
   vendedorNome: string | null;
-  dataVenda: string | null;
   parcelas: CrediarioItem[];
   isGerente: boolean;
   onSelectParcela: (id: number) => void;
@@ -1461,21 +883,13 @@ function VendaCard({
   const totalPendente = parcelas.filter(p => p.situacao === "pendente").reduce((s, p) => s + p.valor, 0);
   const totalVencido  = parcelas.filter(p => p.status_aging === "vencido" && p.situacao === "pendente").reduce((s, p) => s + p.valor, 0);
   const hasVencido    = totalVencido > 0;
-  const hasBreve      = !hasVencido && parcelas.some(p => p.status_aging === "vence_em_breve" && p.situacao === "pendente");
   const qtdPendentes  = parcelas.filter(p => p.situacao === "pendente").length;
-  const temPendente   = qtdPendentes > 0;
-
-  // Status do card (faixa lateral + badge): vencido > vence em breve > em dia.
-  const statusCor   = hasVencido ? C.vermelho : hasBreve ? C.ambar : C.esmeralda;
-  const statusBg    = hasVencido ? C.vermelhoLt : hasBreve ? C.ambarLt : C.esmeraldaLt;
-  const statusLabel = hasVencido ? "vencido" : hasBreve ? "vence em breve" : "em dia";
 
   return (
     <div style={{
-      border: `1px solid ${C.cremeBorder}`,
-      borderLeft: `3px solid ${temPendente ? statusCor : C.cremeBorder}`,
-      borderRadius: 12,
-      background: "#fff",
+      border: `1px solid ${hasVencido ? C.vermelho + "40" : C.cremeBorder}`,
+      borderRadius: 10,
+      background: hasVencido ? C.vermelhoLt + "40" : "#fff",
       marginBottom: 10,
     }}>
       {/* Header da venda */}
@@ -1484,7 +898,7 @@ function VendaCard({
         style={{
           width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "12px 16px", background: "transparent", border: "none", cursor: "pointer",
-          borderRadius: expanded ? "0 12px 0 0" : "0 12px 12px 0",
+          borderRadius: expanded ? "10px 10px 0 0" : 10,
           borderBottom: expanded ? `1px solid ${C.cremeBorder}` : "none",
         }}
       >
@@ -1495,30 +909,20 @@ function VendaCard({
               <span style={{ fontWeight: 600, fontSize: 14, color: C.esmeralda }}>
                 {numeroVenda ? `Venda ${numeroVenda}` : "Sem venda"}
               </span>
-              {temPendente && (
-                <>
-                  <span style={{
-                    fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20,
-                    background: statusBg, color: statusCor,
-                  }}>
-                    {statusLabel}
-                  </span>
-                  <span style={{ fontSize: 11, color: C.cinza }}>
-                    {qtdPendentes} pendente{qtdPendentes > 1 ? "s" : ""}
-                  </span>
-                </>
+              {qtdPendentes > 0 && (
+                <span style={{
+                  fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 20,
+                  background: hasVencido ? C.vermelhoLt : C.esmeraldaLt,
+                  color: hasVencido ? C.vermelho : C.esmeralda,
+                }}>
+                  {qtdPendentes} pendente{qtdPendentes > 1 ? "s" : ""}
+                </span>
               )}
             </div>
             <div style={{ fontSize: 12, color: C.cinza, marginTop: 2, display: "flex", gap: 10, flexWrap: "wrap" }}>
               <span><User size={11} style={{ display: "inline", marginRight: 3 }} />{clienteNome ?? "—"}</span>
               {isGerente && vendedorNome && (
                 <span style={{ color: C.esmeralda }}>• {vendedorNome}</span>
-              )}
-              {dataVenda && (
-                <span style={{ color: C.cinza }}>
-                  <Calendar size={11} style={{ display: "inline", marginRight: 3 }} />
-                  Venda {fmtData(dataVenda)}
-                </span>
               )}
             </div>
           </div>
@@ -1585,24 +989,25 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   const [filtroSituacao, setFiltroSituacao] = useState<string>("pendente");
   const [filtroAging, setFiltroAging] = useState<string>("");
   const [busca, setBusca] = useState("");
-  const [filtroConsultora, setFiltroConsultora] = useState<string>("");
-  const [contagensConsultora, setContagensConsultora] = useState<Contagens | null>(null);
-  const [pagina, setPagina] = useState(1);
-  const [porPagina, setPorPagina] = useState(15);
-  const [periodoPreset, setPeriodoPreset] = useState("mes");
-  const [periodoCustom, setPeriodoCustom] = useState<{ from: string; to: string }>({ from: "", to: "" });
-  const [periodoMetrics, setPeriodoMetrics] = useState<{ vendido: number; recebido: number } | null>(null);
-  const [drill, setDrill] = useState<"vendido" | "recebido" | null>(null);
   const [loadedItems, setLoadedItems] = useState<CrediarioItem[]>(items);
   const [loading, setLoading] = useState(false);
   const [selectedContaId, setSelectedContaId] = useState<number | null>(null);
 
-  // O alerta de vencidos agora é GLOBAL (VencidosAlarme no DashboardShell).
+  // Faixa de alerta de vencidos NA TELA (Fase 4 crediário): aparece se há contas
+  // vencidas e some com "ok"; reaparece no dia seguinte. Regra do Jonathan:
+  // "todas as notificações na tela, senão elas não olham". Começa escondida no
+  // SSR (sem localStorage) e o effect a mostra se ainda não deu "ok" hoje.
+  const [faixaOk, setFaixaOk] = useState(true);
+  useEffect(() => {
+    const hoje = new Date().toISOString().slice(0, 10);
+    setFaixaOk(localStorage.getItem("crediario_faixa_ok") === hoje);
+  }, []);
+  const dispensarFaixa = () => {
+    localStorage.setItem("crediario_faixa_ok", new Date().toISOString().slice(0, 10));
+    setFaixaOk(true);
+  };
 
   const isGerente = ["desenvolvedor", "admin", "gerente_loja"].includes(userRole);
-  // Quem pode registrar baixa: gerente + consultora (no back, a consultora
-  // só baixa conta de venda DELA — ownership em requireCrediarioOwnership).
-  const podeBaixar = isGerente || userRole === "consultora";
 
   // Deep-link "Receber no Crediario" (vindo da tela da venda):
   // /crediario?venda=<id> abre direto o drawer da conta pendente daquela venda,
@@ -1634,9 +1039,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
     setLoading(true);
     try {
       // Pagos: busca mais itens pois pode acumular histórico longo
-      // Carrega tudo (a loja é pequena) e a paginação é client-side por venda —
-      // assim o agrupamento não quebra entre páginas e funciona com os filtros.
-      const params = new URLSearchParams({ limit: "1500" });
+      const params = new URLSearchParams({ limit: situacao === "pago" ? "500" : "200" });
       if (situacao) params.set("situacao", situacao);
       if (aging)    params.set("status_aging", aging);
       if (!isGerente && vendedorId) params.set("vendedor_id", String(vendedorId));
@@ -1647,67 +1050,13 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
     }
   }, [isGerente, vendedorId]);
 
-  // Resumo (cards/abas/alerta) por consultora: ao escolher uma, busca os números
-  // DELA no servidor; em "Todas", volta ao global (prop). O Saldo Crédito NÃO
-  // entra aqui — é da loja (sempre global).
-  useEffect(() => {
-    if (!filtroConsultora || !isGerente) { setContagensConsultora(null); return; }
-    let cancelado = false;
-    void apiFetch<{ contagens?: Contagens }>(`/api/crediario?vendedor_id=${filtroConsultora}&counts=1&limit=1`)
-      .then(d => { if (!cancelado) setContagensConsultora(d.contagens ?? null); })
-      .catch(() => { if (!cancelado) setContagensConsultora(null); });
-    return () => { cancelado = true; };
-  }, [filtroConsultora, isGerente]);
-
-  // Volta pra 1ª página sempre que o conjunto exibido muda (filtro/busca/tamanho).
-  useEffect(() => { setPagina(1); }, [filtroSituacao, filtroAging, busca, filtroConsultora, porPagina]);
-
-  // Período (Vendeu/Recebeu): busca os valores do período escolhido, respeitando
-  // a consultora selecionada (gerente). Consultora logada já vê só os dela.
-  useEffect(() => {
-    const { from, to } = rangeDoPeriodo(periodoPreset, periodoCustom);
-    if (!from || !to) { setPeriodoMetrics(null); return; }
-    const params = new URLSearchParams({ limit: "1", from, to });
-    if (filtroConsultora && isGerente) params.set("vendedor_id", filtroConsultora);
-    let cancelado = false;
-    void apiFetch<{ periodo?: { vendido: number; recebido: number } }>(`/api/crediario?${params}`)
-      .then(d => { if (!cancelado) setPeriodoMetrics(d.periodo ?? null); })
-      .catch(() => { if (!cancelado) setPeriodoMetrics(null); });
-    return () => { cancelado = true; };
-  }, [periodoPreset, periodoCustom, filtroConsultora, isGerente]);
-
-  // Drill-down: quando ativo, a lista mostra as contas do período (vendido =
-  // por data da venda; recebido = por data do recebimento). Recarrega ao mudar
-  // período/consultora. Sair do drill = volta à lista normal (handlers abaixo).
-  useEffect(() => {
-    if (!drill) return;
-    const { from, to } = rangeDoPeriodo(periodoPreset, periodoCustom);
-    if (!from || !to) return;
-    const params = new URLSearchParams({ limit: "1500", drill, from, to });
-    if (filtroConsultora && isGerente) params.set("vendedor_id", filtroConsultora);
-    let cancelado = false;
-    setLoading(true);
-    void apiFetch<{ items: CrediarioItem[] }>(`/api/crediario?${params}`)
-      .then(d => { if (!cancelado) { setLoadedItems(d.items); setPagina(1); } })
-      .catch(() => { /* mantém a lista atual em caso de erro */ })
-      .finally(() => { if (!cancelado) setLoading(false); });
-    return () => { cancelado = true; };
-  }, [drill, periodoPreset, periodoCustom, filtroConsultora, isGerente]);
-
-  const toggleDrill = (modo: "vendido" | "recebido") => {
-    if (drill === modo) { setDrill(null); void reload(filtroSituacao, filtroAging); }
-    else setDrill(modo);
-  };
-
   const handleFiltroSituacao = (s: string) => {
-    setDrill(null);
     setFiltroSituacao(s);
     setFiltroAging("");
     void reload(s, "");
   };
 
   const handleFiltroAging = (a: string) => {
-    setDrill(null);
     const next = filtroAging === a ? "" : a;
     setFiltroAging(next);
     void reload(filtroSituacao, next);
@@ -1719,30 +1068,15 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
     void reload(filtroSituacao, filtroAging);
   }, [filtroSituacao, filtroAging, reload]);
 
-  // Lista de consultoras presentes (para o filtro — só faz sentido p/ gerente,
-  // que enxerga várias; a consultora já recebe só as vendas dela).
-  const consultoras = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const i of loadedItems) {
-      if (i.vendedor_id != null && i.vendedor_nome) map.set(i.vendedor_id, i.vendedor_nome);
-    }
-    return Array.from(map.entries())
-      .map(([id, nome]) => ({ id, nome }))
-      .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
-  }, [loadedItems]);
-
   // Agrupa por venda
   const vendaGroups = useMemo(() => {
-    const buscaLc = busca.trim().toLowerCase();
-    const filtered = loadedItems.filter(i => {
-      if (filtroConsultora && String(i.vendedor_id) !== filtroConsultora) return false;
-      if (!buscaLc) return true;
-      return (
-        (i.cliente_nome ?? "").toLowerCase().includes(buscaLc) ||
-        (i.numero_venda ?? "").toLowerCase().includes(buscaLc) ||
-        (i.vendedor_nome ?? "").toLowerCase().includes(buscaLc)
-      );
-    });
+    const filtered = busca.trim()
+      ? loadedItems.filter(i =>
+          (i.cliente_nome ?? "").toLowerCase().includes(busca.toLowerCase()) ||
+          (i.numero_venda ?? "").toLowerCase().includes(busca.toLowerCase()) ||
+          (i.vendedor_nome ?? "").toLowerCase().includes(busca.toLowerCase())
+        )
+      : loadedItems;
 
     const map = new Map<string, CrediarioItem[]>();
     for (const item of filtered) {
@@ -1751,28 +1085,15 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
       map.get(key)!.push(item);
     }
     return Array.from(map.entries()).map(([key, parcelas]) => ({ key, parcelas }));
-  }, [loadedItems, busca, filtroConsultora]);
+  }, [loadedItems, busca]);
 
   const saldoUsado = saldo ? saldo.limite - saldo.atual : 0;
   const saldoPct = saldo ? Math.min(100, (saldoUsado / saldo.limite) * 100) : 0;
 
-  // Resumo exibido: o da consultora escolhida, ou o global (prop). O Saldo
-  // Crédito é à parte (sempre global — da loja).
-  const contagensView = contagensConsultora ?? contagens;
-  const consultoraSelNome = filtroConsultora
-    ? consultoras.find(c => String(c.id) === filtroConsultora)?.nome ?? null
-    : null;
-  const contasFiltradas = vendaGroups.reduce((s, g) => s + g.parcelas.length, 0);
-
-  // Paginação (client-side, por venda): fatia os grupos já filtrados.
-  const totalPaginas = Math.max(1, Math.ceil(vendaGroups.length / porPagina));
-  const paginaSegura = Math.min(pagina, totalPaginas);
-  const vendaGroupsPagina = vendaGroups.slice((paginaSegura - 1) * porPagina, paginaSegura * porPagina);
-
   const tabs = [
-    { key: "pendente", label: "Pendentes", count: contagensView.pendente },
-    { key: "pago",     label: "Pagos",     count: contagensView.pago },
-    { key: "",         label: "Todos",     count: contagensView.total },
+    { key: "pendente", label: "Pendentes", count: contagens.pendente },
+    { key: "pago",     label: "Pagos",     count: contagens.pago },
+    { key: "",         label: "Todos",     count: contagens.total },
   ];
 
   return (
@@ -1803,34 +1124,50 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
           </button>
         </div>
 
-        {/* O alerta de vencidos virou GLOBAL (VencidosAlarme no DashboardShell,
-            aparece em toda a tela do sistema) — não fica mais inline aqui. */}
+        {/* ── Faixa de alerta de vencidos (some com "ok", volta no dia seguinte) ── */}
+        {contagens.vencido > 0 && !faixaOk && (
+          <div style={{ display: "flex", alignItems: "center", gap: 12, background: C.vermelho, color: "#fff", borderRadius: 10, padding: "12px 16px", marginBottom: 16 }}>
+            <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>
+              Você tem {contagens.vencido} conta{contagens.vencido !== 1 ? "s" : ""} vencida{contagens.vencido !== 1 ? "s" : ""} ({fmtBRL(contagens.valor_vencido)}). Cobre os clientes!
+            </div>
+            <button onClick={dispensarFaixa} style={{ background: "rgba(255,255,255,0.25)", border: "none", color: "#fff", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
+              ok
+            </button>
+          </div>
+        )}
 
         {/* ── Cards de resumo ───────────────────────────────────────────────── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12, marginBottom: 20 }}>
-          <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 12, padding: "14px 16px" }}>
+          <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
             <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
               <Clock size={12} /> Pendente
-              {consultoraSelNome && <span style={chipConsultora}>{primeiroNome(consultoraSelNome)}</span>}
             </div>
-            <div style={{ fontWeight: 700, fontSize: 20, color: C.esmeralda }}>{fmtBRL(contagensView.valor_pendente)}</div>
-            <div style={{ fontSize: 11, color: C.cinza }}>{contagensView.pendente} conta{contagensView.pendente !== 1 ? "s" : ""}</div>
+            <div style={{ fontWeight: 700, fontSize: 20, color: C.esmeralda }}>{fmtBRL(contagens.valor_pendente)}</div>
+            <div style={{ fontSize: 11, color: C.cinza }}>{contagens.pendente} conta{contagens.pendente !== 1 ? "s" : ""}</div>
           </div>
 
-          {contagensView.vencido > 0 && (
-            <div style={{ background: "#fff", border: `1px solid ${C.vermelho}40`, borderRadius: 12, padding: "14px 16px" }}>
+          {contagens.vencido > 0 && (
+            <div style={{ background: C.vermelhoLt, border: `1px solid ${C.vermelho}30`, borderRadius: 10, padding: "14px 16px" }}>
               <div style={{ fontSize: 11, color: C.vermelho, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
                 <AlertTriangle size={12} /> Vencido
-                {consultoraSelNome && <span style={{ ...chipConsultora, background: C.vermelhoLt, color: C.vermelho }}>{primeiroNome(consultoraSelNome)}</span>}
               </div>
-              <div style={{ fontWeight: 700, fontSize: 20, color: C.vermelho }}>{fmtBRL(contagensView.valor_vencido)}</div>
-              <div style={{ fontSize: 11, color: C.vermelho }}>{contagensView.vencido} conta{contagensView.vencido !== 1 ? "s" : ""}</div>
+              <div style={{ fontWeight: 700, fontSize: 20, color: C.vermelho }}>{fmtBRL(contagens.valor_vencido)}</div>
+              <div style={{ fontSize: 11, color: C.vermelho }}>{contagens.vencido} conta{contagens.vencido !== 1 ? "s" : ""}</div>
             </div>
           )}
 
+          <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
+              <CheckCircle size={12} /> Recebidos
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 20, color: C.verde }}>{contagens.pago}</div>
+            <div style={{ fontSize: 11, color: C.cinza }}>contas pagas</div>
+          </div>
+
           {/* Saldo da gerente — só visível para gerente/admin */}
           {saldo && (
-            <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 12, padding: "14px 16px" }}>
+            <div style={{ background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 10, padding: "14px 16px" }}>
               <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
                 <Wallet size={12} /> Saldo Crédito
               </div>
@@ -1849,84 +1186,22 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
           )}
         </div>
 
-        {/* ── Período: quanto vendeu em crediário x quanto recebeu ──────────────
-            "Vendeu" = crediário gerado em vendas do período; "Recebeu" = baixado
-            no período. Segue a consultora filtrada (ou global / a própria). */}
-        <div style={{ marginBottom: 20, background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 12, padding: "14px 16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 12 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginRight: 2 }}>
-              Período{consultoraSelNome ? ` — ${primeiroNome(consultoraSelNome)}` : ""}:
-            </span>
-            {PERIODOS.map(p => (
-              <button
-                key={p.key}
-                onClick={() => setPeriodoPreset(p.key)}
-                style={{
-                  padding: "4px 11px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
-                  background: periodoPreset === p.key ? C.esmeralda : C.cremeBg,
-                  color:      periodoPreset === p.key ? "#fff" : C.cinza,
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
-            {periodoPreset === "custom" && (
-              <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                <input type="date" value={periodoCustom.from} onChange={e => setPeriodoCustom(c => ({ ...c, from: e.target.value }))}
-                  style={{ fontSize: 12, padding: "3px 6px", border: `1px solid ${C.cremeBorder}`, borderRadius: 6 }} />
-                <span style={{ fontSize: 12, color: C.cinza }}>até</span>
-                <input type="date" value={periodoCustom.to} onChange={e => setPeriodoCustom(c => ({ ...c, to: e.target.value }))}
-                  style={{ fontSize: 12, padding: "3px 6px", border: `1px solid ${C.cremeBorder}`, borderRadius: 6 }} />
-              </span>
-            )}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-            <button
-              onClick={() => toggleDrill("vendido")}
-              title="Clique para ver as vendas do período na lista"
-              style={{
-                textAlign: "left", cursor: "pointer", background: C.cremeBg, borderRadius: 10, padding: "12px 14px",
-                border: drill === "vendido" ? `2px solid ${C.esmeralda}` : "2px solid transparent",
-              }}
-            >
-              <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
-                <CreditCard size={12} /> Vendeu em crediário
-              </div>
-              <div style={{ fontWeight: 700, fontSize: 20, color: C.esmeralda }}>{periodoMetrics ? fmtBRL(periodoMetrics.vendido) : "—"}</div>
-            </button>
-            <button
-              onClick={() => toggleDrill("recebido")}
-              title="Clique para ver os recebimentos do período na lista"
-              style={{
-                textAlign: "left", cursor: "pointer", background: C.cremeBg, borderRadius: 10, padding: "12px 14px",
-                border: drill === "recebido" ? `2px solid ${C.verde}` : "2px solid transparent",
-              }}
-            >
-              <div style={{ fontSize: 11, color: C.cinza, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}>
-                <CheckCircle size={12} /> Recebeu
-              </div>
-              <div style={{ fontWeight: 700, fontSize: 20, color: C.verde }}>{periodoMetrics ? fmtBRL(periodoMetrics.recebido) : "—"}</div>
-            </button>
-          </div>
-        </div>
-
         {/* ── Filtros ───────────────────────────────────────────────────────── */}
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-          <div style={{ display: "inline-flex", background: C.cremeBg, borderRadius: 10, padding: 3, gap: 2 }}>
-            {tabs.map(t => (
-              <button
-                key={t.key}
-                onClick={() => handleFiltroSituacao(t.key)}
-                style={{
-                  padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
-                  background: filtroSituacao === t.key ? C.esmeralda : "transparent",
-                  color:      filtroSituacao === t.key ? "#fff" : C.cinza,
-                }}
-              >
-                {t.label} {t.count > 0 && <span style={{ opacity: 0.7 }}>({t.count})</span>}
-              </button>
-            ))}
-          </div>
+          {tabs.map(t => (
+            <button
+              key={t.key}
+              onClick={() => handleFiltroSituacao(t.key)}
+              style={{
+                padding: "6px 14px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
+                background: filtroSituacao === t.key ? C.esmeralda : "#fff",
+                color:      filtroSituacao === t.key ? "#fff" : C.cinza,
+                boxShadow:  filtroSituacao === t.key ? "none" : `0 0 0 1px ${C.cremeBorder}`,
+              }}
+            >
+              {t.label} {t.count > 0 && <span style={{ opacity: 0.7 }}>({t.count})</span>}
+            </button>
+          ))}
 
           {filtroSituacao === "pendente" && (
             <>
@@ -1955,67 +1230,20 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
           )}
         </div>
 
-        {/* ── Busca + filtro de consultora ──────────────────────────────────── */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-          <div style={{
-            flex: 1, minWidth: 200,
-            display: "flex", alignItems: "center", gap: 8,
-            background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 8,
-            padding: "8px 12px",
-          }}>
-            <Search size={15} color={C.cinza} />
-            <input
-              value={busca}
-              onChange={e => setBusca(e.target.value)}
-              placeholder="Buscar por cliente, venda ou consultora..."
-              style={{ border: "none", outline: "none", flex: 1, fontSize: 13, background: "transparent", color: "#1f2937" }}
-            />
-          </div>
-
-          {/* Filtro por consultora — só gerente/admin (a consultora já vê só as dela) */}
-          {isGerente && consultoras.length > 1 && (
-            <div style={{
-              display: "flex", alignItems: "center", gap: 6, minWidth: 200,
-              background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 8,
-              padding: "8px 12px",
-            }}>
-              <User size={15} color={C.cinza} />
-              <select
-                value={filtroConsultora}
-                onChange={e => setFiltroConsultora(e.target.value)}
-                style={{ border: "none", outline: "none", flex: 1, fontSize: 13, background: "transparent", color: "#1f2937", cursor: "pointer" }}
-              >
-                <option value="">Todas as consultoras</option>
-                {consultoras.map(c => (
-                  <option key={c.id} value={String(c.id)}>{c.nome}</option>
-                ))}
-              </select>
-            </div>
-          )}
+        {/* ── Busca ─────────────────────────────────────────────────────────── */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          background: "#fff", border: `1px solid ${C.cremeBorder}`, borderRadius: 8,
+          padding: "8px 12px", marginBottom: 16,
+        }}>
+          <Search size={15} color={C.cinza} />
+          <input
+            value={busca}
+            onChange={e => setBusca(e.target.value)}
+            placeholder="Buscar por cliente, venda ou consultora..."
+            style={{ border: "none", outline: "none", flex: 1, fontSize: 13, background: "transparent", color: "#1f2937" }}
+          />
         </div>
-
-        {/* Faixa de drill ativo (lista mostrando o período, não a cobrança) */}
-        {drill && (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
-            background: C.esmeraldaLt, border: `1px solid ${C.esmeralda}40`, borderRadius: 10,
-            padding: "8px 14px", marginBottom: 12,
-          }}>
-            <span style={{ fontSize: 13, color: C.esmeralda, fontWeight: 600 }}>
-              {drill === "vendido" ? "Vendas do período" : "Recebimentos do período"}
-              {consultoraSelNome ? ` — ${primeiroNome(consultoraSelNome)}` : ""} · {contasFiltradas} conta{contasFiltradas !== 1 ? "s" : ""}
-            </span>
-            <button
-              onClick={() => { setDrill(null); void reload(filtroSituacao, filtroAging); }}
-              style={{
-                marginLeft: "auto", background: "#fff", border: `1px solid ${C.esmeralda}40`,
-                borderRadius: 8, padding: "4px 12px", fontSize: 12, color: C.esmeralda, cursor: "pointer", fontWeight: 600,
-              }}
-            >
-              ✕ voltar à lista
-            </button>
-          </div>
-        )}
 
         {/* ── Lista de vendas agrupadas ─────────────────────────────────────── */}
         {loading ? (
@@ -2028,7 +1256,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
             <p style={{ margin: 0, fontSize: 14 }}>Nenhum registro encontrado</p>
           </div>
         ) : (
-          vendaGroupsPagina.map(({ key, parcelas }) => {
+          vendaGroups.map(({ key, parcelas }) => {
             const first = parcelas[0];
             return (
               <VendaCard
@@ -2037,7 +1265,6 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
                 numeroVenda={first.numero_venda}
                 clienteNome={first.cliente_nome}
                 vendedorNome={first.vendedor_nome}
-                dataVenda={first.data_venda ?? first.venda_created_at ?? first.created_at}
                 parcelas={parcelas}
                 isGerente={isGerente}
                 onSelectParcela={setSelectedContaId}
@@ -2047,53 +1274,9 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
         )}
 
         {vendaGroups.length > 0 && (
-          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-            {totalPaginas > 1 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-                <button
-                  onClick={() => setPagina(p => Math.max(1, p - 1))}
-                  disabled={paginaSegura <= 1}
-                  style={{
-                    padding: "6px 12px", borderRadius: 8, border: `1px solid ${C.cremeBorder}`,
-                    background: "#fff", fontSize: 13, color: C.cinza,
-                    cursor: paginaSegura <= 1 ? "not-allowed" : "pointer", opacity: paginaSegura <= 1 ? 0.5 : 1,
-                  }}
-                >
-                  ‹ Anterior
-                </button>
-                <span style={{ fontSize: 13, color: C.cinza, minWidth: 110, textAlign: "center" }}>
-                  Página {paginaSegura} de {totalPaginas}
-                </span>
-                <button
-                  onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))}
-                  disabled={paginaSegura >= totalPaginas}
-                  style={{
-                    padding: "6px 12px", borderRadius: 8, border: `1px solid ${C.cremeBorder}`,
-                    background: "#fff", fontSize: 13, color: C.cinza,
-                    cursor: paginaSegura >= totalPaginas ? "not-allowed" : "pointer", opacity: paginaSegura >= totalPaginas ? 0.5 : 1,
-                  }}
-                >
-                  Próxima ›
-                </button>
-              </div>
-            )}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: C.cinza, flexWrap: "wrap", justifyContent: "center" }}>
-              <span>{vendaGroups.length} venda{vendaGroups.length !== 1 ? "s" : ""} — {contasFiltradas} conta{contasFiltradas !== 1 ? "s" : ""}</span>
-              <span style={{ color: C.cremeBorder }}>|</span>
-              <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                Por página:
-                <select
-                  value={porPagina}
-                  onChange={e => setPorPagina(Number(e.target.value))}
-                  style={{ border: `1px solid ${C.cremeBorder}`, borderRadius: 6, padding: "2px 6px", fontSize: 12, background: "#fff", cursor: "pointer" }}
-                >
-                  <option value={10}>10</option>
-                  <option value={15}>15</option>
-                  <option value={25}>25</option>
-                </select>
-              </label>
-            </div>
-          </div>
+          <p style={{ textAlign: "center", fontSize: 12, color: C.cinza, marginTop: 16 }}>
+            {vendaGroups.length} venda{vendaGroups.length !== 1 ? "s" : ""} — {loadedItems.length} conta{loadedItems.length !== 1 ? "s" : ""}
+          </p>
         )}
       </div>
 
@@ -2101,8 +1284,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
       {selectedContaId !== null && (
         <DetalheDrawer
           contaId={selectedContaId}
-          podeBaixar={podeBaixar}
-          isDev={userRole === "desenvolvedor"}
+          isGerente={isGerente}
           onClose={() => setSelectedContaId(null)}
           onBaixa={handleBaixaConfirmada}
         />
