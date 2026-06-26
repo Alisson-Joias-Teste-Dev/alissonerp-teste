@@ -19,7 +19,7 @@ export async function POST(
   if (!produtoId) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [prod] = await sql`
-    SELECT id_produto, id_api_produto FROM public.produtos WHERE id_produto = ${produtoId} LIMIT 1
+    SELECT id_produto, id_api_produto FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId} LIMIT 1
   `;
   if (!prod) return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
 

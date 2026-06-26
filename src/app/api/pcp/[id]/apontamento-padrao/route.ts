@@ -49,7 +49,7 @@ export async function GET(
         WHERE ordem_id = o.id AND produto_id IS NOT NULL
         ORDER BY id ASC LIMIT 1
       ) io ON true
-      LEFT JOIN public.produtos p
+      LEFT JOIN alissonerp.produtos_compat p
         ON p.id_produto = COALESCE(o.produto_reposicao_id, io.produto_id)
       WHERE pcp.id = ${pcpId}
     `;

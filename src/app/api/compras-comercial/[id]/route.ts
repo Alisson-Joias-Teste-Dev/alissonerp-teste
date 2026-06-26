@@ -29,5 +29,5 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
   `;
 
   if (!row) return NextResponse.json({ error: "Compra não encontrada" }, { status: 404 });
-  return NextResponse.json(normalizeRow(row as Record<string, unknown>, ["total"]));
+  return NextResponse.json(normalizeRow(row as Record<string, unknown>, ["total", "total_pecas", "peso_total_g", "valor_total_lote", "valor_grama", "ia_peso_balanca", "qtd_parcelas", "local_estoque_id", "fornecedor_id"]));
 }

@@ -7,7 +7,7 @@
  *  - data_ultima_venda MAX(data_venda) em public.vendas
  *  - qtd_vendida_90d   soma de quantidade nos ultimos 90 dias (base do DIO)
  *  - receita_total_12m soma de preco_total nos ultimos 365 dias (base do ABC)
- *  - data_ultima_compra data de reposicao populada pelo ETL em public.produtos
+ *  - data_ultima_compra data de reposicao populada pelo ETL em alissonerp.produtos_compat
  *
  * SQL direto via postgres lib. Retorno integral usado pelo Dashboard analítico.
  */
@@ -126,7 +126,7 @@ export async function GET(req: NextRequest) {
           )::int * 10
           ELSE NULL
         END AS preco_curva
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       LEFT JOIN estoque_comercial ec  ON ec.produto_id = p.id_produto
       LEFT JOIN ultima_venda uv       ON uv.produto_id = p.id_produto

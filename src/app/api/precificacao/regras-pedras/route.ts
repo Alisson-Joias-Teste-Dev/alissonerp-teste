@@ -8,8 +8,10 @@
  * PATCH  /api/precificacao/regras-pedras          — atualizar regra (id no body)
  * DELETE /api/precificacao/regras-pedras?id=X     — remover regra
  *
- * Regra de negócio: ao ativar uma regra (ativa=true), desativa automaticamente
- * todas as outras regras da mesma categoria_pedra. Apenas 1 regra ativa por categoria.
+ * Regra de negócio: cada categoria pode ter VÁRIAS regras ativas ao mesmo tempo
+ * (uma por faixa de tamanho — ex.: diamante tem 8 faixas). Ativar/editar uma regra
+ * NÃO desativa as outras. A view vw_pedras_preco escolhe a faixa certa pelo tamanho.
+ * IMPACTO se desativar uma faixa: as pedras daquele tamanho ficam sem preço.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -109,15 +111,8 @@ export async function POST(req: NextRequest) {
   const ativa = d.ativa === true;
 
   try {
-    // Se a nova regra for marcada como ativa, desativa todas as outras da mesma categoria
-    if (ativa) {
-      await sql`
-        UPDATE alissonerp.pedras_precificacao_regras
-        SET ativa = false, updated_at = NOW()
-        WHERE categoria_pedra = ${d.categoria_pedra} AND ativa = true
-      `;
-    }
-
+    // Pedras: várias regras ativas por categoria (uma por faixa). Criar uma regra ativa
+    // NÃO desativa as outras — cada faixa de tamanho precisa continuar ativa.
     const [regra] = await sql`
       INSERT INTO alissonerp.pedras_precificacao_regras
         (nome_tabela, categoria_pedra, custo_usd_ct, preco_rs_un,
@@ -155,20 +150,10 @@ export async function PATCH(req: NextRequest) {
   const d = parsed.data;
   const id = Number(d.id);
 
-  // Se ativando, desativa todas as outras da mesma categoria
-  if (d.ativa === true) {
-    // Primeiro descobre a categoria da regra que está sendo ativada
-    const [regraAlvo] = await sql<{ categoria_pedra: string }[]>`
-      SELECT categoria_pedra FROM alissonerp.pedras_precificacao_regras WHERE id = ${id}
-    `;
-    if (!regraAlvo) return NextResponse.json({ error: "Regra não encontrada" }, { status: 404 });
-
-    await sql`
-      UPDATE alissonerp.pedras_precificacao_regras
-      SET ativa = false, updated_at = NOW()
-      WHERE categoria_pedra = ${regraAlvo.categoria_pedra} AND ativa = true AND id != ${id}
-    `;
-  }
+  // Pedras: várias regras ativas por categoria (uma por faixa de tamanho).
+  // Ativar/editar uma regra NÃO desativa as outras — senão as pedras das demais
+  // faixas ficam sem preço (foi exatamente o que quebrou em 23/06). A existência
+  // da regra é validada pelo RETURNING do UPDATE abaixo (404 se não achar).
 
   // Validações de range
   if (d.tamanho_final_mm !== undefined && d.tamanho_inicial_mm !== undefined) {
@@ -183,8 +168,8 @@ export async function PATCH(req: NextRequest) {
       SET
         nome_tabela        = COALESCE(${d.nome_tabela ?? null}, nome_tabela),
         categoria_pedra    = COALESCE(${d.categoria_pedra ?? null}, categoria_pedra),
-        custo_usd_ct       = COALESCE(${d.custo_usd_ct !== undefined ? (d.custo_usd_ct === null ? null : Number(d.custo_usd_ct) as any) : undefined}, custo_usd_ct),
-        preco_rs_un        = COALESCE(${d.preco_rs_un !== undefined ? (d.preco_rs_un === null ? null : Number(d.preco_rs_un) as any) : undefined}, preco_rs_un),
+        custo_usd_ct       = COALESCE(${d.custo_usd_ct !== undefined ? (d.custo_usd_ct === null ? null : Number(d.custo_usd_ct) as any) : null}, custo_usd_ct),
+        preco_rs_un        = COALESCE(${d.preco_rs_un !== undefined ? (d.preco_rs_un === null ? null : Number(d.preco_rs_un) as any) : null}, preco_rs_un),
         tamanho_inicial_mm = COALESCE(${d.tamanho_inicial_mm != null ? Number(d.tamanho_inicial_mm) : null}, tamanho_inicial_mm),
         tamanho_final_mm   = COALESCE(${d.tamanho_final_mm != null ? Number(d.tamanho_final_mm) : null}, tamanho_final_mm),
         markup_inicial     = COALESCE(${d.markup_inicial != null ? Number(d.markup_inicial) : null}, markup_inicial),

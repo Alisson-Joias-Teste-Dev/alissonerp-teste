@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
   const itens = await sql`
     SELECT ci.*, p.nome AS produto_nome
     FROM alissonerp.conversao_itens ci
-    JOIN public.produtos p ON p.id_produto = ci.produto_id
+    JOIN alissonerp.produtos_compat p ON p.id_produto = ci.produto_id
     WHERE ci.conversao_id = ${conversao.id}
   `;
 

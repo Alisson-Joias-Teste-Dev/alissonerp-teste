@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
       COUNT(*) FILTER (WHERE ${regraJoia()} AND NOT ${regraInsumo()})::text AS joia,
       COUNT(*) FILTER (WHERE NOT ${regraInsumo()} AND NOT ${regraJoia()})::text AS semclass,
       COUNT(*)::text AS total
-    FROM public.produtos p
+    FROM alissonerp.produtos_compat p
   `;
 
   // Tabela existe?
@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
   if (tbl?.exists) {
     distribAtual = await sql<{ tipo_item: string | null; total: number }[]>`
       SELECT t.tipo_item, COUNT(*)::int AS total
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN alissonerp.produto_tipo_item t ON t.produto_id = p.id_produto
       GROUP BY 1
       ORDER BY 2 DESC
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
     const insertedIns = await sql<{ produto_id: number }[]>`
       INSERT INTO alissonerp.produto_tipo_item (produto_id, tipo_item)
       SELECT p.id_produto, 'insumo'
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       WHERE ${regraInsumo()}
       ON CONFLICT (produto_id) DO NOTHING
       RETURNING produto_id
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
     const insertedJoia = await sql<{ produto_id: number }[]>`
       INSERT INTO alissonerp.produto_tipo_item (produto_id, tipo_item)
       SELECT p.id_produto, 'joia'
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       WHERE ${regraJoia()}
       ON CONFLICT (produto_id) DO NOTHING
       RETURNING produto_id
@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
     // 4) Distribuição final
     const distrib = await sql<{ tipo_item: string | null; total: number }[]>`
       SELECT t.tipo_item, COUNT(*)::int AS total
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN alissonerp.produto_tipo_item t ON t.produto_id = p.id_produto
       WHERE p.situacao = 'A'
       GROUP BY 1

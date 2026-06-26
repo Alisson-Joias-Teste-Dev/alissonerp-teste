@@ -36,7 +36,7 @@ export async function GET(
       cfg.created_at,
       cfg.updated_at
     FROM alissonerp.estoque_comercial_config cfg
-    JOIN public.produtos p ON p.id_produto = cfg.produto_id
+    JOIN alissonerp.produtos_compat p ON p.id_produto = cfg.produto_id
     WHERE cfg.produto_id = ${id}
   `;
 

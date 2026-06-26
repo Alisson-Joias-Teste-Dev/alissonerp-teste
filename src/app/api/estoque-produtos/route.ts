@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
         COALESCE(SUM(e.saldo), 0)::int AS total_pecas,
         COUNT(*) FILTER (WHERE pp.preco_venda IS NULL OR pp.preco_venda = 0)::int AS skus_sem_preco
       FROM public.estoque e
-      JOIN public.produtos p ON p.id_api_produto = e.produto_id_api
+      JOIN alissonerp.produtos_compat p ON p.id_api_produto = e.produto_id_api
       LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
       WHERE e.saldo > 0
         ${wBusca}
@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
         (e.saldo * COALESCE(pp.preco_venda, 0))::numeric(14,2) AS valor_total,
         p.data_ultima_compra
       FROM public.estoque e
-      JOIN public.produtos p ON p.id_api_produto = e.produto_id_api
+      JOIN alissonerp.produtos_compat p ON p.id_api_produto = e.produto_id_api
       LEFT JOIN alissonerp.vw_produto_preco pp ON pp.id_produto = p.id_produto
       WHERE e.saldo > 0
         ${wBusca}

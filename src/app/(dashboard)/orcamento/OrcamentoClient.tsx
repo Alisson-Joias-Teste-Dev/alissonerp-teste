@@ -14,6 +14,7 @@ import { ProfileType } from "./types";
 import { maskCpfCnpj } from "@/lib/formatters";
 import { calcularPrecoSync, getPricingFactors, type CurvaConfig, type CurvaCategoriaInput } from "@/lib/curva-precificacao";
 import { joinGravacao, nomePrincipal, nomesAdicionais, formatGravacao } from "@/lib/gravacao";
+import { calcularItemComDesconto } from "@/lib/desconto/precificar-item";
 import type {
   RingParams, RingSize, PricingCategory, GrooveRule, PricingResult, ConfigOrcamento,
   StoneEntry, StonePrice, StoneType, StoneCut, OrcamentoSnapshot,
@@ -602,7 +603,7 @@ export default function OrcamentoClient({
   const [pecaFotoRef, setPecaFotoRef] = useState<string | null>(null);
   const [pecaDescontoPct, setPecaDescontoPct] = useState(0);
 
-  // Pedras para peça personalizada (vem de public.produtos categoria pedras)
+  // Pedras para peça personalizada (vem de alissonerp.produtos_compat categoria pedras)
   interface PedraProduto {
     id: number; sku: string | null; nome: string; preco: number;
     tipo_de_pedra: string | null; categoria: string | null;
@@ -1759,9 +1760,18 @@ export default function OrcamentoClient({
       const gravacaoBruto = isPar ? gravacaoCost + gravacaoCost2 : gravacaoCost;
       const brutoTotal = ouroBrutoTotal + pedrasBruto + gravacaoBruto;
       const valorTotalCalc = pricingTotal.price;
-      const fatorEfetivo = brutoTotal > 0 ? valorTotalCalc / brutoTotal : 1;
-      const valorOuroCalc = Math.round(ouroBrutoTotal * fatorEfetivo * 100) / 100;
-      const valorPedrasCalc = Math.round(pedrasBruto * fatorEfetivo * 100) / 100;
+      // FONTE ÚNICA (calculadora): distribui o desconto proporcional entre ouro/pedra/
+      // gravação — a PEDRA leva o desconto. pctDesconto derivado do fator efetivo do
+      // par/markup já aplicado (valor real, sem arredondar p/ real). Mantém o mesmo
+      // resultado de antes, agora vindo do lugar único (precificar-item.ts).
+      const _distSave = calcularItemComDesconto({
+        precoListaCheio: brutoTotal,
+        pctDesconto: brutoTotal > 0 ? Math.max(0, (1 - valorTotalCalc / brutoTotal) * 100) : 0,
+        pedrasRS: pedrasBruto,
+        gravacaoRS: gravacaoBruto,
+      });
+      const valorOuroCalc = _distSave.valorOuroRS;
+      const valorPedrasCalc = _distSave.valorPedrasRS;
 
       const valorTotal = usaSnapshotNoSave ? savedSnapshot!.valor : valorTotalCalc;
       const pesoTotal = usaSnapshotNoSave ? savedSnapshot!.peso : pricingTotal.weight;
@@ -3894,16 +3904,24 @@ export default function OrcamentoClient({
                 const brl = (n: number) => `R$ ${n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
                 if (isPar) {
-                  // Pedra EXATA (valor real da pedra). O desconto/arredondamento do par é
-                  // absorvido pelo OURO (valor grande) — assim a pedra não "perde" 1 centavo
-                  // nem o ouro "ganha" 1 centavo errado no rateio. ouro1 + pedras1 = A1
-                  // (bate com o split A1|A2 que aparece embaixo do total).
-                  const pedras1 = Math.round(pedrasCost * 100) / 100;
-                  const pedras2 = Math.round(pedrasCost2 * 100) / 100;
-                  const ouroAjustado = pricingTotal.price - pedras1 - pedras2 - gravTotal;
-                  const w1 = pricing.weight, w2 = pricing2.weight, wTot = w1 + w2;
-                  const ouro1 = Math.round((wTot > 0 ? ouroAjustado * (w1 / wTot) : ouroAjustado) * 100) / 100;
-                  const ouro2 = Math.round((ouroAjustado - ouro1) * 100) / 100;
+                  // FONTE ÚNICA (calculadora): cada anel tem seu FINAL (A1/A2) distribuído
+                  // entre ouro/pedra/gravação com o MESMO fator — a PEDRA leva o desconto
+                  // proporcional. ANTES a pedra ficava CHEIA e o ouro absorvia tudo, indo a
+                  // NEGATIVO quando a pedra era cara e o desconto grande (o "-3"). Agora
+                  // ouro1 + pedras1 = A1 (bate com o split A1|A2 embaixo do total) e o ouro
+                  // nunca fica negativo. IMPACTO se revertido: volta o "-3" na tela.
+                  const a1Bruto = pricing.price * (1 - descPromo1 / 100) + pedrasCost + gravacaoCost;
+                  const a2Bruto = pricing2.price * (1 - descPromo2 / 100) + pedrasCost2 + gravacaoCost2;
+                  const totalBrutoAneis = a1Bruto + a2Bruto;
+                  const a1Final = totalBrutoAneis > 0 ? pricingTotal.price * (a1Bruto / totalBrutoAneis) : 0;
+                  const a2Final = totalBrutoAneis > 0 ? pricingTotal.price * (a2Bruto / totalBrutoAneis) : 0;
+                  const dist1 = calcularItemComDesconto({ precoListaCheio: a1Bruto, pctDesconto: a1Bruto > 0 ? Math.max(0, (1 - a1Final / a1Bruto) * 100) : 0, pedrasRS: pedrasCost, gravacaoRS: gravacaoCost });
+                  const dist2 = calcularItemComDesconto({ precoListaCheio: a2Bruto, pctDesconto: a2Bruto > 0 ? Math.max(0, (1 - a2Final / a2Bruto) * 100) : 0, pedrasRS: pedrasCost2, gravacaoRS: gravacaoCost2 });
+                  const ouro1 = dist1.valorOuroRS;
+                  const pedras1 = dist1.valorPedrasRS;
+                  const ouro2 = dist2.valorOuroRS;
+                  const pedras2 = dist2.valorPedrasRS;
+                  const gravParTotal = Math.round((dist1.valorGravacaoRS + dist2.valorGravacaoRS) * 100) / 100;
                   const qtd1 = stoneEntries.reduce((acc, s) => acc + (s.qtd ?? 0), 0);
                   const qtd2 = stoneEntries2.reduce((acc, s) => acc + (s.qtd ?? 0), 0);
                   return (
@@ -3912,7 +3930,7 @@ export default function OrcamentoClient({
                       {pedras1 > 0 && <Pill label="Aliança 1 · Pedras" value={brl(pedras1)} sublabel={qtd1 > 0 ? `${qtd1} pedra${qtd1 > 1 ? "s" : ""}` : undefined} />}
                       <Pill label="Aliança 2 · Ouro" value={brl(ouro2)} />
                       {pedras2 > 0 && <Pill label="Aliança 2 · Pedras" value={brl(pedras2)} sublabel={qtd2 > 0 ? `${qtd2} pedra${qtd2 > 1 ? "s" : ""}` : undefined} />}
-                      {gravTotal > 0 && <Pill label="Gravação" value={brl(gravTotal)} />}
+                      {gravParTotal > 0 && <Pill label="Gravação" value={brl(gravParTotal)} />}
                     </>
                   );
                 }

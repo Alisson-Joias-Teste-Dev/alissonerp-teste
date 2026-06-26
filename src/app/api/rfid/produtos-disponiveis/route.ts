@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
           categoria,
           qtd_estoque,
           imagem
-        FROM public.produtos
+        FROM alissonerp.produtos_compat
         WHERE qtd_estoque >= 1
           AND situacao = 'A'
           AND categoria ILIKE ${categoriaBase + "%"}
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
           categoria,
           qtd_estoque,
           imagem
-        FROM public.produtos
+        FROM alissonerp.produtos_compat
         WHERE qtd_estoque >= 1
           AND situacao = 'A'
           AND categoria ILIKE ${categoriaBase + "%"}
@@ -90,7 +90,7 @@ export async function GET(req: NextRequest) {
           categoria,
           qtd_estoque,
           imagem
-        FROM public.produtos
+        FROM alissonerp.produtos_compat
         WHERE qtd_estoque >= 1
           AND situacao = 'A'
           AND (nome ILIKE ${"%" + q + "%"} OR sku ILIKE ${"%" + q + "%"})
@@ -106,7 +106,7 @@ export async function GET(req: NextRequest) {
           categoria,
           qtd_estoque,
           imagem
-        FROM public.produtos
+        FROM alissonerp.produtos_compat
         WHERE qtd_estoque >= 1
           AND situacao = 'A'
         ORDER BY nome ASC

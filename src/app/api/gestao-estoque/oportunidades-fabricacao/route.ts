@@ -103,7 +103,7 @@ export async function GET(req: NextRequest) {
         va.data_ultima_venda,
         va.vendas_365d,
         va.vendas_90d
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       JOIN vendas_agg va           ON va.produto_id = p.id_produto
       LEFT JOIN public.estoque e   ON e.sku        = p.sku
       LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto

@@ -2874,7 +2874,12 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       return (<Fragment key={item._key}>
                       <tr className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                         <td className="px-2 py-2 tabular-nums" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
-                        <td className="px-2 py-2 font-medium whitespace-nowrap" style={{ color: "#1A1A1A" }} title={item.nome_produto}>
+                        {/* Descrição: nome QUEBRA em até 2 linhas (whitespace-normal + break-words + maxWidth)
+                            em vez de esticar a linha. REGRA: nome longo de joia (ex. "Corrente Elo Cartier...")
+                            estava com whitespace-nowrap e empurrava as colunas pra fora, e o overflow-hidden
+                            do wrapper (linha ~2860) cortava o "Preço total" na direita. IMPACTO se voltar
+                            o nowrap: a coluna Total volta a ser cortada em telas/cartão de 1280px. (Jonathan 24/06) */}
+                        <td className="px-2 py-2 font-medium whitespace-normal break-words" style={{ color: "#1A1A1A", maxWidth: "220px" }} title={item.nome_produto}>
                           {item.nome_produto}
                           {item.upgrade && (
                             <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full align-middle"
@@ -3799,7 +3804,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           )}
 
           {/* ── Cobrança gateway (link online + maquininha) ── */}
-          {newPagGateway === "Mercado Pago" && (
+          {/* Esconde quando as linhas de pagamento já cobrem o total (ex.: A Receber
+              pendente que preenche o saldo): não faz sentido "cobrar" de novo — esse
+              saldo é recebido pela tela do Crediário. Espelha o gate do botão
+              "Completar pagamento" e a trava do banco (migration 333/335). */}
+          {!pagamentoCobreTotal && newPagGateway === "Mercado Pago" && (
             <MercadoPagoCobranca
               vendaId={venda.id}
               numeroVenda={venda.numero_venda}
@@ -3823,7 +3832,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               }}
             />
           )}
-          {newPagGateway === "PagBank" && (
+          {!pagamentoCobreTotal && newPagGateway === "PagBank" && (
             <PagBankCobranca
               vendaId={venda.id}
               numeroVenda={venda.numero_venda}

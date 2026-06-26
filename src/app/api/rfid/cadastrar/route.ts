@@ -18,7 +18,7 @@ const RfidCadastrarSchema = z.object({
  * Fluxo (UMA transacao):
  *   1. Autentica usuario (401 se nao logado)
  *   2. Valida role (403 se nao autorizado)
- *   3. Valida existencia do produto em public.produtos (404 se nao existe)
+ *   3. Valida existencia do produto em alissonerp.produtos_compat (404 se nao existe)
  *   4. Gera proximo EPC via fn alissonerp.gerar_proximo_epc()
  *   5. INSERT em alissonerp.joias_rfid com status='pendente_impressao'
  *   6. INSERT em alissonerp.joias_leituras (evento='cadastro')
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
   // -----------------------------------------------------------
   try {
     const resultado = await sql.begin(async (tx: any) => {
-      // Busca produto (public.produtos — readonly, ok somente SELECT)
+      // Busca produto (alissonerp.produtos_compat — readonly, ok somente SELECT)
       const [produto] = await tx`
         SELECT
           id_produto,
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
           categoria,
           peso_real,
           preco_tiny
-        FROM public.produtos
+        FROM alissonerp.produtos_compat
         WHERE id_produto = ${produtoId}
       `;
 
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // peso_real em public.produtos e REAL (4 bytes). Salvamos como NUMERIC(8,3).
+      // peso_real em alissonerp.produtos_compat e REAL (4 bytes). Salvamos como NUMERIC(8,3).
       // preco_tiny e NUMERIC. Ambos podem ser null (snapshot opcional).
       const pesoG:
         | number

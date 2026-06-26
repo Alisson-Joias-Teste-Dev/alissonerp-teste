@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     const rfidRows = await sql`
       SELECT j.epc, j.sku, j.nome, j.produto_id, p.nome AS produto_nome
       FROM alissonerp.joias_rfid j
-      LEFT JOIN public.produtos p ON p.id_produto = j.produto_id::bigint
+      LEFT JOIN alissonerp.produtos_compat p ON p.id_produto = j.produto_id::bigint
       WHERE j.epc = ANY(${epcs}::text[])
     `;
 
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     if (idsApi.length > 0) {
       prodRows = await sql`
         SELECT id_api_produto, id_produto, sku, nome
-        FROM public.produtos
+        FROM alissonerp.produtos_compat
         WHERE id_api_produto = ANY(${idsApi}::int[])
       `;
     }

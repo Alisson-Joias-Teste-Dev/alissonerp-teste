@@ -46,7 +46,6 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
 import UserEditDrawer, { type UsuarioEdit, type Deposito as DepositoEdit } from "@/components/UserEditDrawer";
-import Tabela from "@/components/Tabela";
 import { useAuth } from "@/hooks/useAuth";
 import { isFullAccess } from "@/lib/roles";
 import LocaisEstoqueTab from "@/components/LocaisEstoqueTab";
@@ -730,74 +729,94 @@ function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
         </div>
       )}
 
-      <Tabela
-        colunas={[
-          {
-            key: "avatar",
-            header: "",
-            className: "w-12",
-            render: (u) => (
-              <div className="w-8 h-8">
-                {u.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={u.avatar_url} alt={u.nome} className="w-8 h-8 rounded-full object-cover" />
-                ) : (
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-semibold select-none bg-gray-200 text-gray-500">
-                    {u.nome.trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
-                  </div>
-                )}
-              </div>
-            ),
-          },
-          {
-            key: "nome",
-            header: "Nome",
-            className: "font-semibold text-gray-800 whitespace-nowrap",
-            render: (u) => <>{u.nome}</>,
-          },
-          {
-            key: "email",
-            header: "E-mail",
-            className: "text-xs text-gray-500 truncate max-w-[200px]",
-            render: (u) => <>{u.email}</>,
-          },
-          {
-            key: "role",
-            header: "Role",
-            render: (u) => (
-              <span
-                className="inline-block text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap"
-                style={{ backgroundColor: "#d9770622", color: "#B37A4A" }}
-              >
-                {ROLE_LABEL[u.role] ?? u.role}
-              </span>
-            ),
-          },
-          {
-            key: "status",
-            header: "Status",
-            render: (u) =>
-              u.ativo ? (
-                <span className="inline-flex items-center gap-1.5 text-xs text-green-600 font-medium whitespace-nowrap">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Ativo
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 text-xs text-gray-400 font-medium whitespace-nowrap">
-                  <span className="w-1.5 h-1.5 rounded-full bg-gray-300" /> Inativo
-                </span>
-              ),
-          },
-          {
-            key: "desde",
-            header: "Desde",
-            className: "text-xs text-gray-400 whitespace-nowrap",
-            render: (u) => <>{new Date(u.created_at).toLocaleDateString("pt-BR")}</>,
-          },
-        ]}
-        dados={usuarios}
-        onLinhaClick={(u) => abrirDrawer(u)}
-        mensagemVazia="Nenhum usuário cadastrado"
-      />
+      {/* Tabela */}
+      <div className="rounded-xl overflow-hidden border border-gray-200 bg-white">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-100 bg-gray-50">
+              {["", "Nome", "E-mail", "Role", "Status", "Desde"].map((h) => (
+                <th
+                  key={h}
+                  className="px-4 py-3 text-left text-[10px] uppercase tracking-widest font-semibold text-gray-400"
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {usuarios.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">
+                  Nenhum usuário cadastrado
+                </td>
+              </tr>
+            ) : (
+              usuarios.map((u) => (
+                <tr
+                  key={u.id}
+                  className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors"
+                  onClick={() => abrirDrawer(u)}
+                >
+                  {/* Avatar */}
+                  <td className="px-4 py-3 w-12" onClick={(e) => e.stopPropagation()}>
+                    <div className="relative group w-8 h-8 shrink-0 cursor-pointer" onClick={() => abrirDrawer(u)}>
+                      {u.avatar_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={u.avatar_url}
+                          alt={u.nome}
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-semibold select-none"
+                          style={{ backgroundColor: P.border, color: P.sage }}
+                        >
+                          {u.nome.trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                  {/* Nome */}
+                  <td className="px-4 py-3 font-semibold text-gray-800">
+                    {u.nome}
+                  </td>
+                  {/* Email */}
+                  <td className="px-4 py-3 text-xs text-gray-500">
+                    {u.email}
+                  </td>
+                  {/* Role */}
+                  <td className="px-4 py-3">
+                    <span
+                      className="text-[10px] px-2 py-0.5 rounded-full font-medium"
+                      style={{ backgroundColor: P.dourado + "22", color: "#B37A4A" }}
+                    >
+                      {ROLE_LABEL[u.role] ?? u.role}
+                    </span>
+                  </td>
+                  {/* Status */}
+                  <td className="px-4 py-3">
+                    {u.ativo ? (
+                      <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500" />Ativo
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-xs text-gray-400 font-medium">
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />Inativo
+                      </span>
+                    )}
+                  </td>
+                  {/* Desde */}
+                  <td className="px-4 py-3 text-xs text-gray-400">
+                    {new Date(u.created_at).toLocaleDateString("pt-BR")}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
 
       {/* Drawer de edição */}
       <UserEditDrawer
@@ -5181,8 +5200,6 @@ function TabCreditoLoja() {
     descricao: string | null; usuario_nome: string | null; numero_venda: string | null; created_at: string;
   }>>([]);
   const [loading, setLoading] = useState(true);
-  const [ajusteValor, setAjusteValor] = useState("");
-  const [ajusteDesc, setAjusteDesc] = useState("");
   const [novoLimite, setNovoLimite] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -5204,23 +5221,6 @@ function TabCreditoLoja() {
   }
 
   useEffect(() => { loadData(); }, []);
-
-  async function handleAjuste() {
-    const valor = parseFloat(ajusteValor.replace(",", "."));
-    if (!valor || !ajusteDesc.trim()) return alert("Valor e descrição obrigatórios");
-    setSaving(true);
-    try {
-      const res = await fetch("/api/saldo-credito", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ valor, descricao: ajusteDesc.trim() }),
-      });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error);
-      setAjusteValor(""); setAjusteDesc("");
-      await loadData();
-    } catch (e) { alert(e instanceof Error ? e.message : "Erro"); }
-    finally { setSaving(false); }
-  }
 
   async function handleLimite() {
     const lim = parseFloat(novoLimite.replace(",", "."));
@@ -5248,7 +5248,7 @@ function TabCreditoLoja() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded-xl border p-5" style={{ borderColor: P.border, backgroundColor: P.card }}>
           <p className="text-xs uppercase tracking-widest mb-1" style={{ color: P.sage }}>Saldo Disponível</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: "#059669" }}>{fmt(saldo ?? 0)}</p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: (saldo ?? 0) < 0 ? "#EF4444" : "#059669" }}>{fmt(saldo ?? 0)}</p>
         </div>
         <div className="rounded-xl border p-5" style={{ borderColor: P.border, backgroundColor: P.card }}>
           <p className="text-xs uppercase tracking-widest mb-1" style={{ color: P.sage }}>Limite Configurado</p>
@@ -5265,37 +5265,20 @@ function TabCreditoLoja() {
         </div>
       </div>
 
-      {/* Ajuste manual + alterar limite */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="rounded-xl border p-4" style={{ borderColor: P.border, backgroundColor: P.card }}>
-          <p className="text-sm font-semibold mb-3" style={{ color: P.creme }}>Ajustar Saldo</p>
-          <div className="space-y-2">
-            <input type="text" value={ajusteValor} onChange={e => setAjusteValor(e.target.value)}
-              placeholder="Valor (positivo = crédito, negativo = débito)"
+      {/* Alterar limite (o saldo é derivado ao vivo; não há ajuste manual) */}
+      <div className="rounded-xl border p-4" style={{ borderColor: P.border, backgroundColor: P.card }}>
+        <p className="text-sm font-semibold mb-1" style={{ color: P.creme }}>Alterar Limite</p>
+        <p className="text-xs mb-3" style={{ color: P.sage }}>O saldo disponível é calculado automaticamente: limite − total a receber pendente.</p>
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <input type="text" value={novoLimite} onChange={e => setNovoLimite(e.target.value)}
               className="w-full border rounded-lg px-3 py-2 text-sm" style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }} />
-            <input type="text" value={ajusteDesc} onChange={e => setAjusteDesc(e.target.value)}
-              placeholder="Descrição do ajuste"
-              className="w-full border rounded-lg px-3 py-2 text-sm" style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }} />
-            <button onClick={handleAjuste} disabled={saving}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-              style={{ backgroundColor: P.creme, color: P.card }}>
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Aplicar Ajuste
-            </button>
           </div>
-        </div>
-        <div className="rounded-xl border p-4" style={{ borderColor: P.border, backgroundColor: P.card }}>
-          <p className="text-sm font-semibold mb-3" style={{ color: P.creme }}>Alterar Limite</p>
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
-              <input type="text" value={novoLimite} onChange={e => setNovoLimite(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 text-sm" style={{ borderColor: P.border, backgroundColor: P.bg, color: P.creme }} />
-            </div>
-            <button onClick={handleLimite} disabled={saving}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-              style={{ backgroundColor: P.creme, color: P.card }}>
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salvar
-            </button>
-          </div>
+          <button onClick={handleLimite} disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+            style={{ backgroundColor: P.creme, color: P.card }}>
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Salvar
+          </button>
         </div>
       </div>
 

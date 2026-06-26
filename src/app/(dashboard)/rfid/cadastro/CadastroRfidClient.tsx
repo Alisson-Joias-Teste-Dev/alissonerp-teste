@@ -1159,7 +1159,7 @@ function CardProduto({
           </div>
           <div className="text-sm text-red-800 mt-1">
             O produto #{produto.id_produto} não tem SKU ou nome preenchidos em{" "}
-            <code className="text-xs">public.produtos</code>. Não é possível
+            <code className="text-xs">alissonerp.produtos_compat</code>. Não é possível
             gerar etiqueta. Complete o cadastro do produto e tente novamente.
           </div>
           <button

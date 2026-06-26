@@ -5,6 +5,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createPointIntent, cancelPointIntent } from "@/lib/mercado-pago";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
+import { isPagamentoExcedeError, PAGAMENTO_EXCEDE_MSG } from "@/lib/pagamento-excede";
 
 const CriarIntentPointSchema = z.object({
   device_id: z.string().min(1, "obrigatório"),
@@ -111,40 +112,51 @@ export async function POST(
   }
 
   // ─── Cria ou reusa pagamento pendente ────────────────────────────────────
+  // A trava do banco (migration 333) barra a criação de uma linha que faria a
+  // soma dos pagamentos passar do total — é o que blindaria a venda 15343 (um
+  // "A Receber" pendente já cobria o total e mesmo assim nasceu um cartão por
+  // cima). Traduzimos esse erro num 409 amigável; a regra mora só no banco.
   let pagamentoId: number;
-  if (body.pagamento_id) {
-    const [pre] = await sql`
-      SELECT id FROM alissonerp.pagamentos_venda
-      WHERE id = ${body.pagamento_id} AND venda_id = ${vendaId} AND status = 'pendente'
-      LIMIT 1
-    `;
-    if (pre) {
-      await sql`
-        UPDATE alissonerp.pagamentos_venda
-        SET gateway = 'Mercado Pago Point',
-            valor = ${valorCobranca}, parcelas = ${body.installments ?? 1}
-        WHERE id = ${pre.id}
+  try {
+    if (body.pagamento_id) {
+      const [pre] = await sql`
+        SELECT id FROM alissonerp.pagamentos_venda
+        WHERE id = ${body.pagamento_id} AND venda_id = ${vendaId} AND status = 'pendente'
+        LIMIT 1
       `;
-      pagamentoId = Number(pre.id);
+      if (pre) {
+        await sql`
+          UPDATE alissonerp.pagamentos_venda
+          SET gateway = 'Mercado Pago Point',
+              valor = ${valorCobranca}, parcelas = ${body.installments ?? 1}
+          WHERE id = ${pre.id}
+        `;
+        pagamentoId = Number(pre.id);
+      } else {
+        const [pag] = await sql`
+          INSERT INTO alissonerp.pagamentos_venda (venda_id, forma, gateway, valor, parcelas, status)
+          VALUES (${vendaId}, 'Cartão de Crédito', 'Mercado Pago Point', ${valorCobranca}, ${body.installments ?? 1}, 'pendente')
+          RETURNING id
+        `;
+        pagamentoId = Number(pag.id);
+      }
     } else {
       const [pag] = await sql`
-        INSERT INTO alissonerp.pagamentos_venda (venda_id, forma, gateway, valor, parcelas, status)
-        VALUES (${vendaId}, 'Cartão de Crédito', 'Mercado Pago Point', ${valorCobranca}, ${body.installments ?? 1}, 'pendente')
+        INSERT INTO alissonerp.pagamentos_venda (
+          venda_id, forma, gateway, valor, parcelas, status
+        ) VALUES (
+          ${vendaId}, 'Cartão de Crédito', 'Mercado Pago Point',
+          ${valorCobranca}, ${body.installments ?? 1}, 'pendente'
+        )
         RETURNING id
       `;
       pagamentoId = Number(pag.id);
     }
-  } else {
-    const [pag] = await sql`
-      INSERT INTO alissonerp.pagamentos_venda (
-        venda_id, forma, gateway, valor, parcelas, status
-      ) VALUES (
-        ${vendaId}, 'Cartão de Crédito', 'Mercado Pago Point',
-        ${valorCobranca}, ${body.installments ?? 1}, 'pendente'
-      )
-      RETURNING id
-    `;
-    pagamentoId = Number(pag.id);
+  } catch (err) {
+    if (isPagamentoExcedeError(err)) {
+      return NextResponse.json({ error: PAGAMENTO_EXCEDE_MSG }, { status: 409 });
+    }
+    throw err;
   }
 
   // ─── Dispara intent na MP ─────────────────────────────────────────────────

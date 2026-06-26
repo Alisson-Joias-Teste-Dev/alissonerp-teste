@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
         const pesoMax = Number(rangeMatch[2]);
         const [row] = await sql<{ total: string }[]>`
           SELECT COUNT(*) AS total
-          FROM public.produtos
+          FROM alissonerp.produtos_compat
           WHERE COALESCE(peso_precificado, 0) >= ${pesoMin}
             AND COALESCE(peso_precificado, 0) <= ${pesoMax}
             AND situacao = 'A'

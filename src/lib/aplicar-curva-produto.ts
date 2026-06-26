@@ -12,7 +12,7 @@ import {
  * Le peso_precificado do produto, calcula markup/comissao/max_desconto via
  * getPricingFactors e faz UPSERT em alissonerp.produto_curva_aplicada.
  *
- * NAO escreve mais em public.produtos.markup — a precificacao foi unificada
+ * NAO escreve mais em alissonerp.produtos_compat.markup — a precificacao foi unificada
  * na curva dinâmica (produto_curva_aplicada.markup_aplicado).
  *
  * Se peso for null/0, retorna { applied: false, motivo: "peso_ausente" } sem fazer
@@ -32,7 +32,7 @@ export async function aplicarCurvaProduto(
 
   const [produto] = await db`
     SELECT peso_precificado
-    FROM public.produtos
+    FROM alissonerp.produtos_compat
     WHERE id_produto = ${produtoId}
   `;
   if (!produto) return { applied: false, motivo: "produto_nao_encontrado" };
@@ -81,7 +81,7 @@ export async function aplicarCurvaProduto(
     SELECT filho.produto_id, filho_prod.peso_precificado
     FROM alissonerp.erp_produtos pai
     JOIN alissonerp.erp_produtos filho ON filho.parent_id = pai.id
-    JOIN public.produtos filho_prod ON filho_prod.id_produto = filho.produto_id
+    JOIN alissonerp.produtos_compat filho_prod ON filho_prod.id_produto = filho.produto_id
     WHERE pai.produto_id = ${produtoId}
       AND filho.eh_variacao = true
       AND filho_prod.peso_precificado IS NOT NULL

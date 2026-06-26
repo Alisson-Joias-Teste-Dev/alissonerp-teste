@@ -3,7 +3,7 @@ import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 
 // ─── GET /api/vendas/produtos/busca?q=&limit= ─────────────────────────────────
-// Busca produtos em public.produtos (READONLY)
+// Busca produtos em alissonerp.produtos_compat (READONLY)
 // Retorna id, sku, nome, preco_venda (curva dinâmica), peso_precificado e estoque agregado
 //
 // Promocao: se o produto tem promo ativa (migration 248), preco_promo vem
@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
       CASE WHEN vpv.em_promocao THEN vpv.max_parcelas_cartao ELSE NULL END AS max_parcelas_promo,
       -- Percentual de calculo automatico de servico (Frente C — 30/05/2026)
       COALESCE(psc.pct_calculo_servico, NULL) AS pct_calculo_servico
-    FROM public.produtos p
+    FROM alissonerp.produtos_compat p
     LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
     LEFT JOIN alissonerp.vw_produtos_geral_preco pp ON pp.id_produto = p.id_produto
     LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto

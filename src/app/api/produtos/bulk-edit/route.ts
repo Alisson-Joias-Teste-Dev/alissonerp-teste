@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
     const bloqueados = await sql<{ produto_id: number; sku: string | null; nome: string | null; saldo: number }[]>`
       SELECT v.produto_id, p.sku, p.nome, COALESCE(SUM(v.saldo_fisico),0)::int AS saldo
       FROM alissonerp.vw_saldo_estoque_comercial_v2 v
-      JOIN public.produtos p ON p.id_produto = v.produto_id
+      JOIN alissonerp.produtos_compat p ON p.id_produto = v.produto_id
       WHERE v.produto_id = ANY(${ids}::bigint[])
       GROUP BY v.produto_id, p.sku, p.nome
       HAVING SUM(v.saldo_fisico) > 0
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
     up.categoria_precificacao = c ? c : null;
   }
 
-  // tipo_item: vai para alissonerp.produto_tipo_item (fora de public.produtos)
+  // tipo_item: vai para alissonerp.produto_tipo_item (fora de alissonerp.produtos_compat)
   let tipoItem: "joia" | "insumo" | null | undefined = undefined;
   if (updates.tipo_item !== undefined) {
     if (updates.tipo_item === null || updates.tipo_item === "") tipoItem = null;
@@ -164,7 +164,7 @@ export async function POST(req: NextRequest) {
         }
       }
       const rows: { id_produto: number }[] = await tx`
-        SELECT id_produto FROM public.produtos WHERE produto_id = ANY(${ids})
+        SELECT id_produto FROM alissonerp.produtos_compat WHERE produto_id = ANY(${ids})
       `;
       afetados.push(...rows.map((r: { id_produto: number }) => Number(r.id_produto)));
     });

@@ -120,7 +120,7 @@ async function processarProduto(db: any, produtoId: number, userId: string): Pro
   // 5. Dados do produto pra peso e nome
   const [prod] = await db`
     SELECT id_produto, nome, sku, peso_precificado
-    FROM public.produtos WHERE id_produto = ${produtoId}
+    FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId}
   `;
   if (!prod) return { produto_id: produtoId, ofs_criadas: 0, numeros_ordem: [] };
   const pesoUnit = Number(prod.peso_precificado ?? 0);

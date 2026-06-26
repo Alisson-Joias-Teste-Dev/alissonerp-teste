@@ -93,7 +93,7 @@ export async function PUT(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (sql as any).begin(async (tx: typeof sql) => {
       // Confirma que produto existe
-      const [prod] = await tx`SELECT id_produto FROM public.produtos WHERE id_produto = ${produtoId}`;
+      const [prod] = await tx`SELECT id_produto FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId}`;
       if (!prod) throw new Error("PRODUTO_NAO_ENCONTRADO");
 
       // Confirma que todos os setores existem e estão ativos

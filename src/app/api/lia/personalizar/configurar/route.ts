@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     const resultado = await sql.begin(async (tx: any) => {
       // Confirma existencia do produto
       const [produto] = await tx`
-        SELECT id_produto FROM public.produtos WHERE id_produto = ${produtoId}
+        SELECT id_produto FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId}
       `;
       if (!produto) {
         throw new Error("Produto nÃ£o encontrado");

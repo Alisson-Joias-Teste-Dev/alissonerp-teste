@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
 
   const [{ total }] = await sql<{ total: string }[]>`
     SELECT COUNT(*)::text AS total
-    FROM public.produtos
+    FROM alissonerp.produtos_compat
     WHERE situacao = 'A'
       AND (tipo_metal IS NULL OR TRIM(tipo_metal) = '')
       AND nome ILIKE '%ouro%'
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
 
   const amostra = await sql`
     SELECT id_produto, sku, nome, tipo_metal
-    FROM public.produtos
+    FROM alissonerp.produtos_compat
     WHERE situacao = 'A'
       AND (tipo_metal IS NULL OR TRIM(tipo_metal) = '')
       AND nome ILIKE '%ouro%'

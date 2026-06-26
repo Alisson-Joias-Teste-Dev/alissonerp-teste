@@ -22,7 +22,7 @@ export async function GET() {
   const [configs, pendente] = await Promise.all([
     sql`
       SELECT chave, valor FROM alissonerp.configuracoes_sistema
-      WHERE chave IN ('saldo_gerente_limite', 'saldo_gerente_atual')
+      WHERE chave = 'saldo_gerente_limite'
     `,
     sql`
       SELECT
@@ -37,13 +37,15 @@ export async function GET() {
 
   const cfgMap = Object.fromEntries(configs.map((c) => [c.chave, c.valor as string]));
   const saldoLimite = Number(cfgMap["saldo_gerente_limite"] ?? 50000);
-  const saldoAtual  = Number(cfgMap["saldo_gerente_atual"]  ?? 50000);
   const p           = pendente[0];
+  // Saldo GERAL (regra v2.78.0): limite − todo o A Receber pendente, derivado ao
+  // vivo (não o contador 'saldo_gerente_atual'). Pode ser negativo.
+  const saldoAtual  = Math.round((saldoLimite - Number(p.total_pendente)) * 100) / 100;
 
   return NextResponse.json({
     saldo_limite:   saldoLimite,
     saldo_atual:    saldoAtual,
-    saldo_usado:    saldoLimite - saldoAtual,
+    saldo_usado:    Number(p.total_pendente),
     total_pendente: Number(p.total_pendente),
     qtd_pendente:   p.qtd_pendente as number,
     total_vencido:  Number(p.total_vencido),

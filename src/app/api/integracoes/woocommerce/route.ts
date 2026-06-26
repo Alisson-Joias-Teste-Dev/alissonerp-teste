@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   // Buscar produto no banco
   const [produto] = await sql`
     SELECT p.id_produto, p.nome, p.sku, p.preco_total_sync, p.situacao
-    FROM public.produtos p WHERE p.id_produto = ${body.produto_id}
+    FROM alissonerp.produtos_compat p WHERE p.id_produto = ${body.produto_id}
   `;
   if (!produto) return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
 

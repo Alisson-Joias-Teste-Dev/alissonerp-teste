@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
       SELECT
         NULLIF(TRIM(p.categoria), '') AS categoria,
         COUNT(*)::int                 AS produtos
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       WHERE (ep.eh_variacao = false OR ep.id IS NULL)
         ${f.wBusca} ${f.wSkuPrefix} ${f.wPedra} ${f.wSituacao}

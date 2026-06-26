@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
 
   const rows = await sql<{ categoria: string }[]>`
     SELECT DISTINCT TRIM(categoria) AS categoria
-    FROM public.produtos
+    FROM alissonerp.produtos_compat
     WHERE categoria IS NOT NULL AND TRIM(categoria) <> ''
     ORDER BY 1 ASC
   `;

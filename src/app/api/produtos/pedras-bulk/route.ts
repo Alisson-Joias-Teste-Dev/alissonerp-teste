@@ -2,7 +2,7 @@
  * POST /api/produtos/pedras-bulk
  *
  * Cadastra pedras preciosas em massa como produtos independentes.
- * Cada item vira uma linha em public.produtos + alissonerp.erp_produtos.
+ * Cada item vira uma linha em alissonerp.produtos_compat + alissonerp.erp_produtos.
  *
  * Convenções (pedra = produto simples, não variação):
  *   • categoria      = 'Pedras'
@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
       const [skuRow] = await tx<{ next: number }[]>`
         SELECT (COALESCE(
           GREATEST(
-            (SELECT MAX(sku::integer) FROM public.produtos         WHERE sku ~ '^[0-9]+$'),
+            (SELECT MAX(sku::integer) FROM alissonerp.produtos_compat         WHERE sku ~ '^[0-9]+$'),
             (SELECT MAX(sku::integer) FROM alissonerp.erp_produtos WHERE sku ~ '^[0-9]+$')
           ),
           1603
@@ -133,7 +133,7 @@ export async function POST(req: NextRequest) {
         // Se já existe (mesmo nome + categoria Pedras), não cria novo:
         // atualiza preço + peso_ct no produto existente.
         const [dup] = await tx<{ id_produto: string; sku: string; preco_tiny: string | null }[]>`
-          SELECT id_produto, sku, preco_tiny FROM public.produtos
+          SELECT id_produto, sku, preco_tiny FROM alissonerp.produtos_compat
           WHERE LOWER(TRIM(nome)) = LOWER(${nome})
             AND situacao = 'A'
             AND categoria ILIKE 'Pedras%'
@@ -154,13 +154,13 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        // Garante SKU único em AMBAS as tabelas (public.produtos e erp_produtos).
+        // Garante SKU único em AMBAS as tabelas (alissonerp.produtos_compat e erp_produtos).
         let sku = String(proxSku);
          
         while (true) {
           const [ex] = await tx`
             SELECT 1
-            WHERE EXISTS (SELECT 1 FROM public.produtos         WHERE sku = ${sku})
+            WHERE EXISTS (SELECT 1 FROM alissonerp.produtos_compat         WHERE sku = ${sku})
                OR EXISTS (SELECT 1 FROM alissonerp.erp_produtos WHERE sku = ${sku})
           `;
           if (!ex) break;
@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
             (${paiId}, ${sku}, ${nome}, false, false)
         `;
 
-        // Peso real (em ct) — public.produtos.peso_precificado é arredondado
+        // Peso real (em ct) — alissonerp.produtos_compat.peso_precificado é arredondado
         // pelo trigger arredondar_peso_para_cima; guardamos o ct fiel aqui.
         await tx`
           INSERT INTO alissonerp.produto_pedra_extras (produto_id, peso_ct)
@@ -267,7 +267,7 @@ export async function GET(req: NextRequest) {
       SELECT
         COUNT(*)::int                                                           AS total,
         COUNT(*) FILTER (WHERE COALESCE(e.saldo, 0) >= 1)::int                  AS com_estoque
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN public.estoque e ON e.sku = p.sku
       WHERE p.categoria ILIKE 'Pedras%'
         AND p.situacao = 'A'
@@ -278,7 +278,7 @@ export async function GET(req: NextRequest) {
       SELECT
         TRIM(REGEXP_REPLACE(p.nome, '\\s+[0-9.,]+\\s*mm\\s*$', '', 'i')) AS nome_raiz,
         COUNT(*)::int AS qtd
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       WHERE p.categoria ILIKE 'Pedras%'
         AND p.situacao = 'A'
       GROUP BY 1
@@ -287,7 +287,7 @@ export async function GET(req: NextRequest) {
 
     const ultimos = await sql<{ sku: string; nome: string; preco_tiny: number | null; saldo: number | null }[]>`
       SELECT p.sku, p.nome, p.preco_tiny, COALESCE(e.saldo, 0) AS saldo
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN public.estoque e ON e.sku = p.sku
       WHERE p.categoria ILIKE 'Pedras%'
         AND p.situacao = 'A'
@@ -331,7 +331,7 @@ export async function PATCH(req: NextRequest) {
     const result = await (sql as any).begin(async (tx: any) => {
       // Lista pedras ativas
       const pedras = await tx<{ sku: string }[]>`
-        SELECT sku FROM public.produtos
+        SELECT sku FROM alissonerp.produtos_compat
         WHERE categoria ILIKE 'Pedras%' AND situacao = 'A'
       `;
       if (pedras.length === 0) return { atualizados: 0, pedras_sem_saldo_antes: 0 };
@@ -342,7 +342,7 @@ export async function PATCH(req: NextRequest) {
       const [before] = await tx<{ zeradas: number }[]>`
         SELECT
           (COUNT(*) FILTER (WHERE e.sku IS NULL OR COALESCE(e.saldo, 0) = 0))::int AS zeradas
-        FROM public.produtos p
+        FROM alissonerp.produtos_compat p
         LEFT JOIN public.estoque e ON e.sku = p.sku
         WHERE p.sku = ANY(${skus})
       `;
@@ -387,7 +387,7 @@ export async function PATCH(req: NextRequest) {
 // Remove de cascata:
 //   1. public.estoque     (saldo)
 //   2. alissonerp.erp_produtos
-//   3. public.produtos
+//   3. alissonerp.produtos_compat
 //
 // Modos:
 //   body: { label?: string }
@@ -419,13 +419,13 @@ export async function DELETE(req: NextRequest) {
       const alvos = labelRaw
         ? await tx<{ sku: string; id_produto: number }[]>`
             SELECT sku, id_produto
-            FROM public.produtos
+            FROM alissonerp.produtos_compat
             WHERE categoria ILIKE 'Pedras%'
               AND LOWER(TRIM(nome)) LIKE LOWER(${labelRaw + " %"} || '%')
           `
         : await tx<{ sku: string; id_produto: number }[]>`
             SELECT sku, id_produto
-            FROM public.produtos
+            FROM alissonerp.produtos_compat
             WHERE categoria ILIKE 'Pedras%'
           `;
 
@@ -505,7 +505,7 @@ export async function DELETE(req: NextRequest) {
           throw new Error(`Falha em alissonerp.erp_produtos: ${e instanceof Error ? e.message : e}`);
         }
 
-        // 6. public.produtos (com proteção dupla: só Pedras)
+        // 6. alissonerp.produtos_compat (com proteção dupla: só Pedras)
         try {
           await tx`
             DELETE FROM alissonerp.erp_produtos
@@ -515,7 +515,7 @@ export async function DELETE(req: NextRequest) {
           etapas.push(`deletadas: ${idsDel.length}`);
         } catch (e) {
           etapas.push(`produtos: ${e instanceof Error ? e.message : "erro"}`);
-          throw new Error(`Falha em public.produtos: ${e instanceof Error ? e.message : e}`);
+          throw new Error(`Falha em alissonerp.produtos_compat: ${e instanceof Error ? e.message : e}`);
         }
       }
 

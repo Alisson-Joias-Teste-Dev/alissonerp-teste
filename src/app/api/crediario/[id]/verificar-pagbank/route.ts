@@ -19,8 +19,11 @@ import { buscarPedido, buscarCobranca, centavosParaReais } from "@/lib/pagbank";
 import { devolverSaldoGerente } from "@/lib/baixa-credito";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
+import { requireCrediarioOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { ForbiddenError } from "@/lib/auth-server";
 
-const PODE_VERIFICAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
+// consultora entra, mas SÓ na conta de venda dela (ownership abaixo).
+const PODE_VERIFICAR = ["desenvolvedor", "admin", "gerente_loja", "diretor", "consultora"];
 
 const VerificarSchema = z.object({
   payment_id: z.string().min(1, "Informe o ID do pedido ou cobrança do PagBank").max(100),
@@ -44,6 +47,18 @@ export async function POST(
   `;
   if (!usuario || !PODE_VERIFICAR.includes(usuario.role as string)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
+  // consultora só confirma pagamento de conta de uma venda DELA.
+  try {
+    await requireCrediarioOwnership(
+      { id: user.id, role: usuario.role as string, email: user.email ?? "" },
+      contaId,
+    );
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
   }
 
   const raw = await req.json().catch(() => ({}));

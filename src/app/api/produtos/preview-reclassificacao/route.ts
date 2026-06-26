@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
                    NULLIF(p.preco_total_sync,'0')::numeric,
                    NULLIF(p.preco_tiny,'0')::numeric,
                    0) AS preco
-        FROM public.produtos p
+        FROM alissonerp.produtos_compat p
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
         WHERE p.situacao = 'A' AND (ep.eh_variacao = false OR ep.id IS NULL)
       )
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
                    NULLIF(p.preco_total_sync,'0')::numeric,
                    NULLIF(p.preco_tiny,'0')::numeric,
                    0) AS preco
-        FROM public.produtos p
+        FROM alissonerp.produtos_compat p
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
         WHERE p.situacao = 'A' AND (ep.eh_variacao = false OR ep.id IS NULL)
       )
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     const insumosAlto = await sql`
       SELECT p.sku, p.nome, p.categoria,
              p.preco_tiny, p.preco_sync, p.preco_total_sync
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       WHERE p.situacao='A' AND (ep.eh_variacao = false OR ep.id IS NULL)
         AND p.categoria ILIKE 'Insumos%'
@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
     const joiasBaixo = await sql`
       SELECT p.sku, p.nome, p.categoria,
              p.preco_tiny, p.preco_sync, p.preco_total_sync
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       WHERE p.situacao='A' AND (ep.eh_variacao = false OR ep.id IS NULL)
         AND p.categoria NOT ILIKE 'Insumos%'

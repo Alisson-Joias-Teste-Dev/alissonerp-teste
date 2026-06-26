@@ -44,6 +44,7 @@ export async function GET(
         situacao, status_aging, dias_atraso, obs, created_at,
         venda_id, numero_venda, total_venda, venda_situacao, venda_bloqueada,
         credito_gerente_usado, venda_created_at,
+        (SELECT v.data_venda FROM alissonerp.vendas_erp v WHERE v.id = venda_id) AS data_venda,
         cliente_id, cliente_nome, cliente_telefone, cliente_email,
         vendedor_id, vendedor_nome,
         consultora_uuid, consultora_nome
@@ -51,12 +52,24 @@ export async function GET(
       WHERE conta_receber_id = ${contaId}
       LIMIT 1
     `,
+    // Histórico CONSOLIDADO da venda: junta os recebimentos/avisos de TODAS as
+    // contas da mesma venda — não só a conta aberta. Sem isso, a baixa parcial
+    // (que fecha a conta original e abre uma "Saldo restante") faz o histórico
+    // do que já foi pago "sumir" ao abrir a conta nova. Se a conta não tiver
+    // venda vinculada, mostra só a dela (o subselect de venda fica NULL).
     sql`
       SELECT cc.id, cc.tipo, cc.mensagem, cc.created_at,
         u.nome AS usuario_nome
       FROM alissonerp.comunicacoes_crediario cc
       LEFT JOIN alissonerp.usuarios u ON u.id = cc.usuario_id
-      WHERE cc.conta_receber_id = ${contaId}
+      WHERE cc.conta_receber_id IN (
+        SELECT cr.id FROM alissonerp.contas_receber cr
+        WHERE cr.id = ${contaId}
+           OR cr.venda_erp_id = (
+                SELECT venda_erp_id FROM alissonerp.contas_receber
+                WHERE id = ${contaId} AND venda_erp_id IS NOT NULL
+              )
+      )
       ORDER BY cc.created_at ASC
     `,
     // Query 3 — Dados do Ouro (se recebimento foi com balança)
@@ -78,6 +91,30 @@ export async function GET(
     }
   }
 
+  // Fotos anexadas nas baixas (comprovante de Pix/Cartão manual + foto do Ouro):
+  // ficam no bucket pagamento-fotos sob crediario/<conta_id>/. Junta as de TODAS
+  // as contas da venda (a baixa parcial espalha em contas "Saldo restante").
+  // Best-effort: se o storage falhar, segue sem fotos.
+  const fotos: { path: string; conta_id: number; nome: string }[] = [];
+  try {
+    const vendaIdFotos = conta[0].venda_id as number | null;
+    const contasIds: number[] = vendaIdFotos
+      ? (await sql<{ id: number }[]>`
+          SELECT id FROM alissonerp.contas_receber WHERE venda_erp_id = ${vendaIdFotos}
+        `).map(r => Number(r.id))
+      : [contaId];
+    for (const cid of contasIds) {
+      const { data: arquivos } = await supabase.storage
+        .from("pagamento-fotos")
+        .list(`crediario/${cid}`);
+      for (const f of arquivos ?? []) {
+        if (f.name && !f.name.startsWith(".")) {
+          fotos.push({ path: `crediario/${cid}/${f.name}`, conta_id: cid, nome: f.name });
+        }
+      }
+    }
+  } catch { /* fotos são best-effort */ }
+
   const c = conta[0];
   return NextResponse.json({
     ...c,
@@ -89,5 +126,6 @@ export async function GET(
     ouro_peso:           ouro[0]?.ouro_peso ? Number(ouro[0].ouro_peso) : null,
     ouro_valor_grama:    ouro[0]?.ouro_valor_grama ? Number(ouro[0].ouro_valor_grama) : null,
     ouro_foto_path:      ouro[0]?.ouro_foto_path ?? null,
+    fotos,
   });
 }

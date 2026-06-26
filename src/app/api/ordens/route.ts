@@ -330,7 +330,7 @@ export async function POST(req: NextRequest) {
       if (!item.produto_id) continue;
       const [produto] = await tx`
         SELECT id_produto, nome, sku, peso_precificado
-        FROM public.produtos
+        FROM alissonerp.produtos_compat
         WHERE id_produto = ${item.produto_id}
         LIMIT 1
       `;

@@ -1,6 +1,68 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
+> 📋 Última atualização automática: 22/06/2026 — Versão: v2.75.0 <!-- Revisado 22/06/2026 -->
+
+## fix(vendas): venda travada em rascunho após reeditar desconto já aprovado (v2.77.x)
+
+**Sintoma (venda 15628):** ação de marketing zerou os itens (100% de desconto) de uma venda
+cujo desconto de 30% **já tinha sido aprovado**. A venda ficou impossível de aprovar — nenhum
+botão aparecia na tela.
+
+**Causa:** ao reeditar/adicionar item acima do limite, as rotas de itens limpavam
+`desconto_aprovado_por`/`_em` mas **deixavam `aprovacao_desconto_tarefa_id`** apontando para a
+tarefa antiga (já `aprovada`). Com o ponteiro preenchido, o front escondia o botão "Solicitar
+Aprovação de Desconto" (`precisaSolicitarDesconto` exige o campo NULL); e como a tarefa não estava
+mais "aguardando", o banner de "aguardando aprovação"/"Ver Tarefa" também sumia → beco sem saída.
+O cancelamento da tarefa ainda filtrava pela tag errada (`aprovacao_desconto`, sendo a real
+`aprov_desconto_acima`), então nunca cancelava nada.
+
+**Correção** (`POST` e `PATCH /api/vendas/[id]/itens`):
+- ao invalidar a aprovação, zera também `aprovacao_desconto_tarefa_id`;
+- cancela a tarefa vinculada **pelo ID** e **só se ainda estava pendente** (`aguardando_aprovacao`) —
+  tarefa já aprovada/rejeitada é histórico, não se reescreve.
+
+**Dado:** venda 15628 destravada em produção (update assinado, escopo mínimo, 25/06). Outras 4
+vendas estavam no mesmo estado: 15300, 15312, 15399, 15562 (rascunhos antigos). Regra documentada
+em `docs/regras-negocio/comercial.md §6`.
+
+## feat(compras-comercial): etapa de CHEGADA (lote + 2 fotos + IA na balança) antes do cadastro (v2.75.0)
+
+**Pedido do Jonathan:** rastrear o metal assim que a joia chega na loja, antes de cadastrar peça a peça.
+Na chegada informa-se o **lote** (ex: 5 peças / 10 g / R$ 30.000) e o sistema calcula a **grama**
+(R$ 3.000/g). O cadastro detalhado vem depois.
+
+**Como (sem duplicar tabela/estoque):**
+- **Migration 331:** colunas de lote (`total_pecas`, `peso_total_g`, `valor_total_lote`, `valor_grama`),
+  fotos (`foto_balanca_path`, `foto_pecas_path`) e leitura da IA (`ia_*`) em `compras_comercial`; status novo
+  `recebido_pendente_cadastro`; view `vw_saldo_lote_pendente_comercial` (metal a cadastrar por local =
+  peso do lote − peso já cadastrado); trigger AFTER INSERT `fn_gerar_conta_pagar_chegada_comercial`
+  (conta a pagar nasce na chegada, pelo valor do lote); `fn_concluir_*` passa a aceitar concluir vindo da
+  chegada/aprovado; `fn_bloquear_*` libera `aprovado → concluido`. Config `tolerancia_lote_peso_g` (0,30 g).
+- **Chegada (`POST /api/compras-comercial`):** recebe lote + 2 fotos (base64), calcula a grama, sobe as
+  fotos no bucket privado `compras-comercial-fotos`, roda `validarPesoBalanca` na foto da balança (advisory),
+  nasce em `recebido_pendente_cadastro`. Conta a pagar gerada por trigger.
+- **Cadastro:** cada peça (joia) herda a **grama do lote** (rateio por peso); operador pode ajustar.
+- **Conclusão (`/concluir`):** confere Σ peso das peças × peso do lote. Bateu (≤ tolerância) → conclui;
+  divergiu (diferença de balança) → pede **aprovação** (reusa fluxo da migration 274) e só conclui após `aprovado`.
+- **Front (`ComprasComercialClient.tsx`):** "Nova chegada" com lote + grama calculada + `FotoBalancaInput`
+  (IA) + foto das peças; detalhe mostra o lote, leitura da IA e a conferência de peso; botões Concluir/Solicitar
+  aprovação. Bucket privado registrado em `storage-url.ts` e no proxy `api/storage/[bucket]/[...path]`.
+
+**Doc:** `docs/regras-negocio/compras-comercial.md` (nova). `tsc` zero erros.
+**Pendente de teste (homolog):** aplicar migration 331 (assinada) + criar o bucket `compras-comercial-fotos`
+(privado) no Supabase; testar chegada com foto real de balança (IA), cadastro com rateio, conclusão batendo e
+divergente (→ aprovação).
+
+## feat(aliancas): aliança em itens separados (ouro+pedras por anel) + fixes comerciais (v2.69.0)
+
+Pedido do Jonathan: ver e descontar **cada parte** da aliança separadamente. Subido direto pra produção (commit f5b0ef57) + 2 migrations aplicadas (315 + 316) em 22/06.
+- **Orçamento→venda** (`api/orcamento/[id]/route.ts`): a aliança (par) deixa de ser 1 item e vira itens próprios — *Aliança 1 (ouro)*, *Pedras Aliança 1*, *Aliança 2 (ouro)*, *Pedras Aliança 2* — cada um com preço/desconto/comissão. Pedra com valor EXATO (`preco_total_rs`); ouro = (total − pedras) rateado por peso (anéis de mesmo peso saem iguais); Σitens = valor do orçamento. Só vendas novas (as antigas ficam intactas). Comissão total inalterada.
+- **Orçamento (rodapé):** espelho da quebra por aliança (ouro + pedras de cada anel), mesmas regras.
+- **Venda (detalhe):** mostra a ficha de cada anel (`aliancaRings`); descrições sem corte; a tela **não recarrega sozinha** ao digitar (autosave/realtime via `load(silent)`).
+- **Boleamento:** rótulo "Curvatura" → "Boleamento" no orçamento e na ficha da ordem.
+- **Ficha técnica (banco):** grava JSONB como objeto (`::text::jsonb`) — corrige double-encode em 7 pontos de escrita. **Migration 316** normaliza as 156 fichas antigas.
+- **PDF da venda:** gravação usa `formatGravacao` (não gruda nome+data; sem caractere de controle).
+- **Friso (migration 315, aplicada em prod):** trigger `trg_normalizar_friso_ficha` + limpeza de 156 fichas com friso residual (anel liso ia pra fábrica com sulco).
 
 ## feat(crediario): painel de parcelamento/sinal também no detalhe da venda (v2.70.0)
 

@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
         COUNT(*) FILTER (WHERE ${f.wSemPeso})::text  AS sem_peso,
         COUNT(*) FILTER (WHERE ${f.wSemPreco})::text AS sem_preco,
         COUNT(*)::text                                AS total
-      FROM public.produtos p
+      FROM alissonerp.produtos_compat p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       WHERE (ep.eh_variacao = false OR ep.id IS NULL)
         ${f.wBusca} ${f.wSkuPrefix} ${f.wPedra} ${f.wSituacao}

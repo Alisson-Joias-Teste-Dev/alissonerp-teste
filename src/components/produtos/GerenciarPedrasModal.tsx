@@ -9,7 +9,7 @@
  *
  * Botões:
  *   • "Salvar Tabela — {pedra}"    → grava markup editado (stone_markups_table)
- *   • "Cadastrar N pedras em massa" → cria produtos em public.produtos com
+ *   • "Cadastrar N pedras em massa" → cria produtos em alissonerp.produtos_compat com
  *       apenas 3 campos visíveis (mm, ct, preço_venda) via POST
  *       /api/produtos/pedras-bulk.
  */
