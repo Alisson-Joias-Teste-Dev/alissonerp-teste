@@ -26,8 +26,9 @@ Arquivos: `src/lib/vale-troca.ts`, `src/app/api/vale-troca/`, migration `142_dev
 ## 2. Comissão
 
 - **Base = pagamento confirmado**, não a entrega. A comissão elegível é calculada por `pagamentos_venda` com `status='confirmado'`, rateada pelo valor do pagamento sobre o total da venda.
-- **Formas que NÃO comissionam:** `Vale-Troca` e `A Receber` (`forma NOT IN ('Vale-Troca','A Receber')` em `src/app/api/financeiro/comissoes/elegiveis/route.ts`). Logo: venda paga 100% com vale gera **R$0** de comissão; venda mista comissiona só a parte não-vale/não-receber.
-- `vendas_erp.total_comissao` é o valor **teórico** (soma dos `valor_comissao` dos itens). O que de fato é **pago** sai do fechamento, só sobre as formas que comissionam.
+- **A comissão segue o DINHEIRO recebido.** Comissionam todas as formas **já recebidas** (Pix, Cartão, Dinheiro, Mercado Pago) e o **crediário (`A Receber`) JÁ PAGO** (`status='confirmado'`). O crediário quitado é recebimento real — desde 27/06/2026 ele comissiona (antes era excluído mesmo pago, e a consultora perdia a comissão; ex. venda 15346 paga via MP ficava com R$0). Filtro em `elegiveis/route.ts`: `pv.status='confirmado' AND pv.forma <> 'Vale-Troca'`.
+- **NÃO comissionam:** `Vale-Troca` (não é dinheiro novo, é troca) e `A Receber` **PENDENTE** (ainda não entrou — vira comissão quando a parcela for paga). Venda 100% em vale = **R$0**; crediário só comissiona a parte efetivamente quitada.
+- `vendas_erp.total_comissao` é o valor **teórico** (soma dos `valor_comissao` dos itens). O que de fato é **pago** sai do fechamento, sobre o que foi recebido.
 - **Fechamento:** itens entram em `alissonerp.fechamento_comissao_itens` (com `status` ex. `liberado`); comissão é apurada **por período / fim do mês**. Um pagamento já fechado não some retroativamente se a venda for cancelada depois.
 - Aprovação de crédito acima do saldo pelo diretor **zera** a comissão da consultora (`vendas-credito-aprovar.ts`).
 
