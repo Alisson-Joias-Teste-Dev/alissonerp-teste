@@ -54,7 +54,13 @@ export async function GET(req: NextRequest) {
         AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
       WHERE pv.status = 'confirmado'
-        AND pv.forma NOT IN ('Vale-Troca', 'A Receber')
+        -- REGRA DE NEGÓCIO: comissiona toda forma JÁ RECEBIDA. 'A Receber' (crediário)
+        -- comissiona quando CONFIRMADO (pago) — o pv.status='confirmado' acima já garante
+        -- isso; A Receber PENDENTE continua de fora (ainda não entrou). 'Vale-Troca' nunca
+        -- comissiona (não é dinheiro novo, é troca).
+        -- IMPACTO se voltar a excluir 'A Receber': a consultora perde comissão sobre crediário
+        -- que o cliente já pagou (ex.: venda 15346 ficava com R$0 mesmo quitada via Mercado Pago).
+        AND pv.forma <> 'Vale-Troca'
         AND ve.vendedor_id = ${Number(consultoraId)}
         AND pv.data_confirmacao >= ${from}::date
         AND pv.data_confirmacao <= ${to}::date

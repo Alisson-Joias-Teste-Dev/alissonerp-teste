@@ -26,8 +26,9 @@ Arquivos: `src/lib/vale-troca.ts`, `src/app/api/vale-troca/`, migration `142_dev
 ## 2. Comissão
 
 - **Base = pagamento confirmado**, não a entrega. A comissão elegível é calculada por `pagamentos_venda` com `status='confirmado'`, rateada pelo valor do pagamento sobre o total da venda.
-- **Formas que NÃO comissionam:** `Vale-Troca` e `A Receber` (`forma NOT IN ('Vale-Troca','A Receber')` em `src/app/api/financeiro/comissoes/elegiveis/route.ts`). Logo: venda paga 100% com vale gera **R$0** de comissão; venda mista comissiona só a parte não-vale/não-receber.
-- `vendas_erp.total_comissao` é o valor **teórico** (soma dos `valor_comissao` dos itens). O que de fato é **pago** sai do fechamento, só sobre as formas que comissionam.
+- **A comissão segue o DINHEIRO recebido.** Comissionam todas as formas **já recebidas** (Pix, Cartão, Dinheiro, Mercado Pago) e o **crediário (`A Receber`) JÁ PAGO** (`status='confirmado'`). O crediário quitado é recebimento real — desde 27/06/2026 ele comissiona (antes era excluído mesmo pago, e a consultora perdia a comissão; ex. venda 15346 paga via MP ficava com R$0). Filtro em `elegiveis/route.ts`: `pv.status='confirmado' AND pv.forma <> 'Vale-Troca'`.
+- **NÃO comissionam:** `Vale-Troca` (não é dinheiro novo, é troca) e `A Receber` **PENDENTE** (ainda não entrou — vira comissão quando a parcela for paga). Venda 100% em vale = **R$0**; crediário só comissiona a parte efetivamente quitada.
+- `vendas_erp.total_comissao` é o valor **teórico** (soma dos `valor_comissao` dos itens). O que de fato é **pago** sai do fechamento, sobre o que foi recebido.
 - **Fechamento:** itens entram em `alissonerp.fechamento_comissao_itens` (com `status` ex. `liberado`); comissão é apurada **por período / fim do mês**. Um pagamento já fechado não some retroativamente se a venda for cancelada depois.
 - Aprovação de crédito acima do saldo pelo diretor **zera** a comissão da consultora (`vendas-credito-aprovar.ts`).
 
@@ -81,3 +82,9 @@ Não tem feature/endpoint (o PATCH de item só edita venda em `rascunho` e nem m
 - `POST /api/vendas/[id]/cancelar`: bloqueia se houver **pagamento confirmado** ("estorne antes"). Consultora só cancela venda própria e em `rascunho`. Venda `concluido` não cancela.
 - Faz `UPDATE vendas_erp SET situacao='cancelado', bloqueado=true`; devolve crédito de gerente usado (se houver); cancela pedido no Tiny (best-effort).
 - Triggers no cancelamento: libera reservas/estorna estoque comercial (§3) e cancela contas a receber pendentes.
+
+## 6. Aprovação de desconto (rascunho → aprovado)
+
+- Numa venda em `rascunho`, item com `pct_desconto` acima do limite da vendedora (`usuarios.mx_desconto_permitido`, default 15%) **pode ser salvo**, mas a venda **não aprova** enquanto `desconto_aprovado_por` estiver vazio (gate em `vendas-aprovar.ts → approveVenda`). Na tela aparece o botão **"Solicitar Aprovação de Desconto"** → cria tarefa (`tipo=desconto`, tag `aprov_desconto_acima`) → admin/diretor aprova → `tarefas/[id]/aprovacao` grava `desconto_aprovado_por`/`_em` e libera a aprovação da venda.
+- **Reeditar/adicionar item acima do limite INVALIDA a aprovação anterior** (o valor mudou, precisa reaprovar). Ao invalidar, as rotas de itens (`POST` e `PATCH /api/vendas/[id]/itens`) zeram **`desconto_aprovado_por`, `desconto_aprovado_em` E `aprovacao_desconto_tarefa_id`**, e cancelam a tarefa vinculada **só se ainda estava pendente** (`aguardando_aprovacao`) — tarefa já aprovada é histórico, não se reescreve.
+- ⚠️ **Por que limpar `aprovacao_desconto_tarefa_id` é obrigatório:** o front só mostra o botão de solicitar quando esse campo é NULL (`precisaSolicitarDesconto`). Se ficar apontando para uma tarefa já `aprovada`, somem TANTO o botão de solicitar QUANTO o banner de "aguardando" → a venda trava em rascunho sem como reaprovar. Bug corrigido em jun/2026 (venda 15628; outras 4 ficaram presas: 15300, 15312, 15399, 15562).
