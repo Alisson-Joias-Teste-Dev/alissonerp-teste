@@ -283,16 +283,18 @@ export async function GET(req: NextRequest) {
       const aReceberPendente = pagData?.valor_a_receber_pendente ?? 0;
       const aReceberPago = pagData?.valor_a_receber_pago ?? 0;
 
-      // REGRA DE NEGÓCIO: tudo que não está pago, não é VT e não é A Receber
-      // deve ser tratado como pendente.
-      // O que: calcula o resto não contabilizado (total - pago - VT - A Receber)
-      // e adiciona ao pendente.
-      // Por que: cliente pode dever sem estar registrado como A Receber formal.
-      // Impacto se alterado: comissão pendente fica zerada indevidamente.
+      // REGRA DE NEGÓCIO: a comissão segue o DINHEIRO recebido.
+      //  - LIBERADA: formas já recebidas (pagoValido) + crediário (A Receber) JÁ PAGO
+      //    (aReceberPago). Crediário quitado é recebimento real, logo comissiona.
+      //  - PENDENTE: A Receber ainda em aberto (aReceberPendente) + resto não registrado
+      //    (cliente pode dever sem A Receber formal).
+      //  - EXCLUÍDA VT: Vale-Troca (não é dinheiro novo, é troca).
+      // Impacto se alterado: tirar aReceberPago da liberada faz a consultora perder comissão
+      //   sobre crediário que o cliente JÁ quitou (ex.: venda 15346, paga via Mercado Pago).
       const totalContabilizado = pagoValido + vtValor + aReceberPendente + aReceberPago;
       const restoNaoContabilizado = Math.max(0, totalVenda - totalContabilizado);
 
-      const ratioLiberada = totalVenda > 0 ? pagoValido / totalVenda : 0;
+      const ratioLiberada = totalVenda > 0 ? (pagoValido + aReceberPago) / totalVenda : 0;
       const ratioVt = totalVenda > 0 ? vtValor / totalVenda : 0;
       const ratioPendente = totalVenda > 0 ? (aReceberPendente + restoNaoContabilizado) / totalVenda : 0;
 
