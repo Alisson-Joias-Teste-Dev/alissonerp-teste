@@ -156,7 +156,7 @@ export default function TabAprovadores() {
 
   return (
     <ListaAprovadores
-      config={config as Record<string, string>}
+      config={config as unknown as Record<string, string>}
       usuarios={usuarios}
       podeEditar={podeEditar}
       saving={saving}

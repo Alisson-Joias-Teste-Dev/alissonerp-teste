@@ -22,6 +22,11 @@ interface SubmissaoResult {
   tipo?: "gerente" | "diretor";
   tarefa_id?: number;
   message?: string;
+  // Camada 2 (prevenção): bloqueio de validação ANTES de criar a tarefa de crédito
+  // (ex.: cliente sem celular). Quando preenchido, a rota devolve 409 com a mensagem
+  // e NÃO submete o crédito. Impacto se removido: venda de crediário sem celular
+  // chega ao approveVenda e fica presa em rascunho (bug que esta camada previne).
+  erro?: string;
 }
 
 interface AprovacaoResult {
@@ -62,12 +67,23 @@ export async function submeterVendaParaAprovacaoCredito(
   // 2. Buscar dados da venda + determinar tipo
   const [venda] = await sql`
     SELECT v.id, v.numero_venda, v.total_venda, v.total_comissao,
-           c.nome AS cliente_nome
+           c.nome AS cliente_nome, c.celular AS cliente_celular
     FROM alissonerp.vendas_erp v
     LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
     WHERE v.id = ${vendaId}
   `;
   if (!venda) throw new Error(`Venda ${vendaId} não encontrada`);
+
+  // Camada 2 (prevenção): crédito (crediário) EXIGE celular do cliente — é por ele que
+  // o cliente é cobrado/notificado. Sem celular, bloqueia ANTES de criar a tarefa e de
+  // tocar no saldo, devolvendo 'erro' pra consultora cadastrar o celular e tentar de novo.
+  // Impacto se removido: a venda chega ao approveVenda e fica presa em rascunho.
+  if (!venda.cliente_celular || String(venda.cliente_celular).trim() === "") {
+    return {
+      precisa_aprovacao: false,
+      erro: "Cliente sem celular cadastrado. Cadastre o celular do cliente antes de aprovar o crédito.",
+    };
+  }
 
   const saldoAtual = await getSaldoAtual();
   const tipo: "gerente" | "diretor" = valorAReceber <= saldoAtual ? "gerente" : "diretor";
