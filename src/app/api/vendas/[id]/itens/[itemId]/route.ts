@@ -101,6 +101,7 @@ export async function PATCH(
     const thresholdItem = await getDescontoThreshold(vendaId);
     const [vendaAtual] = await sql`
       SELECT desconto_aprovado_por,
+        aprovacao_desconto_tarefa_id,
         EXISTS(
           SELECT 1 FROM alissonerp.itens_venda_erp
           WHERE venda_id = ${vendaId} AND pct_desconto > ${thresholdItem}
@@ -108,25 +109,32 @@ export async function PATCH(
       FROM alissonerp.vendas_erp WHERE id = ${vendaId}
     `;
     if (vendaAtual?.tem_desconto_alto) {
+      // BUG FIX (jun/2026, venda 15628): zerar aprovacao_desconto_tarefa_id é
+      // obrigatório — senão, se a tarefa antiga já estava 'aprovada', o front esconde
+      // o botão de solicitar e o banner de aguardando, e a venda trava em rascunho.
+      const tarefaAnteriorId = vendaAtual.aprovacao_desconto_tarefa_id as number | null;
       await sql`
         UPDATE alissonerp.vendas_erp
-        SET desconto_aprovado_por = NULL,
-            desconto_aprovado_em  = NULL,
-            updated_at            = NOW()
+        SET desconto_aprovado_por        = NULL,
+            desconto_aprovado_em         = NULL,
+            aprovacao_desconto_tarefa_id = NULL,
+            updated_at                   = NOW()
         WHERE id = ${vendaId}
       `;
-      // Cancela tarefa de desconto pendente, se houver.
+      // Cancela a tarefa vinculada SÓ se ainda estava pendente. Mira pelo ID (o filtro
+      // por tag 'aprovacao_desconto' antigo nunca batia: a tag real é 'aprov_desconto_acima').
       // Blindagem 2026-06: falha aqui não pode ser silenciosa — é logada.
-      try {
-        await sql`
-          UPDATE alissonerp.tarefas
-          SET status = 'cancelado', updated_at = NOW()
-          WHERE venda_id = ${vendaId}
-            AND status = 'aguardando_aprovacao'
-            AND tags @> ARRAY['aprovacao_desconto']::text[]
-        `;
-      } catch (err) {
-        console.error(`[itens PATCH] Falha ao cancelar tarefa de desconto (venda ${vendaId}):`, err);
+      if (tarefaAnteriorId) {
+        try {
+          await sql`
+            UPDATE alissonerp.tarefas
+            SET status = 'cancelado', updated_at = NOW()
+            WHERE id = ${tarefaAnteriorId}
+              AND status = 'aguardando_aprovacao'
+          `;
+        } catch (err) {
+          console.error(`[itens PATCH] Falha ao cancelar tarefa de desconto (venda ${vendaId}):`, err);
+        }
       }
     }
   }
