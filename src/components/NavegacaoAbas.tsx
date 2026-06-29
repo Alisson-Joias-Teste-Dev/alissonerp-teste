@@ -18,37 +18,21 @@ interface Props {
   aoMudar?: (key: string) => void;
 }
 
-const P = {
-  bg: "#f9fafb",
-  card: "#ffffff",
-  border: "#e5e7eb",
-  creme: "#111827",
-  sage: "#6b7280",
-};
-
 export default function NavegacaoAbas({ abas, activeKey, aoMudar }: Props) {
   return (
-    <div
-      className="flex gap-1 rounded-xl p-1 w-fit flex-wrap"
-      style={{ backgroundColor: P.bg, border: `1px solid ${P.border}` }}
-    >
+    <div className="flex gap-1 rounded-xl p-1 w-fit flex-wrap bg-gray-50 border border-gray-200">
       {abas.map(({ key, label, icon: Icon }) => {
         const isAtiva = activeKey === key;
-        const btnCls = `flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors`;
-        const btnStyle = {
-          backgroundColor: isAtiva ? P.card : "transparent",
-          color: isAtiva ? P.creme : P.sage,
-          boxShadow: isAtiva ? "0 1px 3px 0 rgb(0 0 0 / 0.08)" : "none",
-        };
+
+        const cls = `flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors ${
+          isAtiva
+            ? "bg-white text-gray-900 shadow-xs"
+            : "bg-transparent text-gray-500 hover:text-gray-700"
+        }`;
 
         if (aoMudar) {
           return (
-            <button
-              key={key}
-              onClick={() => aoMudar(key)}
-              className={btnCls}
-              style={btnStyle}
-            >
+            <button key={key} onClick={() => aoMudar(key)} className={cls}>
               <Icon size={14} strokeWidth={1.75} />
               {label}
             </button>
@@ -56,12 +40,7 @@ export default function NavegacaoAbas({ abas, activeKey, aoMudar }: Props) {
         }
 
         return (
-          <Link
-            key={key}
-            href={`/configuracoes/${key}`}
-            className={btnCls}
-            style={btnStyle}
-          >
+          <Link key={key} href={`/configuracoes/${key}`} className={cls}>
             <Icon size={14} strokeWidth={1.75} />
             {label}
           </Link>
