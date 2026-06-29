@@ -457,7 +457,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  if (tags.includes("aprovacao_desconto") && tarefaInfo?.venda_id) {
+  // BUG FIX (jun/2026): casar por TIPO, não pela tag. A tarefa é criada com tipo
+  // 'desconto_acima', mas nem sempre recebe a tag 'aprovacao_desconto' (alguns
+  // caminhos só põem 'aprov_desconto_acima'). Casar pela tag deixava a aprovação
+  // ser registrada na tarefa SEM marcar desconto_aprovado_por na venda → venda
+  // travava em rascunho mesmo após o diretor aprovar (vendas 15300/15312/15399/
+  // 15562/15629 destravadas à mão). Espelha o padrão do bloco cartao_desconto acima.
+  if (tarefaInfo?.tipo === "desconto_acima" && tarefaInfo?.venda_id) {
     const logCtx = { tarefa_id: Number(id), venda_id: tarefaInfo.venda_id, decisao: body.decisao, aprovador_id: user.id };
     console.log(`[desconto] inicio`, logCtx);
     try {
@@ -524,7 +530,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const isCreditoReal = vendaAtiva && tarefaInfo?.aprovacao_credito_tipo;
 
   if (isCreditoReal &&
-      !tags.includes("aprovacao_desconto") &&
+      tarefaInfo?.tipo !== "desconto_acima" &&
       !tags.includes("aprovacao_venda") &&
       tarefaInfo?.tipo !== "cartao_desconto") {
     try {
