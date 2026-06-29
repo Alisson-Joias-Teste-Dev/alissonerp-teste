@@ -105,7 +105,7 @@ export default function IntegracaoBancoInter({ onMsg }: { onMsg: (msg: { tipo: "
         <Button variant="primary" size="sm" loading={saving} onClick={salvarInter}>
           <Save size={13} /> Salvar Banco Inter
         </Button>
-        <Button variant="secondary" size="sm" onClick={gerarCronSecret}>
+        <Button variant="outline" size="sm" onClick={gerarCronSecret}>
           <RefreshCw size={12} /> Gerar Cron Secret
         </Button>
       </div>

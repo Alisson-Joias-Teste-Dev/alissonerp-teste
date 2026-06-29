@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Save,
 } from "lucide-react";
-import { Button, Spinner, Toggle, StatusBadge, MessageBox } from "@/components/ui";
+import { Button, Spinner, Toggle, Badge, MessageBox } from "@/components/ui";
 import { ConfigIA, KeysStatus, PROVEDORES, P } from "./types";
 
 export default function ConfigIAForm() {
@@ -151,7 +151,7 @@ export default function ConfigIAForm() {
         </div>
         <div className="flex items-center gap-2">
           <Toggle ativo={iaAtiva} onChange={toggleIA} disabled={salvandoConfig} />
-          <StatusBadge ativo={iaAtiva} />
+          <Badge color={iaAtiva ? "success" : "neutral"}>{iaAtiva ? "Ativo" : "Inativo"}</Badge>
         </div>
       </div>
 

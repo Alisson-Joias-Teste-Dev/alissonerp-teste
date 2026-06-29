@@ -10,7 +10,7 @@ import { Modal } from "@/components/ui/Modal";
 import { InputField } from "@/components/ui/InputField";
 import { Switch } from "@/components/ui/Switch";
 
-const INFOS: { id: string; name: string; description: string; icon: React.ElementType; configured: boolean }[] = [
+const INFOS: { id: string; name: string; description: string; icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
   { id: "woocommerce", name: "WooCommerce", description: "Sincroniza produtos e pedidos com a loja virtual", icon: ShoppingBag },
   { id: "kommo", name: "Kommo", description: "CRM de vendas — integração de leads e contatos", icon: MessageCircle },
   { id: "tiny", name: "Tiny ERP", description: "Sistema de gestão empresarial — produtos e estoque", icon: Store },
@@ -37,10 +37,12 @@ export default function TabIntegracoes() {
   async function carregarTudo() {
     setLoading(true);
     try {
-      const [data, iaData] = await Promise.all([
+      const [rawData, rawIa] = await Promise.all([
         fetch("/api/configuracoes/integracoes").then(r => r.ok ? r.json() : {}),
         fetch("/api/configuracoes/ia").then(r => r.ok ? r.json() : { keys_status: {} }),
       ]);
+      const data = rawData as Record<string, unknown>;
+      const iaData = rawIa as Record<string, unknown>;
       const status: Record<string, boolean> = {};
       status.woocommerce = !!(data.woo_url && data.woo_key);
       status.kommo = !!(data.kommo_url && data.kommo_token);
@@ -49,7 +51,7 @@ export default function TabIntegracoes() {
       status.mercado_pago = !!(data.mp_access_token);
       status.pagbank = !!(data.pagbank_connect_token);
       status.banco_inter = !!(data.inter_client_id && data.inter_client_secret);
-      const ks = (iaData as { keys_status?: Record<string, boolean> }).keys_status || {};
+      const ks = (iaData as unknown as { keys_status?: Record<string, boolean> }).keys_status || {};
       status.ia_providers = Object.values(ks).some(Boolean);
       setConfigured(status);
     } catch { /* silencioso */ }

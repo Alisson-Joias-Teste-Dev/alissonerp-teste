@@ -115,7 +115,7 @@ export default function TabUsuarios({ usuarios: usuariosInit, depositos, initial
           ) : paginados.map(u => (
             <TableRow key={u.id} className="cursor-pointer" onClick={() => router.push(`/perfil?userId=${u.id}`)}>
               <TableCell onClick={e => e.stopPropagation()}>
-                <UserAvatar nome={u.nome} fotoUrl={u.avatar_url} size={36} userId={u.id} clickable={false} />
+                <UserAvatar nome={u.nome} fotoUrl={u.avatar_url ?? null} size={36} userId={String(u.id)} clickable={false} />
               </TableCell>
               <TableCell className="font-medium text-gray-900">{u.nome}</TableCell>
               <TableCell className="text-gray-500">{u.email}</TableCell>

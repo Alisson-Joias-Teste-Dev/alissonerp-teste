@@ -1,7 +1,7 @@
 "use client";
 
 import { Smartphone, Pencil } from "lucide-react";
-import { Button, Badge, StatusBadge } from "@/components/ui";
+import { Button, Badge } from "@/components/ui";
 import FormularioDispositivo from "./FormularioDispositivo";
 
 // ─── Paleta ───────────────────────────────────────────────────────────────────
@@ -163,14 +163,14 @@ export default function ListaDispositivos({
 
                 {/* Reserva da Loja */}
                 <td className="px-4 py-3">
-                  <Badge color={d.is_reserva ? P.dourado : P.muted} bg={d.is_reserva ? P.dourado + "22" : P.border}>
+                  <Badge color={d.is_reserva ? "warning" : "neutral"}>
                     {d.is_reserva ? "Sim" : "Não"}
                   </Badge>
                 </td>
 
                 {/* Status */}
                 <td className="px-4 py-3">
-                  <StatusBadge ativo={d.ativo} />
+                  <Badge color={d.ativo ? "success" : "neutral"}>{d.ativo ? "Ativo" : "Inativo"}</Badge>
                 </td>
 
                 {/* Ações */}

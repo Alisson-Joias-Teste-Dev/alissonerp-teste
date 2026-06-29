@@ -6,7 +6,7 @@ import {
   CheckCircle,
   X,
 } from "lucide-react";
-import { Button, Toggle, StatusBadge, MessageBox } from "@/components/ui";
+import { Button, Toggle, Badge, MessageBox } from "@/components/ui";
 
 const P = {
   bg:       "#f9fafb",
@@ -104,7 +104,7 @@ export default function ListaTiposServico({
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <StatusBadge ativo={t.ativo} />
+                    <Badge color={t.ativo ? "success" : "neutral"}>{t.ativo ? "Ativo" : "Inativo"}</Badge>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -113,7 +113,7 @@ export default function ListaTiposServico({
                           <Button variant="primary" size="sm" loading={salvandoId === t.id} onClick={() => onEditar(t.id, editNome)}>
                             <Save size={11} /> Salvar
                           </Button>
-                          <Button variant="secondary" size="sm" onClick={() => setEditandoId(null)}>
+                          <Button variant="outline" size="sm" onClick={() => setEditandoId(null)}>
                             <X size={11} /> Cancelar
                           </Button>
                         </>

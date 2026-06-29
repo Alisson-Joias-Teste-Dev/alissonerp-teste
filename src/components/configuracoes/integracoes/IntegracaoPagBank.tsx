@@ -6,7 +6,7 @@ import {
   CheckCircle,
   Save,
 } from "lucide-react";
-import { Button, Toggle, StatusBadge } from "@/components/ui";
+import { Button, Toggle, Badge } from "@/components/ui";
 
 // ─── Paleta ──────────────────────────────────────────────────────────────────
 const P = {
@@ -120,7 +120,7 @@ export default function IntegracaoPagBank({
         {/* Toggle ativar/desativar gateway */}
         <div className="flex items-center gap-2">
           <Toggle ativo={pagbankAtivo} onChange={alternarPagbankAtivo} />
-          <StatusBadge ativo={pagbankAtivo} />
+          <Badge color={pagbankAtivo ? "success" : "neutral"}>{pagbankAtivo ? "Ativo" : "Inativo"}</Badge>
         </div>
       </div>
 

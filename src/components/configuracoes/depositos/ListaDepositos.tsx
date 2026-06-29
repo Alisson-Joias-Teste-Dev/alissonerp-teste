@@ -9,7 +9,7 @@ import {
   Trash2,
   Plus,
 } from "lucide-react";
-import { Button, Spinner, StatusBadge } from "@/components/ui";
+import { Button, Spinner, Badge } from "@/components/ui";
 import FormularioSetor from "./FormularioSetor";
 
 const P = {
@@ -101,7 +101,7 @@ export default function ListaDepositos({
               <span className="flex-1 text-sm font-medium" style={{ color: dep.ativo ? P.creme : P.muted }}>
                 {dep.nome}
               </span>
-              <StatusBadge ativo={dep.ativo} />
+              <Badge color={dep.ativo ? "success" : "neutral"}>{dep.ativo ? "Ativo" : "Inativo"}</Badge>
               <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                 <Button variant="ghost" size="sm" title="Editar" onClick={() => onEditDeposito(dep)}>
                   <Pencil size={12} />
@@ -121,7 +121,7 @@ export default function ListaDepositos({
                   <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>
                     Setores ({depSetores.length})
                   </span>
-                  <Button variant="secondary" size="sm" onClick={() => { setShowSetorForm(dep.id); setEditingSetor(null); }}>
+                  <Button variant="outline" size="sm" onClick={() => { setShowSetorForm(dep.id); setEditingSetor(null); }}>
                     <Plus size={11} /> Novo Setor
                   </Button>
                 </div>
@@ -154,7 +154,7 @@ export default function ListaDepositos({
                         <span className="flex-1 text-[12px]" style={{ color: s.ativo ? P.creme : P.muted }}>
                           {s.nome}
                         </span>
-                        <StatusBadge ativo={s.ativo} />
+                        <Badge color={s.ativo ? "success" : "neutral"}>{s.ativo ? "Ativo" : "Inativo"}</Badge>
                         <Button variant="ghost" size="sm" title="Editar" onClick={() => {
                           setEditingSetor(s);
                           setShowSetorForm(dep.id);

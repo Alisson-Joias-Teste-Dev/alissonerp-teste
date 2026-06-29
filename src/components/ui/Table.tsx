@@ -6,7 +6,7 @@ interface TableProps { children: ReactNode; className?: string; }
 interface TableHeaderProps { children: ReactNode; className?: string; }
 interface TableBodyProps { children: ReactNode; className?: string; }
 interface TableRowProps { children: ReactNode; className?: string; onClick?: () => void; }
-interface TableCellProps { children: ReactNode; isHeader?: boolean; className?: string; colSpan?: number; }
+interface TableCellProps { children: ReactNode; isHeader?: boolean; className?: string; colSpan?: number; onClick?: (e: React.MouseEvent) => void; }
 
 export function Table({ children, className = "" }: TableProps) {
   return (
@@ -32,13 +32,13 @@ export function TableRow({ children, className = "", onClick }: TableRowProps) {
   );
 }
 
-export function TableCell({ children, isHeader = false, className = "", colSpan }: TableCellProps) {
+export function TableCell({ children, isHeader = false, className = "", colSpan, onClick }: TableCellProps) {
   const Component = isHeader ? "th" : "td";
   const headerCls = "px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
   const bodyCls = "px-6 py-4 text-sm text-gray-700";
 
   return (
-    <Component className={`${isHeader ? headerCls : bodyCls} ${className}`} colSpan={colSpan}>
+    <Component className={`${isHeader ? headerCls : bodyCls} ${className}`} colSpan={colSpan} onClick={onClick}>
       {children}
     </Component>
   );

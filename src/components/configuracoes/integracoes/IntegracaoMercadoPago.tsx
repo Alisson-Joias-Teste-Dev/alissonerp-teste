@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { CreditCard, CheckCircle, X, Save, EyeOff, Eye, RefreshCw, Pencil } from "lucide-react";
-import { Input, Button, Toggle, StatusBadge } from "@/components/ui";
+import { Input, Button, Toggle, Badge } from "@/components/ui";
 
 const P = { creme: "#111827", muted: "#9ca3af", sage: "#6b7280", verde: "#16a34a", vermelho: "#dc2626", border: "#e5e7eb", bg: "#f9fafb" };
 
@@ -110,7 +110,7 @@ export default function IntegracaoMercadoPago({ onMsg }: { onMsg: (msg: { tipo: 
           <BadgeConfigurado ok={mpConfigured} />
           <div className="flex items-center gap-2">
             <Toggle ativo={mpAtivo} onChange={alternarMpAtivo} />
-            <StatusBadge ativo={mpAtivo} />
+            <Badge color={mpAtivo ? "success" : "neutral"}>{mpAtivo ? "Ativo" : "Inativo"}</Badge>
           </div>
         </div>
       </div>

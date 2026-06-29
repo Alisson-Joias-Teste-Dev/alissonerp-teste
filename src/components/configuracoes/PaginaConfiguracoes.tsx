@@ -30,8 +30,10 @@ import TabAprovadores from "@/components/configuracoes/TabAprovadores";
 import LocaisEstoqueTab from "@/components/LocaisEstoqueTab";
 import TabProdutoVisibilidade from "@/components/configuracoes/TabProdutoVisibilidade";
 
+import type { Parametros } from "./types";
+
 interface Props {
-  parametros: Record<string, unknown>;
+  parametros: Parametros;
   webhooks: any[];
   logs: any[];
   usuarios: any[];

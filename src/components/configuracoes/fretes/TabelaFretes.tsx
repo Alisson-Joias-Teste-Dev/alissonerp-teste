@@ -1,7 +1,7 @@
 "use client";
 
 import { Search, X, Save, CheckCircle, AlertTriangle } from "lucide-react";
-import { Button, Toggle, StatusBadge } from "@/components/ui";
+import { Button, Toggle, Badge } from "@/components/ui";
 
 const P = {
   bg:       "#f9fafb",
@@ -121,7 +121,7 @@ export default function TabelaFretes({
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <Toggle ativo={frete.ativo} onChange={() => onToggleAtivo(frete)} disabled={salvandoId === frete.id} />
-                        <StatusBadge ativo={frete.ativo} />
+                        <Badge color={frete.ativo ? "success" : "neutral"}>{frete.ativo ? "Ativo" : "Inativo"}</Badge>
                       </div>
                     </td>
                     <td className="px-4 py-3">
