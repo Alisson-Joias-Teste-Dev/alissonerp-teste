@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+*:focus { outline: none !important; }
+*:focus-visible { outline: none !important; }
+* { -webkit-tap-highlight-color: transparent; }
+
 /* =============================================
    DESIGN SYSTEM — ALISSON JOALHERIA
    Tailwind v4: cores via @theme

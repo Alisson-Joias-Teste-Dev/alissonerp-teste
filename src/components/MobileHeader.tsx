@@ -21,7 +21,7 @@ if (typeof window !== 'undefined') {
 }
 
 export default function MobileHeader() {
-  const { toggle } = useSidebar();
+  const { toggleMobileSidebar } = useSidebar();
   const { nome, fotoUrl, user } = useAuth();
   const [podeInstalar, setPodeInstalar] = useState(false);
   const [instalando, setInstalando] = useState(false);
@@ -70,7 +70,7 @@ export default function MobileHeader() {
     >
       {/* Botão hamburger */}
       <button
-        onClick={toggle}
+        onClick={toggleMobileSidebar}
         aria-label="Abrir menu"
         className="flex items-center justify-center rounded-lg p-1.5 transition-colors hover:bg-white/10"
       >
