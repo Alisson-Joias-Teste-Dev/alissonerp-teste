@@ -51,10 +51,23 @@ export async function getSaldoDisponivel(): Promise<{
   disponivel: number;
 }> {
   const limite = await getSaldoLimite();
+  // Pendente = SÓ o A Receber REAL (mesma base do card "Pendente" / filtro
+  // whereCrediario do /api/crediario). Sem este filtro, contas pendentes que NÃO
+  // são crediário (pagas pelo pedido / lixo legado) inflavam o usado e davam saldo
+  // negativo falso (ex.: homolog mostrava −11k com pendente real de só 5,6k).
   const [row] = await sql`
     SELECT COALESCE(SUM(valor), 0) AS total
     FROM alissonerp.vw_crediario
     WHERE situacao = 'pendente'
+      AND (
+        EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
+                WHERE p.venda_id = vw_crediario.venda_id AND p.forma = 'A Receber')
+        OR NOT EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
+                       WHERE p.venda_id = vw_crediario.venda_id)
+        OR EXISTS (SELECT 1 FROM alissonerp.comunicacoes_crediario c
+                   JOIN alissonerp.contas_receber cr2 ON cr2.id = c.conta_receber_id
+                   WHERE cr2.venda_erp_id = vw_crediario.venda_id)
+      )
   `;
   const pendente = row ? parseFloat(row.total) : 0;
   const disponivel = Math.round((limite - pendente) * 100) / 100;
