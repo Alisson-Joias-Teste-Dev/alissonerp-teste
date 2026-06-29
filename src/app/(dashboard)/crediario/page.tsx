@@ -29,6 +29,21 @@ export default async function CrediarioPage() {
     ? sql`AND vendedor_id = ${vendedorId}`
     : sql``;
 
+  // CREDIÁRIO = só vendas "A Receber" (fiado). MANTÉM se: tem "A Receber" OU é
+  // legado (sem pagamento_venda) OU foi baixada pelo crediário (tem comunicacao).
+  // EXCLUI o resto = paga pelo PEDIDO. Filtro de exibição (igual ao /api/crediario).
+  const whereCrediario = sql`
+    AND (
+      EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
+              WHERE p.venda_id = vw_crediario.venda_id AND p.forma = 'A Receber')
+      OR NOT EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
+                     WHERE p.venda_id = vw_crediario.venda_id)
+      OR EXISTS (SELECT 1 FROM alissonerp.comunicacoes_crediario c
+                 JOIN alissonerp.contas_receber cr2 ON cr2.id = c.conta_receber_id
+                 WHERE cr2.venda_erp_id = vw_crediario.venda_id)
+    )
+  `;
+
   const [itemsResult, countResult, saldoResult] = await Promise.all([
     sql`
       SELECT
@@ -36,12 +51,14 @@ export default async function CrediarioPage() {
         situacao, status_aging, dias_atraso, obs, created_at,
         venda_id, numero_venda, total_venda, venda_situacao, venda_bloqueada,
         credito_gerente_usado, venda_created_at,
+        (SELECT v.data_venda FROM alissonerp.vendas_erp v WHERE v.id = venda_id) AS data_venda,
         cliente_id, cliente_nome, cliente_telefone,
         vendedor_id, vendedor_nome,
         consultora_uuid, consultora_nome
       FROM alissonerp.vw_crediario
       WHERE situacao = 'pendente'
         ${whereVendedor}
+        ${whereCrediario}
       ORDER BY
         CASE WHEN status_aging = 'vencido' THEN 0
              WHEN status_aging = 'vence_em_breve' THEN 1
@@ -58,13 +75,19 @@ export default async function CrediarioPage() {
         COALESCE(SUM(valor) FILTER (WHERE situacao='pendente'), 0) AS valor_pendente,
         COALESCE(SUM(valor) FILTER (WHERE status_aging='vencido' AND situacao='pendente'), 0) AS valor_vencido
       FROM alissonerp.vw_crediario
-      WHERE 1=1 ${whereVendedor}
+      WHERE 1=1 ${whereVendedor} ${whereCrediario}
     `,
     isConsultora
       ? sql`SELECT NULL::numeric AS saldo_atual, NULL::numeric AS saldo_limite`
       : sql`
           SELECT
-            (SELECT valor::numeric FROM alissonerp.configuracoes_sistema WHERE chave='saldo_gerente_atual'  LIMIT 1) AS saldo_atual,
+            -- Saldo GERAL (regra v2.78.0): limite − A Receber pendente, derivado ao
+            -- vivo (não o contador 'saldo_gerente_atual', que dava drift). Pendente =
+            -- SÓ crediário REAL (mesmo filtro whereCrediario do card "Pendente");
+            -- sem ele, conta pendente que não é A Receber inflava e dava negativo falso.
+            -- GLOBAL (sem whereVendedor). Pode ser NEGATIVO se o A Receber passa do limite.
+            (SELECT valor::numeric FROM alissonerp.configuracoes_sistema WHERE chave='saldo_gerente_limite' LIMIT 1)
+              - COALESCE((SELECT SUM(valor) FROM alissonerp.vw_crediario WHERE situacao='pendente' ${whereCrediario}), 0) AS saldo_atual,
             (SELECT valor::numeric FROM alissonerp.configuracoes_sistema WHERE chave='saldo_gerente_limite' LIMIT 1) AS saldo_limite
         `,
   ]);
