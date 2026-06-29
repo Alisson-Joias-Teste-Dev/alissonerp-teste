@@ -2,6 +2,23 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(vendas): destrava venda em rascunho após reeditar desconto já aprovado (REAPLICADO)
+
+**O quê:** reeditar/adicionar item acima do limite numa venda `rascunho` invalidava a
+aprovação de desconto (`desconto_aprovado_por` = NULL) mas deixava
+`aprovacao_desconto_tarefa_id` apontando para a tarefa antiga (já `aprovada`). Isso escondia
+TANTO o botão "Solicitar Aprovação de Desconto" (o front exige o campo NULL) QUANTO o banner
+de "aguardando aprovação" → a venda travava em rascunho sem como reaprovar (beco sem saída).
+
+**Como:** `POST` e `PATCH /api/vendas/[id]/itens` agora (1) zeram também
+`aprovacao_desconto_tarefa_id` ao invalidar a aprovação e (2) cancelam a tarefa vinculada
+mirando pelo **ID** e só se ainda estava pendente (o filtro por tag `aprovacao_desconto`
+antigo nunca batia — a tag real é `aprov_desconto_acima`).
+
+**Histórico:** o fix original (commit `6ea83e1c`, 25/06) foi **revertido** pelo merge de base
+velha `0ae5e160`. Esta entrada é a **reaplicação** sobre a main atual. Vendas destravadas em
+produção por update assinado: 15628 (log #91) e 15399 (log #102). Doc: comercial.md §6.
+
 ## feat(crediario): painel de parcelamento/sinal também no detalhe da venda (v2.70.0)
 
 **O quê:** o painel "Pagamento a prazo (crediário)" (Mensal / Em X dias / Sinal), que só
