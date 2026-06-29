@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const situacao    = url.searchParams.get("situacao") ?? "";     // pendente | pago | cancelado
   const statusAging = url.searchParams.get("status_aging") ?? ""; // vencido | vence_em_breve | em_dia
   const page        = Math.max(1, Number(url.searchParams.get("page")) || 1);
-  const limit       = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 50));
+  const limit       = Math.min(2000, Math.max(1, Number(url.searchParams.get("limit")) || 50));
   const offset      = (page - 1) * limit;
 
   // Filtro de vendedor: consultora vê só as suas, gerente/admin veem tudo (ou filtrado)
@@ -42,6 +42,24 @@ export async function GET(req: NextRequest) {
     ? sql`AND vendedor_id = ${vendedorId}`
     : sql``;
 
+  // CREDIÁRIO = só vendas que foram "A Receber" (fiado). MANTÉM se: tem "A
+  // Receber" (fiado moderno) OU não tem pagamento_venda (legado, ex.: Ruth 28537
+  // sem o registro novo) OU foi BAIXADA pelo crediário (tem comunicacao). EXCLUI
+  // o resto = paga pelo PEDIDO (cartão/Pix no pedido, sem histórico de baixa no
+  // crediário — ex.: 15639 Pix MP Manual, 15643 cartão MP Online). Filtro de
+  // EXIBIÇÃO — não altera nada no banco.
+  const whereCrediario = sql`
+    AND (
+      EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
+              WHERE p.venda_id = vw_crediario.venda_id AND p.forma = 'A Receber')
+      OR NOT EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
+                     WHERE p.venda_id = vw_crediario.venda_id)
+      OR EXISTS (SELECT 1 FROM alissonerp.comunicacoes_crediario c
+                 JOIN alissonerp.contas_receber cr2 ON cr2.id = c.conta_receber_id
+                 WHERE cr2.venda_erp_id = vw_crediario.venda_id)
+    )
+  `;
+
   const whereSituacao = situacao
     ? sql`AND situacao = ${situacao}`
     : sql``;
@@ -50,11 +68,69 @@ export async function GET(req: NextRequest) {
     ? sql`AND status_aging = ${statusAging}`
     : sql``;
 
+  // Drill-down dos cards de período (clicar em "Vendeu"/"Recebeu"):
+  //  - drill=vendido  → contas de vendas FEITAS no período (data_venda), não canceladas.
+  //  - drill=recebido → contas PAGAS no período (data_recebimento).
+  // Quando presente, SUBSTITUI o filtro de situacao/aging na lista.
+  const drill     = url.searchParams.get("drill"); // 'vendido' | 'recebido'
+  const drillFrom = url.searchParams.get("from");
+  const drillTo   = url.searchParams.get("to");
+  const whereDrill =
+    (drill === "recebido" && drillFrom && drillTo)
+      ? sql`AND situacao = 'pago' AND data_recebimento BETWEEN ${drillFrom}::date AND ${drillTo}::date`
+      : (drill === "vendido" && drillFrom && drillTo)
+        ? sql`AND situacao <> 'cancelado'
+              AND COALESCE((SELECT v.data_venda FROM alissonerp.vendas_erp v WHERE v.id = venda_id), venda_created_at::date)
+                  BETWEEN ${drillFrom}::date AND ${drillTo}::date`
+        : null;
+  const whereLista = whereDrill ?? sql`${whereSituacao} ${whereAging}`;
+
+  // Resumo (cards): pendente/vencido/recebidos com o MESMO filtro de vendedor,
+  // ignorando situacao/aging — usado quando a tela troca de consultora. Só
+  // computa se pedido (counts=1) para não pesar as listagens normais.
+  const wantCounts = url.searchParams.get("counts") === "1";
+  const contagensQuery = wantCounts
+    ? sql`
+        SELECT
+          COUNT(*)::integer                                                                       AS total,
+          COUNT(*) FILTER (WHERE situacao='pendente')::integer                                    AS pendente,
+          COUNT(*) FILTER (WHERE situacao='pago')::integer                                        AS pago,
+          COUNT(*) FILTER (WHERE status_aging='vencido' AND situacao='pendente')::integer         AS vencido,
+          COALESCE(SUM(valor) FILTER (WHERE situacao='pendente'), 0)                              AS valor_pendente,
+          COALESCE(SUM(valor) FILTER (WHERE status_aging='vencido' AND situacao='pendente'), 0)   AS valor_vencido
+        FROM alissonerp.vw_crediario
+        WHERE 1=1 ${whereVendedor} ${whereCrediario}
+      `
+    : Promise.resolve(null);
+
+  // Período (cards "Vendeu em crediário" / "Recebeu"): só quando vêm from+to.
+  //  - vendido  = crediário GERADO em vendas feitas no período (venda_created_at),
+  //               somando todas as contas não-canceladas da venda (original + splits
+  //               "Saldo restante" = total original); exclui canceladas.
+  //  - recebido = valor BAIXADO no período (data_recebimento de contas pagas).
+  // Ambos respeitam o filtro de vendedor (consultora) já aplicado.
+  const periodoFrom = url.searchParams.get("from");
+  const periodoTo   = url.searchParams.get("to");
+  const periodoQuery = (periodoFrom && periodoTo)
+    ? sql`
+        SELECT
+          COALESCE(SUM(valor) FILTER (
+            WHERE situacao <> 'cancelado'
+              AND COALESCE((SELECT v.data_venda FROM alissonerp.vendas_erp v WHERE v.id = venda_id), venda_created_at::date)
+                  BETWEEN ${periodoFrom}::date AND ${periodoTo}::date), 0) AS vendido,
+          COALESCE(SUM(valor) FILTER (
+            WHERE situacao = 'pago'
+              AND data_recebimento BETWEEN ${periodoFrom}::date AND ${periodoTo}::date), 0) AS recebido
+        FROM alissonerp.vw_crediario
+        WHERE 1=1 ${whereVendedor} ${whereCrediario}
+      `
+    : Promise.resolve(null);
+
   // Pagos: ordenar por data_recebimento DESC (mais recente primeiro)
   // Pendentes/todos: urgência (vencido→breve→em_dia), depois vencimento ASC
-  const isPago = situacao === "pago";
+  const isPago = situacao === "pago" || drill === "recebido";
 
-  const [items, countResult] = await Promise.all([
+  const [items, countResult, contagensResult, periodoResult] = await Promise.all([
     sql`
       SELECT
         conta_receber_id,
@@ -74,6 +150,7 @@ export async function GET(req: NextRequest) {
         venda_bloqueada,
         credito_gerente_usado,
         venda_created_at,
+        (SELECT v.data_venda FROM alissonerp.vendas_erp v WHERE v.id = venda_id) AS data_venda,
         cliente_id,
         cliente_nome,
         cliente_telefone,
@@ -84,8 +161,8 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.vw_crediario
       WHERE 1=1
         ${whereVendedor}
-        ${whereSituacao}
-        ${whereAging}
+        ${whereCrediario}
+        ${whereLista}
       ORDER BY
         CASE WHEN ${isPago} THEN 0 ELSE
           CASE WHEN status_aging = 'vencido' THEN 0
@@ -102,12 +179,32 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.vw_crediario
       WHERE 1=1
         ${whereVendedor}
-        ${whereSituacao}
-        ${whereAging}
+        ${whereCrediario}
+        ${whereLista}
     `,
+    contagensQuery,
+    periodoQuery,
   ]);
 
   const total = countResult[0].total as number;
+
+  const contagens = contagensResult?.[0]
+    ? {
+        total:          Number(contagensResult[0].total),
+        pendente:       Number(contagensResult[0].pendente),
+        pago:           Number(contagensResult[0].pago),
+        vencido:        Number(contagensResult[0].vencido),
+        valor_pendente: Number(contagensResult[0].valor_pendente),
+        valor_vencido:  Number(contagensResult[0].valor_vencido),
+      }
+    : undefined;
+
+  const periodo = periodoResult?.[0]
+    ? {
+        vendido:  Number(periodoResult[0].vendido),
+        recebido: Number(periodoResult[0].recebido),
+      }
+    : undefined;
 
   return NextResponse.json({
     items: items.map((r) => ({
@@ -121,5 +218,7 @@ export async function GET(req: NextRequest) {
     page,
     limit,
     totalPages: Math.ceil(total / limit),
+    ...(contagens ? { contagens } : {}),
+    ...(periodo ? { periodo } : {}),
   });
 }
