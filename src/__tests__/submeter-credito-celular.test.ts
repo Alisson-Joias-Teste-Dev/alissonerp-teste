@@ -9,9 +9,7 @@ const sqlMock = Object.assign(vi.fn(), { array: (arr: unknown[]) => arr });
 vi.mock("@/lib/db", () => ({ default: sqlMock }));
 
 const mockGetSaldo = vi.fn();
-// A função usa getSaldoAtual (e debitarSaldo) de @/lib/saldo-credito — o mock tem que
-// expor os mesmos nomes, senão o gate "passou do celular" estoura por export ausente.
-vi.mock("@/lib/saldo-credito", () => ({ getSaldoAtual: mockGetSaldo, debitarSaldo: vi.fn() }));
+vi.mock("@/lib/saldo-credito", () => ({ getSaldoDisponivel: mockGetSaldo }));
 vi.mock("@/lib/vendas-aprovar", () => ({ approveVenda: vi.fn() }));
 vi.mock("@/lib/aprovacao-regras", () => ({ getDescontoThreshold: vi.fn() }));
 vi.mock("@/lib/notificacoes", () => ({ criarNotificacao: vi.fn() }));
