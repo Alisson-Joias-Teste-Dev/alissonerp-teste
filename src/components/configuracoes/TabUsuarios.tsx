@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { AlertTriangle, Camera, Eye, EyeOff, Loader2, Plus, Search, Users } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { ROLE_LABEL } from "./constants";
-import type { Usuario, DepositoEdit } from "./types";
+import type { Usuario, DepositoEdit, UsuarioEdit } from "./types";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
@@ -18,7 +18,7 @@ import UserAvatar from "@/components/UserAvatar";
 const ITENS_POR_PAGINA = 10;
 
 export default function TabUsuarios({ usuarios: usuariosInit, depositos, initialUserId }: {
-  usuarios: Usuario[]; depositos: DepositoEdit[];
+  usuarios: Usuario[]; depositos: DepositoEdit[]; initialUserId?: string | null;
 }) {
   const router = useRouter();
   const { role: roleLogado } = useAuth();
