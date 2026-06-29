@@ -6,8 +6,11 @@ import { fetchPayment } from "@/lib/mercado-pago";
 import { creditarSaldo } from "@/lib/saldo-credito";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
+import { requireCrediarioOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { ForbiddenError } from "@/lib/auth-server";
 
-const PODE_VERIFICAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
+// consultora entra, mas SÓ na conta de venda dela (ownership abaixo).
+const PODE_VERIFICAR = ["desenvolvedor", "admin", "gerente_loja", "diretor", "consultora"];
 
 const VerificarMpSchema = z.object({
   payment_id: z.string().min(1, "Informe o ID do pagamento do Mercado Pago").max(100),
@@ -36,6 +39,18 @@ export async function POST(
   `;
   if (!usuario || !PODE_VERIFICAR.includes(usuario.role as string)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
+  // consultora só confirma pagamento de conta de uma venda DELA.
+  try {
+    await requireCrediarioOwnership(
+      { id: user.id, role: usuario.role as string, email: user.email ?? "" },
+      contaId,
+    );
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
   }
 
   const raw = await req.json().catch(() => ({}));
@@ -88,11 +103,16 @@ export async function POST(
   const valorMp   = Number(mpData.transaction_amount ?? 0);
   const valorConta = Number(conta.valor);
 
-  // Tolerância de R$0,10 para diferenças de centavo
-  if (Math.abs(valorMp - valorConta) > 0.10) {
+  // O valor da baixa é o que o Mercado Pago REALMENTE aprovou (dinheiro real),
+  // nunca o que o front diz. Regras (tolerância de R$0,10 p/ centavos):
+  //  - MP > conta  → recusa (não baixa a mais; evitaria furar a trava de soma).
+  //  - MP = conta  → baixa total.
+  //  - MP < conta  → baixa PARCIAL: baixa o pago e abre nova conta com o restante
+  //                  (mesma lógica do registrar-pagamento, já testada).
+  if (valorMp > valorConta + 0.10) {
     return NextResponse.json(
       {
-        error: `Valor do pagamento MP (${valorMp.toFixed(2)}) difere da conta (${valorConta.toFixed(2)})`,
+        error: `Pagamento MP (R$ ${valorMp.toFixed(2)}) é maior que a conta (R$ ${valorConta.toFixed(2)}). Confira se é a conta certa.`,
         mp_valor: valorMp,
         conta_valor: valorConta,
       },
@@ -100,32 +120,79 @@ export async function POST(
     );
   }
 
+  const ehParcial = valorConta - valorMp > 0.10;
+  const valorRestante = ehParcial ? Math.round((valorConta - valorMp) * 100) / 100 : 0;
+
   const obs = (body?.obs ?? "").trim() ||
-    `Pagamento Mercado Pago confirmado — ID ${mpPaymentId}`;
+    (ehParcial
+      ? `Pagamento PARCIAL Mercado Pago — R$ ${valorMp.toFixed(2)} de R$ ${valorConta.toFixed(2)} (ID ${mpPaymentId}). Restante: R$ ${valorRestante.toFixed(2)}`
+      : `Pagamento Mercado Pago confirmado — ID ${mpPaymentId}`);
   const vendaId = conta.venda_erp_id as number | null;
+
+  // Pagamento "A Receber" pendente da venda — alvo do split parcial.
+  const [pagamentoAReceber] = vendaId
+    ? await sql`
+        SELECT id FROM alissonerp.pagamentos_venda
+        WHERE venda_id = ${vendaId} AND forma = 'A Receber' AND status = 'pendente'
+        LIMIT 1
+      `
+    : [null];
+
+  let novoCreditoId: number | null = null;
 
   // ── Registrar baixa em transação ─────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await sql.begin(async (tx: any) => {
-    // 1. Marcar conta a receber como paga
+    // 1. Baixar a conta. No total, mantém o valor original (comportamento
+    //    de antes); no parcial, ajusta para o que foi pago no MP.
+    const valorBaixaConta = ehParcial ? valorMp : valorConta;
     await tx`
       UPDATE alissonerp.contas_receber
-      SET situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
+      SET valor = ${valorBaixaConta}, situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
       WHERE id = ${contaId}
     `;
 
-    // 2. Confirmar pagamento_venda A Receber se existir, grava o gateway_id MP
-    if (vendaId) {
-      await tx`
-        UPDATE alissonerp.pagamentos_venda
-        SET status = 'confirmado',
-            data_confirmacao = NOW(),
-            gateway_id = ${mpPaymentId},
-            gateway = 'Mercado Pago'
-        WHERE venda_id = ${vendaId}
-          AND forma = 'A Receber'
-          AND status = 'pendente'
+    // 1b. SPLIT DE CRÉDITO (pagamento parcial) — nova conta_receber com o
+    //     restante. Espelha o registrar-pagamento (PASSO 1b).
+    if (ehParcial) {
+      const [nova] = await tx`
+        INSERT INTO alissonerp.contas_receber
+          (descricao, cliente_id, cliente_nome, venda_erp_id, valor,
+           data_vencimento, situacao, categoria, obs, created_by)
+        SELECT
+          ${`Saldo restante — ${conta.descricao}`},
+          cr.cliente_id, cr.cliente_nome, cr.venda_erp_id,
+          ${valorRestante}, CURRENT_DATE, 'pendente', 'venda',
+          ${`Parcial de R$ ${valorMp.toFixed(2)} via Mercado Pago (ID ${mpPaymentId}). Restante: R$ ${valorRestante.toFixed(2)}`},
+          ${user.id}::uuid
+        FROM alissonerp.contas_receber cr WHERE cr.id = ${contaId}
+        RETURNING id
       `;
+      novoCreditoId = nova?.id ?? null;
+    }
+
+    // 2. pagamento_venda "A Receber": confirma (total) ou faz split (parcial).
+    //    A soma dos pagamentos da venda continua = total (trava mig 333 ok).
+    if (pagamentoAReceber) {
+      if (!ehParcial) {
+        await tx`
+          UPDATE alissonerp.pagamentos_venda
+          SET status = 'confirmado', data_confirmacao = NOW(),
+              gateway_id = ${mpPaymentId}, gateway = 'Mercado Pago'
+          WHERE id = ${pagamentoAReceber.id}
+        `;
+      } else {
+        await tx`
+          UPDATE alissonerp.pagamentos_venda
+          SET valor = ${valorMp}, status = 'confirmado', data_confirmacao = NOW(),
+              gateway_id = ${mpPaymentId}, gateway = 'Mercado Pago'
+          WHERE id = ${pagamentoAReceber.id}
+        `;
+        await tx`
+          INSERT INTO alissonerp.pagamentos_venda (venda_id, forma, valor, parcelas, status)
+          VALUES (${vendaId}, 'A Receber', ${valorRestante}, 1, 'pendente')
+        `;
+      }
     }
 
     // 3. Registrar comunicação com evidência MP
@@ -154,11 +221,14 @@ export async function POST(
         WHERE venda_id = ${vendaId} AND gateway_id = ${mpPaymentId} LIMIT 1
       `;
       const pagamentoId = pagamento?.id ?? null;
+      // Devolve proporcional ao que foi REALMENTE pago (valorMp), não ao total
+      // da conta — no parcial só volta o crédito do que entrou.
+      const valorDevolver = Math.min(valorMp, creditoUsado);
       try {
-        await creditarSaldo(Math.min(valorConta, creditoUsado), vendaId, pagamentoId, user.id);
+        await creditarSaldo(valorDevolver, vendaId, pagamentoId, user.id);
         await sql`
           UPDATE alissonerp.vendas_erp
-          SET credito_gerente_usado = GREATEST(credito_gerente_usado - ${Math.min(valorConta, creditoUsado)}, 0),
+          SET credito_gerente_usado = GREATEST(credito_gerente_usado - ${valorDevolver}, 0),
               updated_at = NOW()
           WHERE id = ${vendaId}
         `;
@@ -176,5 +246,9 @@ export async function POST(
     mp_status: mpData.status,
     mp_valor: valorMp,
     saldo_devolvido: saldoDevolvido,
+    pagamento_parcial: ehParcial || undefined,
+    valor_pago: valorMp,
+    valor_restante: ehParcial ? valorRestante : undefined,
+    novo_credito_id: novoCreditoId ?? undefined,
   });
 }
