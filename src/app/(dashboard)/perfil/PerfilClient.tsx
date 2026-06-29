@@ -42,7 +42,7 @@ export default function PerfilClient() {
     }).catch(() => {}).finally(() => setLoading(false));
   }, [userId, meuUser]);
 
-  const [nome, setNome] = useState(nomeAtual);
+  const [nome, setNome] = useState(nomeAtual ?? "");
   const [fotoPreview, setFotoPreview] = useState<string | null>(fotoAtual);
   const [fotoFile, setFotoFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,7 +57,7 @@ export default function PerfilClient() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
 
-  useEffect(() => { setNome(nomeAtual); setFotoPreview(fotoAtual); }, [nomeAtual, fotoAtual]);
+  useEffect(() => { setNome(nomeAtual ?? ""); setFotoPreview(fotoAtual); }, [nomeAtual, fotoAtual]);
 
   if (!meuUser) return null;
   if (!isProprio && loading) return <div className="flex justify-center py-16"><Loader2 size={20} className="animate-spin text-gray-400" /></div>;
