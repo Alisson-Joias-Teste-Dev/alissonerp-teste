@@ -164,6 +164,7 @@ const HREF_TO_MODULO: Record<string, string> = {
   "/vendas":                      "vendas",
   "/vendas/solicitacoes-alteracao": "vendas",
   "/estoque-comercial":           "estoque_comercial",
+  "/estoque-comercial/auditoria": "estoque_comercial",
   "/conversoes":                  "estoque_comercial",
   "/devolucoes":                  "devolucoes",
   "/vale-troca":                  "vale_troca",

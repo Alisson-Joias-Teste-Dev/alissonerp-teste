@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Package, AlertTriangle, CheckCircle, Search,
-  RefreshCw, Loader2, X, ClipboardList, ScanLine, Printer,
+  RefreshCw, Loader2, X, ClipboardList, ClipboardCheck, ScanLine, Printer,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -103,6 +103,15 @@ export default function EstoqueComercialClient() {
             <ClipboardList size={15} />
             <span className="hidden sm:inline">Inventario</span>
            </button>
+          <button
+            onClick={() => router.push("/estoque-comercial/auditoria")}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium hover:bg-gray-100 transition-colors"
+            style={{ color: "#184036" }}
+            title="Auditoria"
+          >
+            <ClipboardCheck size={15} />
+            <span className="hidden sm:inline">Auditoria</span>
+          </button>
           <button
             onClick={fetchData}
             className="p-2 rounded-xl hover:bg-gray-100 transition-colors"
