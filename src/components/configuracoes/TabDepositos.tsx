@@ -128,7 +128,7 @@ export default function TabDepositos() {
         <h2 className="text-sm font-semibold" style={{ color: P.creme }}>
           Depósitos / Operadores
         </h2>
-        <Button variant="secondary" size="sm" onClick={() => { setShowDepForm(true); setEditingDep(null); setError(""); }}>
+        <Button variant="outline" size="sm" onClick={() => { setShowDepForm(true); setEditingDep(null); setError(""); }}>
           <Plus size={13} /> Novo Depósito
         </Button>
       </div>

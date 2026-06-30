@@ -172,7 +172,7 @@ export default function FormularioDispositivo({
             <Button variant="primary" size="sm" loading={saving} onClick={() => onSave(device.id)}>
               <Save size={11} /> Salvar
             </Button>
-            <Button variant="secondary" size="sm" onClick={onCancel}>
+            <Button variant="outline" size="sm" onClick={onCancel}>
               <X size={11} /> Cancelar
             </Button>
           </div>

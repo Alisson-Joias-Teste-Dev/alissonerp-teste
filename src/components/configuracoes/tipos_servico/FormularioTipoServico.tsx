@@ -72,7 +72,7 @@ export default function FormularioTipoServico({ onSalvar, onCancelar }: Formular
         <Button variant="primary" size="sm" loading={criando} onClick={handleCriar}>
           <Save size={12} /> Salvar
         </Button>
-        <Button variant="secondary" size="sm" onClick={() => { onCancelar?.(); setErroCriar(""); }}>
+        <Button variant="outline" size="sm" onClick={() => { onCancelar?.(); setErroCriar(""); }}>
           <X size={12} /> Cancelar
         </Button>
       </div>

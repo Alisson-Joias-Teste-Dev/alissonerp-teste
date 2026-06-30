@@ -111,7 +111,7 @@ export default function TabComissoes() {
             <Button variant="primary" size="sm" loading={saving} onClick={adicionarFaixa}>
               <Save size={13} /> Salvar
             </Button>
-            <Button variant="secondary" size="sm" onClick={() => { setAddMode(false); setSaveErr(""); }}>
+            <Button variant="outline" size="sm" onClick={() => { setAddMode(false); setSaveErr(""); }}>
               <X size={13} /> Cancelar
             </Button>
           </div>

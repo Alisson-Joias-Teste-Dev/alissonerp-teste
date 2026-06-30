@@ -241,11 +241,11 @@ export default function TabPermissoes() {
         </div>
         <div className="flex items-center gap-3">
           {totalPending > 0 && (
-            <Badge color={P.dourado} bg={P.dourado + "22"}>
+            <Badge color="dourado">
               {totalPending} alteração{totalPending > 1 ? "ões" : ""} pendente{totalPending > 1 ? "s" : ""}
             </Badge>
           )}
-          <Button variant="secondary" size="sm" onClick={() => { setNovaRoleOpen(true); setErroNovaRole(""); setNovaRoleNome(""); setNovaRoleDesc(""); }}>
+          <Button variant="outline" size="sm" onClick={() => { setNovaRoleOpen(true); setErroNovaRole(""); setNovaRoleNome(""); setNovaRoleDesc(""); }}>
             <Plus size={13} /> Nova Role
           </Button>
           <Button variant="primary" size="sm" loading={saving} disabled={totalPending === 0} onClick={handleSave}>
@@ -293,7 +293,7 @@ export default function TabPermissoes() {
       </p>
 
       {/* ── Modal Nova Role ──────────────────────────────────────────────── */}
-      <Modal aberto={novaRoleOpen} onClose={() => setNovaRoleOpen(false)} titulo="Nova Role" subtitulo="Uma nova coluna aparecerá no grid com tudo zerado">
+      <Modal isOpen={novaRoleOpen} onClose={() => setNovaRoleOpen(false)} title="Nova Role" description="Uma nova coluna aparecerá no grid com tudo zerado">
         <div className="space-y-3">
           <Input
             label="Nome (slug) *"
@@ -318,7 +318,7 @@ export default function TabPermissoes() {
         )}
 
         <div className="flex justify-end gap-3 pt-4">
-          <Button variant="secondary" size="sm" onClick={() => setNovaRoleOpen(false)}>
+          <Button variant="outline" size="sm" onClick={() => setNovaRoleOpen(false)}>
             Cancelar
           </Button>
           <Button variant="primary" size="sm" loading={criandoRole} disabled={!novaRoleNome.trim()} onClick={handleCriarRole}>

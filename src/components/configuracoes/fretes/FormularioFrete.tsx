@@ -147,7 +147,7 @@ export default function FormularioFrete({ onSalvar, onCancelar }: FormularioFret
       </div>
       {erroNovo && <MessageBox tipo="erro" mensagem={erroNovo} onFechar={() => setErroNovo("")} />}
       <div className="flex gap-2">
-        <Button variant="secondary" size="sm" onClick={() => { onCancelar?.(); setErroNovo(""); }}>
+        <Button variant="outline" size="sm" onClick={() => { onCancelar?.(); setErroNovo(""); }}>
           <X size={11} /> Cancelar
         </Button>
         <Button variant="primary" size="sm" loading={savingNovo} onClick={handleCriarFrete}>
