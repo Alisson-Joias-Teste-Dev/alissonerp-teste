@@ -173,6 +173,7 @@ export async function POST(
         await tx`
           UPDATE alissonerp.pagamentos_venda
           SET status = 'confirmado', data_confirmacao = NOW(),
+              forma = ${formaRecebimento ?? null},
               gateway = ${formaRecebimento ?? null},
               ouro_peso = ${ouroPeso},
               ouro_valor_grama = ${ouroValorGrama},
@@ -182,7 +183,8 @@ export async function POST(
       } else if (formaRecebimento) {
         await tx`
           UPDATE alissonerp.pagamentos_venda
-          SET status = 'confirmado', data_confirmacao = NOW(), gateway = ${formaRecebimento}
+          SET status = 'confirmado', data_confirmacao = NOW(),
+              forma = ${formaRecebimento}, gateway = ${formaRecebimento}
           WHERE id = ${pagamento.id}
         `;
       } else {
@@ -203,6 +205,7 @@ export async function POST(
         await tx`
           UPDATE alissonerp.pagamentos_venda
           SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW(),
+              forma = ${formaRecebimento ?? null},
               gateway = ${formaRecebimento ?? null},
               ouro_peso = ${ouroPeso},
               ouro_valor_grama = ${ouroValorGrama},
@@ -213,7 +216,7 @@ export async function POST(
         await tx`
           UPDATE alissonerp.pagamentos_venda
           SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW(),
-              gateway = ${formaRecebimento}
+              forma = ${formaRecebimento}, gateway = ${formaRecebimento}
           WHERE id = ${pagamento.id}
         `;
       } else {
@@ -230,6 +233,43 @@ export async function POST(
           ${vendaId}, 'A Receber', ${valorRestante}, 1, 'pendente'
         )
       `;
+    }
+
+    // PASSO 2c — FALLBACK: Criar pagamento_venda quando não existe "A Receber" pendente
+    // Ocorre quando a conta_receber é um saldo restante de split anterior
+    // ou quando todos os pagamentos originais já foram confirmados por outro meio.
+    // Nesse caso, criamos um novo registro confirmado em vez de atualizar.
+    if (!pagamento && vendaId && formaRecebimento) {
+      if (ouroPeso && ouroValorGrama && ouroFotoPath) {
+        await tx`
+          INSERT INTO alissonerp.pagamentos_venda
+            (venda_id, forma, valor, parcelas, status, data_confirmacao,
+             gateway, ouro_peso, ouro_valor_grama, ouro_foto_path)
+          VALUES (
+            ${vendaId}, ${formaRecebimento ?? null}, ${valorEfetivo}, 1, 'confirmado', NOW(),
+            ${formaRecebimento ?? null}, ${ouroPeso}, ${ouroValorGrama}, ${ouroFotoPath}
+          )
+        `;
+      } else {
+        await tx`
+          INSERT INTO alissonerp.pagamentos_venda
+            (venda_id, forma, valor, parcelas, status, data_confirmacao, gateway)
+          VALUES (
+            ${vendaId}, ${formaRecebimento}, ${valorEfetivo}, 1, 'confirmado', NOW(),
+            ${formaRecebimento}
+          )
+        `;
+      }
+
+      if (ehPagamentoParcial) {
+        await tx`
+          INSERT INTO alissonerp.pagamentos_venda
+            (venda_id, forma, valor, parcelas, status)
+          VALUES (
+            ${vendaId}, 'A Receber', ${valorRestante}, 1, 'pendente'
+          )
+        `;
+      }
     }
 
     // PASSO 3 — Histórico de comunicação
