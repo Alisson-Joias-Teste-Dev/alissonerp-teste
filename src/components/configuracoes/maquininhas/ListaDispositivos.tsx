@@ -163,7 +163,7 @@ export default function ListaDispositivos({
 
                 {/* Reserva da Loja */}
                 <td className="px-4 py-3">
-                  <Badge color={d.is_reserva ? P.dourado : P.muted} bg={d.is_reserva ? P.dourado + "22" : P.border}>
+                  <Badge color={d.is_reserva ? "dourado" : "neutral"}>
                     {d.is_reserva ? "Sim" : "Não"}
                   </Badge>
                 </td>

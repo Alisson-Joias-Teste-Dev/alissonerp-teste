@@ -121,7 +121,7 @@ export default function ListaDepositos({
                   <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>
                     Setores ({depSetores.length})
                   </span>
-                  <Button variant="secondary" size="sm" onClick={() => { setShowSetorForm(dep.id); setEditingSetor(null); }}>
+                  <Button variant="outline" size="sm" onClick={() => { setShowSetorForm(dep.id); setEditingSetor(null); }}>
                     <Plus size={11} /> Novo Setor
                   </Button>
                 </div>

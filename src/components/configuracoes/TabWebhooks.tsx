@@ -121,12 +121,12 @@ export default function TabWebhooks({ webhooks, logs }: { webhooks: any[]; logs:
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       {tr && (
-                        <Badge color={tr.ok ? P.verde : P.vermelho} bg={tr.ok ? P.verde + "22" : P.vermelho + "22"}>
+                        <Badge color={tr.ok ? "success" : "error"}>
                           {tr.msg}
                         </Badge>
                       )}
                       <Button
-                        variant="secondary"
+                        variant="outline"
                         size="sm"
                         loading={testando === wh.nome}
                         disabled={!wh.ativo}

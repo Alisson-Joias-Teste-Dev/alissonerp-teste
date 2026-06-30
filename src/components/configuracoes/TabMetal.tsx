@@ -154,7 +154,7 @@ export default function TabMetal() {
         variant="primary"
         loading={saving}
         className="w-full"
-        size="lg"
+        size="md"
         onClick={salvar}
       >
         {saving ? "Salvando..." : saved ? "Salvo!" : erroMsg ? "Tentar Novamente" : "Salvar Configurações"}

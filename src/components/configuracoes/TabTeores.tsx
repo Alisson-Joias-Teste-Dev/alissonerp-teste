@@ -170,7 +170,7 @@ export default function TabTeores({ teores: initial, ligaTipos: initialLiga }: {
                         <Button variant="primary" size="sm" loading={saving} onClick={() => handleSave(t)}>
                           <Save size={12} /> Salvar
                         </Button>
-                        <Button variant="secondary" size="sm" onClick={() => setEditandoId(null)}>
+                        <Button variant="outline" size="sm" onClick={() => setEditandoId(null)}>
                           <X size={12} /> Cancelar
                         </Button>
                       </div>
@@ -240,7 +240,7 @@ export default function TabTeores({ teores: initial, ligaTipos: initialLiga }: {
                         <Button variant="primary" size="sm" loading={savingLiga} onClick={() => handleSaveLiga(lt)}>
                           <Save size={12} /> Salvar
                         </Button>
-                        <Button variant="secondary" size="sm" onClick={() => setEditandoLigaId(null)}>
+                        <Button variant="outline" size="sm" onClick={() => setEditandoLigaId(null)}>
                           <X size={12} /> Cancelar
                         </Button>
                       </div>

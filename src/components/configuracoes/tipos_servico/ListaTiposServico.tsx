@@ -113,7 +113,7 @@ export default function ListaTiposServico({
                           <Button variant="primary" size="sm" loading={salvandoId === t.id} onClick={() => onEditar(t.id, editNome)}>
                             <Save size={11} /> Salvar
                           </Button>
-                          <Button variant="secondary" size="sm" onClick={() => setEditandoId(null)}>
+                          <Button variant="outline" size="sm" onClick={() => setEditandoId(null)}>
                             <X size={11} /> Cancelar
                           </Button>
                         </>

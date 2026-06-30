@@ -41,6 +41,10 @@ const TIPO_CORES: Record<Gateway["tipo"], string> = {
   pix: "#1D4ED8", cartao: "#7C3AED", dinheiro: "#059669", ouro: "#D97706", outro: "#6B7280",
 };
 
+const TIPO_BADGE_COLOR: Record<Gateway["tipo"], "brand" | "success" | "error" | "warning" | "info" | "neutral" | "dourado"> = {
+  pix: "info", cartao: "brand", dinheiro: "success", ouro: "dourado", outro: "neutral",
+};
+
 export default function TabGateways() {
   const [gateways, setGateways] = useState<Gateway[]>([]);
   const [loading, setLoading] = useState(true);
@@ -195,7 +199,7 @@ export default function TabGateways() {
             <MessageBox tipo="erro" mensagem={erro} onFechar={() => setErro(null)} />
           )}
           <div className="flex items-center justify-end gap-2">
-            <Button variant="secondary" size="sm" onClick={() => { setShowForm(false); setEditingId(null); setErro(null); }}>
+            <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setEditingId(null); setErro(null); }}>
               Cancelar
             </Button>
             <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>
@@ -235,7 +239,7 @@ export default function TabGateways() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <Badge color={TIPO_CORES[g.tipo]} bg={TIPO_CORES[g.tipo] + "18"}>
+                    <Badge color={TIPO_BADGE_COLOR[g.tipo]}>
                       {TIPO_LABELS[g.tipo]}
                     </Badge>
                   </td>

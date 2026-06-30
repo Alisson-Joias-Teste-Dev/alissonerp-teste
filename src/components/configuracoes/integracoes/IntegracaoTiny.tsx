@@ -92,7 +92,7 @@ export default function IntegracaoTiny({ onMsg }: { onMsg: (msg: { tipo: "ok" | 
 
         {tinyConfigured && (
           <>
-            <Button variant="secondary" size="sm" loading={retryingAllTiny}
+            <Button variant="outline" size="sm" loading={retryingAllTiny}
               onClick={async () => {
                 setRetryingAllTiny(true); setRetryAllMsg(null);
                 const res = await fetch("/api/tiny/resync-erros", { method: "POST" });

@@ -91,7 +91,7 @@ export default function ModalNovoUsuario({ onCriado, onClose, rolesDisponiveis }
   }
 
   return (
-    <Modal aberto={true} onClose={onClose} titulo="Novo Usuário" subtitulo="Cria acesso imediato ao sistema">
+    <Modal isOpen={true} onClose={onClose} title="Novo Usuário" description="Cria acesso imediato ao sistema">
       <div className="space-y-4">
         <div className="flex flex-col items-center gap-2">
           <button
@@ -185,7 +185,7 @@ export default function ModalNovoUsuario({ onCriado, onClose, rolesDisponiveis }
       )}
 
       <div className="flex gap-3 mt-6">
-        <Button variant="secondary" size="md" className="flex-1" onClick={onClose}>
+        <Button variant="outline" size="md" className="flex-1" onClick={onClose}>
           Cancelar
         </Button>
         <Button variant="primary" size="md" loading={criandoUsuario} className="flex-1" onClick={handleCriarUsuario}>
