@@ -479,7 +479,9 @@ function DetalheDrawer({
           method: "POST",
           body: JSON.stringify({
             forma_recebimento: formaRecebimento,
-            valor_pago: peso * grama,
+            // Arredonda a 2 casas (igual ao Total exibido). Sem isso, peso × grama
+            // gera fração de centavo (ex.: 2,93 × 597,27 = 1750,0011) e o back barra.
+            valor_pago: Math.round(peso * grama * 100) / 100,
             ouro_peso: peso,
             ouro_valor_grama: grama,
             ouro_foto_path: fotoPath,
