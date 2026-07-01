@@ -68,6 +68,20 @@ export const PATCH = defineRoute({
       );
     }
 
+    // BLINDAGEM: pendência já respondida pela gerência não pode ter a
+    // descrição reescrita por estoquista — o "resolvida=Sim" passaria a
+    // referenciar um texto diferente do que foi aprovado.
+    if (
+      body.pendencia_obs !== undefined &&
+      item.pendencia_resolvida !== null &&
+      !hasRole(user.role, ROLES_INVENTARIO_GERENTES)
+    ) {
+      return NextResponse.json(
+        { error: "Pendência já respondida — somente gerência pode editar a descrição" },
+        { status: 403 },
+      );
+    }
+
     // Responder "resolvida?" é decisão gerencial — bloqueia estoquista
     if (body.resolvida !== undefined && !hasRole(user.role, ROLES_INVENTARIO_GERENTES)) {
       return NextResponse.json(

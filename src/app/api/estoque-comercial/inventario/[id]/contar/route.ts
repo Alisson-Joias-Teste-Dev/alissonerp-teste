@@ -62,6 +62,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const body = parsed.data;
 
   let atualizados = 0;
+  let recusados = 0;
   await sql.begin(async (tx: any) => {
     // Primeira contagem move o inventário para "em_contagem"
     if (inv.status === "aberto") {
@@ -86,20 +87,25 @@ export async function POST(req: NextRequest, { params }: Params) {
         `;
         if (item) atualizados++;
       } else if (c.conferido !== undefined) {
-        // Só o flag conferido — NÃO toca na quantidade contada
+        // Só o flag conferido — NÃO toca na quantidade contada.
+        // BLINDAGEM: item SEM contagem não pode ser marcado conferido
+        // (a regra do front revalidada no servidor) — desmarcar pode.
         const [item] = await tx`
           UPDATE alissonerp.itens_inventario_comercial
           SET conferido    = ${c.conferido},
               conferido_em = CASE WHEN ${c.conferido} THEN now() ELSE NULL END
           WHERE inventario_id = ${invId} AND produto_id = ${c.produto_id}
+            AND (quantidade_contada IS NOT NULL OR ${c.conferido} = false)
           RETURNING id
         `;
-        if (item) atualizados++;
+        if (item) atualizados++; else recusados++;
       }
     }
 
+    // registro_id = inventário (a operação é sobre o inventário; as
+    // contagens item a item vão completas em dados_depois)
     await logAudit(tx, {
-      tabela: "itens_inventario_comercial",
+      tabela: "inventarios_comercial",
       operacao: "UPDATE",
       registro_id: invId,
       usuario_id: user.id,
@@ -107,10 +113,11 @@ export async function POST(req: NextRequest, { params }: Params) {
         contexto: "contagem_inventario",
         inventario_id: invId,
         itens_atualizados: atualizados,
+        itens_recusados: recusados,
         contagens: body.contagens,
       },
     });
   });
 
-  return NextResponse.json({ atualizados });
+  return NextResponse.json({ atualizados, recusados });
 }
