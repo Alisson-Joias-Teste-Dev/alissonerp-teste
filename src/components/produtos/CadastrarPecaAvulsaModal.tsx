@@ -229,7 +229,7 @@ export default function CadastrarPecaAvulsaModal({ onClose, onSuccess }: Props) 
           <div className="flex items-center gap-2">
             <Sparkles size={18} style={{ color: C.roxo }} />
             <h2 className="text-base font-semibold" style={{ color: C.esmeralda }}>
-              Cadastrar Peça Avulsa
+              Cadastrar Pedra Avulsa
             </h2>
           </div>
           <button
@@ -261,7 +261,7 @@ export default function CadastrarPecaAvulsaModal({ onClose, onSuccess }: Props) 
                 <Check size={18} className="mt-0.5 shrink-0 text-emerald-700" />
                 <div className="flex-1">
                   <div className="font-semibold text-sm">
-                    {sucesso.criado ? "Peça avulsa cadastrada" : "Peça avulsa já existia — atualizada"}
+                    {sucesso.criado ? "Pedra avulsa cadastrada" : "Pedra avulsa já existia — atualizada"}
                   </div>
                   <div className="text-xs mt-1 space-y-0.5">
                     <div><span className="text-emerald-700/70">SKU:</span> <span className="font-mono">{sucesso.sku}</span></div>

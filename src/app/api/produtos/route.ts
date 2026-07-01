@@ -321,8 +321,11 @@ export async function GET(req: NextRequest) {
           --   preco_curva usa a view unificada vw_produtos_geral_preco.
           --   Joias → curva dinâmica (ouro + BOM).
           --   Pedras/Insumos → regras de precificação (vw_pedras_preco).
+          --     Exceção (fix 2026-06-30): pedra avulsa SEM regra casada cai no
+          --     preco_tiny DENTRO da própria vw_pedras_preco (fonte única) —
+          --     NÃO aqui no código. Ver docs/seguranca/fix-pedra-avulsa-preco-proprio-2026-06-30.sql
           --   Serviço (tipo_item='servico') → preço fixo via preco_servico.
-          --   NÃO adicionar fallback para preco_tiny ou preco_sync.
+          --   NÃO adicionar fallback para preco_tiny ou preco_sync NESTE código (a view resolve).
           --   Produto sem peso → sem preço calculado (intencional).
           -- ═══════════════════════════════════════════════════════════════════
           pp.preco_venda::int AS preco_curva,

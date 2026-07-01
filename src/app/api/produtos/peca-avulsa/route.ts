@@ -12,7 +12,9 @@
  *   • tipo_metal      = NULL
  *   • markup / fator  = 1 (preço final vem de preco_tiny)
  *   • preco_tiny      = preço de venda calculado, arredondado p/ inteiro
- *   • tem_pedra_preciosa = true
+ *   • tem_pedra_preciosa = false (pedra SOLTA não é "joia com pedra")
+ *   • tipo_de_pedra = tipo_pedra (etiqueta; a vw_pedras_preco casa o preço por ela — mig 338)
+ *   • produto_tipo_item = 'insumo' (sem isso a pedra não entra na vw_pedras_preco)
  *   • eh_pai = eh_variacao = false
  *   • peso_precificado = ct * 0.2 (1 ct = 0.2 g) — trigger arredonda pra cima
  *   • peso_ct fiel salvo em alissonerp.produto_pedra_extras
@@ -96,7 +98,7 @@ export async function POST(req: NextRequest) {
       // Dedup: nome (case-insensitive, trimmed) + categoria Pedras + ativo
       const [dup] = await tx<{ id_produto: string; sku: string; preco_tiny: string | null }[]>`
         SELECT id_produto, sku, preco_tiny
-        FROM public.produtos
+        FROM alissonerp.produtos_compat
         WHERE LOWER(TRIM(nome)) = LOWER(${nome})
           AND situacao = 'A'
           AND categoria ILIKE 'Pedras%'
@@ -131,12 +133,15 @@ export async function POST(req: NextRequest) {
         };
       }
 
-      // Próximo SKU único em AMBAS as tabelas
+      // Próximo SKU único em AMBAS as tabelas.
+      // REGRA: ignora SKUs >= 90000000 — são produtos "(saldo inicial)" da migração
+      // (placeholders), não SKUs reais. Sem esse filtro o próximo SKU saía gigante
+      // (ex: 90000056) em vez de seguir a sequência normal da loja (~1845).
       const [skuRow] = await tx<{ next: number }[]>`
         SELECT (COALESCE(
           GREATEST(
-            (SELECT MAX(sku::integer) FROM public.produtos         WHERE sku ~ '^[0-9]+$'),
-            (SELECT MAX(sku::integer) FROM alissonerp.erp_produtos WHERE sku ~ '^[0-9]+$')
+            (SELECT MAX(sku::integer) FROM alissonerp.produtos_compat WHERE sku ~ '^[0-9]+$' AND sku::bigint < 90000000),
+            (SELECT MAX(sku::integer) FROM alissonerp.erp_produtos   WHERE sku ~ '^[0-9]+$' AND sku::bigint < 90000000)
           ),
           1603
         ) + 1)::int AS next
@@ -146,7 +151,7 @@ export async function POST(req: NextRequest) {
       while (true) {
         const [ex] = await tx`
           SELECT 1
-          WHERE EXISTS (SELECT 1 FROM public.produtos         WHERE sku = ${sku})
+          WHERE EXISTS (SELECT 1 FROM alissonerp.produtos_compat WHERE sku = ${sku})
              OR EXISTS (SELECT 1 FROM alissonerp.erp_produtos WHERE sku = ${sku})
         `;
         if (!ex) break;
@@ -161,24 +166,32 @@ export async function POST(req: NextRequest) {
       `;
       const idProduto = Number(seq.id);
 
+      // FIX: antes eram DOIS INSERT no mesmo produto_id (o 2o violava o indice UNIQUE
+      // de produto_id criado pela migracao de produtos -> "erro ao cadastrar"). Agora 1
+      // INSERT so, com todas as colunas. Tambem: tem_pedra_preciosa=false (pedra SOLTA
+      // nao e "joia com pedra") e tipo_de_pedra=etiqueta (a vw_pedras_preco casa o preco
+      // por ela - mig 338); eh_pai/eh_variacao no mesmo insert.
       await tx`
         INSERT INTO alissonerp.erp_produtos
           (produto_id, sku, nome, tipo_metal, situacao,
            peso_precificado, markup, fator,
-           categoria_precificacao, categoria, tem_pedra_preciosa,
-           preco_tiny)
+           categoria_precificacao, categoria, tem_pedra_preciosa, tipo_de_pedra,
+           preco_tiny, eh_pai, eh_variacao)
         VALUES
           (${idProduto}, ${sku}, ${nome}, ${null}, 'A',
            ${pesoG}, 1, 1,
-           ${null}, 'Pedras', true,
-           ${precoVenda})
+           ${null}, 'Pedras', false, ${input.tipo_pedra},
+           ${precoVenda}, false, false)
       `;
 
+      // Marca 'insumo' - sem ela a pedra NAO entra na vw_pedras_preco (some da vitrine/orcamento).
       await tx`
-        INSERT INTO alissonerp.erp_produtos
-          (produto_id, sku, nome, eh_pai, eh_variacao)
-        VALUES
-          (${idProduto}, ${sku}, ${nome}, false, false)
+        INSERT INTO alissonerp.produto_tipo_item (produto_id, tipo_item)
+        SELECT ${idProduto}, 'insumo'
+        WHERE NOT EXISTS (
+          SELECT 1 FROM alissonerp.produto_tipo_item
+          WHERE produto_id = ${idProduto} AND tipo_item = 'insumo'
+        )
       `;
 
       await tx`
