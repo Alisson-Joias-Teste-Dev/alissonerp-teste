@@ -101,12 +101,18 @@ export async function POST(
 
   // O valor pago default é o total da conta. Se o front enviar valor_pago
   // menor que o total, será pagamento parcial → split de crédito.
-  const valorEfetivo = valorPago ?? Number(conta.valor);
+  // Arredonda a 2 casas: ouro (peso × grama) e dinheiro podem trazer fração de
+  // centavo. Tolerância de 1 centavo no teto — se o valor passar do saldo por
+  // até 1 centavo (arredondamento do ouro), trata como quitação total do saldo.
+  // Espelha a folga do trigger da soma de pagamentos (mig 333).
+  const contaValor = Number(conta.valor);
+  let valorEfetivo = Math.round((valorPago ?? contaValor) * 100) / 100;
   if (valorEfetivo <= 0) return NextResponse.json({ error: "Valor pago inválido" }, { status: 400 });
-  if (valorEfetivo > Number(conta.valor)) return NextResponse.json({ error: "Valor pago maior que o valor da conta" }, { status: 400 });
+  if (valorEfetivo > contaValor + 0.01) return NextResponse.json({ error: "Valor pago maior que o valor da conta" }, { status: 400 });
+  if (valorEfetivo > contaValor) valorEfetivo = contaValor;
 
-  const ehPagamentoParcial = valorEfetivo < Number(conta.valor);
-  const valorRestante = ehPagamentoParcial ? Number(conta.valor) - valorEfetivo : 0;
+  const ehPagamentoParcial = valorEfetivo < contaValor;
+  const valorRestante = ehPagamentoParcial ? contaValor - valorEfetivo : 0;
 
   let saldoDevolvido = false;
 
