@@ -2,6 +2,45 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(inventario): pendências por item + blindagem de segurança do inventário comercial (v2.80.0)
+
+**Pedido do Jonathan:** na tela `/estoque-comercial/inventario/[id]`, explicar cada pendência
+com um campo para descrever o que ela é, salvar, e perguntar se foi resolvida ou não — além de
+caçar bugs e fechar brechas de segurança (estoque de milhões).
+
+**Banco (migration 336 — criada, NÃO executada ainda):**
+- `itens_inventario_comercial`: `pendencia_obs`, `pendencia_registrada_por/em`,
+  `pendencia_resolvida` (NULL=sem resposta), `pendencia_resolucao_obs`, `pendencia_resolvida_por/em`.
+- `inventarios_comercial`: `cancelado_por`, `motivo_cancelamento`.
+- Blindagem: DO block garante que `diferenca` é coluna GERADA (com backup antes de converter).
+
+**Bugs corrigidos:**
+1. Checkbox "conferido" em item sem contagem gravava `quantidade_contada = quantidade_sistema`
+   (contagem falsa — item virava OK sem ninguém contar). Agora exige digitar a quantidade real.
+2. Flag `conferido` nunca era persistido (`/contar` descartava o campo) — agora grava
+   `conferido`/`conferido_em` e o front atualiza estado só após resposta OK.
+3. `/contar` escrevia na coluna gerada `diferenca` (erro silencioso de banco) — removido.
+4. Falhas de fetch eram silenciosas no front — toda falha agora aparece na faixa de mensagem.
+5. Guard do botão Concluir usava a lista FILTRADA pela busca (burlável) — trava movida
+   para o servidor: 409 + `{forcar:true}` com dupla confirmação.
+6. `/finalizar` (app RFID) aceitava inventário CANCELADO e o "ressuscitava" como concluído — bloqueado.
+7. Mensagem de conclusão prometia "ajustes gerados" que nunca existiam — texto honesto
+   (inventário é auditoria, não ajusta estoque). Card "Lidos" mostrava no máx. 200 — agora usa COUNT real.
+
+**Segurança:**
+- GET (lista e detalhe) restritos a `ROLES_INVENTARIO_VER` (antes qualquer usuário logado via tudo).
+- `logAudit` em abrir/contar/concluir/cancelar/finalizar/pendência (dentro das transações).
+- Cancelamento exige motivo e grava autor; app RFID valida role + usuário `ativo` (Bearer).
+- Contagens e snapshot de abertura em transação única; roles centralizados em `src/lib/roles.ts`.
+
+**UI:** painel expansível por item divergente ("Qual é a pendência?" → salvar → "Foi resolvida?"
+Sim/Não + obs, com autor/data), badges de pendência (aberta/resolvida/não resolvida), placar de
+pendências, barra de progresso da contagem, modal de cancelamento com motivo, faixa de cancelado
+com autor/motivo, CSV com colunas de pendência.
+
+**Docs:** `docs/regras-negocio/comercial.md §7` (regras do inventário). Rota nova:
+`PATCH /api/estoque-comercial/inventario/[id]/pendencia` (padrão `defineRoute`).
+
 ## fix(vendas): destrava venda em rascunho após reeditar desconto já aprovado (REAPLICADO)
 
 **O quê:** reeditar/adicionar item acima do limite numa venda `rascunho` invalidava a

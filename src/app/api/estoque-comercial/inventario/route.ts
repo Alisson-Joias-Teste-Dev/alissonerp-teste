@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
+import { logAudit } from "@/lib/audit";
+import { ROLES_INVENTARIO_GERENTES, ROLES_INVENTARIO_VER, hasRole } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
-
-const ROLES_GERENTES = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
-const ROLES_CONTAR = [...ROLES_GERENTES, "estoquista_fabrica", "estoquista_loja"];
 
 const InventarioPostSchema = z.object({
   local_estoque_id: z.coerce.number().int().positive(),
@@ -14,10 +13,14 @@ const InventarioPostSchema = z.object({
 }).passthrough();
 
 // GET /api/estoque-comercial/inventario — listar inventários
-export async function GET(_req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+// BLINDAGEM: restrito às roles de estoque/gerência — quantidades do
+// estoque comercial não são dado público interno.
+export async function GET(req: NextRequest) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!hasRole(user.role, ROLES_INVENTARIO_VER)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
 
   const rows = await sql`
     SELECT
@@ -44,12 +47,9 @@ export async function GET(_req: NextRequest) {
 
 // POST /api/estoque-comercial/inventario — abrir novo inventário
 export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
-  if (!usuario || !ROLES_GERENTES.includes(usuario.role)) {
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  if (!hasRole(user.role, ROLES_INVENTARIO_GERENTES)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -71,28 +71,40 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Criar inventário
-  const [inv] = await sql`
-    INSERT INTO alissonerp.inventarios_comercial
-      (local_estoque_id, obs, categoria, created_by)
-    VALUES
-      (${local_estoque_id}, ${obs ?? null}, ${cat}, ${user.id})
-    RETURNING id, created_at
-  `;
+  // Criar inventário + snapshot numa transação única (ou tudo, ou nada)
+  const inv = await sql.begin(async (tx: any) => {
+    const [novo] = await tx`
+      INSERT INTO alissonerp.inventarios_comercial
+        (local_estoque_id, obs, categoria, created_by)
+      VALUES
+        (${local_estoque_id}, ${obs ?? null}, ${cat}, ${user.id})
+      RETURNING id, created_at
+    `;
 
-  // Snapshot: todos os produtos com saldo > 0 no local, filtrados pela categoria se informada
-  await sql`
-    INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
-    SELECT
-      ${inv.id},
-      v.produto_id,
-      v.saldo_fisico::INTEGER
-    FROM alissonerp.vw_saldo_estoque_comercial_v2 v
-    JOIN public.produtos p ON p.id_produto = v.produto_id
-    WHERE v.local_estoque_id = ${local_estoque_id}
-      AND v.saldo_fisico > 0
-      ${cat ? sql`AND (p.categoria = ${cat} OR p.categoria LIKE ${cat + ' -> %'})` : sql``}
-  `;
+    // Snapshot: todos os produtos com saldo > 0 no local, filtrados pela categoria se informada
+    await tx`
+      INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
+      SELECT
+        ${novo.id},
+        v.produto_id,
+        v.saldo_fisico::INTEGER
+      FROM alissonerp.vw_saldo_estoque_comercial_v2 v
+      JOIN alissonerp.produtos_compat p ON p.id_produto = v.produto_id
+      WHERE v.local_estoque_id = ${local_estoque_id}
+        AND v.saldo_fisico > 0
+        ${cat ? tx`AND (p.categoria = ${cat} OR p.categoria LIKE ${cat + ' -> %'})` : tx``}
+    `;
+
+    await logAudit(tx, {
+      tabela: "inventarios_comercial",
+      operacao: "INSERT",
+      registro_id: novo.id,
+      usuario_id: user.id,
+      dados_depois: { local_estoque_id, categoria: cat, obs: obs ?? null },
+    });
+
+    return novo;
+  });
 
   return NextResponse.json({ id: inv.id, created_at: inv.created_at }, { status: 201 });
 

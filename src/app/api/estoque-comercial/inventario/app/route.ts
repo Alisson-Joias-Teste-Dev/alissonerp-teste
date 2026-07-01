@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
+import { ROLES_INVENTARIO_CONTAR, hasRole } from "@/lib/roles";
 
 export async function GET(_req: NextRequest) {
   try {
@@ -21,6 +22,18 @@ export async function GET(_req: NextRequest) {
   }
 
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // BLINDAGEM: app RFID usa Bearer token — valida role e usuário ativo
+  // (antes qualquer usuário logado listava o estoque inteiro em contagem)
+  const [usuario] = await sql`
+    SELECT role, ativo FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+  `;
+  if (!usuario || !hasRole(usuario.role, ROLES_INVENTARIO_CONTAR)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+  if (usuario.ativo === false) {
+    return NextResponse.json({ error: "Usuário desativado" }, { status: 401 });
+  }
 
   const inventarios = await sql`
     SELECT
