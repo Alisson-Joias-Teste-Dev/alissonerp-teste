@@ -45,6 +45,9 @@
   Mesmo em "modo build", qualquer modificação precisa de autorização prévia.
 - NÃO gastar tokens à toa — direto ao ponto, sem exploração desnecessária,
   sem retrabalho. Eficiência é regra.
+- PRÉVIAS VISUAIS para o Jonathan: enviar SEMPRE como imagem/GIF animado,
+  que abre direto na conversa sem precisar salvar. HTML interativo só como
+  complemento opcional (o app do Claude pode baixar em vez de abrir).
 - COMENTAR A REGRA DE NEGÓCIO (em PT) em todo código novo ou alterado:
     • O QUÊ o trecho faz
     • O PORQUÊ (a regra de negócio por trás)
