@@ -5,7 +5,7 @@
 > Se algo conflitar com outro doc, este arquivo vence.
 
 **Stack:** Next.js 16.1.6 | React 19 | PostgreSQL 15 (Supabase self-hosted) | TailwindCSS v4 | Zustand
-**Versao:** v2.82.1 | **Branch:** `homolog` (nunca main direto)
+**Versao:** v2.83.0 | **Branch:** `homolog` (nunca main direto)
 **Docs completos:** `docs/arquitetura.md` | **Changelog:** `docs/CHANGELOG.md`
 
 > Projeto **100% desenvolvido por IA**. A disciplina de processo (§0) é o que mantém a qualidade — leia a §0 ANTES de qualquer coisa.
@@ -323,6 +323,7 @@ gerente_loja     -> ordens + protocolo + auditoria loja + precificacao
 ourives          -> PCP (so deposito dele)
 motoboy          -> protocolo (so cria, NUNCA conclui)
 consultora       -> so suas ordens + corrige reprovadas
+operador_inventario -> VE tudo do estoque + conta via RFID; NAO edita nada direto (abrir/concluir/cancelar inventario = solicitacao aprovada pelo admin, mig 339)
 pcp              -> PCP completo
 
 Fonte de verdade: alissonerp.usuarios.role (VARCHAR(50))
