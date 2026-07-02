@@ -143,19 +143,21 @@ function SummaryCard({ label, value, color }: { label: string; value: number; co
 
 // Rótulos dos desfechos blindados (espelho do enum aceito pela API)
 const DESFECHO_LABEL: Record<string, string> = {
-  venda_sem_baixa: "Venda sem baixa (gera a saída da venda)",
-  perda: "Peça perdida (baixa definitiva)",
+  venda_sem_baixa: "Conciliar com venda sem baixa (gera a saída da venda)",
+  perda: "Peça perdida (só registro — NÃO baixa estoque)",
   localizada: "Peça localizada (zera a falta)",
-  excedente_confirmado: "Excedente confirmado (gera entrada)",
+  excedente_confirmado: "Conciliar com devolução/vale-troca (gera a entrada)",
   outro: "Outro (só registro, sem efeito no estoque)",
 };
 
 interface Investigacao {
   falta: number | null;
+  sobra: number | null;
   conclusao: { tipo: string; confianca: "alta" | "media"; resumo: string } | null;
   reservas: { reserva_id: number; quantidade: number; venda_id: number; numero_venda: string; situacao: string; data_venda: string | null; vendedor_nome: string | null; created_at: string }[];
   transferencias: { id: number; quantidade: number; local_destino_nome: string | null; created_at: string }[];
   movimentacoes: { id: number; tipo: string; quantidade: number; motivo: string; created_at: string }[];
+  devolucoes: { id: number; numero: string; status: string; created_at: string; qtd_aprovada: number; qtd_entrada: number; qtd_pendente: number }[];
 }
 
 /**
@@ -174,7 +176,7 @@ function PendenciaPanel({
   podeEditar: boolean;      // inventário não cancelado
   salvando: boolean;
   onSalvarPendencia: (obs: string) => void;
-  onResolver: (payload: { resolvida: boolean | null; resolucao_obs?: string; desfecho_tipo?: string; numero_venda?: string; confirmar_baixa?: boolean }) => void;
+  onResolver: (payload: { resolvida: boolean | null; resolucao_obs?: string; desfecho_tipo?: string; numero_venda?: string; numero_devolucao?: string; confirmar_baixa?: boolean }) => void;
   onContar: (qtd: number) => void;
   precisaContagem: boolean; // item ainda sem contagem
 }) {
@@ -184,6 +186,7 @@ function PendenciaPanel({
   // Desfecho blindado
   const [desfecho, setDesfecho] = useState<string>("");
   const [numeroVenda, setNumeroVenda] = useState("");
+  const [devolucaoNumero, setDevolucaoNumero] = useState("");
   const [confirmarBaixa, setConfirmarBaixa] = useState(false);
   // Detetive (investigação automática, 100% leitura)
   const [investigando, setInvestigando] = useState(false);
@@ -198,19 +201,21 @@ function PendenciaPanel({
     ? ["venda_sem_baixa", "perda", "localizada", "outro"]
     : excesso ? ["excedente_confirmado", "outro"] : ["outro"];
 
+  // Conciliações (geram movimento) exigem o documento + confirmação;
+  // registros (perda/localizada/outro) exigem o motivo escrito
   const desfechoValido =
     desfecho !== "" &&
-    (desfecho !== "venda_sem_baixa" || numeroVenda.trim() !== "") &&
-    (desfecho !== "perda" || confirmarBaixa) &&
+    (desfecho !== "venda_sem_baixa" || (numeroVenda.trim() !== "" && confirmarBaixa)) &&
+    (desfecho !== "excedente_confirmado" || (devolucaoNumero.trim() !== "" && confirmarBaixa)) &&
     (!["perda", "localizada", "outro"].includes(desfecho) || resObs.trim().length >= 3);
 
   // DETETIVE AUTOMÁTICO (v2.81.2): item faltando investiga sozinho ao abrir
   // o painel — o Jonathan não quer clique manual: contou e deu falta, o
   // sistema já mostra a causa provável com o nº da venda.
   useEffect(() => {
-    if (faltando) void investigar();
+    if (faltando || excesso) void investigar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [faltando, item.quantidade_contada]);
+  }, [faltando, excesso, item.quantidade_contada]);
 
   async function investigar() {
     setInvestigando(true); setInvestErro(null);
@@ -278,8 +283,8 @@ function PendenciaPanel({
         )}
       </div>
 
-      {/* DETETIVE: por que essa peça está faltando? (só leitura) */}
-      {faltando && (
+      {/* DETETIVE: por que essa peça está faltando/sobrando? (só leitura) */}
+      {(faltando || excesso) && (
         <div className="pt-2" style={{ borderTop: "1px dashed #E8DCC8" }}>
           <div className="flex items-center gap-2 flex-wrap">
             <button disabled={investigando} onClick={investigar}
@@ -288,7 +293,7 @@ function PendenciaPanel({
               {investigando ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
               {investigando ? "Investigando..." : "Investigar de novo"}
             </button>
-            <span className="text-[11px] text-gray-400">roda sozinho ao abrir — busca vendas sem baixa, transferências e movimentos, sem alterar nada</span>
+            <span className="text-[11px] text-gray-400">roda sozinho ao abrir — busca vendas sem baixa, devoluções sem entrada, transferências e movimentos, sem alterar nada</span>
           </div>
           {investErro && <p className="text-xs mt-2" style={{ color: "#991B1B" }}>{investErro}</p>}
           {invest && (
@@ -326,6 +331,24 @@ function PendenciaPanel({
                   ))}
                 </div>
               )}
+              {(invest.devolucoes ?? []).length > 0 && (
+                <div className="text-xs space-y-1">
+                  <p className="font-semibold" style={{ color: "#7A5A4A" }}>Devoluções com retorno aprovado SEM entrada no saldo:</p>
+                  {invest.devolucoes.map(d => (
+                    <div key={d.id} className="flex items-center gap-2 flex-wrap">
+                      <span style={{ color: "#374151" }}>
+                        Devolução <b>{d.numero}</b> — {d.qtd_pendente} un. sem entrada ({d.status}) — {fmtDate(d.created_at)}
+                      </span>
+                      {podeEditar && item.pendencia_resolvida === null && (
+                        <button className="underline" style={{ color: "#1E40AF" }}
+                          onClick={() => { setDesfecho("excedente_confirmado"); setDevolucaoNumero(d.numero); }}>
+                          usar esta devolução no desfecho
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
               {invest.transferencias.length > 0 && (
                 <div className="text-xs space-y-1">
                   <p className="font-semibold" style={{ color: "#7A5A4A" }}>Transferências pendentes (destino não confirmou):</p>
@@ -342,7 +365,7 @@ function PendenciaPanel({
                   ))}
                 </div>
               )}
-              {invest.reservas.length === 0 && invest.transferencias.length === 0 && invest.movimentacoes.length === 0 && (
+              {invest.reservas.length === 0 && invest.transferencias.length === 0 && invest.movimentacoes.length === 0 && (invest.devolucoes ?? []).length === 0 && (
                 <p className="text-xs text-gray-500">Nenhum rastro encontrado (sem venda pendente, sem transferência, sem movimento) — pode ser perda real.</p>
               )}
             </div>
@@ -377,11 +400,25 @@ function PendenciaPanel({
                     <span className="text-[11px] text-gray-400">o sistema confere a venda antes de baixar</span>
                   </div>
                 )}
-                {desfecho === "perda" && (
+                {desfecho === "excedente_confirmado" && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-semibold" style={{ color: "#7A5A4A" }}>Nº da devolução:</span>
+                    <input value={devolucaoNumero} onChange={e => setDevolucaoNumero(e.target.value)}
+                      className="w-36 text-sm border rounded-lg px-2 py-1 outline-none"
+                      style={{ borderColor: "#E8DCC8", background: "#fff" }} placeholder="Ex: DEV-0012" />
+                    <span className="text-[11px] text-gray-400">o sistema confere a devolução antes da entrada</span>
+                  </div>
+                )}
+                {(desfecho === "venda_sem_baixa" || desfecho === "excedente_confirmado") && (
                   <label className="flex items-center gap-2 text-xs" style={{ color: "#991B1B" }}>
                     <input type="checkbox" checked={confirmarBaixa} onChange={e => setConfirmarBaixa(e.target.checked)} />
-                    Confirmo a baixa DEFINITIVA de {Math.abs(item.diferenca)} un. por perda (gera saída no estoque)
+                    Confirmo a CONCILIAÇÃO de {Math.abs(item.diferenca)} un. (gera movimento no estoque, com rastro)
                   </label>
+                )}
+                {desfecho === "perda" && (
+                  <p className="text-[11px]" style={{ color: "#92400E" }}>
+                    Perda NÃO baixa o estoque (sem documento não há conciliação) — fica registrada e o saldo segue divergente até resolução.
+                  </p>
                 )}
                 <textarea value={resObs} onChange={e => setResObs(e.target.value)} rows={2}
                   className="w-full text-sm border rounded-lg px-2 py-1.5 outline-none resize-y"
@@ -396,7 +433,8 @@ function PendenciaPanel({
                       resolucao_obs: resObs.trim() || undefined,
                       desfecho_tipo: desfecho,
                       numero_venda: desfecho === "venda_sem_baixa" ? numeroVenda.trim() : undefined,
-                      confirmar_baixa: desfecho === "perda" ? confirmarBaixa : undefined,
+                      numero_devolucao: desfecho === "excedente_confirmado" ? devolucaoNumero.trim() : undefined,
+                      confirmar_baixa: (desfecho === "venda_sem_baixa" || desfecho === "excedente_confirmado") ? confirmarBaixa : undefined,
                     })}
                     className="text-xs font-medium px-4 py-1.5 rounded-lg disabled:opacity-50"
                     style={{ background: "#059669", color: "#fff" }}>
@@ -409,7 +447,7 @@ function PendenciaPanel({
                     Não resolvida
                   </button>
                 </div>
-                <p className="text-[11px] text-gray-400">Somente gerência responde. Desfechos que mexem no estoque (venda sem baixa, perda, excedente) são exclusivos do administrador.</p>
+                <p className="text-[11px] text-gray-400">Somente gerência responde. CONCILIAÇÕES (movem estoque, sempre casadas com venda/devolução) são exclusivas do administrador — mecanismo temporário até o sistema se organizar.</p>
               </div>
             )
           ) : (
@@ -468,7 +506,7 @@ function ItemRow({
   isAberto: boolean;
   podeEditarPendencia: boolean;
   onSalvarPendencia: (obs: string) => void;
-  onResolver: (payload: { resolvida: boolean | null; resolucao_obs?: string; desfecho_tipo?: string; numero_venda?: string; confirmar_baixa?: boolean }) => void;
+  onResolver: (payload: { resolvida: boolean | null; resolucao_obs?: string; desfecho_tipo?: string; numero_venda?: string; numero_devolucao?: string; confirmar_baixa?: boolean }) => void;
   onContar: (qtd: number) => void;
 }) {
   const lido = item.quantidade_contada ?? 0;

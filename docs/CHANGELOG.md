@@ -2,6 +2,25 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(estoque): baixa manual NÃO EXISTE — movimento só por CONCILIAÇÃO (v2.81.3)
+
+**Regra do Jonathan:** nem admin nem desenvolvedor dão baixa manual. Estoque só se
+move casado com um documento que o sistema confere (conciliação) — e isso é
+TEMPORÁRIO até o sistema se organizar; depois divergência não deve mais acontecer.
+
+- `/estoque-comercial/movimentos`: saída manual BLOQUEADA para todos (403).
+  Endpoint passa a registrar apenas ENTRADA manual (gerência/estoquista).
+- Desfecho `perda`: NÃO gera mais baixa — vira só registro (sem documento não
+  há conciliação; o saldo fica divergente até resolução).
+- Desfecho `excedente_confirmado` virou CONCILIAÇÃO com devolução/vale-troca:
+  exige nº da devolução; valida (existe, aprovada/concluída, tem o produto com
+  retorno aprovado, entrada ainda não aconteceu, quantidade cobre a sobra) e
+  gera ENTRADA amarrada à devolução (motivo pendencia_devolucao_sem_entrada).
+- `venda_sem_baixa` (já era conciliação) e `excedente_confirmado` exigem dupla
+  confirmação (`confirmar_baixa`) e seguem exclusivos de admin/desenvolvedor.
+- Detetive agora investiga SOBRAS: acha devoluções com retorno aprovado sem
+  entrada no saldo e sugere "usar esta devolução no desfecho".
+
 ## fix(inventario): baixa manual só admin + detetive automático + link das vendas (v2.81.2)
 
 **Pedido do Jonathan:** (1) NINGUÉM dá baixa manual no estoque, somente ele em
