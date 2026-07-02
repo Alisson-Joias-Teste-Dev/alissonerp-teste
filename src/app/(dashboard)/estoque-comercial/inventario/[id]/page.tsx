@@ -76,6 +76,7 @@ interface ExcedenteForaInventario {
   id_api_produto: number;
   sku: string;
   nome_produto: string;
+  categoria_produto: string | null;
   quantidade: number;
 }
 
@@ -154,11 +155,12 @@ function SummaryCard({ label, value, color, ativo, onClick }: {
 }
 
 // Explicação de cada status — mostrada pelo botão "!" ao lado dos cartões
-const STATUS_EXPLICACAO: { status: StatusItem; label: string; color: string; texto: string }[] = [
+const STATUS_EXPLICACAO: { status: StatusItem | "fora"; label: string; color: string; texto: string }[] = [
   { status: "ok", label: "OK", color: "#059669", texto: "Item foi contado e a quantidade bateu exatamente com o sistema." },
   { status: "faltando", label: "Faltando", color: "#DC2626", texto: "Item foi contado e apareceu MENOS do que o sistema esperava." },
   { status: "excesso", label: "Excesso", color: "#2563EB", texto: "Item foi contado e apareceu MAIS do que o sistema esperava." },
   { status: "pendente", label: "Sem contagem", color: "#6B7280", texto: "Ninguém contou esse item ainda — falta informar a quantidade real." },
+  { status: "fora", label: "Fora do invent.", color: "#7C3AED", texto: "Etiqueta lida pelo app RFID de um produto que NÃO faz parte da lista deste inventário." },
 ];
 
 function StatusInfoBox() {
@@ -657,7 +659,7 @@ export default function InventarioDetalhePage() {
   const [filtroPendencia, setFiltroPendencia] = useState<"aberta" | "resolvida" | "nao_resolvida" | null>(null);
   // Filtros novos: categoria do produto e status (cartões OK/Faltando/Excesso/Sem contagem)
   const [filtroCategoria, setFiltroCategoria] = useState<string | null>(null);
-  const [filtroStatus, setFiltroStatus] = useState<StatusItem | null>(null);
+  const [filtroStatus, setFiltroStatus] = useState<StatusItem | "fora" | null>(null);
   const [infoStatusAberto, setInfoStatusAberto] = useState(false);
   // Paginação por seção (Excedentes/Faltando/Sem contagem/OK): quantos itens mostrar
   const PAGINA = 50;
@@ -928,7 +930,11 @@ export default function InventarioDetalhePage() {
   const okCount       = itens.filter(i => getStatus(i) === "ok").length;
   const faltandoCount = itens.filter(i => getStatus(i) === "faltando").length;
   const semContagem   = itens.filter(i => getStatus(i) === "pendente").length;
-  const excessoCount  = itens.filter(i => getStatus(i) === "excesso").length + excedentesForaInventario.reduce((s, e) => s + e.quantidade, 0);
+  const excessoCount  = itens.filter(i => getStatus(i) === "excesso").length;
+  // "Fora do inventário": etiquetas lidas pelo app de produto fora da lista —
+  // card e filtro PRÓPRIOS (antes ficavam somados no card Excesso e a lista
+  // nunca respeitava filtro nenhum — bug reportado pelo Jonathan v2.82.1)
+  const foraCount     = excedentesForaInventario.length;
   const pendAbertas   = itens.filter(i => i.pendencia_obs && i.pendencia_resolvida === null).length;
   const pendResolvidas = itens.filter(i => i.pendencia_resolvida === true).length;
   const pendNaoResolvidas = itens.filter(i => i.pendencia_resolvida === false).length;
@@ -974,6 +980,19 @@ export default function InventarioDetalhePage() {
   const faltandoVis   = faltandoL.slice(0, visivelPorSecao.faltando ?? PAGINA);
   const pendentesVis  = pendentesL.slice(0, visivelPorSecao.pendente ?? PAGINA);
   const okVis         = okL.slice(0, visivelPorSecao.ok ?? PAGINA);
+
+  /**
+   * "Chips fora do inventário" (etiqueta lida pelo app de produto que NÃO
+   * está na lista deste inventário) agora respeita categoria + busca, e SÓ
+   * aparece quando o filtro de status é null, "excesso" ou "fora" — clicar
+   * em Faltando/OK/Sem contagem esconde esta seção (bug do Jonathan v2.82.1:
+   * a lista ficava fixa na tela não importa qual cartão fosse clicado).
+   */
+  const excedentesFiltrados = excedentesForaInventario.filter(e =>
+    (!filtroCategoria || e.categoria_produto === filtroCategoria) &&
+    (!filtro || e.sku.toLowerCase().includes(filtro) || e.nome_produto.toLowerCase().includes(filtro))
+  );
+  const mostraForaInventario = filtroStatus === null || filtroStatus === "excesso" || filtroStatus === "fora";
 
   const statusMap: Record<string, { label: string; bg: string; txt: string }> = {
     aberto:      { label: "Aberto",      bg: "#DBEAFE", txt: "#1E40AF" },
@@ -1128,6 +1147,9 @@ export default function InventarioDetalhePage() {
           <SummaryCard label="Faltando"     value={faltandoCount} color="#DC2626" ativo={filtroStatus === "faltando"} onClick={() => setFiltroStatus(p => p === "faltando" ? null : "faltando")} />
           <SummaryCard label="Excesso"      value={excessoCount}  color="#2563EB" ativo={filtroStatus === "excesso"}  onClick={() => setFiltroStatus(p => p === "excesso" ? null : "excesso")} />
           <SummaryCard label="Sem contagem" value={semContagem}   color="#6B7280" ativo={filtroStatus === "pendente"} onClick={() => setFiltroStatus(p => p === "pendente" ? null : "pendente")} />
+          {foraCount > 0 && (
+            <SummaryCard label="Fora do invent." value={foraCount} color="#7C3AED" ativo={filtroStatus === "fora"} onClick={() => setFiltroStatus(p => p === "fora" ? null : "fora")} />
+          )}
         </div>
         <button onClick={() => setInfoStatusAberto(v => !v)}
           className="shrink-0 text-gray-400 hover:text-gray-600 self-stretch px-1"
@@ -1209,29 +1231,32 @@ export default function InventarioDetalhePage() {
         )}
       </div>
 
-      {/* Chips lidos pelo app que nao estao no escopo do inventario */}
-      {excedentesForaInventario.length > 0 && (
+      {/* Chips lidos pelo app que nao estao no escopo do inventario — respeita
+          categoria/busca e SÓ aparece com filtro nulo, "Excesso" ou "Fora do invent." */}
+      {mostraForaInventario && excedentesFiltrados.length > 0 && (
         <div className="mb-4">
-          <p className="text-sm font-bold mb-2" style={{ color: "#2563EB" }}>
-            Chips fora do inventario ({excedentesForaInventario.length})
+          <p className="text-sm font-bold mb-2" style={{ color: "#7C3AED" }}>
+            Chips fora do inventario ({excedentesFiltrados.length})
           </p>
           <div className="flex flex-col gap-1.5">
-            {excedentesForaInventario.map(e => (
+            {excedentesFiltrados.map(e => (
               <div key={e.id_api_produto}
                 className="flex items-center gap-3 px-4 py-3 rounded-xl"
-                style={{ background: "#EFF6FF", border: "1px solid #BFDBFE" }}>
+                style={{ background: "#F5F3FF", border: "1px solid #DDD6FE" }}>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate" style={{ fontFamily: "monospace", color: "#184036" }}>
                     {e.sku}
                   </p>
-                  <p className="text-xs text-gray-400 truncate">{e.nome_produto}</p>
+                  <p className="text-xs text-gray-400 truncate">
+                    {e.nome_produto}{e.categoria_produto ? ` · ${e.categoria_produto}` : ""}
+                  </p>
                 </div>
                 <span className="text-sm font-bold shrink-0" style={{ color: "#374151" }}>
                   {e.quantidade}/0
                 </span>
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                  style={{ background: "#DBEAFE", color: "#1E40AF", border: "1px solid #93C5FD" }}>
-                  Excedente
+                  style={{ background: "#EDE9FE", color: "#6D28D9", border: "1px solid #C4B5FD" }}>
+                  Fora do inventário
                 </span>
               </div>
             ))}

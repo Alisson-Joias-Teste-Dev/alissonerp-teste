@@ -116,12 +116,13 @@ export async function GET(req: NextRequest, { params }: Params) {
       el.id_api_produto,
       p.sku,
       p.nome AS nome_produto,
+      COALESCE(p.categoria, '') AS categoria_produto,
       COUNT(*)::int AS quantidade
     FROM epcs_lidos el
     JOIN public.produtos p ON p.id_api_produto = el.id_api_produto
     WHERE el.id_api_produto IS NOT NULL
       AND el.id_api_produto NOT IN (SELECT id_api_produto FROM ids_do_inventario)
-    GROUP BY el.id_api_produto, p.sku, p.nome
+    GROUP BY el.id_api_produto, p.sku, p.nome, p.categoria
     ORDER BY p.sku
   `;
 
