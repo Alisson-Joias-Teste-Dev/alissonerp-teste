@@ -2,6 +2,25 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(inventario): filtros por categoria/status, paginação e Detetive em lote (v2.82.0)
+
+**Pedido do Jonathan:** filtro por categoria, paginação de verdade (a tela só
+rolava infinita) e o Detetive já mostrando as possíveis pendências/conciliações
+sem precisar abrir item por item.
+
+- **Filtro por categoria:** chips com as categorias que EXISTEM no inventário
+  (com contagem), combinável com status/pendência/busca.
+- **Cartões OK/Faltando/Excesso/Sem contagem viraram filtro clicável**, com
+  botão "!" que explica o significado de cada um.
+- **Paginação real:** cada seção mostra 50 por vez, com "Mostrar mais 50";
+  bloco "Conferidos OK" (normalmente a maioria dos itens) vem recolhido.
+- **Detetive em lote** (`GET /inventario/[id]/investigar-lote`, só leitura):
+  investiga TODOS os itens divergentes numa chamada só e mostra o resultado
+  direto na linha (💡 conciliação encontrada / 🔍 pistas) — o detalhe completo
+  (reservas/transferências/devoluções) continua vindo de `/investigar` ao
+  expandir o item.
+- GET do inventário passa a expor `categoria_produto` de cada item.
+
 ## fix(inventario): teste/lixo, ouro-insumo e serviços fora da auditoria (v2.81.5)
 
 **Pedido do Jonathan:** produto de teste (TESTE-2026-A) é lixo, Ouro 18k é insumo

@@ -58,7 +58,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       ii.pendencia_resolvida, ii.pendencia_resolucao_obs, ii.pendencia_resolvida_em,
       ii.pendencia_desfecho_tipo, ii.pendencia_desfecho_venda_id,
       vd.numero_venda AS pendencia_desfecho_numero_venda,
-      p.nome AS nome_produto, p.sku,
+      p.nome AS nome_produto, p.sku, COALESCE(p.categoria, '') AS categoria_produto,
       uc.email AS contado_por_email,
       ur.email AS pendencia_registrada_por_email,
       uz.email AS pendencia_resolvida_por_email
