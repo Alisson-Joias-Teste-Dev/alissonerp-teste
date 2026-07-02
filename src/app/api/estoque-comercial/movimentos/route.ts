@@ -3,6 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { zodError } from "@/lib/schemas/common";
+import { ROLES_BAIXA_MANUAL, hasRole } from "@/lib/roles";
 
 const ROLES_PERMITIDOS = [
   "desenvolvedor", "admin", "gerente_fabrica", "gerente_loja",
@@ -35,6 +36,13 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;
   const { produto_id, tipo, quantidade, motivo, observacao } = body;
+
+  // BLINDAGEM (v2.81.2): BAIXA manual (saída) é caso excepcional — SOMENTE
+  // admin/desenvolvedor. Estoquista/gerente registram entrada, mas a baixa
+  // normal acontece pelos fluxos (entrega de venda etc), nunca na mão.
+  if (tipo === "saida" && !hasRole(usuario.role, ROLES_BAIXA_MANUAL)) {
+    return NextResponse.json({ error: "Baixa manual de estoque é exclusiva do administrador" }, { status: 403 });
+  }
 
   // Detectar se coluna local_estoque_id existe na tabela
   const [hasLocalCol] = await sql`

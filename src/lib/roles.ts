@@ -85,6 +85,12 @@ export const ROLES_ESTOQUE_MOVIMENTAR = [
   ...ROLES_INVENTARIO_GERENTES, "estoquista_fabrica", "estoquista_loja",
 ] as const;
 
+// Quem pode dar BAIXA MANUAL no estoque (saída manual, estorno e desfechos
+// de pendência que geram movimento): SOMENTE admin/desenvolvedor (Jonathan),
+// em casos excepcionais. Gerente/estoquista NÃO baixam estoque na mão —
+// baixa normal acontece pelos fluxos (entrega de venda, etc). Regra v2.81.2.
+export const ROLES_BAIXA_MANUAL = ["desenvolvedor", "admin"] as const;
+
 // Verifica se a role está na lista permitida
 export function hasRole(role: string | null | undefined, permitidas: readonly string[]): boolean {
   if (!role) return false;

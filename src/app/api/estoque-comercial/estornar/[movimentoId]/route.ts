@@ -6,7 +6,9 @@ import { zodError } from "@/lib/schemas/common";
 
 interface Params { params: Promise<{ movimentoId: string }> }
 
-const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+// BLINDAGEM (v2.81.2): estorno cria movimento reverso (mexe no saldo) —
+// baixa/ajuste manual é exclusivo do administrador (casos excepcionais).
+const ROLES_PERMITIDOS = ["desenvolvedor", "admin"];
 
 const EstornarPostSchema = z.object({
   observacao: z.string().optional(),

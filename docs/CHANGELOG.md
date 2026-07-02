@@ -2,6 +2,22 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(inventario): baixa manual só admin + detetive automático + link das vendas (v2.81.2)
+
+**Pedido do Jonathan:** (1) NINGUÉM dá baixa manual no estoque, somente ele em
+casos excepcionais; (2) a investigação da falta deve rodar sozinha ao final de
+cada contagem; (3) o nº da venda deve abrir a venda para conferência.
+
+- `ROLES_BAIXA_MANUAL` = admin/desenvolvedor (src/lib/roles.ts). Valem para:
+  saída manual em `/estoque-comercial/movimentos`, estorno em `/estornar` e os
+  desfechos de pendência que geram movimento (venda_sem_baixa, perda,
+  excedente_confirmado). Gerência segue respondendo 'localizada'/'outro'
+  (sem movimento); entrada manual segue gerência+estoquista.
+- Detetive AUTOMÁTICO: painel de item faltando investiga sozinho ao abrir
+  (useEffect); botão vira "Investigar de novo".
+- Nº da venda vira LINK (`/vendas/[id]`, nova aba) nos achados do Detetive e
+  na venda vinculada ao desfecho (GET agora expõe pendencia_desfecho_venda_id).
+
 ## fix(seguranca): rotas de estoque aceitavam QUALQUER usuário logado (v2.81.1)
 
 **Falha grave reportada pelo Jonathan:** qualquer pessoa logada (vendedora, motoboy...)
