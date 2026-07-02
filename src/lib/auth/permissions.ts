@@ -9,7 +9,8 @@ export type Role =
   | "consultora"
   | "estoquista_fabrica"
   | "estoquista_loja"
-  | "pcp";
+  | "pcp"
+  | "operador_inventario";
 
 export interface MenuItem {
   label: string;
@@ -100,6 +101,11 @@ const ROLE_MENUS: Record<Role, string[]> = {
   // - Impacto se removido: loja nao consegue registrar compras comerciais no modulo dedicado.
   estoquista_loja:    ["/estoque", "/estoque-comercial", "/compras-comercial", "/editor-ia"],
   pcp:                ["/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/quebra", "/editor-ia"],
+  // REGRA DE NEGOCIO (v2.83.0): operador de inventario (Ytalo/Geovana) VE tudo
+  // do estoque (conta via RFID), mas NAO edita direto — acoes de inventario
+  // viram solicitacao aprovada pelo admin; edicoes em outras telas de estoque
+  // sao bloqueadas na API (403) ate a Etapa 2.
+  operador_inventario: ["/dashboard-comercial", "/estoque", "/estoque-comercial", "/conversoes", "/gestao-estoque", "/rfid/cadastro", "/editor-ia"],
 };
 
 // Agrupamento do menu lateral

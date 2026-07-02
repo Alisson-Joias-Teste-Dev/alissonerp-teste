@@ -5,7 +5,7 @@
 > Se algo conflitar com outro doc, este arquivo vence.
 
 **Stack:** Next.js 16.1.6 | React 19 | PostgreSQL 15 (Supabase self-hosted) | TailwindCSS v4 | Zustand
-**Versao:** v2.82.1 | **Branch:** `homolog` (nunca main direto)
+**Versao:** v2.83.1 | **Branch:** `homolog` (nunca main direto)
 **Docs completos:** `docs/arquitetura.md` | **Changelog:** `docs/CHANGELOG.md`
 
 > Projeto **100% desenvolvido por IA**. A disciplina de processo (§0) é o que mantém a qualidade — leia a §0 ANTES de qualquer coisa.
@@ -152,14 +152,15 @@ O token de acesso ao banco de PRODUCAO e COMPARTILHADO entre a IA do Jonathan
 ANTES de qualquer DDL/DML manual no banco (view, funcao, trigger, INSERT/UPDATE/DELETE):
 
   SELECT alissonerp.assinar_mudanca_banco(
-    '<autor>',     -- quem AUTORIZOU: 'jonathan' | 'chefe'
+    '<autor>',     -- quem AUTORIZOU: 'alisson' | 'jonathan' | 'chefe' — SEMPRE quem de fato mandou (nunca assinar por outro)
     '<agente>',    -- ferramenta executora: 'claude-code' | 'ia-chefe'
     '<descricao>', -- o que muda, em linguagem clara
     '<sql>'        -- o SQL aplicado (resumo fiel)
   );
 
 E setar a etiqueta da conexao ANTES de conectar:  PGAPPNAME='claude-code-jonathan'
-(a IA do chefe deve usar a sua propria etiqueta, ex 'ia-chefe').
+(a IA do chefe deve usar a sua propria etiqueta, ex 'ia-chefe';
+sessoes do Alisson via Claude Code Web usam PGAPPNAME='claude-code-alisson' e autor 'alisson').
 
 Livro: alissonerp.log_mudancas_banco (append-only, criado na migration 303).
 Captura sozinho app_name + IP de origem + usuario. NUNCA pular a assinatura.
@@ -323,6 +324,7 @@ gerente_loja     -> ordens + protocolo + auditoria loja + precificacao
 ourives          -> PCP (so deposito dele)
 motoboy          -> protocolo (so cria, NUNCA conclui)
 consultora       -> so suas ordens + corrige reprovadas
+operador_inventario -> VE tudo do estoque + conta via RFID; NAO edita nada direto (abrir/concluir/cancelar inventario = solicitacao aprovada pelo admin, mig 339)
 pcp              -> PCP completo
 
 Fonte de verdade: alissonerp.usuarios.role (VARCHAR(50))

@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
-import { logAudit } from "@/lib/audit";
-import { condPecaPronta } from "@/lib/inventario-peca-pronta";
-import { ROLES_INVENTARIO_GERENTES, hasRole } from "@/lib/roles";
+import { ROLE_OPERADOR_INVENTARIO, ROLES_INVENTARIO_GERENTES, hasRole } from "@/lib/roles";
+import { executarConcluirInventario, InventarioAcaoError, statsConclusaoInventario } from "@/lib/inventario-acoes";
+import { criarSolicitacaoInventario } from "@/lib/inventario-solicitacoes";
 import { zodError } from "@/lib/schemas/common";
 
 interface Params { params: Promise<{ id: string }> }
@@ -33,82 +33,67 @@ export async function POST(req: NextRequest, { params }: Params) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
 
-  if (!hasRole(user.role, ROLES_INVENTARIO_GERENTES)) {
+  const isOperador = user.role === ROLE_OPERADOR_INVENTARIO;
+  if (!isOperador && !hasRole(user.role, ROLES_INVENTARIO_GERENTES)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
   const { id } = await params;
   const invId = Number(id);
 
-  const [inv] = await sql`
-    SELECT id, status, local_estoque_id
-    FROM alissonerp.inventarios_comercial WHERE id = ${invId}
-  `;
-  if (!inv) return NextResponse.json({ error: "Inventário não encontrado" }, { status: 404 });
-  if (inv.status === "concluido") {
-    return NextResponse.json({ error: "Inventário já concluído" }, { status: 409 });
-  }
-  if (inv.status === "cancelado") {
-    return NextResponse.json({ error: "Inventário cancelado" }, { status: 409 });
-  }
-
   const raw = await req.json().catch(() => ({}));
   const parsed = ConcluirSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const { forcar } = parsed.data;
 
-  const [stats] = await sql`
-    SELECT
-      COUNT(*) FILTER (WHERE diferenca != 0 AND quantidade_contada IS NOT NULL) AS divergentes,
-      COUNT(*) FILTER (WHERE quantidade_contada IS NULL)                        AS nao_contados,
-      COUNT(*) FILTER (WHERE pendencia_obs IS NOT NULL
-                         AND pendencia_resolvida IS NULL)                       AS pendencias_abertas
-    FROM alissonerp.itens_inventario_comercial ii
-    WHERE ii.inventario_id = ${invId}
-      -- PEÇA PRONTA: pedra/personalizada não contam na trava de conclusão
-      AND ${condPecaPronta(sql)}
-  `;
-  const naoContados = Number(stats.nao_contados);
-  const pendenciasAbertas = Number(stats.pendencias_abertas);
+  try {
+    /**
+     * OPERADOR DE INVENTÁRIO (v2.83.0): não conclui direto — o pedido vira
+     * tarefa de aprovação com o placar (divergentes/sem contagem/pendências)
+     * no resumo; a aprovação do admin é a confirmação explícita.
+     */
+    if (isOperador) {
+      const [inv] = await sql`SELECT id, status FROM alissonerp.inventarios_comercial WHERE id = ${invId}`;
+      if (!inv) return NextResponse.json({ error: "Inventário não encontrado" }, { status: 404 });
+      if (inv.status === "concluido" || inv.status === "cancelado") {
+        return NextResponse.json({ error: `Inventário já está ${inv.status}` }, { status: 409 });
+      }
+      const stats = await statsConclusaoInventario(invId);
+      const resumo = [
+        `Ação: CONCLUIR inventário #${invId}`,
+        `Divergentes: ${stats.divergentes}`,
+        `Sem contagem: ${stats.nao_contados}`,
+        `Pendências sem resposta: ${stats.pendencias_abertas}`,
+        "",
+        "Ao aprovar, a contagem é congelada como auditoria (NENHUM ajuste de estoque).",
+      ].join("\n");
+      const solic = await criarSolicitacaoInventario({
+        tipoAcao: "concluir",
+        inventarioId: invId,
+        payload: { forcar: true, stats },
+        resumo,
+        user,
+      });
+      return NextResponse.json(
+        { solicitado: true, ...solic, mensagem: "Pedido de conclusão enviado para aprovação do administrador" },
+        { status: 202 },
+      );
+    }
 
-  // Trava de segurança: só conclui "sujo" com confirmação explícita (forcar)
-  if (!forcar && (naoContados > 0 || pendenciasAbertas > 0)) {
-    return NextResponse.json({
-      error: "Inventário tem itens sem contagem ou pendências sem resposta",
-      requer_confirmacao: true,
-      nao_contados: naoContados,
-      pendencias_abertas: pendenciasAbertas,
-    }, { status: 409 });
+    const resultado = await executarConcluirInventario({ invId, forcar, userId: user.id });
+    return NextResponse.json(resultado);
+  } catch (e) {
+    if (e instanceof InventarioAcaoError) {
+      const extra = e as InventarioAcaoError & { requer_confirmacao?: boolean; stats?: { divergentes: number; nao_contados: number; pendencias_abertas: number } };
+      return NextResponse.json({
+        error: e.message,
+        ...(extra.requer_confirmacao ? {
+          requer_confirmacao: true,
+          nao_contados: extra.stats?.nao_contados,
+          pendencias_abertas: extra.stats?.pendencias_abertas,
+        } : {}),
+      }, { status: e.status });
+    }
+    throw e;
   }
-
-  await sql.begin(async (tx: any) => {
-    await tx`
-      UPDATE alissonerp.inventarios_comercial
-      SET status = 'concluido', data_conclusao = now(), concluido_por = ${user.id}::uuid
-      WHERE id = ${invId}
-    `;
-    await logAudit(tx, {
-      tabela: "inventarios_comercial",
-      operacao: "UPDATE",
-      registro_id: invId,
-      usuario_id: user.id,
-      dados_antes: { status: inv.status },
-      dados_depois: {
-        status: "concluido",
-        forcado: forcar,
-        divergentes: Number(stats.divergentes),
-        nao_contados: naoContados,
-        pendencias_abertas: pendenciasAbertas,
-      },
-    });
-  });
-
-  // Resposta honesta: inventário NÃO gera ajuste automático de estoque
-  return NextResponse.json({
-    id: invId,
-    divergentes: Number(stats.divergentes),
-    nao_contados: naoContados,
-    pendencias_abertas: pendenciasAbertas,
-    ajustes_gerados: 0,
-  });
 }

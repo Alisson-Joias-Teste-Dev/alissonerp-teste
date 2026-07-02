@@ -2,6 +2,43 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(conversao): aprovação ia para admin errado (email adivinhado) (v2.83.1)
+
+**Sintoma (conversão C-2567):** a tarefa de aprovação não chegava ao Alisson.
+**Causa:** os gatilhos fn_processar_conversao (mig 242) e
+fn_processar_conversao_sku (mig 253) endereçavam a tarefa a `role='admin' AND
+email LIKE '%alisson%'` (um L); o email real tem DOIS L ('allisson...') → não
+casava → caía no primeiro admin arbitrário.
+
+- Migration 340: recria as 2 funções (CREATE OR REPLACE, sem DROP; fora das
+  zonas no-touch) resolvendo o aprovador por `configuracoes_sistema.
+  aprovador_conversao` (config central), com fallback tolerante (ILIKE
+  '%aliss%' pega 1 ou 2 L) e, por último, o primeiro admin ATIVO.
+- Script de produção também reendereça as tarefas de conversão PENDENTES que
+  ficaram no admin errado para o aprovador configurado.
+
+## feat(inventario): role operador_inventario com edição via aprovação (v2.83.0)
+
+**Pedido do Jonathan:** Ytalo e Geovana (operadores do inventário) veem tudo do
+estoque e contam via leitor RFID, mas NÃO editam nada direto — qualquer ação
+vira pedido que só executa com a aprovação dele. (Auditoria manual é outra
+frente, separada.)
+
+- **Role nova `operador_inventario`** (src/lib/roles.ts): entra em
+  ROLES_INVENTARIO_CONTAR (vê telas + leituras RFID + contagem), fora de
+  GERENTES e ESTOQUE_MOVIMENTAR.
+- **Migration 339**: tabela `solicitacoes_inventario` (pedido de
+  abrir/concluir/cancelar com payload, status pendente→executada/rejeitada/erro,
+  tarefa vinculada). Aprovador em configuracoes_sistema.aprovador_inventario.
+- **Mesma engrenagem de aprovação de compra comercial/desconto**: pedido cria
+  tarefa 'inventario_solicitacao' + aprovacoes_tarefa + notificação; o PATCH
+  /tarefas/[id]/aprovacao executa a ação ao aprovar (rejeitou = nada muda).
+- **Execução centralizada** em src/lib/inventario-acoes.ts (abrir/concluir/
+  cancelar) — rota direta (gerência) e aprovação executam o MESMO código.
+  Snapshot de abertura agora usa condPecaPronta() (fim da cópia inline).
+- UI: telas mostram "Pedido enviado para aprovação do administrador" (202).
+- scripts/aplicar_339_producao.sql: tabela + role das 2 operadoras + aprovador.
+
 ## fix(inventario): "Chips fora do inventário" não respeitava filtro nenhum (v2.82.1)
 
 **Bug reportado pelo Jonathan:** a seção "Chips fora do inventário" (etiquetas

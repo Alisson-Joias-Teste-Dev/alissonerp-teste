@@ -26,6 +26,7 @@ import {
   ChevronDown, ChevronUp, AlertTriangle, MessageSquareText, Info,
 } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 
 interface InventarioHeader {
   id: number;
@@ -637,6 +638,10 @@ export default function InventarioDetalhePage() {
   const router = useRouter();
   const params = useParams();
   const invId = Number(params.id);
+  const { role } = useAuth();
+  // Operador de inventário: ações viram PEDIDO de aprovação — os textos e
+  // rótulos abaixo mudam para deixar isso claro (não conclui/cancela na hora).
+  const isOperador = role === "operador_inventario";
 
   const [inventario, setInventario] = useState<InventarioHeader | null>(null);
   const [itens, setItens] = useState<ItemInventario[]>([]);
@@ -726,8 +731,10 @@ export default function InventarioDetalhePage() {
    */
   async function concluirInventario() {
     if (!confirm(
-      "Concluir inventário?\n\nA contagem será congelada como registro de auditoria. " +
-      "NENHUM ajuste de estoque é feito automaticamente — divergências devem ser tratadas item a item."
+      isOperador
+        ? "Enviar pedido de CONCLUSÃO para aprovação do administrador?\n\nO inventário só será concluído depois que ele aprovar."
+        : "Concluir inventário?\n\nA contagem será congelada como registro de auditoria. " +
+          "NENHUM ajuste de estoque é feito automaticamente — divergências devem ser tratadas item a item."
     )) return;
     setConcluindo(true); setMsg(null);
     try {
@@ -753,7 +760,12 @@ export default function InventarioDetalhePage() {
         });
       }
       if (!r.ok) throw new Error((await r.json() as { error?: string }).error ?? "Erro");
-      const data = await r.json() as { divergentes: number; nao_contados: number; pendencias_abertas: number };
+      const data = await r.json() as { divergentes: number; nao_contados: number; pendencias_abertas: number; solicitado?: boolean; mensagem?: string };
+      // Operador de inventário: conclusão vira PEDIDO aprovado pelo admin
+      if (data.solicitado) {
+        setMsg({ tipo: "ok", texto: data.mensagem ?? "Pedido de conclusão enviado para aprovação do administrador." });
+        return;
+      }
       setMsg({
         tipo: "ok",
         texto: `Inventário concluído. ${data.divergentes} divergência(s) registrada(s)` +
@@ -779,8 +791,14 @@ export default function InventarioDetalhePage() {
         body: JSON.stringify({ motivo: motivoCancelamento.trim() }),
       });
       if (!r.ok) throw new Error((await r.json() as { error?: string }).error ?? "Erro");
+      const dataCancel = await r.json().catch(() => ({})) as { solicitado?: boolean; mensagem?: string };
       setCancelModalAberto(false);
       setMotivoCancelamento("");
+      // Operador de inventário: cancelamento vira PEDIDO aprovado pelo admin
+      if (dataCancel.solicitado) {
+        setMsg({ tipo: "ok", texto: dataCancel.mensagem ?? "Pedido de cancelamento enviado para aprovação do administrador." });
+        return;
+      }
       await fetchData();
     } catch (e) {
       setMsg({ tipo: "erro", texto: e instanceof Error ? e.message : "Erro ao cancelar" });
@@ -1064,7 +1082,7 @@ export default function InventarioDetalhePage() {
                 style={{ color: "#DC2626" }}
                 onClick={() => { setCancelModalAberto(true); setMsg(null); }} disabled={cancelando}>
                 <XCircle size={14} />
-                Cancelar
+                {isOperador ? "Solicitar cancelamento" : "Cancelar"}
               </button>
               <button className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-sm font-medium disabled:opacity-50"
                 style={{ background: "#059669", color: "#fff" }}
@@ -1072,7 +1090,7 @@ export default function InventarioDetalhePage() {
                 disabled={concluindo}
                 title={semContagem > 0 ? `${semContagem} item(ns) sem contagem — será pedida confirmação` : ""}>
                 {concluindo ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={14} />}
-                Concluir
+                {isOperador ? "Solicitar conclusão" : "Concluir"}
               </button>
             </>
           )}
@@ -1376,11 +1394,12 @@ export default function InventarioDetalhePage() {
           <div className="bg-white rounded-2xl p-5 w-full max-w-md shadow-xl"
             onClick={e => e.stopPropagation()}>
             <h2 className="text-base font-bold mb-1" style={{ fontFamily: "Georgia, serif", color: "#991B1B" }}>
-              Cancelar inventário #{inventario.id}
+              {isOperador ? "Solicitar cancelamento" : "Cancelar inventário"} #{inventario.id}
             </h2>
             <p className="text-sm text-gray-500 mb-3">
-              A contagem será descartada e nenhum ajuste será gerado.
-              O motivo e o autor do cancelamento ficam registrados.
+              {isOperador
+                ? "O pedido de cancelamento vai para a aprovação do administrador. Só depois que ele aprovar a contagem será descartada. Informe o motivo:"
+                : "A contagem será descartada e nenhum ajuste será gerado. O motivo e o autor do cancelamento ficam registrados."}
             </p>
             <textarea autoFocus rows={3} value={motivoCancelamento}
               onChange={e => setMotivoCancelamento(e.target.value)}
@@ -1399,7 +1418,7 @@ export default function InventarioDetalhePage() {
                 disabled={cancelando || motivoCancelamento.trim().length < 5}
                 onClick={confirmarCancelamento}>
                 {cancelando ? <Loader2 size={13} className="animate-spin" /> : <XCircle size={14} />}
-                Confirmar cancelamento
+                {isOperador ? "Enviar pedido" : "Confirmar cancelamento"}
               </button>
             </div>
           </div>
