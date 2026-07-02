@@ -5,6 +5,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { logAudit } from "@/lib/audit";
 import { ROLES_INVENTARIO_CONTAR, hasRole } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
+import { condPecaPronta } from "@/lib/inventario-peca-pronta";
 
 interface Params { params: Promise<{ id: string }> }
 
@@ -61,6 +62,16 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;
 
+  // PEÇA PRONTA (v2.81.4): pedra solta/personalizada não recebem contagem —
+  // nem pela tela, nem por chamada direta de API (vale p/ inventário antigo)
+  const idsEnviados = [...new Set(body.contagens.map(c => c.produto_id))];
+  const excluidosRows = await sql`
+    SELECT ii.produto_id
+    FROM unnest(${idsEnviados}::bigint[]) AS ii(produto_id)
+    WHERE NOT ${condPecaPronta(sql)}
+  `;
+  const excluidos = new Set(excluidosRows.map((r: any) => Number(r.produto_id)));
+
   let atualizados = 0;
   let recusados = 0;
   await sql.begin(async (tx: any) => {
@@ -72,6 +83,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
 
     for (const c of body.contagens) {
+      // Pedra/personalizada: fora da auditoria — recusa sem quebrar o lote
+      if (excluidos.has(Number(c.produto_id))) { recusados++; continue; }
       // Contagem informada: grava quantidade + autor. "diferenca" o banco calcula.
       if (c.quantidade_contada !== undefined) {
         const [item] = await tx`

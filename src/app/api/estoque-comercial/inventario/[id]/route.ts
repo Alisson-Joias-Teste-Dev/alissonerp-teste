@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { ROLES_INVENTARIO_VER, hasRole } from "@/lib/roles";
+import { condPecaPronta } from "@/lib/inventario-peca-pronta";
 
 interface Params { params: Promise<{ id: string }> }
 
@@ -68,6 +69,9 @@ export async function GET(req: NextRequest, { params }: Params) {
     LEFT JOIN auth.users uz ON uz.id = ii.pendencia_resolvida_por
     LEFT JOIN alissonerp.vendas_erp vd ON vd.id = ii.pendencia_desfecho_venda_id
     WHERE ii.inventario_id = ${invId}
+      -- PEÇA PRONTA: pedra solta/personalizada nunca aparecem na auditoria
+      -- (vale também para inventário aberto ANTES da regra — filtro na leitura)
+      AND ${condPecaPronta(sql)}
       ${soDivergentes ? sql`AND ii.diferenca != 0` : sql``}
     ORDER BY
       CASE WHEN ii.quantidade_contada IS NULL THEN 0 ELSE 1 END,

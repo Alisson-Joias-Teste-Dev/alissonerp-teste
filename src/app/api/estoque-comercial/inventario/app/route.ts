@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import sql from "@/lib/db";
+import { condPecaPronta } from "@/lib/inventario-peca-pronta";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
 import { ROLES_INVENTARIO_CONTAR, hasRole } from "@/lib/roles";
@@ -39,8 +40,8 @@ export async function GET(_req: NextRequest) {
     SELECT
       i.id, i.local_estoque_id, le.nome AS local_nome,
       i.status, i.categoria, i.data_abertura, i.obs, i.created_at,
-      (SELECT COUNT(*) FROM alissonerp.itens_inventario_comercial WHERE inventario_id = i.id) AS total_itens,
-      (SELECT COUNT(*) FROM alissonerp.itens_inventario_comercial WHERE inventario_id = i.id AND quantidade_contada IS NOT NULL) AS itens_contados
+      (SELECT COUNT(*) FROM alissonerp.itens_inventario_comercial ii WHERE ii.inventario_id = i.id AND ${condPecaPronta(sql)}) AS total_itens,
+      (SELECT COUNT(*) FROM alissonerp.itens_inventario_comercial ii WHERE ii.inventario_id = i.id AND ii.quantidade_contada IS NOT NULL AND ${condPecaPronta(sql)}) AS itens_contados
     FROM alissonerp.inventarios_comercial i
     JOIN alissonerp.locais_estoque le ON le.id = i.local_estoque_id
     WHERE i.status IN ('aberto', 'em_contagem')
@@ -62,6 +63,8 @@ export async function GET(_req: NextRequest) {
     FROM alissonerp.itens_inventario_comercial ii
     JOIN public.produtos p ON p.id_produto = ii.produto_id
     WHERE ii.inventario_id = ANY(${ids}::int[])
+      -- PEÇA PRONTA: app RFID também não vê pedra/personalizada
+      AND ${condPecaPronta(sql)}
     ORDER BY ii.id
   `;
 

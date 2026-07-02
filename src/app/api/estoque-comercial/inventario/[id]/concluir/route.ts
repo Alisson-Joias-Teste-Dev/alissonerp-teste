@@ -3,6 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { logAudit } from "@/lib/audit";
+import { condPecaPronta } from "@/lib/inventario-peca-pronta";
 import { ROLES_INVENTARIO_GERENTES, hasRole } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
 
@@ -62,8 +63,10 @@ export async function POST(req: NextRequest, { params }: Params) {
       COUNT(*) FILTER (WHERE quantidade_contada IS NULL)                        AS nao_contados,
       COUNT(*) FILTER (WHERE pendencia_obs IS NOT NULL
                          AND pendencia_resolvida IS NULL)                       AS pendencias_abertas
-    FROM alissonerp.itens_inventario_comercial
-    WHERE inventario_id = ${invId}
+    FROM alissonerp.itens_inventario_comercial ii
+    WHERE ii.inventario_id = ${invId}
+      -- PEÇA PRONTA: pedra/personalizada não contam na trava de conclusão
+      AND ${condPecaPronta(sql)}
   `;
   const naoContados = Number(stats.nao_contados);
   const pendenciasAbertas = Number(stats.pendencias_abertas);
