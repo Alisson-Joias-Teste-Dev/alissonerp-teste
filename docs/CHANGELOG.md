@@ -2,6 +2,21 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(conversao): aprovação ia para admin errado (email adivinhado) (v2.83.1)
+
+**Sintoma (conversão C-2567):** a tarefa de aprovação não chegava ao Alisson.
+**Causa:** os gatilhos fn_processar_conversao (mig 242) e
+fn_processar_conversao_sku (mig 253) endereçavam a tarefa a `role='admin' AND
+email LIKE '%alisson%'` (um L); o email real tem DOIS L ('allisson...') → não
+casava → caía no primeiro admin arbitrário.
+
+- Migration 340: recria as 2 funções (CREATE OR REPLACE, sem DROP; fora das
+  zonas no-touch) resolvendo o aprovador por `configuracoes_sistema.
+  aprovador_conversao` (config central), com fallback tolerante (ILIKE
+  '%aliss%' pega 1 ou 2 L) e, por último, o primeiro admin ATIVO.
+- Script de produção também reendereça as tarefas de conversão PENDENTES que
+  ficaram no admin errado para o aprovador configurado.
+
 ## feat(inventario): role operador_inventario com edição via aprovação (v2.83.0)
 
 **Pedido do Jonathan:** Ytalo e Geovana (operadores do inventário) veem tudo do
