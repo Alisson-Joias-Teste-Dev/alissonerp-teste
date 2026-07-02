@@ -60,6 +60,7 @@ interface ItemInventario {
   pendencia_resolvida_por_email: string | null;
   pendencia_resolvida_em: string | null;
   pendencia_desfecho_tipo: string | null;
+  pendencia_desfecho_venda_id: number | null;
   pendencia_desfecho_numero_venda: string | null;
 }
 
@@ -203,6 +204,14 @@ function PendenciaPanel({
     (desfecho !== "perda" || confirmarBaixa) &&
     (!["perda", "localizada", "outro"].includes(desfecho) || resObs.trim().length >= 3);
 
+  // DETETIVE AUTOMÁTICO (v2.81.2): item faltando investiga sozinho ao abrir
+  // o painel — o Jonathan não quer clique manual: contou e deu falta, o
+  // sistema já mostra a causa provável com o nº da venda.
+  useEffect(() => {
+    if (faltando) void investigar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [faltando, item.quantidade_contada]);
+
   async function investigar() {
     setInvestigando(true); setInvestErro(null);
     try {
@@ -277,9 +286,9 @@ function PendenciaPanel({
               className="text-xs font-medium px-3 py-1.5 rounded-lg disabled:opacity-50 flex items-center gap-1.5"
               style={{ background: "#1E40AF", color: "#fff" }}>
               {investigando ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
-              {invest ? "Investigar de novo" : "Investigar falta"}
+              {investigando ? "Investigando..." : "Investigar de novo"}
             </button>
-            <span className="text-[11px] text-gray-400">busca vendas sem baixa, transferências e movimentos — não altera nada</span>
+            <span className="text-[11px] text-gray-400">roda sozinho ao abrir — busca vendas sem baixa, transferências e movimentos, sem alterar nada</span>
           </div>
           {investErro && <p className="text-xs mt-2" style={{ color: "#991B1B" }}>{investErro}</p>}
           {invest && (
@@ -300,7 +309,12 @@ function PendenciaPanel({
                   {invest.reservas.map(r => (
                     <div key={r.reserva_id} className="flex items-center gap-2 flex-wrap">
                       <span style={{ color: "#374151" }}>
-                        Venda <b>#{r.numero_venda}</b> — {r.quantidade} un. — {r.vendedor_nome ?? "vendedora ?"} — {r.situacao}{r.data_venda ? ` — ${new Date(r.data_venda).toLocaleDateString("pt-BR")}` : ""}
+                        Venda{" "}
+                        <a href={`/vendas/${r.venda_id}`} target="_blank" rel="noreferrer"
+                          className="font-bold underline" style={{ color: "#1E40AF" }}>
+                          #{r.numero_venda}
+                        </a>
+                        {" "}— {r.quantidade} un. — {r.vendedor_nome ?? "vendedora ?"} — {r.situacao}{r.data_venda ? ` — ${new Date(r.data_venda).toLocaleDateString("pt-BR")}` : ""}
                       </span>
                       {podeEditar && item.pendencia_resolvida === null && (
                         <button className="underline" style={{ color: "#1E40AF" }}
@@ -395,7 +409,7 @@ function PendenciaPanel({
                     Não resolvida
                   </button>
                 </div>
-                <p className="text-[11px] text-gray-400">Somente gerência pode responder. Fechar como resolvida exige o desfecho — e o efeito no estoque é aplicado na hora.</p>
+                <p className="text-[11px] text-gray-400">Somente gerência responde. Desfechos que mexem no estoque (venda sem baixa, perda, excedente) são exclusivos do administrador.</p>
               </div>
             )
           ) : (
@@ -406,7 +420,17 @@ function PendenciaPanel({
                   : "Não — segue em aberto"}
               </p>
               {item.pendencia_desfecho_numero_venda && (
-                <p className="text-xs mt-0.5">Venda vinculada: <b>#{item.pendencia_desfecho_numero_venda}</b></p>
+                <p className="text-xs mt-0.5">
+                  Venda vinculada:{" "}
+                  {item.pendencia_desfecho_venda_id ? (
+                    <a href={`/vendas/${item.pendencia_desfecho_venda_id}`} target="_blank" rel="noreferrer"
+                      className="font-bold underline" style={{ color: "#1E40AF" }}>
+                      #{item.pendencia_desfecho_numero_venda}
+                    </a>
+                  ) : (
+                    <b>#{item.pendencia_desfecho_numero_venda}</b>
+                  )}
+                </p>
               )}
               {item.pendencia_resolucao_obs && <p className="mt-0.5">{item.pendencia_resolucao_obs}</p>}
               {item.pendencia_resolvida_em && (

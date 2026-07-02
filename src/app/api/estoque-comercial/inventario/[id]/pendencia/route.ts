@@ -3,7 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { defineRoute } from "@/lib/api-handler";
 import { logAudit } from "@/lib/audit";
-import { ROLES_INVENTARIO_CONTAR, ROLES_INVENTARIO_GERENTES, hasRole } from "@/lib/roles";
+import { ROLES_BAIXA_MANUAL, ROLES_INVENTARIO_CONTAR, ROLES_INVENTARIO_GERENTES, hasRole } from "@/lib/roles";
 
 /**
  * PATCH /api/estoque-comercial/inventario/[id]/pendencia
@@ -142,6 +142,19 @@ export const PATCH = defineRoute({
         return NextResponse.json(
           { error: "Fechar como resolvida exige o desfecho: o que aconteceu com a peça?" },
           { status: 422 },
+        );
+      }
+
+      // BLINDAGEM (v2.81.2): desfecho que MEXE NO ESTOQUE (saída/entrada) é
+      // baixa manual — SOMENTE admin/desenvolvedor, em casos excepcionais.
+      // Gerência segue podendo responder 'localizada'/'outro' (sem movimento).
+      if (
+        ["venda_sem_baixa", "perda", "excedente_confirmado"].includes(body.desfecho_tipo) &&
+        !hasRole(user.role, ROLES_BAIXA_MANUAL)
+      ) {
+        return NextResponse.json(
+          { error: "Desfecho com baixa/entrada no estoque é exclusivo do administrador" },
+          { status: 403 },
         );
       }
 

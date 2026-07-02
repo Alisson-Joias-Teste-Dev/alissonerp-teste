@@ -5,7 +5,7 @@
 > Se algo conflitar com outro doc, este arquivo vence.
 
 **Stack:** Next.js 16.1.6 | React 19 | PostgreSQL 15 (Supabase self-hosted) | TailwindCSS v4 | Zustand
-**Versao:** v2.81.1 | **Branch:** `homolog` (nunca main direto)
+**Versao:** v2.81.2 | **Branch:** `homolog` (nunca main direto)
 **Docs completos:** `docs/arquitetura.md` | **Changelog:** `docs/CHANGELOG.md`
 
 > Projeto **100% desenvolvido por IA**. A disciplina de processo (§0) é o que mantém a qualidade — leia a §0 ANTES de qualquer coisa.
@@ -236,6 +236,7 @@ inventario comercial: "conferido" != "contado" — marcar conferido NUNCA grava 
 inventario comercial: NAO ajusta estoque ao concluir (auditoria pura); roles em ROLES_INVENTARIO_* de src/lib/roles.ts; regras em docs/regras-negocio/comercial.md §7
 inventario comercial: snapshot exclui pedra solta (espelho SQL de ehPedraSolta) e personalizada ativa — inventario e de PECA PRONTA (v2.81)
 inventario comercial: fechar pendencia como resolvida EXIGE desfecho_tipo (mig 338) — venda_sem_baixa valida a venda e EFETIVA a reserva junto com a saida (senao disponivel cai em dobro); desfecho com movimento nao se desfaz (409, exige estorno)
+baixa manual de estoque (saida manual, estorno, desfecho com movimento): SOMENTE ROLES_BAIXA_MANUAL (admin/desenvolvedor) — gerente/estoquista NUNCA baixam na mao (v2.81.2)
 ```
 
 ---
