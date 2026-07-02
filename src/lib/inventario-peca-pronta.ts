@@ -32,6 +32,19 @@ export function condPecaPronta(sqlx: any) {
           OR pc.nome ILIKE 'diamante%' OR pc.nome ILIKE 'zirc%' OR pc.nome ILIKE 'rubi%'
           OR pc.nome ILIKE 'esmeralda%' OR pc.nome ILIKE 'safira%' OR pc.nome ILIKE 'pedra%'
           OR pc.nome ILIKE 'moissanita%' OR pc.nome ILIKE 'mossainite%'
+          -- LIXO DE TESTE (v2.81.5): produtos de teste nunca entram na auditoria
+          -- (ex: SKU TESTE-2026-A "Teste Pagamento MP R$ 1,00")
+          OR pc.sku ILIKE 'teste%' OR pc.nome ILIKE 'teste%'
+          -- OURO É INSUMO (v2.81.5): metal/matéria-prima não é peça de vitrine
+          -- (nome de joia começa pelo tipo: "Anel...", "Brinco..." — nunca "Ouro...")
+          OR pc.nome ILIKE 'ouro%'
+          -- INSUMO/PEDRA/SERVIÇO/PERSONALIZAÇÃO por prefixo de SKU (v2.81.5):
+          -- convenção do catálogo (mesma de oportunidades-fabricacao) —
+          -- IS=insumo, PD=pedra, AS=serviço (ex: AS1001-2), PZ=personalização
+          OR pc.sku ILIKE 'IS%' OR pc.sku ILIKE 'PD%'
+          OR pc.sku ILIKE 'AS%' OR pc.sku ILIKE 'PZ%'
+          -- Categoria de serviço nunca é estoque físico
+          OR COALESCE(pc.categoria, '') ILIKE 'Servi%'
         )
     )
     AND NOT EXISTS (

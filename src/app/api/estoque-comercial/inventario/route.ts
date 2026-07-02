@@ -112,6 +112,13 @@ export async function POST(req: NextRequest) {
           OR p.nome ILIKE 'diamante%' OR p.nome ILIKE 'zirc%' OR p.nome ILIKE 'rubi%'
           OR p.nome ILIKE 'esmeralda%' OR p.nome ILIKE 'safira%' OR p.nome ILIKE 'pedra%'
           OR p.nome ILIKE 'moissanita%' OR p.nome ILIKE 'mossainite%'
+          -- LIXO DE TESTE, OURO-INSUMO, PREFIXOS IS/PD/AS/PZ e SERVIÇOS
+          -- (v2.81.5) — espelho de condPecaPronta()
+          OR p.sku ILIKE 'teste%' OR p.nome ILIKE 'teste%'
+          OR p.nome ILIKE 'ouro%'
+          OR p.sku ILIKE 'IS%' OR p.sku ILIKE 'PD%'
+          OR p.sku ILIKE 'AS%' OR p.sku ILIKE 'PZ%'
+          OR COALESCE(p.categoria, '') ILIKE 'Servi%'
         )
         AND NOT EXISTS (
           SELECT 1 FROM alissonerp.produto_personalizacao pp
