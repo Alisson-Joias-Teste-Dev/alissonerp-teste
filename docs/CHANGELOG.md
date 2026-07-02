@@ -11,7 +11,9 @@ e AS1001-2 é serviço — nada disso entra em contagem de estoque na auditoria.
   produtos de teste (sku/nome começando com "teste"), ouro-insumo (nome
   começando com "ouro" — joia começa pelo tipo: Anel/Brinco/...), prefixos
   de SKU IS/PD/AS/PZ (insumo/pedra/serviço/personalização — mesma convenção
-  de oportunidades-fabricacao) e categoria "Serviços".
+  de oportunidades-fabricacao) e categoria "Serviços". Ouro/metal-insumo
+  cobre também sku "ouro%", nome "metal%" e categoria "Metal%" (caso real:
+  sku ouro18k, nome "Metal Ouro 18K", que escapava do prefixo "ouro" no nome).
 - Continua tudo na LEITURA: nada apagado, nada baixado; vale para inventário
   já aberto.
 

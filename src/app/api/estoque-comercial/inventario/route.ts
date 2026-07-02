@@ -115,7 +115,8 @@ export async function POST(req: NextRequest) {
           -- LIXO DE TESTE, OURO-INSUMO, PREFIXOS IS/PD/AS/PZ e SERVIÇOS
           -- (v2.81.5) — espelho de condPecaPronta()
           OR p.sku ILIKE 'teste%' OR p.nome ILIKE 'teste%'
-          OR p.nome ILIKE 'ouro%'
+          OR p.nome ILIKE 'ouro%' OR p.sku ILIKE 'ouro%'
+          OR p.nome ILIKE 'metal%' OR COALESCE(p.categoria, '') ILIKE 'Metal%'
           OR p.sku ILIKE 'IS%' OR p.sku ILIKE 'PD%'
           OR p.sku ILIKE 'AS%' OR p.sku ILIKE 'PZ%'
           OR COALESCE(p.categoria, '') ILIKE 'Servi%'

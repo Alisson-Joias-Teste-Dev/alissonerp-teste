@@ -35,9 +35,12 @@ export function condPecaPronta(sqlx: any) {
           -- LIXO DE TESTE (v2.81.5): produtos de teste nunca entram na auditoria
           -- (ex: SKU TESTE-2026-A "Teste Pagamento MP R$ 1,00")
           OR pc.sku ILIKE 'teste%' OR pc.nome ILIKE 'teste%'
-          -- OURO É INSUMO (v2.81.5): metal/matéria-prima não é peça de vitrine
-          -- (nome de joia começa pelo tipo: "Anel...", "Brinco..." — nunca "Ouro...")
-          OR pc.nome ILIKE 'ouro%'
+          -- OURO/METAL É INSUMO (v2.81.5): matéria-prima não é peça de vitrine.
+          -- Prefixos APENAS (nunca '%ouro%' — pegaria "Meia Aliança Ouro Branco"):
+          -- nome de joia começa pelo tipo ("Anel...", "Brinco..."), nunca por
+          -- "Ouro"/"Metal" (ex. real: sku "ouro18k", nome "Metal Ouro 18K")
+          OR pc.nome ILIKE 'ouro%' OR pc.sku ILIKE 'ouro%'
+          OR pc.nome ILIKE 'metal%' OR COALESCE(pc.categoria, '') ILIKE 'Metal%'
           -- INSUMO/PEDRA/SERVIÇO/PERSONALIZAÇÃO por prefixo de SKU (v2.81.5):
           -- convenção do catálogo (mesma de oportunidades-fabricacao) —
           -- IS=insumo, PD=pedra, AS=serviço (ex: AS1001-2), PZ=personalização
