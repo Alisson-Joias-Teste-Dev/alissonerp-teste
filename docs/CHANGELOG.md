@@ -2,6 +2,50 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(inventario): peça pronta + Detetive + desfecho blindado com baixa (v2.81.0)
+
+**Pedido do Jonathan:** (1) inventário é de PEÇA PRONTA — pedra solta (moissanite,
+diamante, zircônia...) e personalizada sob encomenda não entram na contagem;
+(2) investigar sozinho POR QUE a peça falta (ex.: venda não marcada como entregue),
+sem confusão, só com certeza e sempre com o nº da venda; (3) fechar pendência tem
+que ter motivo e dar a baixa certa no estoque.
+
+**1. Snapshot só de peça pronta** (`POST /inventario`): exclui pedra solta (espelho
+SQL de `ehPedraSolta()`: categoria 'Pedras%', produto_pedra_extras, nome começa com
+nome de pedra) e personalizada ativa (`produto_personalizacao.ativo`). Inventário já
+aberto mantém a foto antiga — cancelar e reabrir aplica a regra.
+
+**2. Detetive** (`GET /inventario/[id]/investigar?produto_id=` — 100% leitura):
+cruza reservas ATIVAS (venda sem entrega confirmada), transferências PENDENTES e
+movimentações pós-abertura. Só AFIRMA causa quando a conta bate exatamente
+(reserva == falta, nada mais no radar); senão devolve como pistas. Na tela:
+botão "Investigar falta" no painel da pendência + "usar esta venda no desfecho".
+
+**3. Desfecho blindado (migration 338 — criada, NÃO executada):** fechar pendência
+como resolvida EXIGE `desfecho_tipo`:
+- `venda_sem_baixa`: exige nº da venda; valida DE VERDADE (existe, não é rascunho/
+  cancelada, contém o produto); gera SAÍDA amarrada à venda e EFETIVA a reserva
+  ativa (senão o disponível cairia em dobro).
+- `perda`: dupla confirmação; nunca deixa saldo abaixo do reservado de outras vendas.
+- `localizada`: zera a falta (contada = sistema) como decisão gerencial auditada.
+- `excedente_confirmado`: gera ENTRADA.
+- `outro`: só registro (obs obrigatória).
+Blindagens: quantidade SEMPRE do servidor (|diferenca|); movimento + resposta na
+mesma transação; desfecho com movimento NÃO se desfaz num clique (409 — exige
+estorno); só gerência; logAudit completo. Motivos de movimento novos:
+`pendencia_venda_sem_baixa`, `pendencia_perda`, `pendencia_excedente`.
+
+## feat(inventario): placar de pendências vira filtro clicável (v2.80.1)
+
+**Pedido do Jonathan:** pendência de item que voltava a ficar OK "sumia" da tela
+(o item desce para o bloco "Conferidos OK" no fim da página, enterrado entre os itens OK).
+
+- Os chips do placar ("aguardando resposta" / "resolvida(s)" / "não resolvida(s)") agora
+  são botões: clicar filtra a lista pelo tipo de pendência (clicar de novo limpa).
+- Faixa "Mostrando só itens com pendência X — limpar filtro" fica visível enquanto o
+  filtro está ativo (usuário nunca fica preso na lista filtrada).
+- Filtro combina com a busca por SKU/nome. Só tela — nada muda no banco/API.
+
 ## feat(inventario): pendências por item + blindagem de segurança do inventário comercial (v2.80.0)
 
 **Pedido do Jonathan:** na tela `/estoque-comercial/inventario/[id]`, explicar cada pendência

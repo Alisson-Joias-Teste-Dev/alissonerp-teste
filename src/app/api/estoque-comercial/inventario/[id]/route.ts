@@ -55,6 +55,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       ii.conferido, ii.contado_em, ii.movimento_ajuste_id,
       ii.pendencia_obs, ii.pendencia_registrada_em,
       ii.pendencia_resolvida, ii.pendencia_resolucao_obs, ii.pendencia_resolvida_em,
+      ii.pendencia_desfecho_tipo, vd.numero_venda AS pendencia_desfecho_numero_venda,
       p.nome AS nome_produto, p.sku,
       uc.email AS contado_por_email,
       ur.email AS pendencia_registrada_por_email,
@@ -64,6 +65,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     LEFT JOIN auth.users uc ON uc.id = ii.contado_por
     LEFT JOIN auth.users ur ON ur.id = ii.pendencia_registrada_por
     LEFT JOIN auth.users uz ON uz.id = ii.pendencia_resolvida_por
+    LEFT JOIN alissonerp.vendas_erp vd ON vd.id = ii.pendencia_desfecho_venda_id
     WHERE ii.inventario_id = ${invId}
       ${soDivergentes ? sql`AND ii.diferenca != 0` : sql``}
     ORDER BY
