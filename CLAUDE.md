@@ -5,7 +5,7 @@
 > Se algo conflitar com outro doc, este arquivo vence.
 
 **Stack:** Next.js 16.1.6 | React 19 | PostgreSQL 15 (Supabase self-hosted) | TailwindCSS v4 | Zustand
-**Versao:** v2.81.3 | **Branch:** `homolog` (nunca main direto)
+**Versao:** v2.81.4 | **Branch:** `homolog` (nunca main direto)
 **Docs completos:** `docs/arquitetura.md` | **Changelog:** `docs/CHANGELOG.md`
 
 > Projeto **100% desenvolvido por IA**. A disciplina de processo (§0) é o que mantém a qualidade — leia a §0 ANTES de qualquer coisa.
@@ -234,7 +234,7 @@ fila_sync: erros Tiny vao para fila_sync_externo, nao bloqueiam a operacao princ
 itens_inventario_comercial.diferenca: coluna GERADA pelo banco — NUNCA escrever nela via UPDATE (mig 336 blinda)
 inventario comercial: "conferido" != "contado" — marcar conferido NUNCA grava quantidade_contada (bug v2.79 gravava qtd do sistema = contagem falsa)
 inventario comercial: NAO ajusta estoque ao concluir (auditoria pura); roles em ROLES_INVENTARIO_* de src/lib/roles.ts; regras em docs/regras-negocio/comercial.md §7
-inventario comercial: snapshot exclui pedra solta (espelho SQL de ehPedraSolta) e personalizada ativa — inventario e de PECA PRONTA (v2.81)
+inventario comercial: PECA PRONTA filtrada na LEITURA via condPecaPronta() de src/lib/inventario-peca-pronta.ts (GET/concluir/contar/app) — vale ate para inventario aberto antes da regra; snapshot novo tambem exclui (v2.81.4)
 inventario comercial: fechar pendencia como resolvida EXIGE desfecho_tipo (mig 338) — venda_sem_baixa valida a venda e EFETIVA a reserva junto com a saida (senao disponivel cai em dobro); desfecho com movimento nao se desfaz (409, exige estorno)
 baixa manual de estoque NAO EXISTE para ninguem (v2.81.3) — movimento so por CONCILIACAO com documento conferido (falta<->venda sem baixa, sobra<->devolucao sem entrada), exclusiva de ROLES_BAIXA_MANUAL (admin/dev) + dupla confirmacao; perda = so registro, SEM baixa; mecanismo TEMPORARIO ate organizar o sistema
 ```

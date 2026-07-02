@@ -2,6 +2,20 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(inventario): regra de peça pronta vale para inventário JÁ ABERTO (v2.81.4)
+
+**Pedido do Jonathan:** aplicar a regra (pedra solta e personalizada não entram em
+contagem de estoque na auditoria) no inventário já feito — sem dar baixa manual em
+nada e sem apagar nada.
+
+- Filtro central `condPecaPronta()` em `src/lib/inventario-peca-pronta.ts`
+  (espelho SQL de `ehPedraSolta()` + personalização ativa), aplicado NA LEITURA:
+  GET do inventário (lista/placar/CSV/progresso), trava de conclusão (`/concluir`
+  não conta mais itens excluídos como "sem contagem"), app RFID (lista e contadores)
+  e `/contar` (recusa contagem de pedra/personalizada mesmo por API direta).
+- Nenhum dado alterado: os itens antigos continuam no banco, só deixam de
+  aparecer e de contar. Snapshot de inventário novo já nascia filtrado (v2.81.0).
+
 ## fix(estoque): baixa manual NÃO EXISTE — movimento só por CONCILIAÇÃO (v2.81.3)
 
 **Regra do Jonathan:** nem admin nem desenvolvedor dão baixa manual. Estoque só se
