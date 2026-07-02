@@ -152,14 +152,15 @@ O token de acesso ao banco de PRODUCAO e COMPARTILHADO entre a IA do Jonathan
 ANTES de qualquer DDL/DML manual no banco (view, funcao, trigger, INSERT/UPDATE/DELETE):
 
   SELECT alissonerp.assinar_mudanca_banco(
-    '<autor>',     -- quem AUTORIZOU: 'jonathan' | 'chefe'
+    '<autor>',     -- quem AUTORIZOU: 'alisson' | 'jonathan' | 'chefe' — SEMPRE quem de fato mandou (nunca assinar por outro)
     '<agente>',    -- ferramenta executora: 'claude-code' | 'ia-chefe'
     '<descricao>', -- o que muda, em linguagem clara
     '<sql>'        -- o SQL aplicado (resumo fiel)
   );
 
 E setar a etiqueta da conexao ANTES de conectar:  PGAPPNAME='claude-code-jonathan'
-(a IA do chefe deve usar a sua propria etiqueta, ex 'ia-chefe').
+(a IA do chefe deve usar a sua propria etiqueta, ex 'ia-chefe';
+sessoes do Alisson via Claude Code Web usam PGAPPNAME='claude-code-alisson' e autor 'alisson').
 
 Livro: alissonerp.log_mudancas_banco (append-only, criado na migration 303).
 Captura sozinho app_name + IP de origem + usuario. NUNCA pular a assinatura.

@@ -14,14 +14,14 @@
 BEGIN;
 
 -- 1) Etiqueta da conexão
-SET LOCAL application_name = 'claude-code-jonathan';
+SET LOCAL application_name = 'claude-code-alisson';
 
 -- 2) Assinatura OBRIGATÓRIA no livro de mudanças (migration 303)
 SELECT alissonerp.assinar_mudanca_banco(
-  'jonathan',
+  'alisson',
   'claude-code',
-  'Migration 339 — solicitações de inventário (role operador_inventario): tabela solicitacoes_inventario, role para Ytalo/Geovana e config aprovador_inventario (Jonathan)',
-  'CREATE TABLE alissonerp.solicitacoes_inventario (pedidos abrir/concluir/cancelar com aprovacao via tarefas); UPDATE usuarios SET role=operador_inventario para geo@ e ytalo@alissonjoias.com.br; INSERT configuracoes_sistema aprovador_inventario = uuid do Jonathan'
+  'Migration 339 — solicitações de inventário (role operador_inventario): tabela solicitacoes_inventario, role para Ytalo/Geovana e config aprovador_inventario (Alisson)',
+  'CREATE TABLE alissonerp.solicitacoes_inventario (pedidos abrir/concluir/cancelar com aprovacao via tarefas); UPDATE usuarios SET role=operador_inventario para geo@ e ytalo@alissonjoias.com.br; INSERT configuracoes_sistema aprovador_inventario = uuid do Alisson'
 );
 
 -- 3) A migration em si (tabela nova — não altera tabela existente, sem backup)
@@ -55,7 +55,7 @@ UPDATE alissonerp.usuarios
 SET role = 'operador_inventario'
 WHERE email IN ('geo@alissonjoias.com.br', 'ytalo@alissonjoias.com.br');
 
--- 5) Aprovador dos pedidos = Jonathan
+-- 5) Aprovador dos pedidos = Alisson
 --    ⚠️ Se o SEU login no ERP não for este e-mail, troque abaixo pelo e-mail
 --    que você usa para entrar no sistema.
 INSERT INTO alissonerp.configuracoes_sistema (chave, valor, descricao)
