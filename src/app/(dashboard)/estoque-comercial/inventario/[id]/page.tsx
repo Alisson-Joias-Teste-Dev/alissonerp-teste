@@ -753,7 +753,12 @@ export default function InventarioDetalhePage() {
         });
       }
       if (!r.ok) throw new Error((await r.json() as { error?: string }).error ?? "Erro");
-      const data = await r.json() as { divergentes: number; nao_contados: number; pendencias_abertas: number };
+      const data = await r.json() as { divergentes: number; nao_contados: number; pendencias_abertas: number; solicitado?: boolean; mensagem?: string };
+      // Operador de inventário: conclusão vira PEDIDO aprovado pelo admin
+      if (data.solicitado) {
+        setMsg({ tipo: "ok", texto: data.mensagem ?? "Pedido de conclusão enviado para aprovação do administrador." });
+        return;
+      }
       setMsg({
         tipo: "ok",
         texto: `Inventário concluído. ${data.divergentes} divergência(s) registrada(s)` +
@@ -779,8 +784,14 @@ export default function InventarioDetalhePage() {
         body: JSON.stringify({ motivo: motivoCancelamento.trim() }),
       });
       if (!r.ok) throw new Error((await r.json() as { error?: string }).error ?? "Erro");
+      const dataCancel = await r.json().catch(() => ({})) as { solicitado?: boolean; mensagem?: string };
       setCancelModalAberto(false);
       setMotivoCancelamento("");
+      // Operador de inventário: cancelamento vira PEDIDO aprovado pelo admin
+      if (dataCancel.solicitado) {
+        setMsg({ tipo: "ok", texto: dataCancel.mensagem ?? "Pedido de cancelamento enviado para aprovação do administrador." });
+        return;
+      }
       await fetchData();
     } catch (e) {
       setMsg({ tipo: "erro", texto: e instanceof Error ? e.message : "Erro ao cancelar" });

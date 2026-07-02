@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
-import { logAudit } from "@/lib/audit";
-import { ROLES_INVENTARIO_GERENTES, ROLES_INVENTARIO_VER, hasRole } from "@/lib/roles";
+import { ROLE_OPERADOR_INVENTARIO, ROLES_INVENTARIO_GERENTES, ROLES_INVENTARIO_VER, hasRole } from "@/lib/roles";
+import { executarAbrirInventario, InventarioAcaoError } from "@/lib/inventario-acoes";
+import { criarSolicitacaoInventario } from "@/lib/inventario-solicitacoes";
 import { zodError } from "@/lib/schemas/common";
 
 const InventarioPostSchema = z.object({
@@ -49,7 +50,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
-  if (!hasRole(user.role, ROLES_INVENTARIO_GERENTES)) {
+
+  const isOperador = user.role === ROLE_OPERADOR_INVENTARIO;
+  if (!isOperador && !hasRole(user.role, ROLES_INVENTARIO_GERENTES)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -57,87 +60,40 @@ export async function POST(req: NextRequest) {
   const parsed = InventarioPostSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const { local_estoque_id, obs, categoria } = parsed.data;
-  const cat = categoria?.trim() || null;
 
-  // Verificar se já existe inventário aberto para esse local
-  const [existente] = await sql`
-    SELECT id FROM alissonerp.inventarios_comercial
-    WHERE local_estoque_id = ${local_estoque_id} AND status IN ('aberto', 'em_contagem')
-  `;
-  if (existente) {
-    return NextResponse.json(
-      { error: `Já existe inventário aberto para esse local (ID: ${existente.id})` },
-      { status: 409 }
-    );
-  }
-
-  // Criar inventário + snapshot numa transação única (ou tudo, ou nada)
-  const inv = await sql.begin(async (tx: any) => {
-    const [novo] = await tx`
-      INSERT INTO alissonerp.inventarios_comercial
-        (local_estoque_id, obs, categoria, created_by)
-      VALUES
-        (${local_estoque_id}, ${obs ?? null}, ${cat}, ${user.id})
-      RETURNING id, created_at
-    `;
-
+  try {
     /**
-     * Snapshot: todos os produtos com saldo > 0 no local, filtrados pela categoria se informada.
-     *
-     * O QUÊ: INVENTÁRIO É DE PEÇA PRONTA — pedra solta e personalizada sob
-     *   encomenda ficam FORA da foto inicial.
-     * POR QUÊ: pedra é matéria-prima contada em quilates (não em unidades de
-     *   prateleira) e personalizada (SKU PZ) só existe depois de encomendada —
-     *   ambas inflavam o "Faltando" com itens que ninguém vai contar.
-     * CRITÉRIO pedra = espelho SQL de ehPedraSolta() (src/lib/compras-pedras.ts):
-     *   categoria 'Pedras%', OU produto_pedra_extras, OU nome COMEÇA com nome de
-     *   pedra. NUNCA usar tem_pedra_preciosa (joia COM pedra) nem includes() no nome.
-     * IMPACTO SE ALTERADO: pedras/personalizadas voltam a poluir o inventário
-     *   e a contagem de faltas fica mentirosa.
+     * OPERADOR DE INVENTÁRIO (v2.83.0): não abre direto — o pedido vira
+     * tarefa de aprovação do administrador; só executa quando ele aprovar.
      */
-    await tx`
-      INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
-      SELECT
-        ${novo.id},
-        v.produto_id,
-        v.saldo_fisico::INTEGER
-      FROM alissonerp.vw_saldo_estoque_comercial_v2 v
-      JOIN alissonerp.produtos_compat p ON p.id_produto = v.produto_id
-      WHERE v.local_estoque_id = ${local_estoque_id}
-        AND v.saldo_fisico > 0
-        ${cat ? tx`AND (p.categoria = ${cat} OR p.categoria LIKE ${cat + ' -> %'})` : tx``}
-        AND NOT (
-          p.categoria ILIKE 'Pedras%'
-          OR EXISTS (SELECT 1 FROM alissonerp.produto_pedra_extras ppe WHERE ppe.produto_id = v.produto_id)
-          OR p.nome ILIKE 'diamante%' OR p.nome ILIKE 'zirc%' OR p.nome ILIKE 'rubi%'
-          OR p.nome ILIKE 'esmeralda%' OR p.nome ILIKE 'safira%' OR p.nome ILIKE 'pedra%'
-          OR p.nome ILIKE 'moissanita%' OR p.nome ILIKE 'mossainite%'
-          -- LIXO DE TESTE, OURO-INSUMO, PREFIXOS IS/PD/AS/PZ e SERVIÇOS
-          -- (v2.81.5) — espelho de condPecaPronta()
-          OR p.sku ILIKE 'teste%' OR p.nome ILIKE 'teste%'
-          OR p.nome ILIKE 'ouro%' OR p.sku ILIKE 'ouro%'
-          OR p.nome ILIKE 'metal%' OR COALESCE(p.categoria, '') ILIKE 'Metal%'
-          OR p.sku ILIKE 'IS%' OR p.sku ILIKE 'PD%'
-          OR p.sku ILIKE 'AS%' OR p.sku ILIKE 'PZ%'
-          OR COALESCE(p.categoria, '') ILIKE 'Servi%'
-        )
-        AND NOT EXISTS (
-          SELECT 1 FROM alissonerp.produto_personalizacao pp
-          WHERE pp.produto_id = v.produto_id AND pp.ativo = true
-        )
-    `;
+    if (isOperador) {
+      const [local] = await sql`SELECT nome FROM alissonerp.locais_estoque WHERE id = ${local_estoque_id}`;
+      const resumo = [
+        `Ação: ABRIR inventário`,
+        `Local: ${local?.nome ?? local_estoque_id}`,
+        categoria?.trim() ? `Categoria: ${categoria.trim()}` : null,
+        obs ? `Obs: ${obs}` : null,
+        "",
+        "Ao aprovar, o sistema abre o inventário e gera a lista de contagem (peça pronta).",
+      ].filter(Boolean).join("\n");
+      const solic = await criarSolicitacaoInventario({
+        tipoAcao: "abrir",
+        payload: { local_estoque_id, obs: obs ?? null, categoria: categoria ?? null },
+        resumo,
+        user,
+      });
+      return NextResponse.json(
+        { solicitado: true, ...solic, mensagem: "Pedido enviado para aprovação do administrador" },
+        { status: 202 },
+      );
+    }
 
-    await logAudit(tx, {
-      tabela: "inventarios_comercial",
-      operacao: "INSERT",
-      registro_id: novo.id,
-      usuario_id: user.id,
-      dados_depois: { local_estoque_id, categoria: cat, obs: obs ?? null },
-    });
-
-    return novo;
-  });
-
-  return NextResponse.json({ id: inv.id, created_at: inv.created_at }, { status: 201 });
-
+    const inv = await executarAbrirInventario({ local_estoque_id, obs, categoria, userId: user.id });
+    return NextResponse.json({ id: inv.id, created_at: inv.created_at }, { status: 201 });
+  } catch (e) {
+    if (e instanceof InventarioAcaoError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
+  }
 }

@@ -71,8 +71,13 @@ export function podedarBaixaCaixa(role: string | null | undefined): boolean {
 export const ROLES_INVENTARIO_GERENTES = [
   "desenvolvedor", "admin", "diretor", "gerente_fabrica", "gerente_loja",
 ] as const;
+// operador_inventario (v2.83.0 — Ytalo/Geovana): VÊ tudo do estoque e conta
+// via leitor RFID, mas NÃO edita nada direto — abrir/concluir/cancelar
+// inventário viram SOLICITAÇÃO aprovada pelo admin (solicitacoes_inventario).
+export const ROLE_OPERADOR_INVENTARIO = "operador_inventario";
 export const ROLES_INVENTARIO_CONTAR = [
   ...ROLES_INVENTARIO_GERENTES, "estoquista_fabrica", "estoquista_loja",
+  ROLE_OPERADOR_INVENTARIO,
 ] as const;
 // Ver = mesmos que podem contar (inventário não é dado público interno)
 export const ROLES_INVENTARIO_VER = ROLES_INVENTARIO_CONTAR;

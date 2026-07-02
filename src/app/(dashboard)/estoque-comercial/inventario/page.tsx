@@ -98,7 +98,14 @@ export default function InventarioPage() {
       });
 
       if (!r.ok) throw new Error((await r.json() as { error?: string }).error ?? "Erro");
-      const data = await r.json() as { id: number };
+      const data = await r.json() as { id?: number; solicitado?: boolean; mensagem?: string };
+      // Operador de inventário: a abertura vira PEDIDO — não navega, avisa
+      if (data.solicitado) {
+        setNovoOpen(false);
+        setErr("");
+        alert(data.mensagem ?? "Pedido enviado para aprovação do administrador.");
+        return;
+      }
       setNovoOpen(false);
       await fetchData();
       router.push(`/estoque-comercial/inventario/${data.id}`);

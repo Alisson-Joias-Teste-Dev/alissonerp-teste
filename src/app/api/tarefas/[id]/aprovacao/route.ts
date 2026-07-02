@@ -574,6 +574,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
+  /**
+   * REGRA DE NEGÓCIO (v2.83.0): solicitação de ação do inventário feita
+   * pela role operador_inventario (Ytalo/Geovana). Ao APROVAR, o sistema
+   * EXECUTA a ação (abrir/concluir/cancelar) — mesma engrenagem das rotas
+   * diretas (src/lib/inventario-acoes). Ao rejeitar, nada muda no estoque.
+   */
+  if (tarefaInfo?.tipo === "inventario_solicitacao" || tags.includes("aprovacao_inventario")) {
+    try {
+      const { processarAprovacaoInventario } = await import("@/lib/inventario-solicitacoes");
+      const resultado = await processarAprovacaoInventario(Number(id), body.decisao, user.id, body.motivo);
+      return NextResponse.json({ ok: true, inventario_solicitacao: resultado });
+    } catch (err) {
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] inventario_solicitacao`, err);
+    }
+  }
+
   if (tarefaInfo?.tipo === "compra_comercial" || tags.includes("aprovacao_compra_comercial")) {
     try {
       const resultado = await processarAprovacaoCompraComercial(Number(id), body.decisao, user.id, body.motivo);

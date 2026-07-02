@@ -2,6 +2,28 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(inventario): role operador_inventario com edição via aprovação (v2.83.0)
+
+**Pedido do Jonathan:** Ytalo e Geovana (operadores do inventário) veem tudo do
+estoque e contam via leitor RFID, mas NÃO editam nada direto — qualquer ação
+vira pedido que só executa com a aprovação dele. (Auditoria manual é outra
+frente, separada.)
+
+- **Role nova `operador_inventario`** (src/lib/roles.ts): entra em
+  ROLES_INVENTARIO_CONTAR (vê telas + leituras RFID + contagem), fora de
+  GERENTES e ESTOQUE_MOVIMENTAR.
+- **Migration 339**: tabela `solicitacoes_inventario` (pedido de
+  abrir/concluir/cancelar com payload, status pendente→executada/rejeitada/erro,
+  tarefa vinculada). Aprovador em configuracoes_sistema.aprovador_inventario.
+- **Mesma engrenagem de aprovação de compra comercial/desconto**: pedido cria
+  tarefa 'inventario_solicitacao' + aprovacoes_tarefa + notificação; o PATCH
+  /tarefas/[id]/aprovacao executa a ação ao aprovar (rejeitou = nada muda).
+- **Execução centralizada** em src/lib/inventario-acoes.ts (abrir/concluir/
+  cancelar) — rota direta (gerência) e aprovação executam o MESMO código.
+  Snapshot de abertura agora usa condPecaPronta() (fim da cópia inline).
+- UI: telas mostram "Pedido enviado para aprovação do administrador" (202).
+- scripts/aplicar_339_producao.sql: tabela + role das 2 operadoras + aprovador.
+
 ## fix(inventario): "Chips fora do inventário" não respeitava filtro nenhum (v2.82.1)
 
 **Bug reportado pelo Jonathan:** a seção "Chips fora do inventário" (etiquetas
