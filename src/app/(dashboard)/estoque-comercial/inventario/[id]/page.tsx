@@ -23,7 +23,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft, Loader2, CheckCircle, XCircle, Search, X, FileDown,
-  ChevronDown, ChevronUp, AlertTriangle, MessageSquareText,
+  ChevronDown, ChevronUp, AlertTriangle, MessageSquareText, Info,
 } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
 
@@ -62,6 +62,7 @@ interface ItemInventario {
   pendencia_desfecho_tipo: string | null;
   pendencia_desfecho_venda_id: number | null;
   pendencia_desfecho_numero_venda: string | null;
+  categoria_produto: string | null;
 }
 
 interface LeiturasEPC {
@@ -131,12 +132,44 @@ function PendenciaBadge({ item }: { item: ItemInventario }) {
     style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCD34D" }}>Pendência aberta</span>;
 }
 
-function SummaryCard({ label, value, color }: { label: string; value: number; color: string }) {
+/**
+ * Cartão de status CLICÁVEL: filtra a lista pelo status (clicar de novo
+ * limpa). Combina com o filtro de categoria e o de pendências.
+ */
+function SummaryCard({ label, value, color, ativo, onClick }: {
+  label: string; value: number; color: string; ativo: boolean; onClick: () => void;
+}) {
   return (
-    <div className="rounded-xl p-3 text-center flex-1"
-      style={{ background: `${color}18`, border: `1px solid ${color}40` }}>
+    <button onClick={onClick}
+      className="rounded-xl p-3 text-center flex-1 transition-shadow"
+      style={{
+        background: `${color}18`,
+        border: `1px solid ${ativo ? color : `${color}40`}`,
+        boxShadow: ativo ? `0 0 0 1.5px ${color}` : "none",
+      }}>
       <p className="text-2xl font-bold" style={{ color }}>{value}</p>
-      <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>{label}</p>
+      <p className="text-xs mt-0.5" style={{ color: "#6B7280" }}>{label}{ativo ? " ✕" : ""}</p>
+    </button>
+  );
+}
+
+// Explicação de cada status — mostrada pelo botão "!" ao lado dos cartões
+const STATUS_EXPLICACAO: { status: StatusItem; label: string; color: string; texto: string }[] = [
+  { status: "ok", label: "OK", color: "#059669", texto: "Item foi contado e a quantidade bateu exatamente com o sistema." },
+  { status: "faltando", label: "Faltando", color: "#DC2626", texto: "Item foi contado e apareceu MENOS do que o sistema esperava." },
+  { status: "excesso", label: "Excesso", color: "#2563EB", texto: "Item foi contado e apareceu MAIS do que o sistema esperava." },
+  { status: "pendente", label: "Sem contagem", color: "#6B7280", texto: "Ninguém contou esse item ainda — falta informar a quantidade real." },
+];
+
+function StatusInfoBox() {
+  return (
+    <div className="rounded-xl p-3 mb-3 text-xs space-y-1.5" style={{ background: "#F9F6F0", border: "1px solid #E8DCC8" }}>
+      {STATUS_EXPLICACAO.map(s => (
+        <p key={s.status}>
+          <b style={{ color: s.color }}>{s.label}:</b>{" "}
+          <span style={{ color: "#374151" }}>{s.texto}</span>
+        </p>
+      ))}
     </div>
   );
 }
@@ -493,7 +526,7 @@ function PendenciaPanel({
 
 function ItemRow({
   item, invId, status, conferido, salvando, expandido, onToggleConferido, onToggleExpand, isAberto, podeEditarPendencia,
-  onSalvarPendencia, onResolver, onContar,
+  onSalvarPendencia, onResolver, onContar, investigacao,
 }: {
   item: ItemInventario;
   invId: number;
@@ -508,6 +541,7 @@ function ItemRow({
   onSalvarPendencia: (obs: string) => void;
   onResolver: (payload: { resolvida: boolean | null; resolucao_obs?: string; desfecho_tipo?: string; numero_venda?: string; numero_devolucao?: string; confirmar_baixa?: boolean }) => void;
   onContar: (qtd: number) => void;
+  investigacao?: { conclusao: { tipo: string; confianca: "alta" | "media"; resumo: string } | null; temPistas: boolean } | null;
 }) {
   const lido = item.quantidade_contada ?? 0;
   // Pendência só existe onde há problema: divergente ou sem contagem
@@ -547,8 +581,28 @@ function ItemRow({
           <p className="text-sm font-medium truncate" style={{ fontFamily: "monospace", color: "#184036" }}>
             {item.sku ?? "—"}
           </p>
-          <p className="text-xs text-gray-400 truncate">{item.nome_produto}</p>
+          <p className="text-xs text-gray-400 truncate">
+            {item.nome_produto}{item.categoria_produto ? ` · ${item.categoria_produto}` : ""}
+          </p>
+          {/* Resultado do Detetive (rodou em lote) direto na linha — sem precisar abrir o item */}
+          {investigacao?.conclusao && (
+            <p className="text-[11px] truncate mt-0.5" style={{ color: investigacao.conclusao.confianca === "alta" ? "#1E40AF" : "#92400E" }}>
+              🔎 {investigacao.conclusao.resumo}
+            </p>
+          )}
         </div>
+        {investigacao?.conclusao && (
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap shrink-0"
+            style={{ background: "#DBEAFE", color: "#1E40AF", border: "1px solid #93C5FD" }}>
+            💡 conciliação
+          </span>
+        )}
+        {!investigacao?.conclusao && investigacao?.temPistas && (
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap shrink-0"
+            style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCD34D" }}>
+            🔍 pistas
+          </span>
+        )}
         <PendenciaBadge item={item} />
         <span className="text-sm font-bold shrink-0" style={{ color: "#374151" }}>
           {lido}/{item.quantidade_sistema}
@@ -601,6 +655,17 @@ export default function InventarioDetalhePage() {
   const [expandidoId, setExpandidoId] = useState<number | null>(null);
   // Filtro do placar de pendências: null = sem filtro (lista completa)
   const [filtroPendencia, setFiltroPendencia] = useState<"aberta" | "resolvida" | "nao_resolvida" | null>(null);
+  // Filtros novos: categoria do produto e status (cartões OK/Faltando/Excesso/Sem contagem)
+  const [filtroCategoria, setFiltroCategoria] = useState<string | null>(null);
+  const [filtroStatus, setFiltroStatus] = useState<StatusItem | null>(null);
+  const [infoStatusAberto, setInfoStatusAberto] = useState(false);
+  // Paginação por seção (Excedentes/Faltando/Sem contagem/OK): quantos itens mostrar
+  const PAGINA = 50;
+  const [visivelPorSecao, setVisivelPorSecao] = useState<Record<string, number>>({});
+  // "Conferidos OK" recolhido por padrão — costuma ser a maioria dos itens
+  const [okAberto, setOkAberto] = useState(false);
+  // Resultado do Detetive rodado em lote (produto_id -> conclusão), badge na linha
+  const [investigacoes, setInvestigacoes] = useState<Record<number, { conclusao: { tipo: string; confianca: "alta" | "media"; resumo: string } | null; temPistas: boolean }>>({});
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -624,12 +689,25 @@ export default function InventarioDetalhePage() {
       setTotalLeituras(d.total_leituras ?? d.leituras?.length ?? 0);
       setExcedentesForaInventario(d.excedentesForaInventario ?? []);
       setConferidoIds(new Set(d.itens.filter(i => i.conferido).map(i => i.produto_id)));
+
+      // Detetive em lote — busca resultado de todos os itens divergentes de
+      // uma vez só (não bloqueia o carregamento principal: falha aqui não
+      // impede ver a tela, só deixa de mostrar a pista na linha)
+      fetch(`/api/estoque-comercial/inventario/${invId}/investigar-lote`)
+        .then(res => res.ok ? res.json() : null)
+        .then(dl => { if (dl?.resultados) setInvestigacoes(dl.resultados); })
+        .catch(() => {});
     } catch {
       setMsg({ tipo: "erro", texto: "Falha de rede ao carregar o inventário." });
     } finally { setLoading(false); }
   }, [invId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Mostra mais 50 itens de uma seção (paginação simples)
+  function mostrarMais(secao: string) {
+    setVisivelPorSecao(prev => ({ ...prev, [secao]: (prev[secao] ?? PAGINA) + PAGINA }));
+  }
 
   function marcarSalvando(produtoId: number, on: boolean) {
     setSalvandoIds(prev => {
@@ -855,11 +933,20 @@ export default function InventarioDetalhePage() {
   const pendResolvidas = itens.filter(i => i.pendencia_resolvida === true).length;
   const pendNaoResolvidas = itens.filter(i => i.pendencia_resolvida === false).length;
 
+  // Categorias existentes NESTE inventário, com a contagem de cada uma —
+  // vira o filtro de chips no topo (combinável com status/pendência/busca)
+  const categorias = Array.from(new Set(
+    itens.map(i => i.categoria_produto).filter((c): c is string => !!c)
+  )).sort();
+  const contagemCategoria = (cat: string) => itens.filter(i => i.categoria_produto === cat).length;
+
   /**
-   * O QUÊ: filtro combinado — busca por SKU/nome + filtro de pendência do placar.
+   * O QUÊ: filtro combinado — busca por SKU/nome + pendência (placar) +
+   *   categoria do produto + status (cartões OK/Faltando/Excesso/Sem contagem).
    * POR QUÊ: item com pendência que volta a ficar OK desce para o bloco
-   *   "Conferidos OK" no fim da página e a pendência parecia sumir — o placar
-   *   clicável traz esses itens de volta à vista em um clique.
+   *   "Conferidos OK" no fim da página e a pendência parecia sumir — os
+   *   filtros clicáveis trazem esses itens de volta à vista em um clique,
+   *   e cruzam com categoria (ex: só "Faltando" dentro de "Anéis").
    * IMPACTO SE ALTERADO: pendência de item corrigido só seria achada rolando
    *   a lista inteira (em inventários grandes, na prática se perde).
    */
@@ -869,9 +956,11 @@ export default function InventarioDetalhePage() {
     if (filtroPendencia === "resolvida") return i.pendencia_resolvida === true;
     return i.pendencia_resolvida === false;
   };
+  const matchCategoria = (i: ItemInventario): boolean => !filtroCategoria || i.categoria_produto === filtroCategoria;
+  const matchStatus = (i: ItemInventario): boolean => !filtroStatus || getStatus(i) === filtroStatus;
   const filtro = busca.trim().toLowerCase();
   const itensFiltrados = itens.filter(i =>
-    matchPendencia(i) &&
+    matchPendencia(i) && matchCategoria(i) && matchStatus(i) &&
     (!filtro || !!i.sku?.toLowerCase().includes(filtro) || i.nome_produto.toLowerCase().includes(filtro))
   );
 
@@ -879,6 +968,12 @@ export default function InventarioDetalhePage() {
   const faltandoL  = itensFiltrados.filter(i => getStatus(i) === "faltando").sort((a, b) => a.diferenca - b.diferenca);
   const pendentesL = itensFiltrados.filter(i => getStatus(i) === "pendente");
   const okL        = itensFiltrados.filter(i => getStatus(i) === "ok");
+
+  // Paginação: cada seção mostra 50 por vez ("mostrar mais" avança)
+  const excessosVis   = excessos.slice(0, visivelPorSecao.excesso ?? PAGINA);
+  const faltandoVis   = faltandoL.slice(0, visivelPorSecao.faltando ?? PAGINA);
+  const pendentesVis  = pendentesL.slice(0, visivelPorSecao.pendente ?? PAGINA);
+  const okVis         = okL.slice(0, visivelPorSecao.ok ?? PAGINA);
 
   const statusMap: Record<string, { label: string; bg: string; txt: string }> = {
     aberto:      { label: "Aberto",      bg: "#DBEAFE", txt: "#1E40AF" },
@@ -890,6 +985,7 @@ export default function InventarioDetalhePage() {
 
   const renderRow = (item: ItemInventario, status: StatusItem) => (
     <ItemRow key={item.id} item={item} invId={invId} status={status}
+      investigacao={investigacoes[item.produto_id] ?? null}
       conferido={conferidoIds.has(item.produto_id)}
       salvando={salvandoIds.has(item.produto_id)}
       expandido={expandidoId === item.id}
@@ -1002,12 +1098,44 @@ export default function InventarioDetalhePage() {
         </div>
       </div>
 
-      <div className="mb-3 flex gap-2">
-        <SummaryCard label="OK"           value={okCount}       color="#059669" />
-        <SummaryCard label="Faltando"     value={faltandoCount} color="#DC2626" />
-        <SummaryCard label="Excesso"      value={excessoCount}  color="#2563EB" />
-        <SummaryCard label="Sem contagem" value={semContagem}   color="#6B7280" />
+      {/* Filtro por categoria: chips com as categorias que EXISTEM neste
+          inventário — clicável, combina com status/pendência/busca */}
+      {categorias.length > 0 && (
+        <div className="mb-3 flex gap-1.5 flex-wrap items-center">
+          <span className="text-xs font-semibold shrink-0" style={{ color: "#7A5A4A" }}>Categoria:</span>
+          <button onClick={() => setFiltroCategoria(null)}
+            className="text-xs px-2.5 py-1 rounded-full font-medium"
+            style={!filtroCategoria
+              ? { background: "#184036", color: "#fff" }
+              : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
+            Todas <span style={{ opacity: 0.65 }}>({itens.length})</span>
+          </button>
+          {categorias.map(cat => (
+            <button key={cat} onClick={() => setFiltroCategoria(prev => prev === cat ? null : cat)}
+              className="text-xs px-2.5 py-1 rounded-full font-medium"
+              style={filtroCategoria === cat
+                ? { background: "#184036", color: "#fff" }
+                : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
+              {cat} <span style={{ opacity: 0.65 }}>({contagemCategoria(cat)})</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <div className="flex gap-2 flex-1">
+          <SummaryCard label="OK"           value={okCount}       color="#059669" ativo={filtroStatus === "ok"}       onClick={() => setFiltroStatus(p => p === "ok" ? null : "ok")} />
+          <SummaryCard label="Faltando"     value={faltandoCount} color="#DC2626" ativo={filtroStatus === "faltando"} onClick={() => setFiltroStatus(p => p === "faltando" ? null : "faltando")} />
+          <SummaryCard label="Excesso"      value={excessoCount}  color="#2563EB" ativo={filtroStatus === "excesso"}  onClick={() => setFiltroStatus(p => p === "excesso" ? null : "excesso")} />
+          <SummaryCard label="Sem contagem" value={semContagem}   color="#6B7280" ativo={filtroStatus === "pendente"} onClick={() => setFiltroStatus(p => p === "pendente" ? null : "pendente")} />
+        </div>
+        <button onClick={() => setInfoStatusAberto(v => !v)}
+          className="shrink-0 text-gray-400 hover:text-gray-600 self-stretch px-1"
+          title="O que significa cada cartão?">
+          <Info size={16} />
+        </button>
       </div>
+      {infoStatusAberto && <StatusInfoBox />}
 
       {/* Placar das pendências: aberta / resolvida / não resolvida.
           CLICÁVEL: filtra a lista pelo tipo (clicar de novo limpa) — é o caminho
@@ -1115,8 +1243,14 @@ export default function InventarioDetalhePage() {
         <div className="mb-4">
           <p className="text-sm font-bold mb-2" style={{ color: "#2563EB" }}>Excedentes ({excessos.length})</p>
           <div className="flex flex-col gap-1.5">
-            {excessos.map(item => renderRow(item, "excesso"))}
+            {excessosVis.map(item => renderRow(item, "excesso"))}
           </div>
+          {excessos.length > excessosVis.length && (
+            <button onClick={() => mostrarMais("excesso")}
+              style={{ width: "100%", textAlign: "center", padding: "9px", border: "1px dashed #E8DCC8", borderRadius: "0.75rem", color: "#184036", fontSize: "13px", background: "#fff", marginTop: "6px" }}>
+              Mostrar mais {Math.min(PAGINA, excessos.length - excessosVis.length)} de {excessos.length - excessosVis.length} restantes
+            </button>
+          )}
         </div>
       )}
 
@@ -1126,8 +1260,14 @@ export default function InventarioDetalhePage() {
             Faltando ({faltandoL.length})
           </p>
           <div className="flex flex-col gap-1.5">
-            {faltandoL.map(item => renderRow(item, "faltando"))}
+            {faltandoVis.map(item => renderRow(item, "faltando"))}
           </div>
+          {faltandoL.length > faltandoVis.length && (
+            <button onClick={() => mostrarMais("faltando")}
+              style={{ width: "100%", textAlign: "center", padding: "9px", border: "1px dashed #E8DCC8", borderRadius: "0.75rem", color: "#184036", fontSize: "13px", background: "#fff", marginTop: "6px" }}>
+              Mostrar mais {Math.min(PAGINA, faltandoL.length - faltandoVis.length)} de {faltandoL.length - faltandoVis.length} restantes
+            </button>
+          )}
         </div>
       )}
 
@@ -1137,17 +1277,38 @@ export default function InventarioDetalhePage() {
             Sem contagem ({pendentesL.length})
           </p>
           <div className="flex flex-col gap-1.5">
-            {pendentesL.map(item => renderRow(item, "pendente"))}
+            {pendentesVis.map(item => renderRow(item, "pendente"))}
           </div>
+          {pendentesL.length > pendentesVis.length && (
+            <button onClick={() => mostrarMais("pendente")}
+              style={{ width: "100%", textAlign: "center", padding: "9px", border: "1px dashed #E8DCC8", borderRadius: "0.75rem", color: "#184036", fontSize: "13px", background: "#fff", marginTop: "6px" }}>
+              Mostrar mais {Math.min(PAGINA, pendentesL.length - pendentesVis.length)} de {pendentesL.length - pendentesVis.length} restantes
+            </button>
+          )}
         </div>
       )}
 
+      {/* "Conferidos OK" recolhido por padrão — normalmente é a maioria dos
+          itens; abrir só quando precisar conferir algo específico */}
       {okL.length > 0 && (
         <div className="mb-4">
-          <p className="text-sm font-bold mb-2" style={{ color: "#059669" }}>Conferidos OK ({okL.length})</p>
-          <div className="flex flex-col gap-1.5">
-            {okL.map(item => renderRow(item, "ok"))}
-          </div>
+          <button onClick={() => setOkAberto(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-semibold"
+            style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", color: "#065F46" }}>
+            <span>✓ Conferidos OK ({okL.length})</span>
+            <span className="text-xs font-normal" style={{ color: "#6B7280" }}>{okAberto ? "▲ ocultar" : "▼ mostrar"}</span>
+          </button>
+          {okAberto && (
+            <div className="flex flex-col gap-1.5 mt-2">
+              {okVis.map(item => renderRow(item, "ok"))}
+              {okL.length > okVis.length && (
+                <button onClick={() => mostrarMais("ok")}
+                  style={{ width: "100%", textAlign: "center", padding: "9px", border: "1px dashed #E8DCC8", borderRadius: "0.75rem", color: "#184036", fontSize: "13px", background: "#fff" }}>
+                  Mostrar mais {Math.min(PAGINA, okL.length - okVis.length)} de {okL.length - okVis.length} restantes
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
