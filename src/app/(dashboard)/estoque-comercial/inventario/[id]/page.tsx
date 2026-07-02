@@ -371,6 +371,8 @@ export default function InventarioDetalhePage() {
   const [conferidoIds, setConferidoIds] = useState<Set<number>>(new Set());
   const [salvandoIds, setSalvandoIds] = useState<Set<number>>(new Set());
   const [expandidoId, setExpandidoId] = useState<number | null>(null);
+  // Filtro do placar de pendências: null = sem filtro (lista completa)
+  const [filtroPendencia, setFiltroPendencia] = useState<"aberta" | "resolvida" | "nao_resolvida" | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -625,10 +627,25 @@ export default function InventarioDetalhePage() {
   const pendResolvidas = itens.filter(i => i.pendencia_resolvida === true).length;
   const pendNaoResolvidas = itens.filter(i => i.pendencia_resolvida === false).length;
 
+  /**
+   * O QUÊ: filtro combinado — busca por SKU/nome + filtro de pendência do placar.
+   * POR QUÊ: item com pendência que volta a ficar OK desce para o bloco
+   *   "Conferidos OK" no fim da página e a pendência parecia sumir — o placar
+   *   clicável traz esses itens de volta à vista em um clique.
+   * IMPACTO SE ALTERADO: pendência de item corrigido só seria achada rolando
+   *   a lista inteira (em inventários grandes, na prática se perde).
+   */
+  const matchPendencia = (i: ItemInventario): boolean => {
+    if (!filtroPendencia) return true;
+    if (filtroPendencia === "aberta") return !!i.pendencia_obs && i.pendencia_resolvida === null;
+    if (filtroPendencia === "resolvida") return i.pendencia_resolvida === true;
+    return i.pendencia_resolvida === false;
+  };
   const filtro = busca.trim().toLowerCase();
-  const itensFiltrados = filtro
-    ? itens.filter(i => i.sku?.toLowerCase().includes(filtro) || i.nome_produto.toLowerCase().includes(filtro))
-    : itens;
+  const itensFiltrados = itens.filter(i =>
+    matchPendencia(i) &&
+    (!filtro || !!i.sku?.toLowerCase().includes(filtro) || i.nome_produto.toLowerCase().includes(filtro))
+  );
 
   const excessos   = itensFiltrados.filter(i => getStatus(i) === "excesso").sort((a, b) => b.diferenca - a.diferenca);
   const faltandoL  = itensFiltrados.filter(i => getStatus(i) === "faltando").sort((a, b) => a.diferenca - b.diferenca);
@@ -764,27 +781,54 @@ export default function InventarioDetalhePage() {
         <SummaryCard label="Sem contagem" value={semContagem}   color="#6B7280" />
       </div>
 
-      {/* Placar das pendências: aberta / resolvida / não resolvida */}
+      {/* Placar das pendências: aberta / resolvida / não resolvida.
+          CLICÁVEL: filtra a lista pelo tipo (clicar de novo limpa) — é o caminho
+          para achar pendência de item que já voltou a ficar OK. */}
       {(pendAbertas + pendResolvidas + pendNaoResolvidas) > 0 && (
-        <div className="mb-5 flex gap-2 flex-wrap text-xs">
+        <div className="mb-2 flex gap-2 flex-wrap text-xs">
           {pendAbertas > 0 && (
-            <span className="px-2.5 py-1 rounded-full font-semibold"
-              style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FCD34D" }}>
-              {pendAbertas} pendência(s) aguardando resposta
-            </span>
+            <button className="px-2.5 py-1 rounded-full font-semibold"
+              style={{ background: "#FEF3C7", color: "#92400E",
+                border: `1px solid ${filtroPendencia === "aberta" ? "#92400E" : "#FCD34D"}`,
+                boxShadow: filtroPendencia === "aberta" ? "0 0 0 1px #92400E" : "none" }}
+              title={filtroPendencia === "aberta" ? "Limpar filtro" : "Mostrar só itens com pendência aguardando resposta"}
+              onClick={() => setFiltroPendencia(p => p === "aberta" ? null : "aberta")}>
+              {pendAbertas} pendência(s) aguardando resposta{filtroPendencia === "aberta" ? " ✕" : ""}
+            </button>
           )}
           {pendResolvidas > 0 && (
-            <span className="px-2.5 py-1 rounded-full font-semibold"
-              style={{ background: "#D1FAE5", color: "#065F46", border: "1px solid #6EE7B7" }}>
-              {pendResolvidas} resolvida(s)
-            </span>
+            <button className="px-2.5 py-1 rounded-full font-semibold"
+              style={{ background: "#D1FAE5", color: "#065F46",
+                border: `1px solid ${filtroPendencia === "resolvida" ? "#065F46" : "#6EE7B7"}`,
+                boxShadow: filtroPendencia === "resolvida" ? "0 0 0 1px #065F46" : "none" }}
+              title={filtroPendencia === "resolvida" ? "Limpar filtro" : "Mostrar só itens com pendência resolvida"}
+              onClick={() => setFiltroPendencia(p => p === "resolvida" ? null : "resolvida")}>
+              {pendResolvidas} resolvida(s){filtroPendencia === "resolvida" ? " ✕" : ""}
+            </button>
           )}
           {pendNaoResolvidas > 0 && (
-            <span className="px-2.5 py-1 rounded-full font-semibold"
-              style={{ background: "#FEE2E2", color: "#991B1B", border: "1px solid #FCA5A5" }}>
-              {pendNaoResolvidas} não resolvida(s)
-            </span>
+            <button className="px-2.5 py-1 rounded-full font-semibold"
+              style={{ background: "#FEE2E2", color: "#991B1B",
+                border: `1px solid ${filtroPendencia === "nao_resolvida" ? "#991B1B" : "#FCA5A5"}`,
+                boxShadow: filtroPendencia === "nao_resolvida" ? "0 0 0 1px #991B1B" : "none" }}
+              title={filtroPendencia === "nao_resolvida" ? "Limpar filtro" : "Mostrar só itens com pendência não resolvida"}
+              onClick={() => setFiltroPendencia(p => p === "nao_resolvida" ? null : "nao_resolvida")}>
+              {pendNaoResolvidas} não resolvida(s){filtroPendencia === "nao_resolvida" ? " ✕" : ""}
+            </button>
           )}
+        </div>
+      )}
+
+      {/* Faixa do filtro ativo: sempre visível enquanto filtrando (mesmo que o
+          contador do chip zere, o usuário nunca fica preso na lista filtrada) */}
+      {filtroPendencia && (
+        <div className="mb-4 text-xs flex items-center gap-2">
+          <span className="text-gray-500">
+            Mostrando só itens com pendência {filtroPendencia === "aberta" ? "aguardando resposta" : filtroPendencia === "resolvida" ? "resolvida" : "não resolvida"} ({itensFiltrados.length})
+          </span>
+          <button onClick={() => setFiltroPendencia(null)} className="underline hover:opacity-70" style={{ color: "#184036" }}>
+            limpar filtro
+          </button>
         </div>
       )}
 

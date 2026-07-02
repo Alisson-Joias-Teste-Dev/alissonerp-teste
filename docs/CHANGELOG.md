@@ -2,6 +2,17 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(inventario): placar de pendências vira filtro clicável (v2.80.1)
+
+**Pedido do Jonathan:** pendência de item que voltava a ficar OK "sumia" da tela
+(o item desce para o bloco "Conferidos OK" no fim da página, enterrado entre os itens OK).
+
+- Os chips do placar ("aguardando resposta" / "resolvida(s)" / "não resolvida(s)") agora
+  são botões: clicar filtra a lista pelo tipo de pendência (clicar de novo limpa).
+- Faixa "Mostrando só itens com pendência X — limpar filtro" fica visível enquanto o
+  filtro está ativo (usuário nunca fica preso na lista filtrada).
+- Filtro combina com a busca por SKU/nome. Só tela — nada muda no banco/API.
+
 ## feat(inventario): pendências por item + blindagem de segurança do inventário comercial (v2.80.0)
 
 **Pedido do Jonathan:** na tela `/estoque-comercial/inventario/[id]`, explicar cada pendência
