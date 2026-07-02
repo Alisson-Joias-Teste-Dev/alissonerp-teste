@@ -60,6 +60,23 @@ export function podedarBaixaCaixa(role: string | null | undefined): boolean {
   return ROLES_BAIXA_CAIXA.includes(role as typeof ROLES_BAIXA_CAIXA[number]);
 }
 
+// REGRA DE NEGÓCIO: Fonte única de roles do inventário comercial.
+// O QUE: centraliza quem pode VER, CONTAR e GERENCIAR (abrir/concluir/
+//   cancelar/resolver pendência) inventários do estoque comercial.
+// POR QUE: as listas estavam duplicadas em 5 rotas e a visualização era
+//   liberada para QUALQUER usuário logado — quantidades de um estoque de
+//   milhões visíveis para roles sem necessidade (motoboy, ourives...).
+// IMPACTO SE REMOVIDO: rotas /api/estoque-comercial/inventario/* quebram
+//   e o inventário volta a ficar exposto a todos os usuários.
+export const ROLES_INVENTARIO_GERENTES = [
+  "desenvolvedor", "admin", "diretor", "gerente_fabrica", "gerente_loja",
+] as const;
+export const ROLES_INVENTARIO_CONTAR = [
+  ...ROLES_INVENTARIO_GERENTES, "estoquista_fabrica", "estoquista_loja",
+] as const;
+// Ver = mesmos que podem contar (inventário não é dado público interno)
+export const ROLES_INVENTARIO_VER = ROLES_INVENTARIO_CONTAR;
+
 // Verifica se a role está na lista permitida
 export function hasRole(role: string | null | undefined, permitidas: readonly string[]): boolean {
   if (!role) return false;

@@ -3,7 +3,7 @@
 > Documento **mantido à mão** (NÃO é auto-gerado como `docs/schema/`). Toda vez que mexermos no módulo comercial, atualizar aqui: regra nova → acrescenta; regra mudou → corrige.
 > Fonte de schema (colunas/tabelas) = `docs/schema/alissonerp-vendas.md` (auto-gerado). Aqui é o **porquê** e o **como** do negócio.
 
-Última atualização: 2026-06-18.
+Última atualização: 2026-07-01.
 
 ---
 
@@ -88,3 +88,15 @@ Não tem feature/endpoint (o PATCH de item só edita venda em `rascunho` e nem m
 - Numa venda em `rascunho`, item com `pct_desconto` acima do limite da vendedora (`usuarios.mx_desconto_permitido`, default 15%) **pode ser salvo**, mas a venda **não aprova** enquanto `desconto_aprovado_por` estiver vazio (gate em `vendas-aprovar.ts → approveVenda`). Na tela aparece o botão **"Solicitar Aprovação de Desconto"** → cria tarefa (`tipo=desconto`, tag `aprov_desconto_acima`) → admin/diretor aprova → `tarefas/[id]/aprovacao` grava `desconto_aprovado_por`/`_em` e libera a aprovação da venda.
 - **Reeditar/adicionar item acima do limite INVALIDA a aprovação anterior** (o valor mudou, precisa reaprovar). Ao invalidar, as rotas de itens (`POST` e `PATCH /api/vendas/[id]/itens`) zeram **`desconto_aprovado_por`, `desconto_aprovado_em` E `aprovacao_desconto_tarefa_id`**, e cancelam a tarefa vinculada **só se ainda estava pendente** (`aguardando_aprovacao`) — tarefa já aprovada é histórico, não se reescreve.
 - ⚠️ **Por que limpar `aprovacao_desconto_tarefa_id` é obrigatório:** o front só mostra o botão de solicitar quando esse campo é NULL (`precisaSolicitarDesconto`). Se ficar apontando para uma tarefa já `aprovada`, somem TANTO o botão de solicitar QUANTO o banner de "aguardando" → a venda trava em rascunho sem como reaprovar. Bug corrigido em jun/2026 (venda 15628; outras 4 ficaram presas: 15300, 15312, 15399, 15562).
+
+## 7. Inventário do estoque comercial (v2.80.0)
+
+- **Inventário é auditoria, NÃO ajusta estoque.** Concluir congela a contagem; `ajustes_gerados` é sempre 0. Divergências são tratadas manualmente item a item depois de investigar. (O helper `gerarAjustesDivergencias` existe em `src/lib/inventario-helpers.ts` mas está desligado de propósito.)
+- **`diferenca` é coluna GERADA pelo banco** (`quantidade_contada - quantidade_sistema`, migration 140). NUNCA escrever nela via UPDATE — a migration 336 tem blindagem que reconverte se estiver dessincronizada.
+- **Pendências por item (migration 336):** item divergente (faltando/excedente) ou sem contagem recebe `pendencia_obs` (o que aconteceu) via `PATCH /api/estoque-comercial/inventario/[id]/pendencia`. Depois a gerência responde **"foi resolvida?"** (`pendencia_resolvida` true/false + `pendencia_resolucao_obs`). NULL = sem resposta. Quem registrou/respondeu e quando ficam gravados. Resolução é permitida **até depois de concluído** (só `cancelado` trava tudo).
+- **Quem faz o quê** (constantes em `src/lib/roles.ts`): `ROLES_INVENTARIO_VER`/`_CONTAR` = gerência + estoquistas (ver e contar); `ROLES_INVENTARIO_GERENTES` = abrir, concluir, cancelar e **responder pendência** (estoquista descreve, só gerência resolve).
+- **Conferido ≠ contado.** Marcar `conferido` NUNCA grava contagem — item sem contagem exige digitar a quantidade real (era o bug que transformava pendente em OK falso). `/contar` aceita `quantidade_contada` e/ou `conferido` separados.
+- **Concluir "sujo" exige forçar.** Se houver item sem contagem ou pendência sem resposta, `/concluir` devolve 409 (`requer_confirmacao`) — só conclui reenviando `{forcar:true}`, e o forçamento fica no `audit_log`.
+- **Cancelar exige motivo** (mín. 5 chars) e grava `cancelado_por` + `motivo_cancelamento`. Inventário cancelado não pode ser "finalizado" pelo app RFID.
+- **Auditoria total:** abrir, contar, concluir, cancelar, finalizar (app) e pendências gravam em `alissonerp.audit_log` via `logAudit` dentro da transação.
+- **App RFID (Bearer):** `/finalizar` e `/inventario/app` validam role + usuário `ativo` (token de demitido não opera).

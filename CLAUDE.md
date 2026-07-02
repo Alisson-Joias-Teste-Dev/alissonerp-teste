@@ -5,7 +5,7 @@
 > Se algo conflitar com outro doc, este arquivo vence.
 
 **Stack:** Next.js 16.1.6 | React 19 | PostgreSQL 15 (Supabase self-hosted) | TailwindCSS v4 | Zustand
-**Versao:** v2.79.1 | **Branch:** `homolog` (nunca main direto)
+**Versao:** v2.80.0 | **Branch:** `homolog` (nunca main direto)
 **Docs completos:** `docs/arquitetura.md` | **Changelog:** `docs/CHANGELOG.md`
 
 > Projeto **100% desenvolvido por IA**. A disciplina de processo (§0) é o que mantém a qualidade — leia a §0 ANTES de qualquer coisa.
@@ -45,6 +45,9 @@
   Mesmo em "modo build", qualquer modificação precisa de autorização prévia.
 - NÃO gastar tokens à toa — direto ao ponto, sem exploração desnecessária,
   sem retrabalho. Eficiência é regra.
+- PRÉVIAS VISUAIS para o Jonathan: enviar SEMPRE como imagem/GIF animado,
+  que abre direto na conversa sem precisar salvar. HTML interativo só como
+  complemento opcional (o app do Claude pode baixar em vez de abrir).
 - COMENTAR A REGRA DE NEGÓCIO (em PT) em todo código novo ou alterado:
     • O QUÊ o trecho faz
     • O PORQUÊ (a regra de negócio por trás)
@@ -228,6 +231,9 @@ audit: logAudit(tx, ...) dentro da mesma transacao — nunca falha a operacao pr
 catches silenciosos: usar useErrorStore.getState().push() em vez de .catch(() => {})
 defineRoute: novo padrao de API route — ver src/lib/api-handler.ts
 fila_sync: erros Tiny vao para fila_sync_externo, nao bloqueiam a operacao principal
+itens_inventario_comercial.diferenca: coluna GERADA pelo banco — NUNCA escrever nela via UPDATE (mig 336 blinda)
+inventario comercial: "conferido" != "contado" — marcar conferido NUNCA grava quantidade_contada (bug v2.79 gravava qtd do sistema = contagem falsa)
+inventario comercial: NAO ajusta estoque ao concluir (auditoria pura); roles em ROLES_INVENTARIO_* de src/lib/roles.ts; regras em docs/regras-negocio/comercial.md §7
 ```
 
 ---

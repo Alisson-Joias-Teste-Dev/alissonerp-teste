@@ -3,16 +3,12 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { gerarAjustesDivergencias } from "@/lib/inventario-helpers";
 import { internalError } from "@/lib/api-error";
+import { logAudit } from "@/lib/audit";
+import { ROLES_INVENTARIO_CONTAR, hasRole } from "@/lib/roles";
 import { zodError, IdSchema } from "@/lib/schemas/common";
 
 interface Params { params: Promise<{ id: string }> }
-
-const ROLES_CONTAR = [
-  "desenvolvedor", "admin", "gerente_fabrica", "gerente_loja",
-  "estoquista_fabrica", "estoquista_loja",
-];
 
 const FinalizarSchema = z.object({
   leituras: z.array(z.string().max(200)).max(10000).optional(),
@@ -40,11 +36,16 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
+  // BLINDAGEM: além da role, bloqueia usuário desativado (app RFID usa
+  // Bearer token — sessão antiga de funcionário demitido não pode operar)
   const [usuario] = await sql`
-    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
+    SELECT role, ativo FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
   `;
-  if (!usuario || !ROLES_CONTAR.includes(usuario.role)) {
+  if (!usuario || !hasRole(usuario.role, ROLES_INVENTARIO_CONTAR)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+  if (usuario.ativo === false) {
+    return NextResponse.json({ error: "Usuário desativado" }, { status: 401 });
   }
 
   const { id } = await params;
@@ -59,6 +60,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!inv) return NextResponse.json({ error: "Inventário não encontrado" }, { status: 404 });
   if (inv.status === "concluido") {
     return NextResponse.json({ error: "Inventário já concluído" }, { status: 409 });
+  }
+  // BLINDAGEM: inventário cancelado NÃO pode ser "ressuscitado" pelo app
+  // RFID como concluído — cancelamento é decisão gerencial final.
+  if (inv.status === "cancelado") {
+    return NextResponse.json({ error: "Inventário cancelado" }, { status: 409 });
   }
 
   const raw = await req.json().catch(() => ({}));
@@ -103,6 +109,22 @@ export async function POST(req: NextRequest, { params }: Params) {
       `;
 
       // Ajustes de estoque NAO sao gerados automaticamente — inventario e apenas auditoria
+
+      // Trilha de auditoria: quem finalizou pelo app, quantos itens e leituras
+      await logAudit(tx, {
+        tabela: "inventarios_comercial",
+        operacao: "UPDATE",
+        registro_id: invId,
+        usuario_id: user.id,
+        dados_antes: { status: inv.status },
+        dados_depois: {
+          status: "concluido",
+          origem: "app_rfid_finalizar",
+          contagens: body.contagens.length,
+          leituras: body.leituras?.length ?? 0,
+          leitor_id: leitorId,
+        },
+      });
     });
 
     return NextResponse.json({
