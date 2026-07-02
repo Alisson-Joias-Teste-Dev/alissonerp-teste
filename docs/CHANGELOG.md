@@ -2,6 +2,20 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(inventario): "Chips fora do inventário" não respeitava filtro nenhum (v2.82.1)
+
+**Bug reportado pelo Jonathan:** a seção "Chips fora do inventário" (etiquetas
+lidas pelo app RFID de produto que não está na lista do inventário) ficava
+fixa na tela não importa qual cartão/categoria fosse clicado — porque essa
+lista nunca tinha sido ligada a filtro nenhum, era renderizada sempre.
+
+- Novo cartão **"Fora do invent."** (roxo), com filtro próprio — clicável
+  como os outros, some quando Faltando/OK/Sem contagem estão ativos.
+- Passa a respeitar categoria e busca (API agora expõe `categoria_produto`
+  também nesses itens).
+- `excessoCount` do cartão "Excesso" não soma mais esses itens (evita
+  contagem duplicada agora que existe cartão próprio).
+
 ## feat(inventario): filtros por categoria/status, paginação e Detetive em lote (v2.82.0)
 
 **Pedido do Jonathan:** filtro por categoria, paginação de verdade (a tela só
