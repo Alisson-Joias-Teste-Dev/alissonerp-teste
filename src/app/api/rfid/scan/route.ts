@@ -3,6 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { zodError } from "@/lib/schemas/common";
+import { ROLES_ESTOQUE_MOVIMENTAR, hasRole } from "@/lib/roles";
 
 const RfidScanSchema = z.object({
   codigo: z.string().min(1, "obrigatório"),
@@ -131,6 +132,13 @@ export async function POST(req: NextRequest) {
 
   // ─── Ação: entrada no estoque ─────────────────────────────────
   if (action === "entrada_estoque") {
+    // BLINDAGEM (v2.81.1): entrada de estoque é para gerência/estoquista.
+    // Antes QUALQUER usuário logado gerava entrada (+1 por chamada, repetível)
+    // — furo grave num estoque de milhões. Se remover, a brecha volta.
+    const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
+    if (!hasRole(usuario?.role, ROLES_ESTOQUE_MOVIMENTAR)) {
+      return NextResponse.json({ error: "Sem permissão para dar entrada no estoque" }, { status: 403 });
+    }
     if (!r.produto_id) {
       return NextResponse.json({ error: "RFID sem produto vinculado" }, { status: 400 });
     }
