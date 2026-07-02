@@ -81,7 +81,20 @@ export async function POST(req: NextRequest) {
       RETURNING id, created_at
     `;
 
-    // Snapshot: todos os produtos com saldo > 0 no local, filtrados pela categoria se informada
+    /**
+     * Snapshot: todos os produtos com saldo > 0 no local, filtrados pela categoria se informada.
+     *
+     * O QUÊ: INVENTÁRIO É DE PEÇA PRONTA — pedra solta e personalizada sob
+     *   encomenda ficam FORA da foto inicial.
+     * POR QUÊ: pedra é matéria-prima contada em quilates (não em unidades de
+     *   prateleira) e personalizada (SKU PZ) só existe depois de encomendada —
+     *   ambas inflavam o "Faltando" com itens que ninguém vai contar.
+     * CRITÉRIO pedra = espelho SQL de ehPedraSolta() (src/lib/compras-pedras.ts):
+     *   categoria 'Pedras%', OU produto_pedra_extras, OU nome COMEÇA com nome de
+     *   pedra. NUNCA usar tem_pedra_preciosa (joia COM pedra) nem includes() no nome.
+     * IMPACTO SE ALTERADO: pedras/personalizadas voltam a poluir o inventário
+     *   e a contagem de faltas fica mentirosa.
+     */
     await tx`
       INSERT INTO alissonerp.itens_inventario_comercial (inventario_id, produto_id, quantidade_sistema)
       SELECT
@@ -93,6 +106,17 @@ export async function POST(req: NextRequest) {
       WHERE v.local_estoque_id = ${local_estoque_id}
         AND v.saldo_fisico > 0
         ${cat ? tx`AND (p.categoria = ${cat} OR p.categoria LIKE ${cat + ' -> %'})` : tx``}
+        AND NOT (
+          p.categoria ILIKE 'Pedras%'
+          OR EXISTS (SELECT 1 FROM alissonerp.produto_pedra_extras ppe WHERE ppe.produto_id = v.produto_id)
+          OR p.nome ILIKE 'diamante%' OR p.nome ILIKE 'zirc%' OR p.nome ILIKE 'rubi%'
+          OR p.nome ILIKE 'esmeralda%' OR p.nome ILIKE 'safira%' OR p.nome ILIKE 'pedra%'
+          OR p.nome ILIKE 'moissanita%' OR p.nome ILIKE 'mossainite%'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM alissonerp.produto_personalizacao pp
+          WHERE pp.produto_id = v.produto_id AND pp.ativo = true
+        )
     `;
 
     await logAudit(tx, {
