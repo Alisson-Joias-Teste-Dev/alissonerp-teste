@@ -6,6 +6,7 @@ import {
   RefreshCw, CheckCircle, XCircle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Inventario {
   id: number;
@@ -43,6 +44,9 @@ const STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> 
 
 export default function InventarioPage() {
   const router = useRouter();
+  const { role } = useAuth();
+  // Operador de inventário: abrir vira PEDIDO de aprovação (textos abaixo)
+  const isOperador = role === "operador_inventario";
   const [items,       setItems]      = useState<Inventario[]>([]);
   const [locais,      setLocais]     = useState<LocalEstoque[]>([]);
   const [categorias,  setCategorias] = useState<Categoria[]>([]);
@@ -142,7 +146,7 @@ export default function InventarioPage() {
             style={{ background: "#184036", color: "#F3EADA" }}
           >
             <Plus size={15} />
-            Novo inventario
+            {isOperador ? "Solicitar inventário" : "Novo inventario"}
           </button>
         </div>
       </div>
@@ -224,7 +228,7 @@ export default function InventarioPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-bold text-lg" style={{ color: "#184036" }}>Novo Inventario</h2>
+              <h2 className="font-bold text-lg" style={{ color: "#184036" }}>{isOperador ? "Solicitar inventário" : "Novo Inventario"}</h2>
               <button onClick={() => setNovoOpen(false)}><X size={18} className="text-gray-400" /></button>
             </div>
             <div className="mb-3">
@@ -274,7 +278,7 @@ export default function InventarioPage() {
               disabled={criando}
             >
               {criando ? <Loader2 size={14} className="animate-spin" /> : <ClipboardList size={14} />}
-              Abrir Inventario
+              {isOperador ? "Enviar pedido de abertura" : "Abrir Inventario"}
             </button>
           </div>
         </div>
