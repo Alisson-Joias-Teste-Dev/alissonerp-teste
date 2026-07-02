@@ -3,7 +3,6 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { zodError } from "@/lib/schemas/common";
-import { ROLES_BAIXA_MANUAL, hasRole } from "@/lib/roles";
 
 const ROLES_PERMITIDOS = [
   "desenvolvedor", "admin", "gerente_fabrica", "gerente_loja",
@@ -37,11 +36,16 @@ export async function POST(req: NextRequest) {
   const body = parsed.data;
   const { produto_id, tipo, quantidade, motivo, observacao } = body;
 
-  // BLINDAGEM (v2.81.2): BAIXA manual (saída) é caso excepcional — SOMENTE
-  // admin/desenvolvedor. Estoquista/gerente registram entrada, mas a baixa
-  // normal acontece pelos fluxos (entrega de venda etc), nunca na mão.
-  if (tipo === "saida" && !hasRole(usuario.role, ROLES_BAIXA_MANUAL)) {
-    return NextResponse.json({ error: "Baixa manual de estoque é exclusiva do administrador" }, { status: 403 });
+  // BLINDAGEM (v2.81.3): BAIXA MANUAL DE ESTOQUE NÃO EXISTE — para NINGUÉM,
+  // nem admin/desenvolvedor (regra do Jonathan). Saída de estoque só pelos
+  // fluxos rastreáveis: entrega de venda (reserva→saída) e desfecho blindado
+  // da pendência de inventário (motivo + validação + auditoria).
+  // IMPACTO SE REMOVIDO: reabre porta para sumir peça com uma chamada de API.
+  if (tipo === "saida") {
+    return NextResponse.json(
+      { error: "Baixa manual de estoque é bloqueada para todos — use a entrega da venda ou o desfecho de pendência do inventário" },
+      { status: 403 },
+    );
   }
 
   // Detectar se coluna local_estoque_id existe na tabela
@@ -53,39 +57,8 @@ export async function POST(req: NextRequest) {
     LIMIT 1
   `;
 
-  // Verificar saldo ao sair
-  if (tipo === "saida") {
-    if (hasLocalCol) {
-      const local_estoque_id = body.local_estoque_id ?? 2;
-      const [saldo] = await sql`
-        SELECT COALESCE(SUM(
-          CASE WHEN tipo = 'entrada' THEN quantidade ELSE -quantidade END
-        ), 0) AS disponivel
-        FROM alissonerp.movimentacoes_estoque_comercial
-        WHERE produto_id = ${produto_id}
-          AND local_estoque_id = ${local_estoque_id}
-          AND status = 'efetivado'
-      `;
-      if (Number(saldo?.disponivel ?? 0) < quantidade) {
-        return NextResponse.json(
-          { error: `Saldo disponível insuficiente. Disponível: ${saldo?.disponivel ?? 0}` },
-          { status: 409 }
-        );
-      }
-    } else {
-      const [saldo] = await sql`
-        SELECT COALESCE(saldo, 0) AS saldo
-        FROM alissonerp.vw_saldo_estoque_comercial
-        WHERE produto_id = ${produto_id}
-      `;
-      if (!saldo || Number(saldo.saldo) < quantidade) {
-        return NextResponse.json(
-          { error: `Saldo insuficiente. Disponível: ${saldo?.saldo ?? 0}` },
-          { status: 409 }
-        );
-      }
-    }
-  }
+  // (Checagem de saldo de saída removida: saída manual é bloqueada acima
+  //  para todos — este endpoint só registra ENTRADA manual. v2.81.3)
 
   // INSERT com ou sem colunas v2
   if (hasLocalCol) {

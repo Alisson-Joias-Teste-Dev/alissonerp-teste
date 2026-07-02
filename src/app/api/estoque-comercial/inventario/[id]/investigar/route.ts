@@ -89,12 +89,43 @@ export async function GET(req: NextRequest, { params }: Params) {
     item.quantidade_contada !== null && Number(item.diferenca) < 0
       ? -Number(item.diferenca)
       : null;
+  // Sobra REAL: contado e deu MAIS que o sistema (candidata a conciliação
+  // com devolução/vale-troca cuja entrada nunca aconteceu)
+  const sobra =
+    item.quantidade_contada !== null && Number(item.diferenca) > 0
+      ? Number(item.diferenca)
+      : null;
+
+  // 4) Devoluções com retorno aprovado do produto cuja ENTRADA nunca ocorreu
+  //    (explica sobra: cliente devolveu, vale-troca saiu, mas a peça não
+  //    entrou no saldo). Comparação pelo vínculo oficial devolucao_id.
+  const devolucoesRaw = sobra !== null ? await sql`
+    SELECT d.id, d.numero, d.status, d.created_at,
+           COALESCE(SUM(di.quantidade), 0)::int AS qtd_aprovada,
+           COALESCE((
+             SELECT SUM(m.quantidade)::int
+             FROM alissonerp.movimentacoes_estoque_comercial m
+             WHERE m.devolucao_id = d.id AND m.produto_id = ${produtoId}
+               AND m.tipo = 'entrada' AND m.status = 'efetivado'
+           ), 0) AS qtd_entrada
+    FROM alissonerp.devolucoes_venda d
+    JOIN alissonerp.devolucoes_itens di ON di.devolucao_id = d.id
+    WHERE di.produto_id = ${produtoId}
+      AND di.condicao = 'aprovado_retorno'
+      AND d.status IN ('aprovado', 'concluido')
+    GROUP BY d.id, d.numero, d.status, d.created_at
+    ORDER BY d.created_at DESC
+  ` : [];
+  const devolucoes = devolucoesRaw
+    .map((d: any) => ({ ...d, qtd_pendente: Number(d.qtd_aprovada) - Number(d.qtd_entrada) }))
+    .filter((d: any) => d.qtd_pendente > 0);
 
   const somaReservas = reservas.reduce((s: number, r: any) => s + Number(r.quantidade), 0);
   const somaTransf = transferencias.reduce((s: number, t: any) => s + Number(t.quantidade), 0);
   const saidasPosAbertura = movimentacoes
     .filter((m: any) => m.tipo === "saida")
     .reduce((s: number, m: any) => s + Number(m.quantidade), 0);
+  const somaDevolucoesPendentes = devolucoes.reduce((s: number, d: any) => s + Number(d.qtd_pendente), 0);
 
   /**
    * CONCLUSÃO — só afirma quando a conta bate EXATAMENTE com uma única
@@ -125,14 +156,25 @@ export async function GET(req: NextRequest, { params }: Params) {
         resumo: `Houve saída de ${saidasPosAbertura} un. DEPOIS da abertura do inventário — a "falta" pode ser só a foto inicial desatualizada.`,
       };
     }
+  } else if (sobra !== null && somaDevolucoesPendentes === sobra && devolucoes.length > 0) {
+    const numeros = devolucoes.map((d: any) => d.numero).join(", ");
+    conclusao = {
+      tipo: "devolucao_sem_entrada",
+      confianca: devolucoes.length === 1 ? "alta" : "media",
+      resumo: devolucoes.length === 1
+        ? `Devolução ${numeros} tem ${sobra} un. com retorno aprovado que nunca entraram no saldo — bate com a sobra.`
+        : `${devolucoes.length} devoluções (${numeros}) somam exatamente a sobra de ${sobra} un. sem entrada no saldo.`,
+    };
   }
 
   return NextResponse.json({
     produto_id: produtoId,
     falta,
+    sobra,
     conclusao,
     reservas,
     transferencias,
     movimentacoes,
+    devolucoes,
   });
 }

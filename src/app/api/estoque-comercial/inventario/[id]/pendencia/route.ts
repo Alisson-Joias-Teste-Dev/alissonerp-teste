@@ -9,36 +9,43 @@ import { ROLES_BAIXA_MANUAL, ROLES_INVENTARIO_CONTAR, ROLES_INVENTARIO_GERENTES,
  * PATCH /api/estoque-comercial/inventario/[id]/pendencia
  *
  * O QUÊ: registra/edita a DESCRIÇÃO da pendência de um item divergente do
- *   inventário e o DESFECHO BLINDADO dela — fechar como "resolvida" exige
- *   dizer O QUE aconteceu com a peça, e o sistema aplica o efeito certo:
- *     venda_sem_baixa      → exige a venda; valida de verdade (existe? tem o
- *                            produto? não é rascunho/cancelada) e gera a SAÍDA
- *                            que faltou, efetivando a reserva ativa da venda.
- *     perda                → SAÍDA por perda (dupla confirmação; nunca come
- *                            saldo reservado de outra venda).
+ *   inventário e o DESFECHO dela. Movimento de estoque SÓ existe por
+ *   CONCILIAÇÃO — a divergência precisa casar com um documento real que o
+ *   sistema confere:
+ *     venda_sem_baixa      → CONCILIAÇÃO falta ↔ venda: exige a venda; valida
+ *                            de verdade (existe? tem o produto? não é
+ *                            rascunho/cancelada) e gera a SAÍDA que faltou,
+ *                            efetivando a reserva ativa da venda.
+ *     excedente_confirmado → CONCILIAÇÃO sobra ↔ devolução/vale-troca: exige a
+ *                            devolução; valida (existe? tem o produto com
+ *                            retorno aprovado? a entrada ainda NÃO aconteceu?)
+ *                            e gera a ENTRADA que faltou, amarrada à devolução.
+ *     perda                → SÓ REGISTRO, SEM BAIXA (não há documento que
+ *                            concilie — o saldo fica divergente até resolução).
  *     localizada           → a peça reapareceu: zera a falta assumindo a
  *                            quantidade do sistema como contada (decisão
  *                            gerencial explícita, auditada). Sem movimento.
- *     excedente_confirmado → contou MAIS que o sistema: gera ENTRADA.
  *     outro                → só registro (observação obrigatória), sem efeito.
- * POR QUÊ: estoque de milhões — "resolvida = Sim" solto não fecha o ciclo:
- *   a peça sumida precisa virar venda paga, perda assumida ou volta ao
- *   estoque, sempre com movimento rastreável e nº de venda quando houver.
- * IMPACTO SE ALTERADO: desfechos voltam a ser texto solto e a baixa de
- *   estoque volta a ser manual (ou esquecida) — o saldo mente.
+ * POR QUÊ: regra do Jonathan — baixa/entrada manual NÃO existe para ninguém.
+ *   Estoque só se move por documento conferido. A conciliação é mecanismo
+ *   TEMPORÁRIO até o sistema se organizar; depois divergência não deve mais
+ *   acontecer.
+ * IMPACTO SE ALTERADO: reabre baixa manual "no motivo" — peça some do saldo
+ *   sem documento e o estoque de milhões volta a mentir.
  *
  * Regras:
  *   - Descrever pendência: quem pode contar (estoquistas + gerência).
- *   - Responder desfecho (Sim/Não): SOMENTE gerência (decisão gerencial).
- *   - resolvida=true EXIGE desfecho_tipo (blindagem principal).
- *   - Quantidade do movimento vem SEMPRE do servidor (|diferenca| do item)
- *     — nunca do cliente.
+ *   - Responder desfecho (Sim/Não): gerência; CONCILIAÇÕES (com movimento):
+ *     SOMENTE admin/desenvolvedor (ROLES_BAIXA_MANUAL) + dupla confirmação.
+ *   - Quantidade do movimento vem SEMPRE do servidor (|diferenca| do item).
  *   - Movimento + resposta gravam na MESMA transação (ou tudo, ou nada).
  *   - Desfecho que gerou movimento NÃO pode ser desfeito por aqui (409) —
  *     estorno é operação de estoque, não um clique de "voltar".
  *   - Inventário cancelado: nada pode ser alterado.
  */
 const DESFECHOS = ["venda_sem_baixa", "perda", "localizada", "excedente_confirmado", "outro"] as const;
+// Desfechos que geram movimento — exigem conciliação, admin e dupla confirmação
+const DESFECHOS_COM_MOVIMENTO = ["venda_sem_baixa", "excedente_confirmado"];
 
 const PendenciaSchema = z.object({
   item_id: z.coerce.number().int().positive(),
@@ -46,10 +53,11 @@ const PendenciaSchema = z.object({
   // true = resolvida | false = não resolvida | null = limpar resposta
   resolvida: z.boolean().nullable().optional(),
   resolucao_obs: z.string().trim().max(2000).optional(),
-  // Desfecho blindado (obrigatório quando resolvida = true)
+  // Desfecho (obrigatório quando resolvida = true)
   desfecho_tipo: z.enum(DESFECHOS).optional(),
   numero_venda: z.string().trim().max(30).optional(),
-  // Dupla confirmação exigida para perda (baixa definitiva)
+  numero_devolucao: z.string().trim().max(30).optional(),
+  // Dupla confirmação exigida para conciliações (geram movimento)
   confirmar_baixa: z.boolean().optional(),
 }).refine(
   (d) => d.pendencia_obs !== undefined || d.resolvida !== undefined,
@@ -121,6 +129,7 @@ export const PATCH = defineRoute({
 
     // BLINDAGEM: desfecho que já gerou movimentação não se desfaz num clique.
     // Estorno de estoque é movimento REVERSO (nunca deletar) — fora deste PATCH.
+    // ('perda' fica na lista por legado: até v2.81.2 ela gerava movimento.)
     if (
       body.resolvida !== undefined && body.resolvida !== true &&
       item.pendencia_resolvida === true && item.pendencia_desfecho_tipo &&
@@ -133,9 +142,10 @@ export const PATCH = defineRoute({
       );
     }
 
-    // ---------- Validações do desfecho blindado (resolvida = true) ----------
+    // ---------- Validações do desfecho (resolvida = true) ----------
     const diff = item.quantidade_contada === null ? null : Number(item.diferenca);
     let vendaVinculada: { id: number; numero_venda: string } | null = null;
+    let devolucaoVinculada: { id: number; numero: string; venda_id: number | null } | null = null;
 
     if (body.resolvida === true) {
       if (!body.desfecho_tipo) {
@@ -145,17 +155,22 @@ export const PATCH = defineRoute({
         );
       }
 
-      // BLINDAGEM (v2.81.2): desfecho que MEXE NO ESTOQUE (saída/entrada) é
-      // baixa manual — SOMENTE admin/desenvolvedor, em casos excepcionais.
-      // Gerência segue podendo responder 'localizada'/'outro' (sem movimento).
-      if (
-        ["venda_sem_baixa", "perda", "excedente_confirmado"].includes(body.desfecho_tipo) &&
-        !hasRole(user.role, ROLES_BAIXA_MANUAL)
-      ) {
-        return NextResponse.json(
-          { error: "Desfecho com baixa/entrada no estoque é exclusivo do administrador" },
-          { status: 403 },
-        );
+      // BLINDAGEM (v2.81.3): CONCILIAÇÃO (movimento de estoque) é exclusiva
+      // de admin/desenvolvedor e exige dupla confirmação. Mecanismo
+      // temporário até o sistema se organizar.
+      if (DESFECHOS_COM_MOVIMENTO.includes(body.desfecho_tipo)) {
+        if (!hasRole(user.role, ROLES_BAIXA_MANUAL)) {
+          return NextResponse.json(
+            { error: "Conciliação com movimento de estoque é exclusiva do administrador" },
+            { status: 403 },
+          );
+        }
+        if (body.confirmar_baixa !== true) {
+          return NextResponse.json(
+            { error: "Conciliação gera movimento de estoque — confirme a operação (confirmar_baixa)" },
+            { status: 422 },
+          );
+        }
       }
 
       // Desfechos de falta exigem item CONTADO e FALTANDO (qtd vem do servidor)
@@ -169,11 +184,11 @@ export const PATCH = defineRoute({
       }
       if (body.desfecho_tipo === "excedente_confirmado" && (diff === null || diff <= 0)) {
         return NextResponse.json(
-          { error: "Excedente confirmado é para item contado com SOBRA" }, { status: 422 },
+          { error: "Conciliação com devolução é para item contado com SOBRA" }, { status: 422 },
         );
       }
 
-      // Motivo do desfecho é obrigatório onde não há venda que explique
+      // Motivo do desfecho é obrigatório onde não há documento que explique
       if (
         ["perda", "localizada", "outro"].includes(body.desfecho_tipo) &&
         (body.resolucao_obs ?? "").trim().length < 3
@@ -183,17 +198,10 @@ export const PATCH = defineRoute({
         );
       }
 
-      if (body.desfecho_tipo === "perda" && body.confirmar_baixa !== true) {
-        return NextResponse.json(
-          { error: "Perda é baixa definitiva — confirme a baixa (confirmar_baixa)" },
-          { status: 422 },
-        );
-      }
-
       if (body.desfecho_tipo === "venda_sem_baixa") {
         if (!body.numero_venda) {
           return NextResponse.json(
-            { error: "Informe o número da venda que explica a falta" }, { status: 422 },
+            { error: "Conciliação exige o número da venda que explica a falta" }, { status: 422 },
           );
         }
         // Venda validada DE VERDADE: existe, não é rascunho/cancelada e tem o produto
@@ -222,35 +230,77 @@ export const PATCH = defineRoute({
         `;
         if (!temProduto) {
           return NextResponse.json(
-            { error: `A venda ${venda.numero_venda} não contém este produto — desfecho bloqueado` },
+            { error: `A venda ${venda.numero_venda} não contém este produto — conciliação bloqueada` },
             { status: 422 },
           );
         }
         vendaVinculada = { id: venda.id, numero_venda: venda.numero_venda };
-      }
 
-      // Saídas nunca podem comer saldo reservado de OUTRA venda nem negativar
-      if (["venda_sem_baixa", "perda"].includes(body.desfecho_tipo)) {
+        // Saída nunca pode negativar o saldo físico
         const qtd = -Number(diff);
         const [saldo] = await sql`
-          SELECT saldo_fisico, reservado FROM alissonerp.vw_saldo_estoque_comercial_v2
+          SELECT saldo_fisico FROM alissonerp.vw_saldo_estoque_comercial_v2
           WHERE produto_id = ${item.produto_id} AND local_estoque_id = ${inv.local_estoque_id}
         `;
         const fisico = Number(saldo?.saldo_fisico ?? 0);
-        const reservado = Number(saldo?.reservado ?? 0);
         if (fisico < qtd) {
           return NextResponse.json(
-            { error: `Saldo físico insuficiente (${fisico}) para baixar ${qtd} un.` }, { status: 422 },
+            { error: `Saldo físico insuficiente (${fisico}) para conciliar ${qtd} un.` }, { status: 422 },
           );
         }
-        // Na venda_sem_baixa a própria reserva da venda será efetivada junto;
-        // na perda, o que sobra após a baixa precisa cobrir as reservas ativas.
-        if (body.desfecho_tipo === "perda" && fisico - qtd < reservado) {
+      }
+
+      if (body.desfecho_tipo === "excedente_confirmado") {
+        if (!body.numero_devolucao) {
           return NextResponse.json(
-            { error: `Baixa de ${qtd} un. deixaria o saldo abaixo do reservado (${reservado}) — investigue as vendas com reserva ativa antes de dar perda` },
+            { error: "Conciliação exige o número da devolução/vale-troca que explica a sobra" },
             { status: 422 },
           );
         }
+        // Devolução validada DE VERDADE: existe, aprovada/concluída, tem o
+        // produto com retorno aprovado e a entrada ainda NÃO aconteceu
+        const devolucoes = await sql`
+          SELECT id, numero, status, venda_id FROM alissonerp.devolucoes_venda
+          WHERE numero = ${body.numero_devolucao}
+          LIMIT 2
+        `;
+        if (devolucoes.length === 0) {
+          return NextResponse.json({ error: `Devolução ${body.numero_devolucao} não encontrada` }, { status: 422 });
+        }
+        if (devolucoes.length > 1) {
+          return NextResponse.json({ error: `Mais de uma devolução com número ${body.numero_devolucao} — verifique` }, { status: 422 });
+        }
+        const dev = devolucoes[0];
+        if (!["aprovado", "concluido"].includes(String(dev.status))) {
+          return NextResponse.json(
+            { error: `Devolução ${dev.numero} está '${dev.status}' — não explica entrada de estoque` },
+            { status: 422 },
+          );
+        }
+        const [retorno] = await sql`
+          SELECT COALESCE(SUM(di.quantidade), 0)::int AS qtd_aprovada
+          FROM alissonerp.devolucoes_itens di
+          WHERE di.devolucao_id = ${dev.id}
+            AND di.produto_id = ${item.produto_id}
+            AND di.condicao = 'aprovado_retorno'
+        `;
+        const [entradas] = await sql`
+          SELECT COALESCE(SUM(m.quantidade), 0)::int AS qtd_entrada
+          FROM alissonerp.movimentacoes_estoque_comercial m
+          WHERE m.devolucao_id = ${dev.id}
+            AND m.produto_id = ${item.produto_id}
+            AND m.tipo = 'entrada'
+            AND m.status = 'efetivado'
+        `;
+        const pendenteEntrada = Number(retorno.qtd_aprovada) - Number(entradas.qtd_entrada);
+        const sobra = Number(diff);
+        if (pendenteEntrada < sobra) {
+          return NextResponse.json(
+            { error: `Devolução ${dev.numero} não cobre a sobra: retorno aprovado sem entrada = ${Math.max(pendenteEntrada, 0)} un., sobra = ${sobra} un. — conciliação bloqueada` },
+            { status: 422 },
+          );
+        }
+        devolucaoVinculada = { id: dev.id, numero: dev.numero, venda_id: dev.venda_id ?? null };
       }
     }
 
@@ -275,7 +325,7 @@ export const PATCH = defineRoute({
       let movimentoId: number | null = null;
 
       if (body.resolvida === true && body.desfecho_tipo) {
-        // ---------- Efeito no estoque, por tipo de desfecho ----------
+        // ---------- Efeito no estoque: SÓ conciliação ----------
         if (body.desfecho_tipo === "venda_sem_baixa" && vendaVinculada) {
           const qtd = -Number(diff);
           const [mov] = await tx`
@@ -286,7 +336,7 @@ export const PATCH = defineRoute({
               (${item.produto_id}, 'saida', ${qtd}, 'pendencia_venda_sem_baixa',
                ${inv.local_estoque_id}, 'efetivado',
                ${vendaVinculada.id}, 'vendas_erp',
-               ${`Pendência inventário #${invId}: venda #${vendaVinculada.numero_venda} sem baixa`},
+               ${`Conciliação pendência inventário #${invId}: venda #${vendaVinculada.numero_venda} sem baixa`},
                ${user.id})
             RETURNING id
           `;
@@ -301,32 +351,17 @@ export const PATCH = defineRoute({
               AND local_estoque_id = ${inv.local_estoque_id}
               AND status = 'ativo'
           `;
-        } else if (body.desfecho_tipo === "perda") {
-          const qtd = -Number(diff);
-          const [mov] = await tx`
-            INSERT INTO alissonerp.movimentacoes_estoque_comercial
-              (produto_id, tipo, quantidade, motivo, local_estoque_id, status,
-               referencia_id, referencia_tipo, observacao, created_by)
-            VALUES
-              (${item.produto_id}, 'saida', ${qtd}, 'pendencia_perda',
-               ${inv.local_estoque_id}, 'efetivado',
-               ${invId}, 'inventarios_comercial',
-               ${`Pendência inventário #${invId}: perda assumida pela gerência — ${(body.resolucao_obs ?? "").slice(0, 200)}`},
-               ${user.id})
-            RETURNING id
-          `;
-          movimentoId = mov.id;
-        } else if (body.desfecho_tipo === "excedente_confirmado") {
+        } else if (body.desfecho_tipo === "excedente_confirmado" && devolucaoVinculada) {
           const qtd = Number(diff);
           const [mov] = await tx`
             INSERT INTO alissonerp.movimentacoes_estoque_comercial
               (produto_id, tipo, quantidade, motivo, local_estoque_id, status,
-               referencia_id, referencia_tipo, observacao, created_by)
+               referencia_id, referencia_tipo, devolucao_id, observacao, created_by)
             VALUES
-              (${item.produto_id}, 'entrada', ${qtd}, 'pendencia_excedente',
+              (${item.produto_id}, 'entrada', ${qtd}, 'pendencia_devolucao_sem_entrada',
                ${inv.local_estoque_id}, 'efetivado',
-               ${invId}, 'inventarios_comercial',
-               ${`Pendência inventário #${invId}: excedente confirmado — ${(body.resolucao_obs ?? "").slice(0, 200)}`},
+               ${devolucaoVinculada.venda_id}, 'vendas_erp', ${devolucaoVinculada.id},
+               ${`Conciliação pendência inventário #${invId}: devolução ${devolucaoVinculada.numero} sem entrada`},
                ${user.id})
             RETURNING id
           `;
@@ -342,7 +377,8 @@ export const PATCH = defineRoute({
             WHERE id = ${item.id}
           `;
         }
-        // 'outro' = só registro, sem efeito no estoque
+        // 'perda' e 'outro' = SÓ REGISTRO, sem movimento (não há documento
+        // que concilie — baixa manual não existe para ninguém, v2.81.3)
 
         await tx`
           UPDATE alissonerp.itens_inventario_comercial
@@ -351,7 +387,7 @@ export const PATCH = defineRoute({
               pendencia_resolvida_por    = ${user.id}::uuid,
               pendencia_resolvida_em     = now(),
               pendencia_desfecho_tipo    = ${body.desfecho_tipo},
-              pendencia_desfecho_venda_id = ${vendaVinculada?.id ?? null},
+              pendencia_desfecho_venda_id = ${vendaVinculada?.id ?? devolucaoVinculada?.venda_id ?? null},
               movimento_ajuste_id        = COALESCE(${movimentoId}, movimento_ajuste_id)
           WHERE id = ${item.id}
         `;
@@ -374,12 +410,14 @@ export const PATCH = defineRoute({
                ii.pendencia_obs, ii.pendencia_registrada_em,
                ii.pendencia_resolvida, ii.pendencia_resolucao_obs, ii.pendencia_resolvida_em,
                ii.pendencia_desfecho_tipo, ii.pendencia_desfecho_venda_id,
+               vd.numero_venda AS pendencia_desfecho_numero_venda,
                ii.movimento_ajuste_id,
                ur.email AS pendencia_registrada_por_email,
                uz.email AS pendencia_resolvida_por_email
         FROM alissonerp.itens_inventario_comercial ii
         LEFT JOIN auth.users ur ON ur.id = ii.pendencia_registrada_por
         LEFT JOIN auth.users uz ON uz.id = ii.pendencia_resolvida_por
+        LEFT JOIN alissonerp.vendas_erp vd ON vd.id = ii.pendencia_desfecho_venda_id
         WHERE ii.id = ${item.id}
       `;
 
@@ -397,6 +435,7 @@ export const PATCH = defineRoute({
           pendencia_resolucao_obs: rows[0].pendencia_resolucao_obs,
           pendencia_desfecho_tipo: rows[0].pendencia_desfecho_tipo,
           pendencia_desfecho_venda_id: rows[0].pendencia_desfecho_venda_id,
+          devolucao_conciliada_id: devolucaoVinculada?.id ?? null,
           movimento_gerado_id: rows[0].movimento_ajuste_id,
         },
       });
