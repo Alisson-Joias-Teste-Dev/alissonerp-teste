@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { ROLES_ESTOQUE_MOVIMENTAR, hasRole } from "@/lib/roles";
 
 interface Params { params: Promise<{ id: string }> }
 
@@ -13,6 +14,13 @@ export async function POST(
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  // BLINDAGEM (v2.81.1): confirmar recebimento gera ENTRADA no destino —
+  // é para gerência/estoquista. Antes qualquer usuário logado concluía.
+  const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
+  if (!hasRole(usuario?.role, ROLES_ESTOQUE_MOVIMENTAR)) {
+    return NextResponse.json({ error: "Sem permissão para receber transferência" }, { status: 403 });
+  }
 
   const { id } = await params;
   const transferId = Number(id);

@@ -77,6 +77,14 @@ export const ROLES_INVENTARIO_CONTAR = [
 // Ver = mesmos que podem contar (inventário não é dado público interno)
 export const ROLES_INVENTARIO_VER = ROLES_INVENTARIO_CONTAR;
 
+// Quem pode MOVIMENTAR estoque comercial (entrada por scanner, receber
+// transferência, leituras de contagem): gerência + estoquistas.
+// POR QUÊ: vendedora/motoboy NUNCA mexem em saldo — brecha fechada em v2.81.1
+// (qualquer logado conseguia gerar entrada via /api/rfid/scan).
+export const ROLES_ESTOQUE_MOVIMENTAR = [
+  ...ROLES_INVENTARIO_GERENTES, "estoquista_fabrica", "estoquista_loja",
+] as const;
+
 // Verifica se a role está na lista permitida
 export function hasRole(role: string | null | undefined, permitidas: readonly string[]): boolean {
   if (!role) return false;

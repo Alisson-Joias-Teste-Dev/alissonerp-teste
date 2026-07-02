@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
+import { ROLES_INVENTARIO_CONTAR, hasRole } from "@/lib/roles";
 
 const InventarioRfidSchema = z.object({
   leituras: z.array(z.string()).min(1, "leituras obrigatório"),
@@ -32,6 +33,14 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
+    // BLINDAGEM (v2.81.1): leituras alimentam a CONTAGEM do inventário —
+    // qualquer logado podia "informar quantidade" mandando lista de etiquetas
+    // e envenenar a contagem. Restrito a quem pode contar.
+    const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
+    if (!hasRole(usuario?.role, ROLES_INVENTARIO_CONTAR)) {
+      return NextResponse.json({ error: "Sem permissão para registrar leituras de inventário" }, { status: 403 });
     }
 
     const raw = await req.json().catch(() => ({}));

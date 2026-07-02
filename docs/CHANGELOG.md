@@ -2,6 +2,23 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(seguranca): rotas de estoque aceitavam QUALQUER usuário logado (v2.81.1)
+
+**Falha grave reportada pelo Jonathan:** qualquer pessoa logada (vendedora, motoboy...)
+conseguia mudar o estoque. Auditoria completa das rotas que escrevem movimentação:
+
+1. `POST /api/rfid/scan` (ação `entrada_estoque`): gerava ENTRADA (+1 por chamada,
+   repetível à vontade) sem checar função — fechado com `ROLES_ESTOQUE_MOVIMENTAR`.
+2. `POST /api/estoque-comercial/transferir/[id]/concluir`: qualquer logado confirmava
+   recebimento (ENTRADA no destino) — fechado com `ROLES_ESTOQUE_MOVIMENTAR`.
+3. `POST /api/rfid/inventario`: qualquer logado "informava quantidade" mandando lista
+   de etiquetas (envenenava a contagem) — fechado com `ROLES_INVENTARIO_CONTAR`.
+
+Constante nova `ROLES_ESTOQUE_MOVIMENTAR` em `src/lib/roles.ts` (gerência + estoquistas).
+Conferidos e já protegidos: /movimentos, /transferir (criar/cancelar), /estornar,
+/converter, /auditoria/*, /inventario/* (contar/concluir/cancelar/finalizar/pendencia),
+ai-chat (só leitura), /vendas/[id]/rfid (ownership).
+
 ## feat(inventario): peça pronta + Detetive + desfecho blindado com baixa (v2.81.0)
 
 **Pedido do Jonathan:** (1) inventário é de PEÇA PRONTA — pedra solta (moissanite,
