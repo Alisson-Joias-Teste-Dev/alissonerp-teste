@@ -2,6 +2,19 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(inventario): teste/lixo, ouro-insumo e serviços fora da auditoria (v2.81.5)
+
+**Pedido do Jonathan:** produto de teste (TESTE-2026-A) é lixo, Ouro 18k é insumo
+e AS1001-2 é serviço — nada disso entra em contagem de estoque na auditoria.
+
+- `condPecaPronta()` (e o snapshot de abertura) agora excluem também:
+  produtos de teste (sku/nome começando com "teste"), ouro-insumo (nome
+  começando com "ouro" — joia começa pelo tipo: Anel/Brinco/...), prefixos
+  de SKU IS/PD/AS/PZ (insumo/pedra/serviço/personalização — mesma convenção
+  de oportunidades-fabricacao) e categoria "Serviços".
+- Continua tudo na LEITURA: nada apagado, nada baixado; vale para inventário
+  já aberto.
+
 ## fix(inventario): regra de peça pronta vale para inventário JÁ ABERTO (v2.81.4)
 
 **Pedido do Jonathan:** aplicar a regra (pedra solta e personalizada não entram em

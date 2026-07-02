@@ -5,7 +5,7 @@
 > Se algo conflitar com outro doc, este arquivo vence.
 
 **Stack:** Next.js 16.1.6 | React 19 | PostgreSQL 15 (Supabase self-hosted) | TailwindCSS v4 | Zustand
-**Versao:** v2.81.4 | **Branch:** `homolog` (nunca main direto)
+**Versao:** v2.81.5 | **Branch:** `homolog` (nunca main direto)
 **Docs completos:** `docs/arquitetura.md` | **Changelog:** `docs/CHANGELOG.md`
 
 > Projeto **100% desenvolvido por IA**. A disciplina de processo (§0) é o que mantém a qualidade — leia a §0 ANTES de qualquer coisa.
