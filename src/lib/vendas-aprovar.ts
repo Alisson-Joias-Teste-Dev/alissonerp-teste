@@ -100,14 +100,13 @@ async function refreshTinyToken(): Promise<string | null> {
     client_id: clientId, client_secret: clientSecret,
   }));
 
-  // Max 12s total para refresh token (2 attempts x 6000ms com margem)
   for (const body of attempts) {
     try {
       const res = await fetch("https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body,
-        signal: AbortSignal.timeout(6000),
+        signal: AbortSignal.timeout(10000),
       });
       if (!res.ok) continue;
       const tokens = await res.json() as { access_token: string; refresh_token?: string; expires_in?: number };
