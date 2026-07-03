@@ -1,5 +1,5 @@
 import sql from "@/lib/db";
-import { ensureTinyToken } from "@/lib/vendas-aprovar";
+import { ensureTinyToken } from "@/lib/tiny-auth";
 
 interface TinyContatoResult {
   ok: boolean;

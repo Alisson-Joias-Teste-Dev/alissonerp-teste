@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
-import { ensureTinyToken } from "@/lib/vendas-aprovar";
+import { ensureTinyToken } from "@/lib/tiny-auth";
 import { internalError } from "@/lib/api-error";
 import { logAudit } from "@/lib/audit";
 
