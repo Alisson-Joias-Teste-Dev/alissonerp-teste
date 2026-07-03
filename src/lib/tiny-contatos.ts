@@ -1,5 +1,5 @@
 import sql from "@/lib/db";
-import { ensureTinyToken } from "@/lib/vendas-aprovar";
+import { ensureTinyToken } from "@/lib/tiny-auth";
 
 interface TinyContatoResult {
   ok: boolean;
@@ -38,6 +38,7 @@ function buildPayload(c: Record<string, unknown>) {
 }
 
 export async function syncContatoToTiny(contatoId: number, signal?: AbortSignal): Promise<TinyContatoResult> {
+  const t0 = Date.now();
   try {
     const [contato] = await sql`
       SELECT id_contato, nome, cpf_cnpj, email, telefone, celular,
@@ -47,14 +48,22 @@ export async function syncContatoToTiny(contatoId: number, signal?: AbortSignal)
     `;
     if (!contato) return { ok: false, erro: "Contato não encontrado" };
 
+    console.error(`[tiny-contatos] DB ok contatoId=${contatoId} duracao=${Date.now() - t0}ms`);
+
     let token: string;
     try {
       token = await ensureTinyToken(signal);
     } catch (err) {
+      console.error(`[tiny-contatos] ensureTinyToken FALHOU contatoId=${contatoId} duracao=${Date.now() - t0}ms`, err);
       return { ok: false, erro: err instanceof Error ? err.message : "Token Tiny não disponível" };
     }
 
-    if (signal?.aborted) return { ok: false, erro: "Operação cancelada" };
+    console.error(`[tiny-contatos] token obtido contatoId=${contatoId} duracao=${Date.now() - t0}ms tokenLength=${token.length}`);
+
+    if (signal?.aborted) {
+      console.error(`[tiny-contatos] ABORTADO apos token contatoId=${contatoId} duracao=${Date.now() - t0}ms`);
+      return { ok: false, erro: "Operação cancelada" };
+    }
 
     const payload = buildPayload(contato as Record<string, unknown>);
     const isNovo = !contato.id_api_contato;
@@ -62,6 +71,8 @@ export async function syncContatoToTiny(contatoId: number, signal?: AbortSignal)
       ? "https://api.tiny.com.br/public-api/v3/contatos"
       : `https://api.tiny.com.br/public-api/v3/contatos/${contato.id_api_contato}`;
     const method = isNovo ? "POST" : "PUT";
+
+    console.error(`[tiny-contatos] fetch Tiny ${method} ${url} contatoId=${contatoId} duracao=${Date.now() - t0}ms`);
 
     let res: Response;
     try {
@@ -72,14 +83,18 @@ export async function syncContatoToTiny(contatoId: number, signal?: AbortSignal)
         signal: signal ?? AbortSignal.timeout(15000),
       });
     } catch (err) {
+      console.error(`[tiny-contatos] fetch EXCEPTION contatoId=${contatoId} duracao=${Date.now() - t0}ms`, err);
       if (err instanceof Error && err.name === "AbortError") {
         return { ok: false, erro: "Tempo limite excedido ao sincronizar com Tiny. Tente novamente." };
       }
       return { ok: false, erro: err instanceof Error ? err.message : "Erro de comunicação com Tiny" };
     }
 
+    console.error(`[tiny-contatos] fetch OK status=${res.status} contatoId=${contatoId} duracao=${Date.now() - t0}ms`);
+
     if (!res.ok) {
       const txt = await res.text();
+      console.error(`[tiny-contatos] Tiny erro body=${txt.slice(0, 500)} contatoId=${contatoId}`);
       let msg = `Tiny contatos ${res.status}`;
       try {
         const j = JSON.parse(txt);
@@ -96,13 +111,17 @@ export async function syncContatoToTiny(contatoId: number, signal?: AbortSignal)
       const tinyId = data.id ?? (data.data as Record<string, unknown> | undefined)?.id as number | undefined;
       if (tinyId) {
         await sql`UPDATE public.contatos SET id_api_contato = ${tinyId} WHERE id_contato = ${contatoId}`;
+        console.error(`[tiny-contatos] SUCESSO tinyId=${tinyId} contatoId=${contatoId} duracao=${Date.now() - t0}ms`);
         return { ok: true, tiny_id: tinyId };
       }
+      console.error(`[tiny-contatos] Tiny sem ID resposta=${JSON.stringify(data).slice(0, 300)} contatoId=${contatoId}`);
       return { ok: false, erro: "Tiny não retornou ID do contato criado" };
     }
 
+    console.error(`[tiny-contatos] SUCESSO update contatoId=${contatoId} duracao=${Date.now() - t0}ms`);
     return { ok: true };
   } catch (err) {
+    console.error(`[tiny-contatos] ERRO INESPERADO contatoId=${contatoId} duracao=${Date.now() - t0}ms`, err);
     return { ok: false, erro: err instanceof Error ? err.message : "Erro inesperado ao sincronizar contato" };
   }
 }
