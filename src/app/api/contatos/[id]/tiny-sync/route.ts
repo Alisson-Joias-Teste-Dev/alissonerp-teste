@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { syncContatoToTiny } from "@/lib/tiny-contatos";
 
+// Timeout total: 12s para caber no limite do gateway (tipicamente 15-30s).
+// A sync completa = ensureTinyToken (max ~5s) + fetch Tiny API (max ~6s).
+const TOTAL_TIMEOUT_MS = 12_000;
+
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -15,20 +19,18 @@ export async function POST(
     const contatoId = Number(id);
     if (isNaN(contatoId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-    // Fire-and-forget: responde imediatamente, sincronização roda em background.
-    // Evita timeout do gateway (502 HTML) quando o refresh OAuth + API Tiny
-    // demoram mais que o limite do proxy.
-    syncContatoToTiny(contatoId)
-      .then((r) => {
-        if (!r.ok) console.error(`[tiny-sync bg] contato ${contatoId} falhou: ${r.erro}`);
-      })
-      .catch((err) => {
-        console.error(`[tiny-sync bg] contato ${contatoId} erro:`, err);
-      });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TOTAL_TIMEOUT_MS);
 
-    return NextResponse.json({ ok: true, pending: true }, { status: 202 });
+    const result = await syncContatoToTiny(contatoId, controller.signal);
+    clearTimeout(timeout);
+
+    if (!result.ok) {
+      return NextResponse.json({ error: result.erro }, { status: 502 });
+    }
+    return NextResponse.json({ ok: true, tiny_id: result.tiny_id });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erro interno";
+    const msg = err instanceof Error ? err.message : "Erro interno ao sincronizar contato";
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 }
