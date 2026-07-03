@@ -116,7 +116,11 @@ async function refreshTinyToken(signal?: AbortSignal): Promise<string | null> {
     client_id: clientId, client_secret: clientSecret,
   }));
 
+  console.error(`[refreshTinyToken] INICIO grantTypes=${attempts.map(a => a.get("grant_type")).join(",")}`);
+
   for (const body of attempts) {
+    const grantType = body.get("grant_type") ?? "?";
+    const tReq = Date.now();
     try {
       const timeoutSignal = AbortSignal.timeout(6000);
       const fetchSignal = signal ? combineSignals(signal, timeoutSignal) : timeoutSignal;
@@ -126,6 +130,7 @@ async function refreshTinyToken(signal?: AbortSignal): Promise<string | null> {
         body,
         signal: fetchSignal,
       });
+      console.error(`[refreshTinyToken] ${grantType} status=${res.status} duracao=${Date.now() - tReq}ms`);
       if (!res.ok) continue;
       const tokens = await res.json() as { access_token: string; refresh_token?: string; expires_in?: number };
       await sql`INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted) VALUES ('tiny_bearer_token', ${JSON.stringify(tokens.access_token)}) ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(tokens.access_token)}`;
@@ -136,18 +141,30 @@ async function refreshTinyToken(signal?: AbortSignal): Promise<string | null> {
         const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
         await sql`INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted) VALUES ('tiny_token_expires_at', ${JSON.stringify(expiresAt)}) ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(expiresAt)}`;
       }
+      console.error(`[refreshTinyToken] SUCESSO ${grantType}`);
       return tokens.access_token;
-    } catch { continue; }
+    } catch (err) {
+      console.error(`[refreshTinyToken] EXCEPTION ${grantType} duracao=${Date.now() - tReq}ms`, err);
+      continue;
+    }
   }
+  console.error(`[refreshTinyToken] FALHA todas as tentativas`);
   return null;
 }
 
 export async function ensureTinyToken(signal?: AbortSignal): Promise<string> {
+  const t0 = Date.now();
+
   let token = await readTinyToken();
   if (!token) {
+    console.error(`[ensureTinyToken] token inexistente, chamando refresh`);
     const refreshed = await refreshTinyToken(signal);
-    if (!refreshed) throw new Error("Token do Tiny não configurado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'.");
+    if (!refreshed) {
+      console.error(`[ensureTinyToken] refresh falhou`);
+      throw new Error("Token do Tiny não configurado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'.");
+    }
     token = refreshed;
+    console.error(`[ensureTinyToken] refresh OK duracao=${Date.now() - t0}ms`);
   }
 
   // Verificação proativa: token expira em < 10 min? Renova antes
@@ -160,46 +177,19 @@ export async function ensureTinyToken(signal?: AbortSignal): Promise<string> {
     expiresAtIso = expiresAtIso.replace(/"/g, "").trim();
     const expiresAt = new Date(expiresAtIso);
     if (!isNaN(expiresAt.getTime()) && expiresAt.getTime() - Date.now() < 10 * 60 * 1000) {
+      console.error(`[ensureTinyToken] token expira em breve ${expiresAtIso}, renovando`);
       const newToken = await refreshTinyToken(signal);
       if (newToken) {
         token = newToken;
+        console.error(`[ensureTinyToken] renovacao OK`);
       } else if (expiresAt.getTime() < Date.now()) {
+        console.error(`[ensureTinyToken] token EXPIRADO e refresh falhou`);
         throw new Error("Token do Tiny expirado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'.");
       }
     }
   }
 
-  return token;
-}
-
-export async function ensureTinyToken(signal?: AbortSignal): Promise<string> {
-  let token = await readTinyToken();
-  if (!token) {
-    const refreshed = await refreshTinyToken(signal);
-    if (!refreshed) throw new Error("Token do Tiny não configurado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'.");
-    token = refreshed;
-  }
-
-  // Verificação proativa: token expira em < 10 min? Renova antes
-  const [expiresRow] = await sql`
-    SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_token_expires_at'
-  `;
-  if (expiresRow?.valor_encrypted) {
-    let expiresAtIso: string;
-    try { expiresAtIso = JSON.parse(expiresRow.valor_encrypted); } catch { expiresAtIso = String(expiresRow.valor_encrypted); }
-    expiresAtIso = expiresAtIso.replace(/"/g, "").trim();
-    const expiresAt = new Date(expiresAtIso);
-    if (!isNaN(expiresAt.getTime()) && expiresAt.getTime() - Date.now() < 10 * 60 * 1000) {
-      const newToken = await refreshTinyToken(signal);
-      if (newToken) {
-        token = newToken;
-      } else if (expiresAt.getTime() < Date.now()) {
-        // Token já expirou E o refresh falhou — não adianta tentar enviar
-        throw new Error("Token do Tiny expirado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'.");
-      }
-    }
-  }
-
+  console.error(`[ensureTinyToken] FIM duracao=${Date.now() - t0}ms tokenLength=${token.length}`);
   return token;
 }
 
