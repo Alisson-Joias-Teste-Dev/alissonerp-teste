@@ -15,35 +15,18 @@ export async function POST(
     const contatoId = Number(id);
     if (isNaN(contatoId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-    // Tenta completar em até 5s. Se demorar mais, cai pro fire-and-forget.
-    // Se completar rápido, mostra o resultado real (sucesso ou erro) pro usuário.
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5_000);
+    // Fire-and-forget: responde imediatamente, sincronização roda em background.
+    // Evita timeout do gateway (502 HTML) quando o refresh OAuth + API Tiny
+    // demoram mais que o limite do proxy.
+    syncContatoToTiny(contatoId)
+      .then((r) => {
+        if (!r.ok) console.error(`[tiny-sync bg] contato ${contatoId} falhou: ${r.erro}`);
+      })
+      .catch((err) => {
+        console.error(`[tiny-sync bg] contato ${contatoId} erro:`, err);
+      });
 
-    try {
-      const result = await syncContatoToTiny(contatoId, controller.signal);
-      clearTimeout(timeout);
-
-      if (!result.ok) {
-        return NextResponse.json({ error: result.erro }, { status: 502 });
-      }
-      return NextResponse.json({ ok: true, tiny_id: result.tiny_id });
-    } catch (err) {
-      clearTimeout(timeout);
-
-      if (err instanceof Error && err.name === "AbortError") {
-        // Excedeu 5s → fire-and-forget
-        syncContatoToTiny(contatoId)
-          .then((r) => {
-            if (!r.ok) console.error(`[tiny-sync bg] contato ${contatoId} falhou: ${r.erro}`);
-          })
-          .catch((e) => console.error(`[tiny-sync bg] contato ${contatoId} erro:`, e));
-
-        return NextResponse.json({ ok: true, pending: true }, { status: 202 });
-      }
-
-      throw err;
-    }
+    return NextResponse.json({ ok: true, pending: true }, { status: 202 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Erro interno";
     return NextResponse.json({ error: msg }, { status: 502 });
