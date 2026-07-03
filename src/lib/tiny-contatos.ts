@@ -50,7 +50,7 @@ export async function syncContatoToTiny(contatoId: number, signal?: AbortSignal)
 
     let token: string;
     try {
-      token = await ensureTinyToken();
+      token = await ensureTinyToken(signal);
     } catch (err) {
       return { ok: false, erro: err instanceof Error ? err.message : "Token Tiny não disponível" };
     }
@@ -70,7 +70,7 @@ export async function syncContatoToTiny(contatoId: number, signal?: AbortSignal)
         method,
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
-        signal: signal ? signal : AbortSignal.timeout(15000),
+        signal: signal ?? AbortSignal.timeout(15000),
       });
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {

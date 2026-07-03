@@ -71,7 +71,23 @@ async function readTinyToken(): Promise<string | null> {
   return token.replace(/"/g, "").trim() || null;
 }
 
-async function refreshTinyToken(): Promise<string | null> {
+function combineSignals(...signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+  const cleanups: (() => void)[] = [];
+  for (const sig of signals) {
+    if (sig.aborted) {
+      controller.abort(sig.reason);
+      cleanups.forEach(fn => fn());
+      return controller.signal;
+    }
+    const onAbort = () => controller.abort(sig.reason);
+    sig.addEventListener("abort", onAbort, { once: true });
+    cleanups.push(() => sig.removeEventListener("abort", onAbort));
+  }
+  return controller.signal;
+}
+
+async function refreshTinyToken(signal?: AbortSignal): Promise<string | null> {
   const [ciRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_client_id'`;
   const [csRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_client_secret'`;
   if (!ciRow?.valor_encrypted || !csRow?.valor_encrypted) return null;
@@ -100,14 +116,15 @@ async function refreshTinyToken(): Promise<string | null> {
     client_id: clientId, client_secret: clientSecret,
   }));
 
-  // Max 12s total para refresh token (2 attempts x 6000ms com margem)
   for (const body of attempts) {
     try {
+      const timeoutSignal = AbortSignal.timeout(6000);
+      const fetchSignal = signal ? combineSignals(signal, timeoutSignal) : timeoutSignal;
       const res = await fetch("https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body,
-        signal: AbortSignal.timeout(6000),
+        signal: fetchSignal,
       });
       if (!res.ok) continue;
       const tokens = await res.json() as { access_token: string; refresh_token?: string; expires_in?: number };
@@ -125,10 +142,10 @@ async function refreshTinyToken(): Promise<string | null> {
   return null;
 }
 
-export async function ensureTinyToken(): Promise<string> {
+export async function ensureTinyToken(signal?: AbortSignal): Promise<string> {
   let token = await readTinyToken();
   if (!token) {
-    const refreshed = await refreshTinyToken();
+    const refreshed = await refreshTinyToken(signal);
     if (!refreshed) throw new Error("Token do Tiny não configurado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'.");
     token = refreshed;
   }
@@ -143,7 +160,7 @@ export async function ensureTinyToken(): Promise<string> {
     expiresAtIso = expiresAtIso.replace(/"/g, "").trim();
     const expiresAt = new Date(expiresAtIso);
     if (!isNaN(expiresAt.getTime()) && expiresAt.getTime() - Date.now() < 10 * 60 * 1000) {
-      const newToken = await refreshTinyToken();
+      const newToken = await refreshTinyToken(signal);
       if (newToken) {
         token = newToken;
       } else if (expiresAt.getTime() < Date.now()) {
