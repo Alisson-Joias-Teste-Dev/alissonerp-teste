@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
 import { sendToTiny } from "@/lib/vendas-aprovar";
+import { internalError } from "@/lib/api-error";
 
 const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
 
@@ -31,17 +32,10 @@ export async function POST(
     WHERE id = ${vendaId} AND tiny_pedido_id IS NULL
   `;
 
-  // Timeout total de 25s para não exceder o gateway e levar 502 HTML
   try {
-    await Promise.race([
-      sendToTiny(vendaId),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Tempo limite excedido ao reenviar para o Tiny. Tente novamente.")), 25_000)
-      ),
-    ]);
+    await sendToTiny(vendaId);
     return NextResponse.json({ ok: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erro ao reenviar para o Tiny";
-    return NextResponse.json({ error: msg }, { status: 422 });
+    return internalError(`[POST /api/vendas/${vendaId}/tiny-resync]`, err, "Erro ao reenviar para o Tiny", 422);
   }
 }
