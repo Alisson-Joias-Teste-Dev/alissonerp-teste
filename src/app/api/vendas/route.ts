@@ -455,6 +455,54 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Server-side elegibilidade: produto sem estoque + reposição inativa não pode ser vendido ──
+    // REGRA DE NEGÓCIO (correção URGENTE 07/2026 — PROBLEMA 2): a busca já filtra, mas o
+    // servidor também deve revalidar ao criar a venda (evita bypass por SKU direto/RFID).
+    // Bloqueia se: controla_estoque=true AND saldo<=0 AND reposição INATIVA.
+    if (Array.isArray(body.itens) && body.itens.length > 0) {
+      const pidsEleg = (body.itens as ItemInput[])
+        .map(i => i.produto_id)
+        .filter((pid): pid is number => pid != null && pid > 0);
+      if (pidsEleg.length > 0) {
+        const elegibilidade = await tx`
+          SELECT
+            p.id_produto AS produto_id,
+            COALESCE(ecc.controla_estoque, true) AS controla_estoque,
+            COALESCE(est.saldo, 0)::float8 AS saldo,
+            (prc.ativo = true) AS reposicao_ativa
+          FROM public.produtos p
+          LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
+          LEFT JOIN (
+            SELECT produto_id, SUM(disponivel)::float8 AS saldo
+            FROM alissonerp.vw_saldo_estoque_comercial
+            GROUP BY produto_id
+          ) est ON est.produto_id = p.id_produto
+          LEFT JOIN alissonerp.produto_reposicao_config prc ON prc.produto_id = p.id_produto AND prc.ativo = true
+          WHERE p.id_produto = ANY(${pidsEleg}::bigint[])
+        `;
+        const elegMap = new Map<number, { controla_estoque: boolean; saldo: number; reposicao_ativa: boolean }>(
+          elegibilidade.map((r: Record<string, unknown>) => [
+            Number(r.produto_id),
+            {
+              controla_estoque: Boolean(r.controla_estoque),
+              saldo: Number(r.saldo),
+              reposicao_ativa: Boolean(r.reposicao_ativa),
+            },
+          ])
+        );
+        for (const item of body.itens as ItemInput[]) {
+          if (!item.produto_id) continue;
+          const eleg = elegMap.get(Number(item.produto_id));
+          if (!eleg) continue;
+          if (eleg.controla_estoque && eleg.saldo <= 0 && !eleg.reposicao_ativa) {
+            throw new Error(
+              `"${item.nome_produto}" (${item.sku ?? 'sem SKU'}) não pode ser vendido: sem estoque e sem reposição ativa.`,
+            );
+          }
+        }
+      }
+    }
+
     // 3. Inserir itens (trigger recalcula totais automaticamente)
     if (!Array.isArray(body.itens) || body.itens.length === 0) {
       throw new Error("Venda deve ter pelo menos um item");

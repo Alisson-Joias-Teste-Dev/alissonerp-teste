@@ -1681,14 +1681,19 @@ CREATE FUNCTION alissonerp.fn_estoque_comercial_baixa_venda() RETURNS trigger
     SET search_path TO 'alissonerp', 'directus', 'public'
     AS $$
 DECLARE
-  v_config_ativo BOOLEAN;
-  v_situacao     TEXT;
+  v_config_ativo     BOOLEAN;
+  v_controla_estoque BOOLEAN;
+  v_situacao         TEXT;
 BEGIN
   SELECT situacao INTO v_situacao FROM alissonerp.vendas_erp WHERE id = NEW.venda_id;
   IF v_situacao = 'cancelado' THEN RETURN NEW; END IF;
 
-  SELECT ativo INTO v_config_ativo FROM alissonerp.estoque_comercial_config WHERE produto_id = NEW.produto_id;
-  IF v_config_ativo IS NULL OR v_config_ativo = false THEN RETURN NEW; END IF;
+  SELECT ativo, controla_estoque INTO v_config_ativo, v_controla_estoque
+  FROM alissonerp.estoque_comercial_config WHERE produto_id = NEW.produto_id;
+
+  IF v_config_ativo IS NULL OR v_config_ativo = false OR v_controla_estoque = false THEN
+    RETURN NEW;
+  END IF;
 
   -- rascunho, aprovado, enviado: cria reserva (estoque só é dado baixa na entrega)
   IF v_situacao IN ('rascunho', 'aprovado', 'enviado') THEN
@@ -1791,11 +1796,14 @@ BEGIN
       NEW.numero_venda, v_pendentes;
   END IF;
 
-  -- Converter reservas ativas em saída efetivada
+  -- Converter reservas ativas em saída efetivada (apenas produtos que controlam estoque)
   FOR v_reserva IN
-    SELECT id, produto_id, quantidade, local_estoque_id
-    FROM alissonerp.reservas_estoque_comercial
-    WHERE venda_id = NEW.id AND status = 'ativo'
+    SELECT r.id, r.produto_id, r.quantidade, r.local_estoque_id
+    FROM alissonerp.reservas_estoque_comercial r
+    LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = r.produto_id
+    WHERE r.venda_id = NEW.id
+      AND r.status = 'ativo'
+      AND COALESCE(ecc.controla_estoque, true) = true
   LOOP
     INSERT INTO alissonerp.movimentacoes_estoque_comercial
       (produto_id, tipo, quantidade, motivo, referencia_id, referencia_tipo,
