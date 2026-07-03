@@ -38,63 +38,72 @@ function buildPayload(c: Record<string, unknown>) {
   return payload;
 }
 
-export async function syncContatoToTiny(contatoId: number): Promise<TinyContatoResult> {
-  const [contato] = await sql`
-    SELECT id_contato, nome, cpf_cnpj, email, telefone, celular,
-           endereco, numero, complemento, bairro, municipio, cep, uf,
-           tipo_pessoa, inscricao_estadual, id_api_contato
-    FROM public.contatos WHERE id_contato = ${contatoId}
-  `;
-  if (!contato) return { ok: false, erro: "Contato não encontrado" };
-
-  let token: string;
+export async function syncContatoToTiny(contatoId: number, signal?: AbortSignal): Promise<TinyContatoResult> {
   try {
-    token = await ensureTinyToken();
-  } catch (err) {
-    return { ok: false, erro: err instanceof Error ? err.message : "Token Tiny não disponível" };
-  }
+    const [contato] = await sql`
+      SELECT id_contato, nome, cpf_cnpj, email, telefone, celular,
+             endereco, numero, complemento, bairro, municipio, cep, uf,
+             tipo_pessoa, inscricao_estadual, id_api_contato
+      FROM public.contatos WHERE id_contato = ${contatoId}
+    `;
+    if (!contato) return { ok: false, erro: "Contato não encontrado" };
 
-  const payload = buildPayload(contato as Record<string, unknown>);
-  const isNovo = !contato.id_api_contato;
-  const url = isNovo
-    ? "https://api.tiny.com.br/public-api/v3/contatos"
-    : `https://api.tiny.com.br/public-api/v3/contatos/${contato.id_api_contato}`;
-  const method = isNovo ? "POST" : "PUT";
-
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15000),
-    });
-  } catch (err) {
-    return { ok: false, erro: err instanceof Error ? err.message : "Erro de comunicação com Tiny" };
-  }
-
-  if (!res.ok) {
-    const txt = await res.text();
-    let msg = `Tiny contatos ${res.status}`;
+    let token: string;
     try {
-      const j = JSON.parse(txt);
-      const erros = Array.isArray(j.erros)
-        ? j.erros.map((e: Record<string, string>) => e.mensagem || e.campo || JSON.stringify(e)).join("; ")
-        : "";
-      msg = [j.message || j.error || j.mensagem, erros].filter(Boolean).join(" — ") || msg;
-    } catch { /* */ }
-    return { ok: false, erro: msg };
-  }
-
-  if (isNovo) {
-    const data = await res.json() as { id?: number; data?: { id?: number } };
-    const tinyId = data.id ?? (data.data as Record<string, unknown> | undefined)?.id as number | undefined;
-    if (tinyId) {
-      await sql`UPDATE public.contatos SET id_api_contato = ${tinyId} WHERE id_contato = ${contatoId}`;
-      return { ok: true, tiny_id: tinyId };
+      token = await ensureTinyToken();
+    } catch (err) {
+      return { ok: false, erro: err instanceof Error ? err.message : "Token Tiny não disponível" };
     }
-    return { ok: false, erro: "Tiny não retornou ID do contato criado" };
-  }
 
-  return { ok: true };
+    if (signal?.aborted) return { ok: false, erro: "Operação cancelada" };
+
+    const payload = buildPayload(contato as Record<string, unknown>);
+    const isNovo = !contato.id_api_contato;
+    const url = isNovo
+      ? "https://api.tiny.com.br/public-api/v3/contatos"
+      : `https://api.tiny.com.br/public-api/v3/contatos/${contato.id_api_contato}`;
+    const method = isNovo ? "POST" : "PUT";
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+        signal: signal ? signal : AbortSignal.timeout(15000),
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return { ok: false, erro: "Tempo limite excedido ao sincronizar com Tiny. Tente novamente." };
+      }
+      return { ok: false, erro: err instanceof Error ? err.message : "Erro de comunicação com Tiny" };
+    }
+
+    if (!res.ok) {
+      const txt = await res.text();
+      let msg = `Tiny contatos ${res.status}`;
+      try {
+        const j = JSON.parse(txt);
+        const erros = Array.isArray(j.erros)
+          ? j.erros.map((e: Record<string, string>) => e.mensagem || e.campo || JSON.stringify(e)).join("; ")
+          : "";
+        msg = [j.message || j.error || j.mensagem, erros].filter(Boolean).join(" — ") || msg;
+      } catch { /* */ }
+      return { ok: false, erro: msg };
+    }
+
+    if (isNovo) {
+      const data = await res.json() as { id?: number; data?: { id?: number } };
+      const tinyId = data.id ?? (data.data as Record<string, unknown> | undefined)?.id as number | undefined;
+      if (tinyId) {
+        await sql`UPDATE public.contatos SET id_api_contato = ${tinyId} WHERE id_contato = ${contatoId}`;
+        return { ok: true, tiny_id: tinyId };
+      }
+      return { ok: false, erro: "Tiny não retornou ID do contato criado" };
+    }
+
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, erro: err instanceof Error ? err.message : "Erro inesperado ao sincronizar contato" };
+  }
 }
