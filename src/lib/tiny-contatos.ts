@@ -50,12 +50,7 @@ export async function syncContatoToTiny(contatoId: number, signal?: AbortSignal)
 
     let token: string;
     try {
-      token = await Promise.race([
-        ensureTinyToken(),
-        new Promise<string>((_, reject) =>
-          setTimeout(() => reject(new Error("Tempo limite ao renovar token Tiny. Tente novamente.")), 7_000)
-        ),
-      ]);
+      token = await ensureTinyToken();
     } catch (err) {
       return { ok: false, erro: err instanceof Error ? err.message : "Token Tiny não disponível" };
     }

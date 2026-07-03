@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { syncContatoToTiny } from "@/lib/tiny-contatos";
 
-// Timeout total: 12s para caber no limite do gateway (tipicamente 15-30s).
-// A sync completa = ensureTinyToken (max ~5s) + fetch Tiny API (max ~6s).
-const TOTAL_TIMEOUT_MS = 12_000;
+// Timeout total seguro: 25s fica abaixo do timeout do gateway (~30s no Easypanel)
+// para nunca levar 502 (HTML) em vez de JSON.
+const TOTAL_TIMEOUT_MS = 25_000;
 
 export async function POST(
   _req: NextRequest,
@@ -19,6 +19,7 @@ export async function POST(
     const contatoId = Number(id);
     if (isNaN(contatoId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
+    // Promise.race: sync concorre com um timeout total
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TOTAL_TIMEOUT_MS);
 
@@ -30,6 +31,7 @@ export async function POST(
     }
     return NextResponse.json({ ok: true, tiny_id: result.tiny_id });
   } catch (err) {
+    // Safety net: qualquer exceção não tratada vira JSON, nunca HTML
     const msg = err instanceof Error ? err.message : "Erro interno ao sincronizar contato";
     return NextResponse.json({ error: msg }, { status: 502 });
   }
