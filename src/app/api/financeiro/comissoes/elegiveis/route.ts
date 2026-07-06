@@ -56,11 +56,13 @@ export async function GET(req: NextRequest) {
       WHERE pv.status = 'confirmado'
         -- REGRA DE NEGÓCIO: comissiona toda forma JÁ RECEBIDA. 'A Receber' (crediário)
         -- comissiona quando CONFIRMADO (pago) — o pv.status='confirmado' acima já garante
-        -- isso; A Receber PENDENTE continua de fora (ainda não entrou). 'Vale-Troca' nunca
-        -- comissiona (não é dinheiro novo, é troca).
+        -- isso; A Receber PENDENTE continua de fora (ainda não entrou).
+        -- comissionavel=false (Vale-Troca/Permuta/Ajuste Consultora) nunca comissiona —
+        -- não é dinheiro novo. Fonte única de verdade: coluna comissionavel (migration 341),
+        -- não a string forma (que pode ficar 'A Receber' se a baixa não rewritar forma).
         -- IMPACTO se voltar a excluir 'A Receber': a consultora perde comissão sobre crediário
         -- que o cliente já pagou (ex.: venda 15346 ficava com R$0 mesmo quitada via Mercado Pago).
-        AND pv.forma <> 'Vale-Troca'
+        AND pv.comissionavel = true
         AND ve.vendedor_id = ${Number(consultoraId)}
         AND pv.data_confirmacao >= ${from}::date
         AND pv.data_confirmacao <= ${to}::date

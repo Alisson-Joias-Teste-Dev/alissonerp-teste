@@ -112,8 +112,9 @@ export async function POST(req: NextRequest) {
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
       WHERE pv.status = 'confirmado'
         -- REGRA DE NEGÓCIO: A Receber (crediário) comissiona quando CONFIRMADO (pago);
-        -- só Vale-Troca nunca comissiona (não é dinheiro novo). Ver comercial.md §2.
-        AND pv.forma <> 'Vale-Troca'
+        -- comissionavel=false (Vale-Troca/Permuta/Ajuste Consultora) nunca comissiona —
+        -- não é dinheiro novo. Ver comercial.md §2 e migration 341.
+        AND pv.comissionavel = true
         AND ve.vendedor_id = ${consultoraId}
         AND pv.data_confirmacao >= ${periodoInicio}::date
         AND pv.data_confirmacao <= ${periodoFim}::date

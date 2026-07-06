@@ -5,7 +5,11 @@
  * Rota principal de baixa do crediário — usada pelo drawer de detalhe
  * (CrediarioClient.tsx) para registrar o recebimento de um crédito
  * "A Receber" em qualquer forma de pagamento: Dinheiro, Cartão, Pix,
- * Ouro, Vale-Troca.
+ * Ouro, Vale-Troca, Permuta, Ajuste Consultora.
+ *
+ * forma_recebimento é OBRIGATÓRIO (desde 06/07/2026, migration 341) —
+ * define tanto `forma`/`gateway` quanto `comissionavel` em pagamentos_venda.
+ * Vale-Troca/Permuta/Ajuste Consultora não são dinheiro novo → comissionavel=false.
  *
  * ⚠️  BLINDAGEM: Esta rota implementa as 7 regras de ouro do módulo
  * crediário documentadas em AGENTS.md. NÃO ALTERE sem ler aquele doc.
@@ -34,16 +38,24 @@ import { zodError } from "@/lib/schemas/common";
 // Use verificar-mp para baixas com ID do Mercado Pago.
 const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
 
+// REGRA DE NEGÓCIO (06/07/2026): formas que NÃO são dinheiro novo — nunca
+// geram comissão. Ver comercial.md §2 e migration 341. Antes disso,
+// forma_recebimento era opcional e uma baixa sem forma escolhida ficava
+// para sempre com forma='A Receber', indistinguível de dinheiro real —
+// 3 pagamentos assim (Vale-Troca, permuta, desconto da consultora)
+// geraram comissão indevida no fechamento de jun/2026.
+const FORMAS_NAO_COMISSIONAVEIS = ["Vale-Troca", "Permuta", "Ajuste Consultora"];
+
 const RegistrarPagamentoSchema = z.object({
   obs: z.string().max(5000).optional(),
-  forma_recebimento: z.string().max(50).optional(),
+  forma_recebimento: z.string().min(1, "obrigatório — informe como o cliente pagou").max(50),
   // Pagamento parcial: valor efetivamente pago (default = total da conta)
   valor_pago: z.number().positive().optional(),
   // Campos específicos de Ouro — validados no handler, obrigatórios quando forma === "Ouro"
   ouro_peso: z.number().positive().optional(),
   ouro_valor_grama: z.number().positive().optional(),
   ouro_foto_path: z.string().max(500).optional(),
-}).partial();
+});
 
 export async function POST(
   req: NextRequest,
@@ -93,7 +105,11 @@ export async function POST(
   const parsed = RegistrarPagamentoSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const obs = (parsed.data.obs ?? "").trim() || null;
-  const formaRecebimento = parsed.data.forma_recebimento?.trim() || null;
+  const formaRecebimento = parsed.data.forma_recebimento.trim();
+  if (!formaRecebimento) {
+    return NextResponse.json({ error: "Informe como o cliente pagou" }, { status: 400 });
+  }
+  const comissionavel = !FORMAS_NAO_COMISSIONAVEIS.includes(formaRecebimento);
   const valorPago = parsed.data.valor_pago ?? null;
   const ouroPeso = parsed.data.ouro_peso ?? null;
   const ouroValorGrama = parsed.data.ouro_valor_grama ?? null;
@@ -159,7 +175,7 @@ export async function POST(
           CURRENT_DATE,
           'pendente',
           'venda',
-          ${`Parcial de R$ ${valorEfetivo.toFixed(2)} pago via ${formaRecebimento ?? "não informado"}. Restante: R$ ${valorRestante.toFixed(2)}`},
+          ${`Parcial de R$ ${valorEfetivo.toFixed(2)} pago via ${formaRecebimento}. Restante: R$ ${valorRestante.toFixed(2)}`},
           ${user.id}::uuid
         FROM alissonerp.contas_receber cr
         WHERE cr.id = ${contaId}
@@ -179,24 +195,20 @@ export async function POST(
         await tx`
           UPDATE alissonerp.pagamentos_venda
           SET status = 'confirmado', data_confirmacao = NOW(),
-              forma = ${formaRecebimento ?? null},
-              gateway = ${formaRecebimento ?? null},
+              forma = ${formaRecebimento},
+              gateway = ${formaRecebimento},
+              comissionavel = ${comissionavel},
               ouro_peso = ${ouroPeso},
               ouro_valor_grama = ${ouroValorGrama},
               ouro_foto_path = ${ouroFotoPath}
           WHERE id = ${pagamento.id}
         `;
-      } else if (formaRecebimento) {
-        await tx`
-          UPDATE alissonerp.pagamentos_venda
-          SET status = 'confirmado', data_confirmacao = NOW(),
-              forma = ${formaRecebimento}, gateway = ${formaRecebimento}
-          WHERE id = ${pagamento.id}
-        `;
       } else {
         await tx`
           UPDATE alissonerp.pagamentos_venda
-          SET status = 'confirmado', data_confirmacao = NOW()
+          SET status = 'confirmado', data_confirmacao = NOW(),
+              forma = ${formaRecebimento}, gateway = ${formaRecebimento},
+              comissionavel = ${comissionavel}
           WHERE id = ${pagamento.id}
         `;
       }
@@ -211,24 +223,20 @@ export async function POST(
         await tx`
           UPDATE alissonerp.pagamentos_venda
           SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW(),
-              forma = ${formaRecebimento ?? null},
-              gateway = ${formaRecebimento ?? null},
+              forma = ${formaRecebimento},
+              gateway = ${formaRecebimento},
+              comissionavel = ${comissionavel},
               ouro_peso = ${ouroPeso},
               ouro_valor_grama = ${ouroValorGrama},
               ouro_foto_path = ${ouroFotoPath}
           WHERE id = ${pagamento.id}
         `;
-      } else if (formaRecebimento) {
-        await tx`
-          UPDATE alissonerp.pagamentos_venda
-          SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW(),
-              forma = ${formaRecebimento}, gateway = ${formaRecebimento}
-          WHERE id = ${pagamento.id}
-        `;
       } else {
         await tx`
           UPDATE alissonerp.pagamentos_venda
-          SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW()
+          SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW(),
+              forma = ${formaRecebimento}, gateway = ${formaRecebimento},
+              comissionavel = ${comissionavel}
           WHERE id = ${pagamento.id}
         `;
       }
@@ -245,24 +253,24 @@ export async function POST(
     // Ocorre quando a conta_receber é um saldo restante de split anterior
     // ou quando todos os pagamentos originais já foram confirmados por outro meio.
     // Nesse caso, criamos um novo registro confirmado em vez de atualizar.
-    if (!pagamento && vendaId && formaRecebimento) {
+    if (!pagamento && vendaId) {
       if (ouroPeso && ouroValorGrama && ouroFotoPath) {
         await tx`
           INSERT INTO alissonerp.pagamentos_venda
             (venda_id, forma, valor, parcelas, status, data_confirmacao,
-             gateway, ouro_peso, ouro_valor_grama, ouro_foto_path)
+             gateway, comissionavel, ouro_peso, ouro_valor_grama, ouro_foto_path)
           VALUES (
-            ${vendaId}, ${formaRecebimento ?? null}, ${valorEfetivo}, 1, 'confirmado', NOW(),
-            ${formaRecebimento ?? null}, ${ouroPeso}, ${ouroValorGrama}, ${ouroFotoPath}
+            ${vendaId}, ${formaRecebimento}, ${valorEfetivo}, 1, 'confirmado', NOW(),
+            ${formaRecebimento}, ${comissionavel}, ${ouroPeso}, ${ouroValorGrama}, ${ouroFotoPath}
           )
         `;
       } else {
         await tx`
           INSERT INTO alissonerp.pagamentos_venda
-            (venda_id, forma, valor, parcelas, status, data_confirmacao, gateway)
+            (venda_id, forma, valor, parcelas, status, data_confirmacao, gateway, comissionavel)
           VALUES (
             ${vendaId}, ${formaRecebimento}, ${valorEfetivo}, 1, 'confirmado', NOW(),
-            ${formaRecebimento}
+            ${formaRecebimento}, ${comissionavel}
           )
         `;
       }
@@ -291,7 +299,7 @@ export async function POST(
       VALUES (
         ${contaId},
         'aviso_recebimento',
-        ${obs ?? `Recebido via ${formaRecebimento ?? "não informado"} — R$ ${valorEfetivo.toFixed(2)}${msgOuro} — ${conta.descricao}`},
+        ${obs ?? `Recebido via ${formaRecebimento} — R$ ${valorEfetivo.toFixed(2)}${msgOuro} — ${conta.descricao}`},
         ${user.id}::uuid
       )
     `;
