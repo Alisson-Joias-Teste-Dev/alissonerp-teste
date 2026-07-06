@@ -45,7 +45,8 @@ export async function POST(req: NextRequest) {
         AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = ve.vendedor_id
       WHERE pv.status = 'confirmado'
-        AND pv.forma NOT IN ('Vale-Troca', 'A Receber')
+        -- A Receber (crediário) comissiona quando CONFIRMADO (pago); só Vale-Troca não comissiona.
+        AND pv.forma <> 'Vale-Troca'
         AND pv.data_confirmacao >= ${periodoInicio}::date
         AND pv.data_confirmacao <= ${periodoFim}::date
         -- REGRA DE MIGRAÇÃO: só vendas com data_venda também em maio
@@ -102,7 +103,7 @@ export async function POST(req: NextRequest) {
             AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
           LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
           WHERE pv.status = 'confirmado'
-            AND pv.forma NOT IN ('Vale-Troca', 'A Receber')
+            AND pv.forma <> 'Vale-Troca'
             AND ve.vendedor_id = ${v.id}
             AND pv.data_confirmacao >= ${periodoInicio}::date
             AND pv.data_confirmacao <= ${periodoFim}::date
