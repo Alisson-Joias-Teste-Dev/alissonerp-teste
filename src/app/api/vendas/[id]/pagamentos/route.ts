@@ -262,10 +262,10 @@ export async function POST(
         const aplic = await aplicarValeTroca(valeNum, vendaId, valorUsarVale, user.id, tx);
         const [novoPg] = await tx`
           INSERT INTO alissonerp.pagamentos_venda (
-            venda_id, forma, gateway, valor, parcelas, status, vale_troca_id, data_confirmacao
+            venda_id, forma, gateway, valor, parcelas, status, vale_troca_id, data_confirmacao, comissionavel
           ) VALUES (
             ${vendaId}, 'Vale-Troca', NULL, ${aplic.valor_aplicado}, 1,
-            'confirmado', ${aplic.vale_aplicado_id}, now()
+            'confirmado', ${aplic.vale_aplicado_id}, now(), false
           )
           RETURNING id
         `;

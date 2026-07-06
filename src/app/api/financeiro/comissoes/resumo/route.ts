@@ -26,10 +26,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Total disponível: pagamentos confirmados elegíveis, sem VT, sem A Receber, não fechados
+    // Total disponível: pagamentos confirmados elegíveis (A Receber pago comissiona,
+    // comissionavel=false — Vale-Troca/Permuta/Ajuste Consultora — não), não fechados
     const [disponivel] = await sql`
       SELECT COALESCE(SUM(
-        CASE WHEN pv.status = 'confirmado' AND pv.forma NOT IN ('Vale-Troca', 'A Receber')
+        CASE WHEN pv.status = 'confirmado' AND pv.comissionavel = true
           THEN ROUND(ve.total_comissao * pv.valor / NULLIF(ve.total_venda, 0), 2)
           ELSE 0
         END
@@ -38,7 +39,7 @@ export async function GET(req: NextRequest) {
       JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
         AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
       WHERE pv.status = 'confirmado'
-        AND pv.forma NOT IN ('Vale-Troca', 'A Receber')
+        AND pv.comissionavel = true
         AND pv.id NOT IN (
           SELECT pagamento_venda_id FROM alissonerp.fechamento_comissao_itens
           WHERE status NOT IN ('estornado', 'cancelado')

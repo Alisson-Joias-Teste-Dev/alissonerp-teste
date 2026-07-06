@@ -737,7 +737,7 @@ function DetalheDrawer({
                   <>
                     <div style={{ fontSize: 11, color: C.cinza, marginBottom: 8 }}>Como o cliente pagou?</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                      {(["Dinheiro", "Cartão de Crédito", "Pix", "Ouro", "Vale-Troca", "Manual (MP)", "PagBank"] as const).map(f => (
+                      {(["Dinheiro", "Cartão de Crédito", "Pix", "Ouro", "Vale-Troca", "Manual (MP)", "PagBank", "Permuta", "Ajuste Consultora"] as const).map(f => (
                         <button
                           key={f}
                           onClick={() => {
