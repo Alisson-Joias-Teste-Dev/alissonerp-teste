@@ -48,8 +48,10 @@ export async function POST(req: NextRequest) {
         -- A Receber (crediário) comissiona quando CONFIRMADO (pago); comissionavel=false
         -- (Vale-Troca/Permuta/Ajuste Consultora) nunca comissiona. Ver migration 341.
         AND pv.comissionavel = true
+        -- data_confirmacao é timestamptz; "<= periodoFim::date" vira meia-noite e
+        -- exclui pagamentos confirmados durante o próprio último dia do período.
         AND pv.data_confirmacao >= ${periodoInicio}::date
-        AND pv.data_confirmacao <= ${periodoFim}::date
+        AND pv.data_confirmacao < ${periodoFim}::date + interval '1 day'
         -- REGRA DE MIGRAÇÃO: só vendas com data_venda também em maio
         AND ve.data_venda >= ${periodoInicio}::date
         AND ve.data_venda <= ${periodoFim}::date
@@ -108,7 +110,7 @@ export async function POST(req: NextRequest) {
             AND pv.comissionavel = true
             AND ve.vendedor_id = ${v.id}
             AND pv.data_confirmacao >= ${periodoInicio}::date
-            AND pv.data_confirmacao <= ${periodoFim}::date
+            AND pv.data_confirmacao < ${periodoFim}::date + interval '1 day'
             AND ve.data_venda >= ${periodoInicio}::date
             AND ve.data_venda <= ${periodoFim}::date
             AND pv.id NOT IN (

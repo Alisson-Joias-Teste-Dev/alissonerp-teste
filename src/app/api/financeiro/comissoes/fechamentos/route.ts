@@ -117,8 +117,11 @@ export async function POST(req: NextRequest) {
         -- não é dinheiro novo. Ver comercial.md §2 e migration 341.
         AND pv.comissionavel = true
         AND ve.vendedor_id = ${consultoraId}
+        -- data_confirmacao é timestamptz; comparar "<= periodoFim::date" vira meia-noite
+        -- e exclui quase todo pagamento confirmado NO PRÓPRIO último dia do período
+        -- (achado 06/07/2026: 7 pagamentos de 30/06 sumiram do fechamento por isso).
         AND pv.data_confirmacao >= ${periodoInicio}::date
-        AND pv.data_confirmacao <= ${periodoFim}::date
+        AND pv.data_confirmacao < ${periodoFim}::date + interval '1 day'
         AND pv.id NOT IN (
           SELECT pagamento_venda_id FROM alissonerp.fechamento_comissao_itens
           WHERE status NOT IN ('estornado', 'cancelado')

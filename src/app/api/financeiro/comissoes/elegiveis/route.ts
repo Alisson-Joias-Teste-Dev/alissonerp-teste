@@ -67,8 +67,10 @@ export async function GET(req: NextRequest) {
         -- que o cliente já pagou (ex.: venda 15346 ficava com R$0 mesmo quitada via Mercado Pago).
         AND pv.comissionavel = true
         AND ve.vendedor_id = ${Number(consultoraId)}
+        -- data_confirmacao é timestamptz; "<= to::date" vira meia-noite e exclui
+        -- pagamentos confirmados durante o próprio último dia do período.
         AND pv.data_confirmacao >= ${from}::date
-        AND pv.data_confirmacao <= ${to}::date
+        AND pv.data_confirmacao < ${to}::date + interval '1 day'
         AND pv.id NOT IN (
           SELECT pagamento_venda_id FROM alissonerp.fechamento_comissao_itens
           WHERE status NOT IN ('estornado', 'cancelado')
