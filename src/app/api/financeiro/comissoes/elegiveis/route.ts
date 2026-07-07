@@ -46,8 +46,11 @@ export async function GET(req: NextRequest) {
         pv.valor::text AS valor_pagamento,
         ve.total_venda::text,
         ve.total_comissao::text,
-        ROUND(pv.valor / NULLIF(ve.total_venda, 0), 6)::text AS percentual_rateio,
-        ROUND(ve.total_comissao * pv.valor / NULLIF(ve.total_venda, 0), 2)::text AS comissao_calculada,
+        -- LEAST(...,1): trava o rateio em 100% -- uma venda cujo total_venda foi
+        -- reduzido DEPOIS de um pagamento ja confirmado (desconto/ajuste tardio
+        -- sem estorno) nao pode gerar comissao acima do teorico da venda.
+        LEAST(ROUND(pv.valor / NULLIF(ve.total_venda, 0), 6), 1)::text AS percentual_rateio,
+        ROUND(ve.total_comissao * LEAST(pv.valor / NULLIF(ve.total_venda, 0), 1), 2)::text AS comissao_calculada,
         c.nome AS cliente_nome
       FROM alissonerp.pagamentos_venda pv
       JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id

@@ -31,7 +31,8 @@ export async function GET(req: NextRequest) {
     const [disponivel] = await sql`
       SELECT COALESCE(SUM(
         CASE WHEN pv.status = 'confirmado' AND pv.comissionavel = true
-          THEN ROUND(ve.total_comissao * pv.valor / NULLIF(ve.total_venda, 0), 2)
+          -- LEAST(...,1): trava o rateio em 100% (ver elegiveis/route.ts)
+          THEN ROUND(ve.total_comissao * LEAST(pv.valor / NULLIF(ve.total_venda, 0), 1), 2)
           ELSE 0
         END
       ), 0)::text AS valor
