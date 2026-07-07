@@ -1,5 +1,5 @@
 import sql from "@/lib/db";
-import { ensureTinyToken } from "@/lib/tiny-auth";
+import { ensureTinyToken, refreshTinyToken } from "@/lib/tiny-auth";
 
 interface TinyContatoResult {
   ok: boolean;
@@ -74,14 +74,18 @@ export async function syncContatoToTiny(contatoId: number, signal?: AbortSignal)
 
     console.error(`[tiny-contatos] fetch Tiny ${method} ${url} contatoId=${contatoId} duracao=${Date.now() - t0}ms`);
 
-    let res: Response;
-    try {
-      res = await fetch(url, {
+    async function doFetch(tkn: string): Promise<Response> {
+      return fetch(url, {
         method,
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${tkn}` },
         body: JSON.stringify(payload),
         signal: signal ?? AbortSignal.timeout(15000),
       });
+    }
+
+    let res: Response;
+    try {
+      res = await doFetch(token);
     } catch (err) {
       console.error(`[tiny-contatos] fetch EXCEPTION contatoId=${contatoId} duracao=${Date.now() - t0}ms`, err);
       if (err instanceof Error && err.name === "AbortError") {
@@ -91,6 +95,27 @@ export async function syncContatoToTiny(contatoId: number, signal?: AbortSignal)
     }
 
     console.error(`[tiny-contatos] fetch OK status=${res.status} contatoId=${contatoId} duracao=${Date.now() - t0}ms`);
+
+    // Se 401, tenta renovar o token e retentar (token expirado)
+    if (res.status === 401) {
+      console.error(`[tiny-contatos] 401 contatoId=${contatoId} — tentando refresh token`);
+      const newToken = await refreshTinyToken(signal);
+      if (newToken) {
+        try {
+          res = await doFetch(newToken);
+        } catch (err) {
+          console.error(`[tiny-contatos] fetch retry EXCEPTION contatoId=${contatoId} duracao=${Date.now() - t0}ms`, err);
+          if (err instanceof Error && err.name === "AbortError") {
+            return { ok: false, erro: "Tempo limite excedido ao sincronizar com Tiny. Tente novamente." };
+          }
+          return { ok: false, erro: err instanceof Error ? err.message : "Erro de comunicação com Tiny" };
+        }
+        console.error(`[tiny-contatos] fetch retry status=${res.status} contatoId=${contatoId} duracao=${Date.now() - t0}ms`);
+      } else {
+        console.error(`[tiny-contatos] refresh token falhou contatoId=${contatoId}`);
+        return { ok: false, erro: "Token Tiny expirado e não foi possível renovar. Reconecte em Configurações > Integrações." };
+      }
+    }
 
     if (!res.ok) {
       const txt = await res.text();
