@@ -477,13 +477,32 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           WHERE id = ${tarefaInfo.venda_id}
         `;
         console.log(`[desconto] vendas_erp: lock removido, desconto_aprovado_por gravado`);
+        // REGRA DE NEGÓCIO (jul/2026 — correção): aprovar o desconto libera o
+        // lock, NÃO altera a comissão. A comissão sempre segue a tabela de
+        // faixas (faixas_comissao) pelo desconto real de cada item — igual ao
+        // getComissao() do front. Até aqui isso jogava TODOS os itens pra
+        // 0,5% fixo (taxa de desconto >30%) mesmo quando o desconto real
+        // era, por ex., 21% (que vale 1,55% na tabela). Equívoco identificado
+        // pelo dono: a aprovação de um desconto de 20-30% não deveria ter o
+        // mesmo efeito na comissão que um desconto acima de 30%.
         await sql`
-          UPDATE alissonerp.itens_venda_erp
-          SET pct_comissao    = 0.5,
-              valor_comissao  = ROUND(total_item * 0.005, 2)
-          WHERE venda_id = ${tarefaInfo.venda_id}
+          UPDATE alissonerp.itens_venda_erp iv
+          SET pct_comissao   = calc.pct_comissao,
+              valor_comissao = ROUND(iv.total_item * calc.pct_comissao / 100, 2)
+          FROM (
+            SELECT i.id,
+                   CASE
+                     WHEN i.pct_desconto > 30 THEN 0.5
+                     ELSE COALESCE(fc.comissao_pct, 0)
+                   END AS pct_comissao
+            FROM alissonerp.itens_venda_erp i
+            LEFT JOIN alissonerp.faixas_comissao fc
+              ON fc.desconto_pct = ROUND(i.pct_desconto) AND fc.ativo = true
+            WHERE i.venda_id = ${tarefaInfo.venda_id}
+          ) calc
+          WHERE iv.id = calc.id
         `;
-        console.log(`[desconto] itens_venda_erp: comissão → 0,5%`);
+        console.log(`[desconto] itens_venda_erp: comissão recalculada pela tabela de faixas`);
       } else {
         await sql`
           UPDATE alissonerp.vendas_erp
