@@ -1980,10 +1980,12 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
     setClienteSyncMsg(null);
     try {
       const res = await fetch(`/api/contatos/${venda.cliente_id}/tiny-sync`, { method: "POST" });
-      const data = await res.json() as { ok?: boolean; tiny_id?: number; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Erro ao sincronizar cliente");
+      const text = await res.text();
+      let data: Record<string, unknown> = {};
+      try { data = JSON.parse(text); } catch { data = { error: "Resposta inesperada do servidor. Tente novamente." }; }
+      if (!res.ok) throw new Error((data.error as string) ?? "Erro ao sincronizar cliente");
       setClienteSyncMsg("Cliente enviado ao Tiny com sucesso!");
-      setVenda(prev => prev ? { ...prev, cliente_id_tiny: data.tiny_id ?? prev.cliente_id_tiny } : prev);
+      setVenda(prev => prev ? { ...prev, cliente_id_tiny: (data.tiny_id as number) ?? prev.cliente_id_tiny } : prev);
     } catch (e) {
       setClienteSyncMsg(e instanceof Error ? e.message : "Erro ao sincronizar cliente");
     } finally {
