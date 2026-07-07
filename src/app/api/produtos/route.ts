@@ -612,47 +612,46 @@ export async function POST(req: NextRequest) {
       const [seqPai] = await tx<{ id: string }[]>`SELECT nextval('alissonerp.seq_produto_id') AS id`;
       const paiId = Number(seqPai.id);
 
-      // INSERT pai em alissonerp.erp_produtos
-      const [prodPai] = await tx<{ id_produto: number; sku: string; nome: string; preco_sync: string | null }[]>`
-        INSERT INTO alissonerp.erp_produtos
-          (produto_id, sku, nome, tipo_metal, situacao,
-           peso_precificado, markup, fator,
-           categoria_precificacao, categoria, tem_pedra_preciosa)
-        VALUES
-          (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
-           ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
-           ${categoria_precificacao ?? null}, ${categoria_geral ?? null}, ${tem_pedra_preciosa ?? false})
-        RETURNING produto_id AS id_produto, sku, nome, preco_sync
-      `;
-
-      // INSERT pai em erp_produtos — fornecedor só entra se a coluna existir
-      // (migration 159 pendente = não entra, silencioso).
+      // INSERT pai em alissonerp.erp_produtos (todos os campos em 1 row)
+      // NOTA: tabela tem UNIQUE(produto_id) e UNIQUE(sku) — NÃO podem existir 2 rows com mesmo produto_id.
       const temColFornecedor = await colunaExiste("alissonerp", "erp_produtos", "fornecedor", tx);
       const [erpPai] = temColFornecedor
-        ? await tx<{ id: number; produto_id: number; sku: string }[]>`
+        ? await tx<{ id: number; id_produto: number; sku: string; nome: string; preco_sync: string | null }[]>`
             INSERT INTO alissonerp.erp_produtos
-              (produto_id, sku, nome, eh_pai, eh_variacao,
+              (produto_id, sku, nome, tipo_metal, situacao,
+               peso_precificado, markup, fator,
+               categoria_precificacao, categoria, tem_pedra_preciosa,
+               eh_pai, eh_variacao,
                cor_metal, largura_aro, altura_aro, base, fornecedor)
             VALUES
-              (${paiId}, ${sku}, ${nome.trim()}, ${temVariacoes}, false,
+              (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
+               ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
+               ${categoria_precificacao ?? null}, ${categoria_geral ?? null}, ${tem_pedra_preciosa ?? false},
+               ${temVariacoes}, false,
                ${cor_metal ?? null},
                ${medidas?.largura_aro ?? null},
                ${medidas?.altura_aro  ?? null},
                ${medidas?.base        ?? null},
                ${fornecedor ?? null})
-            RETURNING id, produto_id, sku
+            RETURNING id, produto_id AS id_produto, sku, nome, preco_sync
           `
-        : await tx<{ id: number; produto_id: number; sku: string }[]>`
+        : await tx<{ id: number; id_produto: number; sku: string; nome: string; preco_sync: string | null }[]>`
             INSERT INTO alissonerp.erp_produtos
-              (produto_id, sku, nome, eh_pai, eh_variacao,
+              (produto_id, sku, nome, tipo_metal, situacao,
+               peso_precificado, markup, fator,
+               categoria_precificacao, categoria, tem_pedra_preciosa,
+               eh_pai, eh_variacao,
                cor_metal, largura_aro, altura_aro, base)
             VALUES
-              (${paiId}, ${sku}, ${nome.trim()}, ${temVariacoes}, false,
+              (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
+               ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
+               ${categoria_precificacao ?? null}, ${categoria_geral ?? null}, ${tem_pedra_preciosa ?? false},
+               ${temVariacoes}, false,
                ${cor_metal ?? null},
                ${medidas?.largura_aro ?? null},
                ${medidas?.altura_aro  ?? null},
                ${medidas?.base        ?? null})
-            RETURNING id, produto_id, sku
+            RETURNING id, produto_id AS id_produto, sku, nome, preco_sync
           `;
 
       // Mestre de fornecedores: só UPSERT se a tabela existir.
@@ -739,30 +738,23 @@ export async function POST(req: NextRequest) {
         if (combo.comprimento != null) sufixos.push(`${combo.comprimento}cm`);
         const nomeVar = sufixos.length > 0 ? `${nome.trim()} ${sufixos.join(" ")}` : `${nome.trim()} ${contador}`;
 
-        // INSERT variação em alissonerp.erp_produtos
-        await tx`
-          INSERT INTO alissonerp.erp_produtos
-            (produto_id, sku, nome, tipo_metal, situacao,
-             peso_precificado, markup, fator,
-             categoria_precificacao, tem_pedra_preciosa)
-          VALUES
-            (${varId}, ${skuVar}, ${nomeVar},
-             ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
-             ${pesoVar}, ${Number(markup)}, ${Number(fator ?? 1)},
-             ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false})
-        `;
-
-        // INSERT variação em erp_produtos (fornecedor opcional)
+        // INSERT variação em alissonerp.erp_produtos (todos os campos em 1 row)
+        // UNIQUE(produto_id) e UNIQUE(sku) impedem 2 rows por variação.
         if (temColFornecedor) {
           await tx`
             INSERT INTO alissonerp.erp_produtos
-              (produto_id, sku, nome,
+              (produto_id, sku, nome, tipo_metal, situacao,
+               peso_precificado, markup, fator,
+               categoria_precificacao, tem_pedra_preciosa,
                parent_sku, parent_id,
                eh_variacao, eh_pai,
                sufixo_variacao, numeracao, cor_metal, comprimento,
                largura_aro, altura_aro, base, fornecedor)
             VALUES
               (${varId}, ${skuVar}, ${nomeVar},
+               ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
+               ${pesoVar}, ${Number(markup)}, ${Number(fator ?? 1)},
+               ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false},
                ${sku}, ${erpPai.id},
                true, false,
                ${String(contador)},
@@ -777,13 +769,18 @@ export async function POST(req: NextRequest) {
         } else {
           await tx`
             INSERT INTO alissonerp.erp_produtos
-              (produto_id, sku, nome,
+              (produto_id, sku, nome, tipo_metal, situacao,
+               peso_precificado, markup, fator,
+               categoria_precificacao, tem_pedra_preciosa,
                parent_sku, parent_id,
                eh_variacao, eh_pai,
                sufixo_variacao, numeracao, cor_metal, comprimento,
                largura_aro, altura_aro, base)
             VALUES
               (${varId}, ${skuVar}, ${nomeVar},
+               ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
+               ${pesoVar}, ${Number(markup)}, ${Number(fator ?? 1)},
+               ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false},
                ${sku}, ${erpPai.id},
                true, false,
                ${String(contador)},
@@ -843,7 +840,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      return { pai: prodPai, erp: erpPai, variacoes: variacoesCriadas };
+      return { pai: erpPai, erp: erpPai, variacoes: variacoesCriadas };
     });
 
     // ── Recalcular preço de pedras (fora da transação) ───────────────────────
