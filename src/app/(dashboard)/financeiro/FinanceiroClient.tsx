@@ -3245,7 +3245,7 @@ function TabComissoes({ fechamentos, vendedores }: { fechamentos: any[]; vendedo
                 <div><span style={{ color: C.cinza }}>Aprovado por: </span><span style={{ color: "#1A1A1A" }}>{detail.approved_by ?? "—"}</span></div>
                 <div><span style={{ color: C.cinza }}>Aprovado em: </span><span style={{ color: "#1A1A1A" }}>{detail.approved_at ? fmtDate(detail.approved_at) : "—"}</span></div>
                 <div><span style={{ color: C.cinza }}>Conta Pagar: </span><span style={{ color: "#1A1A1A" }}>{detail.conta_pagar_id ? `#${detail.conta_pagar_id}` : "—"}</span></div>
-                <div><span style={{ color: C.cinza }}>Itens: </span><span style={{ color: "#1A1A1A" }}>{detail.qtd_itens}</span></div>
+                <div><span style={{ color: C.cinza }}>Itens: </span><span style={{ color: "#1A1A1A" }}>{(detail.itens ?? []).filter((i: any) => i.status !== "cancelado").length}</span></div>
               </div>
             </div>
 
@@ -3312,25 +3312,34 @@ function TabComissoes({ fechamentos, vendedores }: { fechamentos: any[]; vendedo
                     })}
                   </tbody>
                   <tfoot>
+                    {(() => {
+                      // Itens cancelados não contam em NENHUM total do rodapé — eles ficam
+                      // na tabela só pra auditoria (ver comercial.md §2). Somar sem filtrar
+                      // aqui foi o bug que fez o rodapé mostrar R$3.156,29 quando o total
+                      // real (o mesmo do card do topo) já era R$2.994,25 (08/07/2026).
+                      const itensAtivos = (detail.itens ?? []).filter((i: any) => i.status !== "cancelado");
+                      return (
                     <tr style={{ borderTop: `2px solid ${C.esmeralda}`, backgroundColor: C.cremeBg }}>
                       <td className="px-3 py-2 text-xs font-bold" style={{ color: C.esmeralda }} colSpan={3}>
-                        Total ({detail.itens?.length ?? 0} itens)
+                        Total ({itensAtivos.length} itens)
                       </td>
                       <td className="px-3 py-2 text-xs tabular-nums font-bold" style={{ color: C.esmeralda }}>
-                        {fmt((detail.itens ?? []).reduce((s: number, i: any) => s + Number(i.valor_pagamento), 0))}
-                      </td>
-                      <td className="px-3 py-2 text-xs" />
-                      <td className="px-3 py-2 text-xs" />
-                      <td className="px-3 py-2 text-xs tabular-nums font-bold" style={{ color: C.esmeralda }}>
-                        {fmt((detail.itens ?? []).reduce((s: number, i: any) => s + Number(i.valor_comissionavel), 0))}
+                        {fmt(itensAtivos.reduce((s: number, i: any) => s + Number(i.valor_pagamento), 0))}
                       </td>
                       <td className="px-3 py-2 text-xs" />
                       <td className="px-3 py-2 text-xs" />
                       <td className="px-3 py-2 text-xs tabular-nums font-bold" style={{ color: C.esmeralda }}>
-                        {fmt((detail.itens ?? []).reduce((s: number, i: any) => s + Number(i.comissao_calculada), 0))}
+                        {fmt(itensAtivos.reduce((s: number, i: any) => s + Number(i.valor_comissionavel), 0))}
+                      </td>
+                      <td className="px-3 py-2 text-xs" />
+                      <td className="px-3 py-2 text-xs" />
+                      <td className="px-3 py-2 text-xs tabular-nums font-bold" style={{ color: C.esmeralda }}>
+                        {fmt(itensAtivos.reduce((s: number, i: any) => s + Number(i.comissao_calculada), 0))}
                       </td>
                       <td className="px-3 py-2 text-xs" />
                     </tr>
+                      );
+                    })()}
                   </tfoot>
                 </table>
               </div>
