@@ -1439,15 +1439,30 @@ function DetalheDrawer({
   );
 }
 
+// Formas aceitas na cascata — precisa bater com FORMAS_ACEITAS do back
+// (src/app/api/crediario/venda/[vendaId]/receber-cascata/route.ts).
+const FORMAS_CASCATA = ["Dinheiro", "Pix", "Cartão de Crédito", "Manual (MP)"] as const;
+
+interface CascataDetalhe {
+  contaId: number;
+  descricao: string;
+  valorConta: number;
+  aplicado: number;
+  quitada: boolean;
+}
+
 // ── Componente: Card de venda (agrupa parcelas da mesma venda) ────────────────
 function VendaCard({
+  vendaId,
   numeroVenda,
   clienteNome,
   vendedorNome,
   dataVenda,
   parcelas,
   isGerente,
+  podeBaixar,
   onSelectParcela,
+  onCascataConfirmada,
 }: {
   vendaId?: number | null;
   numeroVenda: string | null;
@@ -1456,9 +1471,18 @@ function VendaCard({
   dataVenda: string | null;
   parcelas: CrediarioItem[];
   isGerente: boolean;
+  podeBaixar: boolean;
   onSelectParcela: (id: number) => void;
+  onCascataConfirmada: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [cascataAberta, setCascataAberta] = useState(false);
+  const [formaCascata, setFormaCascata] = useState<typeof FORMAS_CASCATA[number]>("Dinheiro");
+  const [valorCascata, setValorCascata] = useState("");
+  const [paymentIdCascata, setPaymentIdCascata] = useState("");
+  const [enviandoCascata, setEnviandoCascata] = useState(false);
+  const [erroCascata, setErroCascata] = useState("");
+  const [resultadoCascata, setResultadoCascata] = useState<CascataDetalhe[] | null>(null);
 
   const totalPendente = parcelas.filter(p => p.situacao === "pendente").reduce((s, p) => s + p.valor, 0);
   const totalVencido  = parcelas.filter(p => p.status_aging === "vencido" && p.situacao === "pendente").reduce((s, p) => s + p.valor, 0);
@@ -1471,6 +1495,77 @@ function VendaCard({
   const statusCor   = hasVencido ? C.vermelho : hasBreve ? C.ambar : C.esmeralda;
   const statusBg    = hasVencido ? C.vermelhoLt : hasBreve ? C.ambarLt : C.esmeraldaLt;
   const statusLabel = hasVencido ? "vencido" : hasBreve ? "vence em breve" : "em dia";
+
+  // Parcelas pendentes na mesma ordem que o back distribui (vencimento asc).
+  // new Date(...) em vez de localeCompare: data_vencimento vem como string
+  // quando recarregado via API, mas como Date quando vem direto do SSR —
+  // .getTime() funciona nos dois casos.
+  const pendentesOrdenadas = useMemo(
+    () =>
+      parcelas
+        .filter(p => p.situacao === "pendente")
+        .slice()
+        .sort((a, b) => new Date(a.data_vencimento ?? 0).getTime() - new Date(b.data_vencimento ?? 0).getTime()),
+    [parcelas],
+  );
+
+  // Preview ao vivo — só formas manuais têm valor digitado; Manual (MP) mostra
+  // o resultado real só depois de consultar o Mercado Pago (não dá preview).
+  const valorNumCascata = parseFloat(valorCascata.replace(",", ".")) || 0;
+  const previewCascata: CascataDetalhe[] = useMemo(() => {
+    if (formaCascata === "Manual (MP)" || valorNumCascata <= 0) return [];
+    let restante = valorNumCascata;
+    const out: CascataDetalhe[] = [];
+    for (const p of pendentesOrdenadas) {
+      if (restante <= 0.001) break;
+      const aplicado = restante >= p.valor - 0.001 ? p.valor : restante;
+      out.push({
+        contaId: p.conta_receber_id,
+        descricao: p.descricao,
+        valorConta: p.valor,
+        aplicado: Math.round(aplicado * 100) / 100,
+        quitada: aplicado >= p.valor - 0.001,
+      });
+      restante = Math.round((restante - aplicado) * 100) / 100;
+    }
+    return out;
+  }, [formaCascata, valorNumCascata, pendentesOrdenadas]);
+
+  async function handleReceberCascata() {
+    if (!vendaId) return;
+    setErroCascata("");
+    setEnviandoCascata(true);
+    try {
+      const body: Record<string, unknown> = { forma_recebimento: formaCascata };
+      if (formaCascata === "Manual (MP)") {
+        if (!paymentIdCascata.trim()) {
+          setErroCascata("Informe o ID do pagamento do Mercado Pago");
+          setEnviandoCascata(false);
+          return;
+        }
+        body.payment_id = paymentIdCascata.trim();
+      } else {
+        if (valorNumCascata <= 0) {
+          setErroCascata("Informe o valor recebido");
+          setEnviandoCascata(false);
+          return;
+        }
+        body.valor_total = valorNumCascata;
+      }
+      const resp = await apiFetch<{ detalhe: CascataDetalhe[] }>(
+        `/api/crediario/venda/${vendaId}/receber-cascata`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      );
+      setResultadoCascata(resp.detalhe);
+      setValorCascata("");
+      setPaymentIdCascata("");
+      onCascataConfirmada();
+    } catch (e) {
+      setErroCascata(e instanceof Error ? e.message : "Erro ao registrar recebimento");
+    } finally {
+      setEnviandoCascata(false);
+    }
+  }
 
   return (
     <div style={{
@@ -1539,6 +1634,134 @@ function VendaCard({
         </div>
       </button>
 
+      {/* Receber pagamento — atalho pra antecipação (cobre 1+ parcelas de uma vez) */}
+      {podeBaixar && temPendente && vendaId && (
+        <div style={{ padding: cascataAberta ? "10px 16px 14px" : "0 16px", borderTop: cascataAberta ? `1px solid ${C.cremeBorder}` : "none" }}>
+          {!cascataAberta ? (
+            <button
+              onClick={() => { setCascataAberta(true); setResultadoCascata(null); setErroCascata(""); }}
+              style={{
+                width: "100%", textAlign: "left", background: "transparent", border: "none",
+                cursor: "pointer", padding: "8px 0", fontSize: 12, fontWeight: 600, color: C.esmeralda,
+              }}
+            >
+              + Receber pagamento
+            </button>
+          ) : resultadoCascata ? (
+            <div style={{ padding: "10px 0" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.esmeralda, marginBottom: 6 }}>
+                Recebimento registrado
+              </div>
+              {resultadoCascata.map(d => (
+                <div key={d.contaId} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.cinza, padding: "2px 0" }}>
+                  <span>{d.descricao}</span>
+                  <span style={{ color: d.quitada ? C.esmeralda : C.ambar, fontWeight: 600 }}>
+                    {d.quitada ? `quitada — ${fmtBRL(d.aplicado)}` : `parcial — ${fmtBRL(d.aplicado)}`}
+                  </span>
+                </div>
+              ))}
+              <button
+                onClick={() => setCascataAberta(false)}
+                style={{
+                  marginTop: 8, background: "transparent", border: `1px solid ${C.cremeBorder}`,
+                  borderRadius: 8, padding: "6px 12px", fontSize: 12, cursor: "pointer", color: C.cinza,
+                }}
+              >
+                Fechar
+              </button>
+            </div>
+          ) : (
+            <div style={{ padding: "6px 0 10px" }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                {FORMAS_CASCATA.map(f => (
+                  <button
+                    key={f}
+                    onClick={() => setFormaCascata(f)}
+                    style={{
+                      padding: "5px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+                      border: `1px solid ${formaCascata === f ? C.esmeralda : C.cremeBorder}`,
+                      background: formaCascata === f ? C.esmeraldaLt : "#fff",
+                      color: formaCascata === f ? C.esmeralda : C.cinza,
+                      fontWeight: formaCascata === f ? 600 : 400,
+                    }}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+
+              {formaCascata === "Manual (MP)" ? (
+                <input
+                  type="text"
+                  placeholder="ID do pagamento no Mercado Pago"
+                  value={paymentIdCascata}
+                  onChange={e => setPaymentIdCascata(e.target.value)}
+                  style={{
+                    width: "100%", padding: "8px 10px", borderRadius: 8,
+                    border: `1px solid ${C.cremeBorder}`, fontSize: 13, marginBottom: 8,
+                  }}
+                />
+              ) : (
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Valor recebido (ex: 500,00)"
+                  value={valorCascata}
+                  onChange={e => setValorCascata(e.target.value)}
+                  style={{
+                    width: "100%", padding: "8px 10px", borderRadius: 8,
+                    border: `1px solid ${C.cremeBorder}`, fontSize: 13, marginBottom: 8,
+                  }}
+                />
+              )}
+
+              {previewCascata.length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  {previewCascata.map(d => (
+                    <div key={d.contaId} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.cinza, padding: "2px 0" }}>
+                      <span>{d.descricao}</span>
+                      <span style={{ color: d.quitada ? C.esmeralda : C.ambar, fontWeight: 600 }}>
+                        {d.quitada ? `quitada — ${fmtBRL(d.aplicado)}` : `parcial — ${fmtBRL(d.aplicado)} (falta ${fmtBRL(d.valorConta - d.aplicado)})`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {erroCascata && (
+                <div style={{ fontSize: 12, color: C.vermelho, marginBottom: 8 }}>{erroCascata}</div>
+              )}
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={handleReceberCascata}
+                  disabled={enviandoCascata}
+                  style={{
+                    background: C.esmeralda, color: "#fff", border: "none", borderRadius: 8,
+                    padding: "8px 16px", fontSize: 13, fontWeight: 600,
+                    cursor: enviandoCascata ? "default" : "pointer", opacity: enviandoCascata ? 0.7 : 1,
+                  }}
+                >
+                  {enviandoCascata
+                    ? <><Loader2 size={13} style={{ display: "inline", animation: "spin 1s linear infinite", marginRight: 6 }} />Registrando...</>
+                    : "Confirmar recebimento"}
+                </button>
+                <button
+                  onClick={() => setCascataAberta(false)}
+                  disabled={enviandoCascata}
+                  style={{
+                    background: "transparent", border: `1px solid ${C.cremeBorder}`, borderRadius: 8,
+                    padding: "8px 16px", fontSize: 13, cursor: "pointer", color: C.cinza,
+                  }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Lista de parcelas */}
       {expanded && (
         <div style={{ padding: "8px 16px 12px" }}>
@@ -1605,6 +1828,12 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   // Quem pode registrar baixa: gerente + consultora (no back, a consultora
   // só baixa conta de venda DELA — ownership em requireCrediarioOwnership).
   const podeBaixar = isGerente || userRole === "consultora";
+  // Cascata (recebe várias parcelas de uma vez): restrita a gerente/dev/admin/
+  // diretor. NÃO libera consultora aqui — a rota nova ainda não tem a mesma
+  // trava de "só a venda dela" que o baixa avulso tem (ownership pendente,
+  // já sinalizado ao Jonathan como pendência separada). Evita alargar esse
+  // buraco enquanto ele não for corrigido.
+  const podeCascata = isGerente || userRole === "diretor";
 
   // Deep-link "Receber no Crediario" (vindo da tela da venda):
   // /crediario?venda=<id> abre direto o drawer da conta pendente daquela venda,
@@ -2042,7 +2271,9 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
                 dataVenda={first.data_venda ?? first.venda_created_at ?? first.created_at}
                 parcelas={parcelas}
                 isGerente={isGerente}
+                podeBaixar={podeCascata}
                 onSelectParcela={setSelectedContaId}
+                onCascataConfirmada={() => void reload(filtroSituacao, filtroAging)}
               />
             );
           })
