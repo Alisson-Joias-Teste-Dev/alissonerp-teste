@@ -260,7 +260,7 @@ export async function processarAprovacaoCredito(
   const [tarefa] = await sql`
     SELECT t.id, t.venda_id, t.tipo AS tipo_tarefa, t.criado_por,
            v.id AS vid, v.numero_venda, v.situacao, v.aprovacao_credito_tipo,
-           v.total_comissao
+           v.total_comissao, v.data_venda::text AS data_venda
     FROM alissonerp.tarefas t
     JOIN alissonerp.vendas_erp v ON v.id = t.venda_id
     WHERE t.id = ${tarefaId}
@@ -364,7 +364,15 @@ export async function processarAprovacaoCredito(
   // tipo 'gerente' → comissão da consultora MANTIDA, nada a fazer: o saldo de crédito
   // é DERIVADO ao vivo (limite − A Receber pendente, v2.78.0), não há contador a
   // debitar. tipo 'diretor' (crédito sem saldo) → zera a comissão de todos os itens.
-  if (tipo === "diretor") {
+  //
+  // REGRA DE NEGÓCIO (decisão Jonathan, 27/06/2026): o zeramento só vale a
+  // partir de julho/2026 — maio e junho foram restaurados manualmente após
+  // pente-fino (ver comercial.md §2). Antes desta correção (06/07/2026) essa
+  // condição de data não existia no código, então aprovações de diretor em
+  // junho continuavam zerando a comissão (ex.: vendas 15672/15678, corrigidas
+  // manualmente em prod).
+  const ZERAMENTO_CREDITO_DIRETOR_A_PARTIR_DE = "2026-07-01";
+  if (tipo === "diretor" && (tarefa.data_venda as string) >= ZERAMENTO_CREDITO_DIRETOR_A_PARTIR_DE) {
     await sql`
       UPDATE alissonerp.itens_venda_erp
       SET pct_comissao = 0, valor_comissao = 0

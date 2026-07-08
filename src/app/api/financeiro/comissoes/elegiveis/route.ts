@@ -46,8 +46,15 @@ export async function GET(req: NextRequest) {
         pv.valor::text AS valor_pagamento,
         ve.total_venda::text,
         ve.total_comissao::text,
-        ROUND(pv.valor / NULLIF(ve.total_venda, 0), 6)::text AS percentual_rateio,
-        ROUND(ve.total_comissao * pv.valor / NULLIF(ve.total_venda, 0), 2)::text AS comissao_calculada,
+        -- LEAST(...,1): trava o rateio em 100% -- uma venda cujo total_venda foi
+        -- reduzido DEPOIS de um pagamento ja confirmado (desconto/ajuste tardio
+        -- sem estorno) nao pode gerar comissao acima do teorico da venda.
+        LEAST(ROUND(pv.valor / NULLIF(ve.total_venda, 0), 6), 1)::text AS percentual_rateio,
+        -- comissionavel=false (Vale-Troca/Permuta/Ajuste Consultora) sempre R$0 — não é
+        -- dinheiro novo. Ainda assim aparece na prévia (comissao_calculada=0), pra ficar
+        -- visível/auditável em vez de sumir silenciosamente da consulta (08/07/2026).
+        CASE WHEN pv.comissionavel THEN ROUND(ve.total_comissao * LEAST(pv.valor / NULLIF(ve.total_venda, 0), 1), 2) ELSE 0 END::text AS comissao_calculada,
+        pv.comissionavel,
         c.nome AS cliente_nome
       FROM alissonerp.pagamentos_venda pv
       JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
@@ -57,15 +64,13 @@ export async function GET(req: NextRequest) {
         -- REGRA DE NEGÓCIO: comissiona toda forma JÁ RECEBIDA. 'A Receber' (crediário)
         -- comissiona quando CONFIRMADO (pago) — o pv.status='confirmado' acima já garante
         -- isso; A Receber PENDENTE continua de fora (ainda não entrou).
-        -- comissionavel=false (Vale-Troca/Permuta/Ajuste Consultora) nunca comissiona —
-        -- não é dinheiro novo. Fonte única de verdade: coluna comissionavel (migration 341),
-        -- não a string forma (que pode ficar 'A Receber' se a baixa não rewritar forma).
         -- IMPACTO se voltar a excluir 'A Receber': a consultora perde comissão sobre crediário
         -- que o cliente já pagou (ex.: venda 15346 ficava com R$0 mesmo quitada via Mercado Pago).
-        AND pv.comissionavel = true
         AND ve.vendedor_id = ${Number(consultoraId)}
+        -- data_confirmacao é timestamptz; "<= to::date" vira meia-noite e exclui
+        -- pagamentos confirmados durante o próprio último dia do período.
         AND pv.data_confirmacao >= ${from}::date
-        AND pv.data_confirmacao <= ${to}::date
+        AND pv.data_confirmacao < ${to}::date + interval '1 day'
         AND pv.id NOT IN (
           SELECT pagamento_venda_id FROM alissonerp.fechamento_comissao_itens
           WHERE status NOT IN ('estornado', 'cancelado')
@@ -85,6 +90,7 @@ export async function GET(req: NextRequest) {
       valor_comissionavel: Number(e.valor_pagamento),
       percentual_rateio: Number(e.percentual_rateio),
       comissao_calculada: Number(e.comissao_calculada),
+      comissionavel: Boolean(e.comissionavel),
       cliente_nome: e.cliente_nome,
     })));
   } catch (err) {

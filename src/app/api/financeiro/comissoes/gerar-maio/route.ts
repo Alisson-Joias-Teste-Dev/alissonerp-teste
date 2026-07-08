@@ -48,8 +48,10 @@ export async function POST(req: NextRequest) {
         -- A Receber (crediário) comissiona quando CONFIRMADO (pago); comissionavel=false
         -- (Vale-Troca/Permuta/Ajuste Consultora) nunca comissiona. Ver migration 341.
         AND pv.comissionavel = true
+        -- data_confirmacao é timestamptz; "<= periodoFim::date" vira meia-noite e
+        -- exclui pagamentos confirmados durante o próprio último dia do período.
         AND pv.data_confirmacao >= ${periodoInicio}::date
-        AND pv.data_confirmacao <= ${periodoFim}::date
+        AND pv.data_confirmacao < ${periodoFim}::date + interval '1 day'
         -- REGRA DE MIGRAÇÃO: só vendas com data_venda também em maio
         AND ve.data_venda >= ${periodoInicio}::date
         AND ve.data_venda <= ${periodoFim}::date
@@ -84,6 +86,7 @@ export async function POST(req: NextRequest) {
           total_comissao: string;
           percentual_rateio: string;
           comissao_calculada: string;
+          comissionavel: boolean;
           cliente_nome: string | null;
         }>>`
           SELECT
@@ -96,18 +99,20 @@ export async function POST(req: NextRequest) {
             pv.valor::text AS valor_pagamento,
             ve.total_venda::text,
             ve.total_comissao::text,
-            ROUND(pv.valor / NULLIF(ve.total_venda, 0), 6)::text AS percentual_rateio,
-            ROUND(ve.total_comissao * pv.valor / NULLIF(ve.total_venda, 0), 2)::text AS comissao_calculada,
+            -- LEAST(...,1): trava o rateio em 100% (ver elegiveis/route.ts)
+            LEAST(ROUND(pv.valor / NULLIF(ve.total_venda, 0), 6), 1)::text AS percentual_rateio,
+            -- comissionavel=false ainda entra no fechamento (R$0) pra ficar auditável (08/07/2026)
+            CASE WHEN pv.comissionavel THEN ROUND(ve.total_comissao * LEAST(pv.valor / NULLIF(ve.total_venda, 0), 1), 2) ELSE 0 END::text AS comissao_calculada,
+            pv.comissionavel,
             c.nome AS cliente_nome
           FROM alissonerp.pagamentos_venda pv
           JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
             AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
           LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
           WHERE pv.status = 'confirmado'
-            AND pv.comissionavel = true
             AND ve.vendedor_id = ${v.id}
             AND pv.data_confirmacao >= ${periodoInicio}::date
-            AND pv.data_confirmacao <= ${periodoFim}::date
+            AND pv.data_confirmacao < ${periodoFim}::date + interval '1 day'
             AND ve.data_venda >= ${periodoInicio}::date
             AND ve.data_venda <= ${periodoFim}::date
             AND pv.id NOT IN (
@@ -158,7 +163,7 @@ export async function POST(req: NextRequest) {
               ${v.id}, ${e.cliente_nome}, ${e.data_venda}::date, ${e.data_recebimento}::date, ${e.forma_recebimento},
               ${Number(e.total_venda)}, ${Number(e.valor_pagamento)}, ${Number(e.valor_pagamento)},
               ${Number(e.percentual_rateio)}, ${Number(e.total_comissao)},
-              ${Number(e.comissao_calculada)}, 'liberado', 'normal'
+              ${Number(e.comissao_calculada)}, 'liberado', ${e.comissionavel ? "normal" : "nao_comissionavel"}
             )
           `;
         }
