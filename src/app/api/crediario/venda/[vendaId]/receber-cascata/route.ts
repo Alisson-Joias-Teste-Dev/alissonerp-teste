@@ -42,6 +42,11 @@ import { internalError } from "@/lib/api-error";
 // separadamente ao Jonathan, fora do escopo desta feature).
 const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
 
+// Doc de regras de negócio (docs/regras-negocio/crediario.md §6): "a consultora
+// registra o pagamento (TODAS AS FORMAS PERMITIDAS)" — sem restrição de Pix/
+// Cartão manual a dev/comprovante. Isso diverge do que registrar-pagamento/
+// route.ts faz hoje (FORMAS_MANUAL_RESTRITO); já sinalizado ao Jonathan como
+// divergência doc x código, fora do escopo desta feature. Aqui seguimos o doc.
 const FORMAS_ACEITAS = ["Dinheiro", "Pix", "Cartão de Crédito", "Manual (MP)"] as const;
 
 const ReceberCascataSchema = z.object({

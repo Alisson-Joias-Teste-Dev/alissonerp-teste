@@ -1495,12 +1495,15 @@ function VendaCard({
   const statusLabel = hasVencido ? "vencido" : hasBreve ? "vence em breve" : "em dia";
 
   // Parcelas pendentes na mesma ordem que o back distribui (vencimento asc).
+  // new Date(...) em vez de localeCompare: data_vencimento vem como string
+  // quando recarregado via API, mas como Date quando vem direto do SSR —
+  // .getTime() funciona nos dois casos.
   const pendentesOrdenadas = useMemo(
     () =>
       parcelas
         .filter(p => p.situacao === "pendente")
         .slice()
-        .sort((a, b) => (a.data_vencimento ?? "").localeCompare(b.data_vencimento ?? "")),
+        .sort((a, b) => new Date(a.data_vencimento ?? 0).getTime() - new Date(b.data_vencimento ?? 0).getTime()),
     [parcelas],
   );
 
