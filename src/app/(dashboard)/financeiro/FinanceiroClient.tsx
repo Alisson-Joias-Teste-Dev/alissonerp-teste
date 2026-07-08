@@ -3273,31 +3273,41 @@ function TabComissoes({ fechamentos, vendedores }: { fechamentos: any[]; vendedo
                       const da = a.data_recebimento ?? "";
                       const db = b.data_recebimento ?? "";
                       return sortAsc ? da.localeCompare(db) : db.localeCompare(da);
-                    }).map((item: any) => (
-                      <tr key={item.id} className="border-t" style={{ borderColor: C.cremeBorder }}>
-                        <td className="px-3 py-2 text-xs">
+                    }).map((item: any) => {
+                      const cancelado = item.status === "cancelado";
+                      const strike = cancelado ? "line-through" : undefined;
+                      return (
+                      <tr key={item.id} className="border-t" style={{ borderColor: C.cremeBorder, opacity: cancelado ? 0.45 : 1 }}>
+                        <td className="px-3 py-2 text-xs" style={{ textDecoration: strike }}>
                           {item.venda_id ? (
                             <a href={`/vendas/${item.venda_id}`} target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: C.esmeralda, fontWeight: 500 }}>#{item.numero_venda_snapshot ?? item.venda_id}</a>
                           ) : (
                             <span style={{ color: "#1A1A1A" }}>#{item.numero_venda_snapshot ?? "—"}</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-xs" style={{ color: C.cinza }}>{item.data_venda ? fmtDate(item.data_venda) : "—"}</td>
-                        <td className="px-3 py-2 text-xs" style={{ color: C.cinza }}>{item.cliente_nome_snapshot ?? "—"}</td>
-                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: "#1A1A1A" }}>{fmt(item.valor_pagamento)}</td>
-                        <td className="px-3 py-2 text-xs" style={{ color: "#1A1A1A" }}>{item.forma_recebimento}</td>
-                        <td className="px-3 py-2 text-xs" style={{ color: C.cinza }}>{item.data_recebimento ? fmtDate(item.data_recebimento) : "—"}</td>
-                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: "#1A1A1A" }}>{fmt(item.valor_comissionavel)}</td>
-                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: C.cinza }}>{(Number(item.percentual_rateio) * 100).toFixed(2)}%</td>
-                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: C.ambar }}>
+                        <td className="px-3 py-2 text-xs" style={{ color: C.cinza, textDecoration: strike }}>{item.data_venda ? fmtDate(item.data_venda) : "—"}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: C.cinza, textDecoration: strike }}>{item.cliente_nome_snapshot ?? "—"}</td>
+                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: "#1A1A1A", textDecoration: strike }}>{fmt(item.valor_pagamento)}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: "#1A1A1A", textDecoration: strike }}>{item.forma_recebimento}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: C.cinza, textDecoration: strike }}>{item.data_recebimento ? fmtDate(item.data_recebimento) : "—"}</td>
+                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: "#1A1A1A", textDecoration: strike }}>{fmt(item.valor_comissionavel)}</td>
+                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: C.cinza, textDecoration: strike }}>{(Number(item.percentual_rateio) * 100).toFixed(2)}%</td>
+                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: C.ambar, textDecoration: strike }}>
                           {Number(item.valor_comissionavel) > 0
                             ? `${(Number(item.comissao_calculada) / Number(item.valor_comissionavel) * 100).toFixed(2)}%`
                             : "—"}
                         </td>
-                        <td className="px-3 py-2 text-xs tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.comissao_calculada)}</td>
-                        <td className="px-3 py-2 text-xs" style={{ color: item.tipo_item === "estorno" || item.tipo_item === "ajuste_negativo" ? C.vermelho : item.tipo_item === "ajuste_positivo" ? C.esmeralda : C.cinza, fontWeight: item.tipo_item !== "normal" ? 600 : 400 }}>{item.tipo_item}</td>
+                        <td className="px-3 py-2 text-xs tabular-nums font-semibold" style={{ color: cancelado ? C.cinza : C.esmeralda, textDecoration: strike }}>{fmt(item.comissao_calculada)}</td>
+                        <td className="px-3 py-2 text-xs">
+                          {cancelado ? (
+                            <span className="px-2 py-0.5 rounded-full font-semibold" style={{ color: C.vermelho, backgroundColor: "#FFEBEE" }}>cancelado — não conta no total</span>
+                          ) : (
+                            <span style={{ color: item.tipo_item === "estorno" || item.tipo_item === "ajuste_negativo" ? C.vermelho : item.tipo_item === "ajuste_positivo" ? C.esmeralda : C.cinza, fontWeight: item.tipo_item !== "normal" ? 600 : 400 }}>{item.tipo_item}</span>
+                          )}
+                        </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                   <tfoot>
                     <tr style={{ borderTop: `2px solid ${C.esmeralda}`, backgroundColor: C.cremeBg }}>
