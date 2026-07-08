@@ -91,6 +91,7 @@ export async function POST(req: NextRequest) {
       total_comissao: string;
       percentual_rateio: string;
       comissao_calculada: string;
+      comissionavel: boolean;
       cliente_nome: string | null;
     }>>`
       SELECT
@@ -105,17 +106,18 @@ export async function POST(req: NextRequest) {
         ve.total_comissao::text,
         -- LEAST(...,1): trava o rateio em 100% (ver elegiveis/route.ts)
         LEAST(ROUND(pv.valor / NULLIF(ve.total_venda, 0), 6), 1)::text AS percentual_rateio,
-        ROUND(ve.total_comissao * LEAST(pv.valor / NULLIF(ve.total_venda, 0), 1), 2)::text AS comissao_calculada,
+        -- comissionavel=false (Vale-Troca/Permuta/Ajuste Consultora) sempre R$0 — não é
+        -- dinheiro novo. Ainda assim entra no fechamento (comissao_calculada=0) pra ficar
+        -- visível/auditável no relatório, em vez de sumir silenciosamente da consulta
+        -- (pedido do Jonathan, 08/07/2026 — ver comercial.md §2).
+        CASE WHEN pv.comissionavel THEN ROUND(ve.total_comissao * LEAST(pv.valor / NULLIF(ve.total_venda, 0), 1), 2) ELSE 0 END::text AS comissao_calculada,
+        pv.comissionavel,
         c.nome AS cliente_nome
       FROM alissonerp.pagamentos_venda pv
       JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
         AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
       WHERE pv.status = 'confirmado'
-        -- REGRA DE NEGÓCIO: A Receber (crediário) comissiona quando CONFIRMADO (pago);
-        -- comissionavel=false (Vale-Troca/Permuta/Ajuste Consultora) nunca comissiona —
-        -- não é dinheiro novo. Ver comercial.md §2 e migration 341.
-        AND pv.comissionavel = true
         AND ve.vendedor_id = ${consultoraId}
         -- data_confirmacao é timestamptz; comparar "<= periodoFim::date" vira meia-noite
         -- e exclui quase todo pagamento confirmado NO PRÓPRIO último dia do período
@@ -159,7 +161,7 @@ export async function POST(req: NextRequest) {
           ${consultoraId}, ${e.cliente_nome}, ${e.data_venda}::date, ${e.data_recebimento}::date, ${e.forma_recebimento},
           ${Number(e.total_venda)}, ${Number(e.valor_pagamento)}, ${Number(e.valor_pagamento)},
           ${Number(e.percentual_rateio)}, ${Number(e.total_comissao)},
-          ${Number(e.comissao_calculada)}, 'liberado', 'normal'
+          ${Number(e.comissao_calculada)}, 'liberado', ${e.comissionavel ? "normal" : "nao_comissionavel"}
         )
       `;
     }

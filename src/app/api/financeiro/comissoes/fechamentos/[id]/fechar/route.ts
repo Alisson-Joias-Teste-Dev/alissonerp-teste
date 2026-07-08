@@ -63,7 +63,10 @@ export async function POST(
         WHERE fci.fechamento_id = ${id}::uuid
           AND fci.status <> 'cancelado'
           AND (
-            pv.comissionavel = false
+            -- comissionavel=false com comissao_calculada=0 é o esperado (Vale-Troca/Permuta/
+            -- Ajuste Consultora aparecem no relatório pra auditoria, mas não pagam nada).
+            -- Só é suspeito se ALGUÉM conseguiu gravar comissão em cima disso.
+            (pv.comissionavel = false AND fci.comissao_calculada <> 0)
             OR COALESCE(cc.mensagem, '') ~* ${PALAVRAS_SUSPEITAS.join("|")}
           )
       `;

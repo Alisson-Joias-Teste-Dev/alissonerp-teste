@@ -3297,10 +3297,12 @@ function TabComissoes({ fechamentos, vendedores }: { fechamentos: any[]; vendedo
                             ? `${(Number(item.comissao_calculada) / Number(item.valor_comissionavel) * 100).toFixed(2)}%`
                             : "—"}
                         </td>
-                        <td className="px-3 py-2 text-xs tabular-nums font-semibold" style={{ color: cancelado ? C.cinza : C.esmeralda, textDecoration: strike }}>{fmt(item.comissao_calculada)}</td>
+                        <td className="px-3 py-2 text-xs tabular-nums font-semibold" style={{ color: cancelado || item.tipo_item === "nao_comissionavel" ? C.cinza : C.esmeralda, textDecoration: strike }}>{fmt(item.comissao_calculada)}</td>
                         <td className="px-3 py-2 text-xs">
                           {cancelado ? (
                             <span className="px-2 py-0.5 rounded-full font-semibold" style={{ color: C.vermelho, backgroundColor: "#FFEBEE" }}>cancelado — não conta no total</span>
+                          ) : item.tipo_item === "nao_comissionavel" ? (
+                            <span className="px-2 py-0.5 rounded-full font-semibold" style={{ color: "#92400E", backgroundColor: "#FFF3E0" }} title="Vale-Troca, Permuta ou Ajuste Consultora não é dinheiro novo — não comissiona.">não comissionável ({item.forma_recebimento})</span>
                           ) : (
                             <span style={{ color: item.tipo_item === "estorno" || item.tipo_item === "ajuste_negativo" ? C.vermelho : item.tipo_item === "ajuste_positivo" ? C.esmeralda : C.cinza, fontWeight: item.tipo_item !== "normal" ? 600 : 400 }}>{item.tipo_item}</span>
                           )}
