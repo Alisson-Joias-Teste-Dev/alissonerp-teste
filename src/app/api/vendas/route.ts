@@ -446,9 +446,30 @@ export async function POST(req: NextRequest) {
         const produtosUpgrade = new Set<number>(
           upgradesRows.map((r: Record<string, unknown>) => Number(r.produto_id))
         );
+        /**
+         * REGRA DE NEGOCIO (Item de Servico): produto com controla_estoque=false
+         * (conserto, ajuste, repolimento, componente sob encomenda) nao tem
+         * estoque fisico e NAO deve abrir ordem de reposicao/fabricacao.
+         * O QUE: remove itens de servico da lista de produtos que viram reposicao.
+         * POR QUE: servico e mao de obra, nao peca fisica faltando em estoque.
+         * COALESCE(...,true): produto sem linha na config controla estoque por
+         * padrao (mesma convencao usada em src/lib/entrega-venda.ts).
+         * IMPACTO SE REMOVIDO: vender AS1001-1/servico abre ordem indevida no
+         * PCP, que fica presa para sempre e trava a entrega (ENTREGA_BLOCKED).
+         */
+        const semControleRows = await tx`
+          SELECT produto_id
+          FROM alissonerp.estoque_comercial_config
+          WHERE produto_id = ANY(${pids}::bigint[])
+            AND COALESCE(controla_estoque, true) = false
+        `;
+        const produtosSemControleEstoque = new Set<number>(
+          semControleRows.map((r: Record<string, unknown>) => Number(r.produto_id))
+        );
         for (const item of body.itens as ItemInput[]) {
           if (!item.produto_id) continue;
           if (produtosUpgrade.has(Number(item.produto_id))) continue;
+          if (produtosSemControleEstoque.has(Number(item.produto_id))) continue;
           const disp = dispMap.get(Number(item.produto_id)) ?? 0;
           if (disp < item.quantidade) produtosParaReposicao.add(Number(item.produto_id));
         }
