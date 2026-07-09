@@ -77,29 +77,26 @@ export async function aplicarCurvaProduto(
   `;
 
   // ── Propagar para variacoes filhas ──
+  // REGRA DE NEGOCIO: filhos herdam markup/comissao/desconto do pai.
+  // Nao recalculamos via getPricingFactors(pesoFilho) porque o peso
+  // da variacao nao pode interferir na precificacao — todos os tamanhos
+  // de um mesmo modelo tem o mesmo preco de venda.
   const filhos = await db`
-    SELECT filho.produto_id, filho_prod.peso_precificado
+    SELECT filho.produto_id
     FROM alissonerp.erp_produtos pai
     JOIN alissonerp.erp_produtos filho ON filho.parent_id = pai.id
-    JOIN alissonerp.produtos_compat filho_prod ON filho_prod.id_produto = filho.produto_id
     WHERE pai.produto_id = ${produtoId}
       AND filho.eh_variacao = true
-      AND filho_prod.peso_precificado IS NOT NULL
-      AND filho_prod.peso_precificado > 0
   `;
 
-  for (const filho of filhos) {
-    const pesoFilho = Number(filho.peso_precificado);
-    const factorsFilho = getPricingFactors(pesoFilho, config, categorias);
-    const markupFilho = Number(factorsFilho.mkp.toFixed(4));
-    const comissaoFilho = Number(factorsFilho.commission.toFixed(3));
-    const maxDescontoFilho = Number(factorsFilho.maxDiscount.toFixed(2));
-
+  if (filhos.length > 0) {
+    const filhoIds = filhos.map((f: { produto_id: number }) => f.produto_id);
     await db`
       INSERT INTO alissonerp.produto_curva_aplicada
         (produto_id, comissao_pct, max_desconto_pct, markup_aplicado, updated_at)
-      VALUES
-        (${filho.produto_id}, ${comissaoFilho}, ${maxDescontoFilho}, ${markupFilho}, NOW())
+      SELECT p.produto_id, ${comissao}, ${maxDesconto}, ${markup}, NOW()
+      FROM alissonerp.erp_produtos p
+      WHERE p.produto_id = ANY(${filhoIds})
       ON CONFLICT (produto_id) DO UPDATE SET
         comissao_pct     = EXCLUDED.comissao_pct,
         max_desconto_pct = EXCLUDED.max_desconto_pct,
