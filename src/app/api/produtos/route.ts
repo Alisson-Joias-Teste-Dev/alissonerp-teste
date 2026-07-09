@@ -731,6 +731,7 @@ export async function POST(req: NextRequest) {
         const skuVar = `${sku}-${contador}`;
 
         const pesoVar = Math.max(parseFloat(pesoVariacao(combo).toFixed(2)), 0.01);
+        const pesoPrec = Number(peso_precificado);
 
         const sufixos: string[] = [];
         if (combo.numeracao != null) sufixos.push(`nº ${combo.numeracao}`);
@@ -753,7 +754,7 @@ export async function POST(req: NextRequest) {
             VALUES
               (${varId}, ${skuVar}, ${nomeVar},
                ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
-               ${pesoVar}, ${Number(markup)}, ${Number(fator ?? 1)},
+               ${pesoPrec}, ${Number(markup)}, ${Number(fator ?? 1)},
                ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false},
                ${sku}, ${erpPai.id},
                true, false,
@@ -779,7 +780,7 @@ export async function POST(req: NextRequest) {
             VALUES
               (${varId}, ${skuVar}, ${nomeVar},
                ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
-               ${pesoVar}, ${Number(markup)}, ${Number(fator ?? 1)},
+               ${pesoPrec}, ${Number(markup)}, ${Number(fator ?? 1)},
                ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false},
                ${sku}, ${erpPai.id},
                true, false,
@@ -861,9 +862,6 @@ export async function POST(req: NextRequest) {
     // Nao bloqueia a resposta — se falhar, registra no log e segue.
     try {
       await aplicarCurvaProduto(result.pai.id_produto);
-      for (const v of result.variacoes) {
-        await aplicarCurvaProduto(v.produto_id);
-      }
     } catch (err) {
       console.warn("[POST /api/produtos] falha ao aplicar curva:", err);
     }
