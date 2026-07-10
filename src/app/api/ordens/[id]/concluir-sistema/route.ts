@@ -6,15 +6,18 @@ import { isMasterAdmin } from "@/lib/master-admin";
 /**
  * REGRA DE NEGÓCIO — Conclusão forçada por sistema (somente Master Admin)
  *
- * O QUE: permite concluir uma ordem travada em todas as etapas operacionais
- * vinculadas (PCP, protocolo, auditoria, aprovação consultora e entrega).
+ * O QUE: conclui uma ordem travada A PARTIR DO PASSO ATUAL da timeline, seguindo
+ * a sequência real (auditoria loja → protocolo ida → PCP → auditoria fábrica →
+ * protocolo volta → aprovação consultora → preparação entrega). Os passos que já
+ * ficaram para trás NÃO são tocados. Registra QUEM apertou o botão (nome), no
+ * lugar do antigo "concluída pelo sistema".
  *
- * POR QUE: quando o fluxo fica preso por falha operacional humana, as ordens
- * acumulam no funil e bloqueiam o andamento geral da fábrica/loja.
+ * POR QUE: quando o fluxo trava por falha operacional humana, as ordens acumulam
+ * no funil. O dono destrava sem fabricar conclusão de etapas que a ordem nunca
+ * alcançou ("pra trás não faz") e com autoria real de quem forçou.
  *
- * IMPACTO SE REMOVIDO: o dono perde o mecanismo de contingência para
- * destravar gargalos rapidamente e as ordens podem permanecer entulhadas no
- * sistema por tempo indeterminado.
+ * IMPACTO SE REMOVIDO: o dono perde o mecanismo de contingência e as ordens
+ * podem permanecer entulhadas no sistema por tempo indeterminado.
  */
 export async function PATCH(
   _req: NextRequest,
@@ -24,8 +27,14 @@ export async function PATCH(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
+  /**
+   * REGRA DE NEGÓCIO: puxa role (permissão) e nome (autoria) na mesma query.
+   * O QUE: o nome é gravado na conclusão para registrar QUEM apertou o botão.
+   * POR QUE: substitui o antigo "concluída pelo sistema" por autoria real.
+   * IMPACTO SE REMOVIDO: perde-se a rastreabilidade de quem forçou a conclusão.
+   */
   const [usuario] = await sql`
-    SELECT role
+    SELECT role, nome
     FROM alissonerp.usuarios
     WHERE id = ${user.id}::uuid
     LIMIT 1
@@ -56,7 +65,10 @@ export async function PATCH(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  const observacaoSistema = `\n[CONCLUÍDA PELO SISTEMA em ${new Date().toISOString()} por ${user.id}]`;
+  // Nome de quem apertou o botão; cai no id só se o cadastro não tiver nome (blindagem).
+  const responsavel = (usuario?.nome && String(usuario.nome).trim()) || user.id;
+  const observacaoConclusao = `\n[CONCLUÍDA POR ${responsavel} em ${new Date().toISOString()}]`;
+  const parecerConclusao = `Concluída por ${responsavel}`;
 
   const resultado = await sql.begin(async (tx: any) => {
     const [ordem] = await tx`
@@ -71,106 +83,195 @@ export async function PATCH(
     }
 
     /**
-     * REGRA DE NEGÓCIO: concluir todas as etapas em uma única transação.
+     * REGRA DE NEGÓCIO: descobrir ONDE a ordem está e concluir dali pra frente.
      *
-     * O QUE: atualiza todos os módulos vinculados à ordem para estado final,
-     * com rastreabilidade "Concluída pelo sistema".
-     * POR QUE: evita estado parcialmente concluído (ordem concluída, mas etapa
-     * intermediária pendente) que volta a entulhar o funil.
-     * IMPACTO SE REMOVIDO: inconsistência de status entre módulos e reabertura
-     * de pendências fantasma no rastreio de ordens.
+     * O QUE: lê a timeline real (vw_timeline_ordem) e acha o passo mais avançado
+     * que já teve progresso (concluído ou em andamento) = "passo atual". Só os
+     * passos NESSE ponto ou à frente entram na conclusão; os anteriores ficam
+     * intactos.
+     * POR QUE: o botão não pode fabricar conclusão de etapas que a ordem nunca
+     * alcançou (regra "pra trás não faz"), mesmo quando um passo do meio foi
+     * pulado (ex.: auditoria de loja que não se aplica àquela ordem).
+     * IMPACTO SE REMOVIDO: volta a marcar como concluídas etapas anteriores que
+     * nunca aconteceram, sujando o histórico e disparando gatilhos indevidos.
      */
-    const pcpRows = await tx`
-      UPDATE alissonerp.pcp
-      SET etapas = 'concluido',
-          data_conclusao = COALESCE(data_conclusao, now()),
-          updated_at = now()
+    const timeline = await tx`
+      SELECT passo, evento_cod, status
+      FROM alissonerp.vw_timeline_ordem
       WHERE ordem_id = ${ordemId}
-        AND etapas <> 'concluido'
-      RETURNING id
+      ORDER BY passo
     `;
+    let maxProgresso = 1; // passo 1 (Criação da ordem) é sempre concluído
+    for (const ev of timeline) {
+      if (
+        (ev.status === "concluido" || ev.status === "em_andamento") &&
+        Number(ev.passo) > maxProgresso
+      ) {
+        maxProgresso = Number(ev.passo);
+      }
+    }
+    // Códigos de evento que estão no passo atual ou à frente (>= maxProgresso).
+    const paraFrente = new Set(
+      timeline
+        .filter((ev: any) => Number(ev.passo) >= maxProgresso)
+        .map((ev: any) => ev.evento_cod as string),
+    );
+    const concluir = (cod: string): boolean => paraFrente.has(cod);
 
-    const protocoloRows = await tx`
-      UPDATE alissonerp.protocolos p
-      SET etapas = 'concluido',
-          updated_at = now()
-      WHERE p.id IN (
-        SELECT po.protocolo_id
-        FROM alissonerp.protocolo_ordens po
-        WHERE po.ordem_id = ${ordemId}
-      )
-        AND p.etapas <> 'concluido'
-      RETURNING id
-    `;
+    // Só conta o que REALMENTE concluiu do passo atual pra frente.
+    let auditoriaLojaRows: any[] = [];
+    let protocoloIdaRows: any[] = [];
+    let pcpRows: any[] = [];
+    let auditoriaFabRows: any[] = [];
+    let protocoloVoltaRows: any[] = [];
+    let aprovacaoRows: any[] = [];
+    let entregaRows: any[] = [];
 
-    const auditoriaRows = await tx`
-      UPDATE alissonerp.auditorias
-      SET situacao = 'aprovado',
-          parecer = COALESCE(NULLIF(parecer, ''), 'Concluída pelo sistema'),
-          data_conclusao = COALESCE(data_conclusao, now())
-      WHERE ordem_id = ${ordemId}
-        AND situacao IN ('pendente', 'em_analise', 'pendenciado')
-      RETURNING id
-    `;
+    // Passo 2 — Auditoria de LOJA
+    if (concluir("auditoria_loja")) {
+      auditoriaLojaRows = await tx`
+        UPDATE alissonerp.auditorias
+        SET situacao = 'aprovado',
+            parecer = COALESCE(NULLIF(parecer, ''), ${parecerConclusao}),
+            data_conclusao = COALESCE(data_conclusao, now())
+        WHERE ordem_id = ${ordemId}
+          AND tipo_auditoria = 'loja'
+          AND situacao IN ('pendente', 'em_analise', 'pendenciado')
+        RETURNING id
+      `;
+    }
 
-    const aprovacaoRows = await tx`
-      UPDATE alissonerp.aprovacoes_consultora
-      SET etapas = 'aprovado'
-      WHERE ordem_id = ${ordemId}
-        AND etapas IN ('pendente', 'aguardando')
-      RETURNING id
-    `;
+    // Passo 3 — Protocolo IDA
+    if (concluir("protocolo_ida")) {
+      protocoloIdaRows = await tx`
+        UPDATE alissonerp.protocolos p
+        SET etapas = 'concluido',
+            updated_at = now()
+        WHERE p.direcao = 'ida'
+          AND p.etapas <> 'concluido'
+          AND p.id IN (
+            SELECT po.protocolo_id
+            FROM alissonerp.protocolo_ordens po
+            WHERE po.ordem_id = ${ordemId}
+          )
+        RETURNING id
+      `;
+    }
 
-    const entregaRows = await tx`
-      UPDATE alissonerp.preparacoes_entrega
-      SET etapas = 'concluido',
-          updated_at = now()
-      WHERE ordem_id = ${ordemId}
-        AND etapas <> 'concluido'
-      RETURNING id
-    `;
+    // Passo 4 — PCP
+    if (concluir("pcp")) {
+      pcpRows = await tx`
+        UPDATE alissonerp.pcp
+        SET etapas = 'concluido',
+            data_conclusao = COALESCE(data_conclusao, now()),
+            updated_at = now()
+        WHERE ordem_id = ${ordemId}
+          AND etapas <> 'concluido'
+        RETURNING id
+      `;
+    }
 
+    // Passo 5 — Auditoria de FÁBRICA
+    if (concluir("auditoria_fabrica")) {
+      auditoriaFabRows = await tx`
+        UPDATE alissonerp.auditorias
+        SET situacao = 'aprovado',
+            parecer = COALESCE(NULLIF(parecer, ''), ${parecerConclusao}),
+            data_conclusao = COALESCE(data_conclusao, now())
+        WHERE ordem_id = ${ordemId}
+          AND tipo_auditoria = 'fabrica'
+          AND situacao IN ('pendente', 'em_analise', 'pendenciado')
+        RETURNING id
+      `;
+    }
+
+    // Passo 6 — Protocolo VOLTA
+    if (concluir("protocolo_volta")) {
+      protocoloVoltaRows = await tx`
+        UPDATE alissonerp.protocolos p
+        SET etapas = 'concluido',
+            updated_at = now()
+        WHERE p.direcao = 'volta'
+          AND p.etapas <> 'concluido'
+          AND p.id IN (
+            SELECT po.protocolo_id
+            FROM alissonerp.protocolo_ordens po
+            WHERE po.ordem_id = ${ordemId}
+          )
+        RETURNING id
+      `;
+    }
+
+    // Passo 7 — Aprovação consultora
+    if (concluir("aprovacao_consultora")) {
+      aprovacaoRows = await tx`
+        UPDATE alissonerp.aprovacoes_consultora
+        SET etapas = 'aprovado'
+        WHERE ordem_id = ${ordemId}
+          AND etapas IN ('pendente', 'aguardando')
+        RETURNING id
+      `;
+    }
+
+    // Passo 8 — Preparação entrega
+    if (concluir("preparacao_entrega")) {
+      entregaRows = await tx`
+        UPDATE alissonerp.preparacoes_entrega
+        SET etapas = 'concluido',
+            updated_at = now()
+        WHERE ordem_id = ${ordemId}
+          AND etapas <> 'concluido'
+        RETURNING id
+      `;
+    }
+
+    /**
+     * REGRA DE NEGÓCIO: marca a ORDEM como concluída e registra o autor.
+     * O QUE: status → concluido + carimbo "[CONCLUÍDA POR <nome> em <data>]".
+     * POR QUE: tira a ordem do funil e deixa rastro de quem forçou a conclusão.
+     * IMPACTO SE REMOVIDO: ordem continua entulhando o rastreio, sem autoria.
+     */
     await tx`
       UPDATE alissonerp.ordens
       SET status = 'concluido',
           data_conclusao = COALESCE(data_conclusao, now()),
-          detalhes_ordem = COALESCE(detalhes_ordem, '') || ${observacaoSistema},
+          detalhes_ordem = COALESCE(detalhes_ordem, '') || ${observacaoConclusao},
           updated_at = now()
       WHERE id = ${ordemId}
     `;
 
     /**
-     * REGRA DE NEGÓCIO: sweep final de PCP para blindar kanban de rota.
+     * REGRA DE NEGÓCIO: sweep final do PCP para blindar o kanban de rota.
      *
-     * O QUE: reaplica conclusão em qualquer PCP da ordem que tenha ficado
-     * ativo após atualizações intermediárias do fluxo.
-     * POR QUE: evita que OF reapareça em "Novas Ordens" no PCP depois da
-     * conclusão forçada da ordem.
-     * IMPACTO SE REMOVIDO: ordem concluída pode continuar entulhando o PCP,
-     * gerando retrabalho operacional.
+     * O QUE: se o PCP está no passo atual ou à frente, reaplica a conclusão caso
+     * uma atualização intermediária o tenha reativado por gatilho.
+     * POR QUE: evita que a OF reapareça em "Novas Ordens" no PCP após a conclusão.
+     * IMPACTO SE REMOVIDO: ordem concluída pode voltar a entulhar o PCP.
+     * OBS: só roda quando o PCP é do passo atual pra frente — respeita "pra trás não faz".
      */
-    const pcpSweepRows = await tx`
-      UPDATE alissonerp.pcp
-      SET etapas = 'concluido',
-          data_conclusao = COALESCE(data_conclusao, now()),
-          updated_at = now()
-      WHERE ordem_id = ${ordemId}
-        AND etapas <> 'concluido'
-      RETURNING id
-    `;
+    let pcpSweepRows: any[] = [];
+    if (concluir("pcp")) {
+      pcpSweepRows = await tx`
+        UPDATE alissonerp.pcp
+        SET etapas = 'concluido',
+            data_conclusao = COALESCE(data_conclusao, now()),
+            updated_at = now()
+        WHERE ordem_id = ${ordemId}
+          AND etapas <> 'concluido'
+        RETURNING id
+      `;
+    }
 
     /**
-     * REGRA DE NEGÓCIO: conclusão forçada de REPOSIÇÃO dá ENTRADA no estoque.
+     * REGRA DE NEGÓCIO: conclusão forçada de REPOSIÇÃO garante ENTRADA no estoque.
      *
-     * O QUE: ao concluir a ordem pelo sistema, se ela for de reposição
-     * (reposicao_venda/reposicao_loja), dá entrada da peça no estoque comercial
-     * (almox. 2) — o mesmo que o protocolo de volta faria no fluxo normal.
-     * POR QUE: este botão PULA o protocolo de volta. Sem a entrada, a peça da
-     * reposição nunca aparece no estoque e a entrega da venda quebra com
-     * STOCK_NEGATIVE (caso C-2372). A função fn_reposicao_entrada_estoque é
-     * idempotente (não dobra se a volta também concluir).
-     * IMPACTO SE REMOVIDO: reposição forçada conclui sem peça no estoque →
-     * entrega da venda travada.
+     * O QUE: se a ordem for de reposição (reposicao_venda/reposicao_loja), garante
+     * a entrada da peça no estoque comercial (almox. 2) — idempotente.
+     * POR QUE: dependendo de onde a ordem travou, o protocolo de volta pode NÃO
+     * ter sido concluído por este botão; a entrada explícita garante que a peça
+     * exista no estoque, senão a entrega da venda quebra com STOCK_NEGATIVE
+     * (caso C-2372). fn_reposicao_entrada_estoque não dobra se a volta concluir.
+     * IMPACTO SE REMOVIDO: reposição pode concluir sem peça no estoque → entrega travada.
      */
     const [entradaRepos] = await tx`
       SELECT alissonerp.fn_reposicao_entrada_estoque(${ordemId}, ${user.id}::uuid) AS criadas
@@ -179,10 +280,14 @@ export async function PATCH(
     return {
       notFound: false,
       ordem_id: ordemId,
+      passo_atual: maxProgresso,
+      concluido_por: responsavel,
+      auditorias_loja_concluidas: auditoriaLojaRows.length,
+      protocolos_ida_concluidos: protocoloIdaRows.length,
       pcp_concluidos: pcpRows.length,
       pcp_concluidos_sweep_final: pcpSweepRows.length,
-      protocolos_concluidos: protocoloRows.length,
-      auditorias_concluidas: auditoriaRows.length,
+      auditorias_fabrica_concluidas: auditoriaFabRows.length,
+      protocolos_volta_concluidos: protocoloVoltaRows.length,
       aprovacoes_concluidas: aprovacaoRows.length,
       entregas_concluidas: entregaRows.length,
       entradas_estoque_reposicao: entradaRepos?.criadas ?? 0,
