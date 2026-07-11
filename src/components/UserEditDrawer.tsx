@@ -701,7 +701,6 @@ export default function UserEditDrawer({ usuario, depositos, onClose, onSaved, u
                 {(
                   [
                     ["fabrica", "🏭 Protocolo Fábrica", "ida/volta com motoboy"],
-                    ["service", "🔧 Protocolo Service", "ida/volta loja ↔ service"],
                   ] as [string, string, string][]
                 ).map(([value, label, hint]) => {
                   const checked = tiposProtocoloPermitidos.includes(value);

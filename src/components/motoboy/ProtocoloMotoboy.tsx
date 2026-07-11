@@ -433,8 +433,8 @@ export default function ProtocoloMotoboy() {
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5 pb-32">
 
-          <div className="grid grid-cols-2 gap-2">
-            {(["fabrica", "service"] as const)
+          <div className="grid grid-cols-1 gap-2">
+            {(["fabrica"] as const)
               .filter((t) => tiposPermitidos.length === 0 || tiposPermitidos.includes(t))
               .map((t) => {
                 const ativo = tipoProtocoloCriar === t;
