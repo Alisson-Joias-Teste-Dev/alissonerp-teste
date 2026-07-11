@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, CheckCircle2, Clock, Search, Truck, HandHeart, Undo2, UserCheck } from "lucide-react";
 import SolicitarPecaModal from "@/components/forms/SolicitarPecaModal";
 import AcaoSolicitacaoModal, { type AcaoTipo } from "@/components/forms/AcaoSolicitacaoModal";
+import HistoricoSolicitacaoModal from "@/components/forms/HistoricoSolicitacaoModal";
 import { MobileCard } from "@/components/ui/MobileCard";
 import { getPublicUrl } from "@/lib/storage-url";
 
@@ -44,7 +45,9 @@ function resolveStorageUrl(path: string | null | undefined): string | null {
 
 function fmt(d: string | null) {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("pt-BR");
+  return new Date(d).toLocaleString("pt-BR", {
+    day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+  });
 }
 
 function produtosLabel(r: SolicitacaoRow) {
@@ -84,6 +87,7 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
   const [acao, setAcao] = useState<{ row: SolicitacaoRow; tipo: AcaoTipo } | null>(null);
   const [filtro, setFiltro] = useState<Filtro>("abertas");
   const [busca, setBusca] = useState("");
+  const [historico, setHistorico] = useState<SolicitacaoRow | null>(null);
   const [fotoModal, setFotoModal] = useState<{ url: string; titulo: string } | null>(null);
 
   const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
@@ -175,6 +179,7 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
             const acoes = acoesDoStatus(r.status);
             return (
               <MobileCard key={r.id} titulo={`#${r.id}`} subtitulo={produtosLabel(r)}
+                onClick={() => setHistorico(r)}
                 badges={[{ label: si.label, cor: si.cor }]}
                 campos={[
                   { label: "Solicitado por", valor: r.solicitante_nome ?? "—" },
@@ -215,7 +220,8 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
                 const si = statusInfo(r);
                 const acoes = acoesDoStatus(r.status);
                 return (
-                  <tr key={r.id} style={{ borderTop: i > 0 ? "1px solid #F3EADA" : undefined }}>
+                  <tr key={r.id} onClick={() => setHistorico(r)} className="cursor-pointer hover:bg-[#FAFAF7] transition-colors"
+                    style={{ borderTop: i > 0 ? "1px solid #F3EADA" : undefined }} title="Ver histórico">
                     <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#6B7280" }}>#{r.id}</td>
                     <td className="px-4 py-3 text-[12px]" style={{ color: "#374151", maxWidth: 280 }}>{produtosLabel(r)}</td>
                     <td className="px-4 py-3 text-[12px]" style={{ color: "#374151" }}>{r.solicitante_nome || "—"}</td>
@@ -230,7 +236,7 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
                       {acoes.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 justify-end">
                           {acoes.map((ac) => (
-                            <button key={ac.tipo} onClick={() => setAcao({ row: r, tipo: ac.tipo })}
+                            <button key={ac.tipo} onClick={(e) => { e.stopPropagation(); setAcao({ row: r, tipo: ac.tipo }); }}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold" style={{ backgroundColor: "#18403612", color: C.esmeralda }}>
                               <ac.icon size={12} /> {ac.label}
                             </button>
@@ -252,6 +258,10 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
       {acao && (
         <AcaoSolicitacaoModal isOpen={true} onClose={() => setAcao(null)} solicitacaoId={acao.row.id} tipo={acao.tipo}
           produtosLabel={produtosLabel(acao.row)} onSuccess={() => { setAcao(null); refresh(); }} />
+      )}
+      {historico && (
+        <HistoricoSolicitacaoModal isOpen={true} onClose={() => setHistorico(null)} row={historico}
+          produtosLabel={produtosLabel(historico)} onAbrirFoto={abrirFoto} />
       )}
 
       {fotoModal && (
