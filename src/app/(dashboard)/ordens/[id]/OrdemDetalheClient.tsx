@@ -592,11 +592,22 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
    * IMPACTO SE REMOVIDO: usuário verá etapas em amarelo/cinza mesmo com a
    * ordem finalizada por contingência, gerando retrabalho e confusão.
    */
-  const concluidaPeloSistema = String(ordem.detalhes_ordem ?? "").includes("[CONCLUÍDA PELO SISTEMA");
-  const matchConclusaoSistema = String(ordem.detalhes_ordem ?? "").match(/\[CONCLUÍDA PELO SISTEMA em ([^\]]+) por /);
-  const dataConclusaoSistema = matchConclusaoSistema?.[1]
-    ? new Date(matchConclusaoSistema[1]).toLocaleString("pt-BR")
+  // Detecta a conclusão forçada pelo botão de contingência em 2 formatos:
+  //  • NOVO:   "[CONCLUÍDA POR <nome> em <iso>]"       → mostra QUEM apertou o botão
+  //  • ANTIGO: "[CONCLUÍDA PELO SISTEMA em <iso> por <id>]" → mantido p/ ordens já concluídas
+  // Sem isso, ordens concluídas antes da mudança perderiam o selo no timeline.
+  const detalhesOrdemTxt = String(ordem.detalhes_ordem ?? "");
+  const matchConclusaoNome = detalhesOrdemTxt.match(/\[CONCLUÍDA POR ([^\]]+?) em ([^\]]+)\]/);
+  const matchConclusaoSistema = detalhesOrdemTxt.match(/\[CONCLUÍDA PELO SISTEMA em ([^\]]+) por /);
+  const concluidaPeloSistema = Boolean(matchConclusaoNome) || Boolean(matchConclusaoSistema);
+  const dataConclusaoRaw = matchConclusaoNome?.[2] ?? matchConclusaoSistema?.[1] ?? null;
+  const dataConclusaoSistema = dataConclusaoRaw
+    ? new Date(dataConclusaoRaw).toLocaleString("pt-BR")
     : null;
+  const nomeConclusaoSistema = matchConclusaoNome?.[1]?.trim() ?? null;
+  const rotuloConclusaoSistema = nomeConclusaoSistema
+    ? `Concluída por ${nomeConclusaoSistema}${dataConclusaoSistema ? ` em ${dataConclusaoSistema}` : ""}`
+    : `Concluída pelo sistema${dataConclusaoSistema ? ` em ${dataConclusaoSistema}` : ""}`;
 
   // Encontrar o passo atual (primeiro não-concluido)
   const passoAtualIdx = timeline.findIndex((ev) => ev.status !== "concluido");
@@ -1245,7 +1256,7 @@ export default function OrdemDetalheClient({ ordem, apontamentos, movEstoque, tr
                       )}
                       {concluidaPeloSistema && (
                         <p className="text-[11px] mt-0.5" style={{ color: "#059669" }}>
-                          Concluída pelo sistema{dataConclusaoSistema ? ` em ${dataConclusaoSistema}` : ""}
+                          {rotuloConclusaoSistema}
                         </p>
                       )}
                       {ev.data_evento && (
