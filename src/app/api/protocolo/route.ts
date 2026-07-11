@@ -13,16 +13,17 @@ import { zodError, IdSchema, UuidSchema } from "@/lib/schemas/common";
 import { STATUS_BAIXA_OURO } from "@/lib/cofre-ouro-status";
 
 const ProtocoloPostSchema = z.object({
-  direcao: z.enum(["ida", "volta"]),
+  direcao: z.enum(["ida", "volta"]).optional(), // protocolo interno não usa direção
   ordem_ids: z.array(IdSchema).min(1, "Parâmetros inválidos").max(LIMITS.ORDENS_LOTE_MAX).optional(),
   baixa_id: IdSchema.optional(), // REGRA: sangria vincula 1 baixa por protocolo
+  produto_ids: z.array(IdSchema).min(1, "Parâmetros inválidos").max(LIMITS.ORDENS_LOTE_MAX).optional(), // protocolo interno
   motoboy_id: UuidSchema.optional(),
   foto_criacao: z.string().max(LIMITS.IMAGE_BASE64_MAX).optional(),
   user_id: UuidSchema.optional(),
   tipo_protocolo: z.string().max(50).optional(),
 }).refine(
-  (data) => (data.ordem_ids && data.ordem_ids.length > 0) || data.baixa_id,
-  { message: "Informe ao menos um ordem_ids ou baixa_id" }
+  (data) => (data.ordem_ids && data.ordem_ids.length > 0) || data.baixa_id || (data.produto_ids && data.produto_ids.length > 0),
+  { message: "Informe ao menos um ordem_ids, baixa_id ou produto_ids" }
 );
 
 // GET /api/protocolo?user_id=UUID — lista protocolos do motoboy (ou todos se todos=true)
@@ -41,13 +42,15 @@ export async function GET(req: NextRequest) {
   const rows = todos
     ? await sql`
         SELECT p.id, p.direcao::text, p.etapas::text, p.created_at, p.tipo_protocolo,
-          (SELECT count(*)::int FROM alissonerp.protocolo_ordens po WHERE po.protocolo_id = p.id) AS total_ordens
+          (SELECT count(*)::int FROM alissonerp.protocolo_ordens po WHERE po.protocolo_id = p.id) AS total_ordens,
+          (SELECT count(*)::int FROM alissonerp.protocolo_produtos pp WHERE pp.protocolo_id = p.id) AS total_produtos
         FROM alissonerp.protocolos p
         ORDER BY p.created_at DESC LIMIT 50
       `
     : await sql`
         SELECT p.id, p.direcao::text, p.etapas::text, p.created_at, p.tipo_protocolo,
-          (SELECT count(*)::int FROM alissonerp.protocolo_ordens po WHERE po.protocolo_id = p.id) AS total_ordens
+          (SELECT count(*)::int FROM alissonerp.protocolo_ordens po WHERE po.protocolo_id = p.id) AS total_ordens,
+          (SELECT count(*)::int FROM alissonerp.protocolo_produtos pp WHERE pp.protocolo_id = p.id) AS total_produtos
         FROM alissonerp.protocolos p
         WHERE p.created_by = ${userId}::uuid OR p.motoboy_id = ${userId}::uuid
         ORDER BY p.created_at DESC LIMIT 50
@@ -70,12 +73,13 @@ export async function POST(req: NextRequest) {
   const raw = await req.json().catch(() => ({}));
   const parsed = ProtocoloPostSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
-  const { direcao, ordem_ids, baixa_id, motoboy_id, foto_criacao, user_id, tipo_protocolo } = parsed.data;
+  const { direcao, ordem_ids, baixa_id, produto_ids, motoboy_id, foto_criacao, user_id, tipo_protocolo } = parsed.data;
   void user_id; // body.user_id é ignorado intencionalmente (usa user.id da sessão)
 
   // Defesa em profundidade — zod ja limita, helper retorna 413 explicito.
   try {
     if (ordem_ids) checkArrayLength("ordem_ids", ordem_ids, LIMITS.ORDENS_LOTE_MAX);
+    if (produto_ids) checkArrayLength("produto_ids", produto_ids, LIMITS.ORDENS_LOTE_MAX);
     checkBase64Length("foto_criacao", foto_criacao, LIMITS.IMAGE_BASE64_MAX);
   } catch (e) {
     const r = payloadTooLargeResponse(e);
@@ -85,9 +89,17 @@ export async function POST(req: NextRequest) {
 
   const tipoFinal = tipo_protocolo ?? "fabrica";
   const isSangria = !!baixa_id;
+  /**
+   * REGRA DE NEGÓCIO: protocolo interno registra retirada/devolução de produto
+   * entre estoquista e consultora, dentro da mesma loja — sem role/permissão
+   * própria (qualquer usuário autenticado abre e conclui) e sem direção
+   * (não é ida/volta pra fábrica, é só um "abriu" → "confirmou recebimento").
+   */
+  const isInterno = tipoFinal === "interno";
+  const direcaoFinal = direcao ?? "ida";
 
-  // Validar permissão do usuário autenticado (admin/dev ignoram)
-  {
+  // Validar permissão do usuário autenticado (admin/dev ignoram; interno não valida)
+  if (!isInterno) {
     const [usuario] = await sql`
       SELECT role::text AS role, tipos_protocolo_permitidos
       FROM alissonerp.usuarios
@@ -120,14 +132,20 @@ export async function POST(req: NextRequest) {
   const [prot] = await sql`
     INSERT INTO alissonerp.protocolos (direcao, etapas, motoboy_id, foto_criacao, created_by, tipo_protocolo)
     VALUES (
-      ${direcao}, 'pendente',
-      ${motoboy_id ?? null}::uuid,
+      ${direcaoFinal}, 'pendente',
+      ${motoboy_id ?? user.id}::uuid,
       ${foto_criacao ?? null},
       ${user.id}::uuid,
       ${tipoFinal}
     )
     RETURNING id
   `;
+
+  // Protocolo interno: vincula produtos (não ordens/baixa)
+  if (isInterno && produto_ids && produto_ids.length > 0) {
+    const rowsProdutos = produto_ids.map((produto_id) => ({ protocolo_id: prot.id, produto_id }));
+    await sql`INSERT INTO alissonerp.protocolo_produtos ${sql(rowsProdutos)}`;
+  }
 
   /**
    * REGRA DE NEGÓCIO: sangria vincula exatamente 1 baixa ao protocolo.

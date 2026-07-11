@@ -3,9 +3,11 @@
 import { useState, useCallback, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, CheckCircle2, Clock, Package, ChevronDown } from "lucide-react";
+import { Plus, CheckCircle2, Clock, Package, ChevronDown, Search } from "lucide-react";
 import NovaProtocoloModal from "@/components/forms/NovaProtocoloModal";
 import ConcluirProtocoloModal from "@/components/forms/ConcluirProtocoloModal";
+import NovoProtocoloInternoModal from "@/components/forms/NovoProtocoloInternoModal";
+import ConcluirProtocoloInternoModal from "@/components/forms/ConcluirProtocoloInternoModal";
 import { MobileCard } from "@/components/ui/MobileCard";
 import { getPublicUrl } from "@/lib/storage-url";
 
@@ -41,7 +43,7 @@ const C = {
   cremeBg: "#FAFAF7",
 };
 
-type Tab = "ida" | "volta" | "entregas";
+type Tab = "ida" | "volta" | "interno" | "entregas";
 type Filtro = "pendentes" | "concluidos" | "todos";
 
 interface ProtocoloRow {
@@ -104,9 +106,27 @@ interface ProtocoloConcluido {
   } | null;
 }
 
+interface InternoProduto {
+  nome: string;
+  sku: string | null;
+}
+
+interface InternoRow {
+  id: number;
+  etapas: string;
+  data_conclusao: string | null;
+  created_at: string;
+  criado_por_nome: string | null;
+  concluido_por_nome: string | null;
+  foto_criacao: string | null;
+  foto_conclusao: string | null;
+  produtos: InternoProduto[];
+}
+
 interface Props {
   ida: ProtocoloRow[];
   volta: ProtocoloRow[];
+  interno: InternoRow[];
   aprovacoes: AprovacaoRow[];
   entregas: EntregaRow[];
   tiposProtocoloPermitidos?: string[];
@@ -169,9 +189,14 @@ function destinoLabel(destino: string | null | undefined) {
   return destino ?? "—";
 }
 
-export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos = [] }: Props) {
+export default function ProtocoloClient({ ida, volta, interno, tiposProtocoloPermitidos = [] }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("ida");
+
+  // Protocolo interno (retirada/devolução loja): sem role, sem direção — abre e conclui
+  const [internoModalAberto, setInternoModalAberto] = useState(false);
+  const [concluirInterno, setConcluirInterno] = useState<InternoRow | null>(null);
+  const [filtroInterno, setFiltroInterno] = useState<Filtro>("pendentes");
 
   // Modal state: which direcao + which tipo was selected from dropdown
   const [modalAberto, setModalAberto] = useState<{ direcao: "ida" | "volta"; tipo: string; modo: "ordens" | "sangria" } | null>(null);
@@ -259,6 +284,7 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: "ida",      label: "Ida",      count: ida.length },
     { key: "volta",    label: "Volta",    count: volta.length },
+    { key: "interno",  label: "Interno",  count: interno.length },
     { key: "entregas", label: "Entregas", count: concluidos?.length ?? 0 },
   ];
 
@@ -274,6 +300,22 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
             Transporte Loja ↔ Fábrica
           </p>
         </div>
+        {/*
+          REGRA DE NEGÓCIO: protocolo interno (retirada/devolução entre estoquista
+          e consultora) não tem permissão própria — qualquer usuário autenticado
+          pode abrir, por isso o botão não passa por podeNovProtocolo.
+        */}
+        {tab === "interno" && (
+          <button
+            onClick={() => setInternoModalAberto(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-opacity hover:opacity-90"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}
+          >
+            <Plus size={15} />
+            Abrir Protocolo Interno
+          </button>
+        )}
+
         {(tab === "ida" || tab === "volta") && podeNovProtocolo && (
           <div className="relative" ref={dropdownRef}>
             {tiposProtocoloPermitidos.length === 1 ? (
@@ -423,6 +465,17 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
           onAbrirFoto={abrirFotoModal}
           filtro={filtroVolta}
           onFiltroChange={setFiltroVolta}
+        />
+      )}
+
+      {/* Tab: Interno — retirada/devolução de produto entre estoquista e consultora */}
+      {tab === "interno" && (
+        <ProtocoloInternoTable
+          rows={interno}
+          onConcluir={(row) => setConcluirInterno(row)}
+          onAbrirFoto={abrirFotoModal}
+          filtro={filtroInterno}
+          onFiltroChange={setFiltroInterno}
         />
       )}
 
@@ -581,6 +634,25 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
           direcao={tab === "ida" ? "ida" : "volta"}
           totalOrdens={concluirProt.total_ordens}
           onSuccess={() => { setConcluirProt(null); refresh(); }}
+        />
+      )}
+
+      {/* Modal abrir protocolo interno — busca produtos + foto */}
+      {internoModalAberto && (
+        <NovoProtocoloInternoModal
+          isOpen={true}
+          onClose={() => setInternoModalAberto(false)}
+          onSuccess={() => { setInternoModalAberto(false); refresh(); }}
+        />
+      )}
+      {/* Modal confirmar recebimento do protocolo interno */}
+      {concluirInterno && (
+        <ConcluirProtocoloInternoModal
+          isOpen={true}
+          onClose={() => setConcluirInterno(null)}
+          protocoloId={concluirInterno.id}
+          produtos={concluirInterno.produtos.map((p) => p.nome)}
+          onSuccess={() => { setConcluirInterno(null); refresh(); }}
         />
       )}
 
@@ -878,6 +950,231 @@ function ProtocoloTable({
                       style={{ backgroundColor: "#18403612", color: C.esmeralda }}
                     >
                       <CheckCircle2 size={12} /> Concluir
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+/**
+ * REGRA DE NEGÓCIO: protocolo interno registra retirada/devolução de produto
+ * entre estoquista e consultora, dentro da mesma loja — sem PCP, sem aprovação,
+ * sem direção. É só "quem abriu" (foto) e "quem confirmou o recebimento" (foto),
+ * pensado pra auditoria simples: dá pra ver na hora quem pegou o quê e quando.
+ */
+function ProtocoloInternoTable({
+  rows,
+  onConcluir,
+  onAbrirFoto,
+  filtro,
+  onFiltroChange,
+}: {
+  rows: InternoRow[];
+  onConcluir: (row: InternoRow) => void;
+  onAbrirFoto: (url: string | null | undefined, titulo: string) => void;
+  filtro: Filtro;
+  onFiltroChange: (f: Filtro) => void;
+}) {
+  const [busca, setBusca] = useState("");
+
+  const countPendentes = rows.filter((r) => r.etapas !== "concluido").length;
+  const countConcluidos = rows.filter((r) => r.etapas === "concluido").length;
+
+  /**
+   * REGRA DE NEGÓCIO: auditoria precisa achar rápido todos os protocolos
+   * internos de um produto específico (nome ou SKU). A ordem já vem
+   * decrescente (mais recente primeiro) direto do banco — o filtro de busca
+   * só reduz a lista, não reordena.
+   */
+  const buscaNorm = busca.trim().toLowerCase();
+  const rowsPorEtapa =
+    filtro === "pendentes" ? rows.filter((r) => r.etapas !== "concluido") :
+    filtro === "concluidos" ? rows.filter((r) => r.etapas === "concluido") :
+    rows;
+  const rowsFiltrados = buscaNorm.length === 0
+    ? rowsPorEtapa
+    : rowsPorEtapa.filter((r) =>
+        r.produtos.some((p) =>
+          p.nome.toLowerCase().includes(buscaNorm) || (p.sku ?? "").toLowerCase().includes(buscaNorm)
+        )
+      );
+
+  const opFiltro: { value: Filtro; label: string; count: number }[] = [
+    { value: "pendentes", label: "Pendentes", count: countPendentes },
+    { value: "concluidos", label: "Concluídas", count: countConcluidos },
+    { value: "todos",      label: "Todas",     count: rows.length },
+  ];
+
+  function produtosLabel(produtos: InternoProduto[]) {
+    if (produtos.length === 0) return "—";
+    return produtos.map((p) => p.sku ? `${p.nome} (${p.sku})` : p.nome).join(", ");
+  }
+
+  return (
+    <>
+      {/* Busca por produto (nome ou SKU) — pra auditoria achar rápido o histórico de uma peça */}
+      <div className="relative mb-3 max-w-sm">
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#9CA3AF" }} />
+        <input
+          type="text"
+          placeholder="Buscar por produto ou SKU..."
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+          className="w-full pl-8 pr-3 py-2 rounded-lg border text-sm focus:outline-none"
+          style={{ borderColor: C.cremeBorder }}
+        />
+      </div>
+
+      {/* Pills de filtro */}
+      <div className="flex gap-1.5 mb-4 flex-wrap">
+        {opFiltro.map((op) => (
+          <button
+            key={op.value}
+            onClick={() => onFiltroChange(op.value)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+            style={{
+              backgroundColor: filtro === op.value ? C.esmeralda : C.creme,
+              color: filtro === op.value ? C.creme : "#6B7280",
+            }}
+          >
+            {op.label}
+            <span
+              className="text-[10px] font-bold px-1 py-0.5 rounded-full"
+              style={{
+                backgroundColor: filtro === op.value ? "rgba(255,255,255,0.2)" : "#18403618",
+                color: filtro === op.value ? C.creme : C.esmeralda,
+              }}
+            >
+              {op.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Lista mobile */}
+      <div className="block md:hidden space-y-3 mb-3">
+        {rowsFiltrados.length === 0 && (
+          <p className="text-center py-8 text-sm" style={{ color: "#9CA3AF" }}>Nenhum protocolo interno encontrado</p>
+        )}
+        {rowsFiltrados.map((r) => (
+          <MobileCard
+            key={r.id}
+            titulo={`Protocolo #${r.id}`}
+            subtitulo={produtosLabel(r.produtos)}
+            badges={[
+              { label: r.etapas === "concluido" ? "Concluído" : "Pendente", cor: r.etapas === "concluido" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700" },
+            ]}
+            campos={[
+              { label: "Aberto por", valor: r.criado_por_nome ?? "—" },
+              { label: "Aberto em", valor: fmt(r.created_at) },
+              { label: "Confirmado por", valor: r.concluido_por_nome ?? "—" },
+              { label: "Confirmado em", valor: fmt(r.data_conclusao) },
+              ...((resolveStorageUrl(r.foto_criacao) || resolveStorageUrl(r.foto_conclusao)) ? [{
+                label: "Fotos",
+                valor: (
+                  <div className="flex gap-2">
+                    {resolveStorageUrl(r.foto_criacao) && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveStorageUrl(r.foto_criacao)!}
+                        alt="Abertura"
+                        className="w-12 h-12 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={(e) => { e.stopPropagation(); onAbrirFoto(resolveStorageUrl(r.foto_criacao), "Foto de Abertura"); }}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    )}
+                    {resolveStorageUrl(r.foto_conclusao) && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveStorageUrl(r.foto_conclusao)!}
+                        alt="Confirmação"
+                        className="w-12 h-12 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={(e) => { e.stopPropagation(); onAbrirFoto(resolveStorageUrl(r.foto_conclusao), "Foto de Confirmação"); }}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    )}
+                  </div>
+                ),
+              }] : []),
+              { label: "Ação", valor: r.etapas === "pendente" ? (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onConcluir(r); }}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold"
+                  style={{ backgroundColor: "#18403612", color: C.esmeralda }}
+                >
+                  <CheckCircle2 size={11} /> Confirmar recebimento
+                </button>
+              ) : "—" },
+            ]}
+          />
+        ))}
+      </div>
+
+      {/* Tabela desktop */}
+      <div className="hidden md:block rounded-xl border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ backgroundColor: C.cremeBg, borderBottom: "1px solid #E8DCC8" }}>
+              {["ID", "Produtos", "Aberto por", "Aberto em", "Confirmado por", "Confirmado em", "Fotos", "Status", ""].map((h) => (
+                <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rowsFiltrados.length === 0 && (
+              <tr><td colSpan={9} className="text-center py-12 text-sm" style={{ color: "#9CA3AF" }}>Nenhum protocolo interno encontrado</td></tr>
+            )}
+            {rowsFiltrados.map((r, i) => (
+              <tr key={r.id} style={{ borderTop: i > 0 ? "1px solid #F3EADA" : undefined }}>
+                <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#6B7280" }}>#{r.id}</td>
+                <td className="px-4 py-3 text-[12px]" style={{ color: "#374151" }}>{produtosLabel(r.produtos)}</td>
+                <td className="px-4 py-3 text-[12px]" style={{ color: "#374151" }}>{r.criado_por_nome || "—"}</td>
+                <td className="px-4 py-3 font-mono text-[11px]" style={{ color: "#9CA3AF" }}>{fmt(r.created_at)}</td>
+                <td className="px-4 py-3 text-[12px]" style={{ color: "#374151" }}>{r.concluido_por_nome || "—"}</td>
+                <td className="px-4 py-3 font-mono text-[11px]" style={{ color: r.data_conclusao ? "#059669" : "#9CA3AF" }}>
+                  {fmt(r.data_conclusao)}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-1.5">
+                    {resolveStorageUrl(r.foto_criacao) && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveStorageUrl(r.foto_criacao)!}
+                        alt="Abertura"
+                        title="Foto de Abertura"
+                        className="w-10 h-10 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => onAbrirFoto(resolveStorageUrl(r.foto_criacao), "Foto de Abertura")}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    )}
+                    {resolveStorageUrl(r.foto_conclusao) && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveStorageUrl(r.foto_conclusao)!}
+                        alt="Confirmação"
+                        title="Foto de Confirmação"
+                        className="w-10 h-10 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => onAbrirFoto(resolveStorageUrl(r.foto_conclusao), "Foto de Confirmação")}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    )}
+                  </div>
+                </td>
+                <td className="px-4 py-3"><EtapaBadge etapa={r.etapas === "concluido" ? "concluido" : "pendente"} /></td>
+                <td className="px-4 py-3 text-right">
+                  {r.etapas === "pendente" && (
+                    <button
+                      onClick={() => onConcluir(r)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold ml-auto"
+                      style={{ backgroundColor: "#18403612", color: C.esmeralda }}
+                    >
+                      <CheckCircle2 size={12} /> Confirmar
                     </button>
                   )}
                 </td>
