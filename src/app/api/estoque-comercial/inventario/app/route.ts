@@ -55,13 +55,26 @@ export async function GET(_req: NextRequest) {
   }
 
   const ids = inventarios.map((inv: any) => inv.id);
+  // REGRA DE NEGÓCIO (11/07 — Jonathan): o id_api_produto que o app usa pra CASAR
+  // a etiqueta lida com o item vem daqui. Ele é gravado na alissonerp.erp_produtos
+  // (tabela-mestre, exposta pela view produtos_compat), mas o espelho pro
+  // public.produtos só propaga no INSERT — quando o id chega depois por UPDATE
+  // (sync Tiny pós-cadastro) ele nunca alcança o public. Lendo só do public, o
+  // item vinha com id_api_produto = NULL e o app NÃO conseguia casar a leitura →
+  // a peça nunca contava no inventário (ex.: SKU 1840-18).
+  // Base no public (que tem TODOS os produtos, inclusive legados só-do-public);
+  // id_api preferindo a erp e caindo no public. Onde as duas têm, o número é
+  // idêntico (conferido: 15.546 casos, 0 divergência).
+  // IMPACTO SE REVERTIDO: peças com id só na erp voltam a não contar no app.
   const itens = await sql`
     SELECT
       ii.id, ii.inventario_id, ii.produto_id,
-      p.id_api_produto, p.sku, p.nome, ii.quantidade_sistema,
+      COALESCE(pc.id_api_produto, p.id_api_produto) AS id_api_produto,
+      p.sku, p.nome, ii.quantidade_sistema,
       ii.quantidade_contada, ii.conferido
     FROM alissonerp.itens_inventario_comercial ii
     JOIN public.produtos p ON p.id_produto = ii.produto_id
+    LEFT JOIN alissonerp.produtos_compat pc ON pc.id_produto = ii.produto_id
     WHERE ii.inventario_id = ANY(${ids}::int[])
       -- PEÇA PRONTA: app RFID também não vê pedra/personalizada
       AND ${condPecaPronta(sql)}
