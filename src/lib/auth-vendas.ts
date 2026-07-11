@@ -114,10 +114,13 @@ export async function requireEntregaVendaAccess(
   if (!row) throw new NotFoundError("Entrega nao encontrada");
   if (isVendasFullAccess(user.role)) return row;
 
-  // Motoboy designado pode confirmar a própria entrega (código do cliente no app)
-  if (opts.permitirMotoboy && user.role === "motoboy") {
+  // Motoboy designado pode confirmar a própria entrega (código do cliente no app).
+  // REGRA: role 'entregador' é o motoboy do app; 'motoboy' é protocolista
+  // (mesma convenção de confirmar-avulso/route.ts). Ambos operam SÓ a entrega
+  // designada a eles (motoboy_id == user.id) — não abre acesso às dos outros.
+  if (opts.permitirMotoboy && (user.role === "entregador" || user.role === "motoboy")) {
     if (row.motoboy_id && row.motoboy_id === user.id) return row;
-    throw new ForbiddenError("Motoboy só opera entregas designadas a ele");
+    throw new ForbiddenError("Entregador só opera entregas designadas a ele");
   }
 
   // Consultora: precisa ser dona da venda
