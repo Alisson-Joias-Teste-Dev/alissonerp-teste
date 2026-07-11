@@ -105,12 +105,31 @@ export async function GET(req: NextRequest, { params }: Params) {
       FROM alissonerp.joias_leituras
       WHERE inventario_id = ${invId}
     ),
+    -- REGRA DE NEGÓCIO (11/07 — Jonathan): resolve o id_api_produto pela
+    -- erp_produtos (via produtos_compat) ALÉM da public.produtos. Sem isso, uma
+    -- peça com id só na erp (public.id_api = NULL por causa do espelho que só
+    -- propaga INSERT) ficava FORA de ids_do_inventario e suas leituras apareciam
+    -- como "excedente fora do inventário" (falso — a peça ESTÁ no inventário).
     ids_do_inventario AS (
-      SELECT p.id_api_produto
+      SELECT COALESCE(pc.id_api_produto, p.id_api_produto) AS id_api_produto
       FROM alissonerp.itens_inventario_comercial ii
       JOIN public.produtos p ON p.id_produto = ii.produto_id
+      LEFT JOIN alissonerp.produtos_compat pc ON pc.id_produto = ii.produto_id
       WHERE ii.inventario_id = ${invId}
-        AND p.id_api_produto IS NOT NULL
+        AND COALESCE(pc.id_api_produto, p.id_api_produto) IS NOT NULL
+    ),
+    -- Fonte de produto por id_api resolvendo as duas tabelas (erp primeiro).
+    -- Onde as duas têm, o número é idêntico (0 divergência em 15.546 casos).
+    prod_por_api AS (
+      SELECT DISTINCT ON (id_api_produto) id_api_produto, sku, nome, categoria
+      FROM (
+        SELECT id_api_produto, sku, nome, categoria, 1 AS pri
+          FROM alissonerp.produtos_compat WHERE id_api_produto IS NOT NULL
+        UNION ALL
+        SELECT id_api_produto, sku, nome, categoria, 2 AS pri
+          FROM public.produtos WHERE id_api_produto IS NOT NULL
+      ) u
+      ORDER BY id_api_produto, pri
     )
     SELECT
       el.id_api_produto,
@@ -119,7 +138,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       COALESCE(p.categoria, '') AS categoria_produto,
       COUNT(*)::int AS quantidade
     FROM epcs_lidos el
-    JOIN public.produtos p ON p.id_api_produto = el.id_api_produto
+    JOIN prod_por_api p ON p.id_api_produto = el.id_api_produto
     WHERE el.id_api_produto IS NOT NULL
       AND el.id_api_produto NOT IN (SELECT id_api_produto FROM ids_do_inventario)
     GROUP BY el.id_api_produto, p.sku, p.nome, p.categoria
