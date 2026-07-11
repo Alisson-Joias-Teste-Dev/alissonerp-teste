@@ -47,7 +47,7 @@ export default async function ProtocoloPage() {
       LEFT JOIN alissonerp.protocolo_ordens po ON po.protocolo_id = p.id
       LEFT JOIN alissonerp.usuarios m        ON m.id = p.motoboy_id
       LEFT JOIN alissonerp.usuarios r        ON r.id = p.recebedor_id
-      WHERE p.direcao = 'ida'
+      WHERE p.direcao = 'ida' AND p.tipo_protocolo != 'interno'
       GROUP BY p.id, m.nome, r.nome
       ORDER BY p.id DESC
       LIMIT 100
@@ -68,7 +68,7 @@ export default async function ProtocoloPage() {
       LEFT JOIN alissonerp.protocolo_ordens po ON po.protocolo_id = p.id
       LEFT JOIN alissonerp.usuarios m        ON m.id = p.motoboy_id
       LEFT JOIN alissonerp.usuarios r        ON r.id = p.recebedor_id
-      WHERE p.direcao = 'volta'
+      WHERE p.direcao = 'volta' AND p.tipo_protocolo != 'interno'
       GROUP BY p.id, m.nome, r.nome
       ORDER BY p.id DESC
       LIMIT 100
