@@ -20,10 +20,20 @@ export async function GET() {
     }
     if (!user) return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
 
+    // REGRA DE NEGOCIO (11/07 — Jonathan): o app baixa os produtos por aqui e os
+    // guarda pela chave id_api_produto (o numero gravado na etiqueta). Esse id fica
+    // na alissonerp.erp_produtos, mas o espelho pro public.produtos so propaga no
+    // INSERT — quando o id chega depois por UPDATE (sync Tiny pos-cadastro) nunca
+    // alcanca o public. Lendo so do public, o produto vinha com id_api NULL e o app
+    // nao casava a etiqueta lida com o SKU (ex.: 1840-18). Resolve pela erp
+    // (view produtos_compat) com fallback pro public; onde as duas tem, e identico.
     const produtos = await sql`
-      SELECT id_produto, id_api_produto, sku, nome
-      FROM public.produtos
-      WHERE situacao = 'A'
+      SELECT p.id_produto,
+             COALESCE(pc.id_api_produto, p.id_api_produto) AS id_api_produto,
+             p.sku, p.nome
+      FROM public.produtos p
+      LEFT JOIN alissonerp.produtos_compat pc ON pc.id_produto = p.id_produto
+      WHERE p.situacao = 'A'
       ORDER BY id_api_produto
     `;
 
