@@ -79,6 +79,7 @@ export async function GET(
         ev.foto_entrega_path,
         ev.is_avulso,
         ev.descricao_avulso,
+        (ev.created_by = ev.motoboy_id) AS auto_criado,
         -- Dados da venda vinculada
         ve.numero_venda,
         ve.total_venda,
@@ -218,6 +219,7 @@ export async function GET(
     foto_entrega_path: e.foto_entrega_path ?? null,
     is_avulso: Boolean(e.is_avulso),
     descricao_avulso: e.descricao_avulso ?? null,
+    auto_criado: Boolean(e.auto_criado),
     // Dados da venda
     numero_venda: e.numero_venda,
     total_venda: e.total_venda ? Number(e.total_venda) : null,

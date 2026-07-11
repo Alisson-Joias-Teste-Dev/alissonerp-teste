@@ -138,6 +138,7 @@ interface EntregaDetalhe {
   itens_count: number;
   is_avulso: boolean;
   descricao_avulso: string | null;
+  auto_criado: boolean;
 }
 
 // ── Props ───────────────────────────────────────────────────────────────────────
@@ -369,8 +370,12 @@ export default function EntregaDetalheDrawer({
   const podeConfirmarPagamento =
     isPendente && temNaEntregaPendente && !detalhe?.is_avulso &&
     (isRetirada || (isMotoboy && !!detalhe?.data_saida));
-  // Avulso confirma com botão simples, sem código nem registro de saída
-  const podeConfirmarAvulso = isPendente && !!detalhe?.is_avulso;
+  // Avulso confirma com botão simples, sem código nem registro de saída.
+  // REGRA (anti-fraude): a corrida que o PRÓPRIO entregador registrou fica
+  // pendente de confirmação da LOJA — ele não confirma o próprio lançamento
+  // (o backend confirmar-avulso também bloqueia). Loja/admin confirma normal.
+  const avulsoAutoCriadoDele = !!detalhe?.auto_criado && userRole === "entregador";
+  const podeConfirmarAvulso = isPendente && !!detalhe?.is_avulso && !avulsoAutoCriadoDele;
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -1469,6 +1474,17 @@ export default function EntregaDetalheDrawer({
                   <CheckCircle size={14} />
                   {confirmandoAvulso ? "Confirmando..." : "Confirmar Entrega"}
                 </button>
+              )}
+
+              {/* Corrida que o próprio entregador registrou: aguarda a loja */}
+              {isPendente && !!detalhe?.is_avulso && avulsoAutoCriadoDele && (
+                <div style={{
+                  padding: "10px 12px", background: "#FEF3C7", color: "#92400E",
+                  borderRadius: 8, fontSize: 12, fontWeight: 600,
+                  display: "flex", alignItems: "center", gap: 6,
+                }}>
+                  <Clock size={13} /> Aguardando confirmação da loja
+                </div>
               )}
 
               {/* Informar Correios */}

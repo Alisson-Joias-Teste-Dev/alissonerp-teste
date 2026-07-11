@@ -98,6 +98,7 @@ export async function GET(req: NextRequest) {
         ev.forma_entrega, ev.regiao, ev.frete_motoboy, ev.data_saida,
         ev.data_entrega_realizada, ev.created_at,
         ev.is_avulso, ev.descricao_avulso,
+        (ev.created_by = ev.motoboy_id) AS auto_criado,
         ve.numero_venda, ve.total_venda,
         COALESCE(c.nome, ca.nome) AS cliente_nome,
         EXISTS (
@@ -170,6 +171,7 @@ export async function GET(req: NextRequest) {
       cliente_nome: r.cliente_nome,
       is_avulso: Boolean(r.is_avulso),
       descricao_avulso: r.descricao_avulso ? String(r.descricao_avulso) : null,
+      auto_criado: Boolean(r.auto_criado),
       foi_pago: Boolean(r.foi_pago),
     })),
     total,

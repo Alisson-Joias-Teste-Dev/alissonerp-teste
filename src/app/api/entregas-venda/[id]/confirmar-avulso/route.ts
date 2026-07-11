@@ -51,7 +51,7 @@ export async function POST(
   // Motoboy só pode confirmar a própria corrida
   if (isMotoboy) {
     const [entrega] = await sql`
-      SELECT motoboy_id, is_avulso
+      SELECT motoboy_id, is_avulso, created_by
       FROM alissonerp.entregas_venda
       WHERE id = ${entregaId} LIMIT 1
     `;
@@ -59,6 +59,16 @@ export async function POST(
     if (!entrega.is_avulso) return NextResponse.json({ error: "Entrega não é avulsa" }, { status: 400 });
     if (String(entrega.motoboy_id) !== user.id) {
       return NextResponse.json({ error: "Você não é o motoboy desta entrega" }, { status: 403 });
+    }
+    // REGRA DE NEGÓCIO (anti-fraude): corrida que o PRÓPRIO motoboy registrou
+    // fica pendente de confirmação da LOJA — ele não confirma o próprio
+    // lançamento. Avulso criado pela loja e atribuído a ele segue confirmável
+    // por ele no app (created_by != motoboy).
+    if (String(entrega.created_by) === user.id) {
+      return NextResponse.json(
+        { error: "Corrida registrada por você aguarda confirmação da loja." },
+        { status: 403 },
+      );
     }
   }
 
