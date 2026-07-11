@@ -5,16 +5,11 @@ import MovimentacaoInternaClient from "./MovimentacaoInternaClient";
 export const dynamic = 'force-dynamic';
 
 /**
- * REGRA DE NEGÓCIO: Movimentação Interna registra retirada/devolução de
- * produto entre estoquista e consultora, dentro da mesma loja — sem PCP,
- * sem aprovação de consultora, sem role própria (qualquer usuário
- * autenticado abre e conclui). É só auditoria: quem abriu, quem confirmou,
- * foto obrigatória nas duas pontas.
- *
- * Reaproveita a tabela alissonerp.protocolos (tipo_protocolo='interno') e
- * alissonerp.protocolo_produtos por trás — mas fica fora da tela Protocolo
- * (que é especificamente sobre transporte Loja↔Fábrica com motoboy) para
- * não confundir os dois conceitos.
+ * REGRA DE NEGOCIO: Movimentacao Interna registra o ciclo de uma peca que sai
+ * do estoque da loja para a consultora e depois se resolve — sem PCP, sem
+ * aprovacao, sem role propria. Ciclo: solicitado -> entregue -> recebido ->
+ * finalizado (devolvido ao estoque | cliente levou). Cada passo grava quem fez,
+ * quando, e (nos passos fisicos) uma foto. Independente do modulo Protocolo.
  */
 export default async function MovimentacaoInternaPage() {
   const supabase = await createServerSupabase();
@@ -22,26 +17,34 @@ export default async function MovimentacaoInternaPage() {
 
   const rows = user ? await sql`
     SELECT
-      p.id,
-      p.etapas::text,
-      p.data_conclusao,
-      p.created_at,
-      p.foto_criacao,
-      p.foto_conclusao,
-      m.nome AS criado_por_nome,
-      r.nome AS concluido_por_nome,
+      s.id,
+      s.status::text,
+      s.descricao,
+      s.created_at,
+      s.entregue_em,
+      s.recebido_em,
+      s.finalizado_em,
+      s.motivo_final,
+      s.foto_entrega,
+      s.foto_recebimento,
+      s.foto_devolucao,
+      sol.nome AS solicitante_nome,
+      ent.nome AS entregue_por_nome,
+      rec.nome AS recebido_por_nome,
+      fin.nome AS finalizado_por_nome,
       COALESCE(
         (SELECT json_agg(json_build_object('nome', pr.nome, 'sku', pr.sku) ORDER BY pr.nome)
-         FROM alissonerp.protocolo_produtos pp
-         JOIN public.produtos pr ON pr.id_produto = pp.produto_id
-         WHERE pp.protocolo_id = p.id),
+         FROM alissonerp.solicitacao_peca_produtos spp
+         JOIN public.produtos pr ON pr.id_produto = spp.produto_id
+         WHERE spp.solicitacao_id = s.id),
         '[]'::json
       ) AS produtos
-    FROM alissonerp.protocolos p
-    LEFT JOIN alissonerp.usuarios m ON m.id = p.created_by
-    LEFT JOIN alissonerp.usuarios r ON r.id = p.recebedor_id
-    WHERE p.tipo_protocolo = 'interno'
-    ORDER BY p.id DESC
+    FROM alissonerp.solicitacoes_peca s
+    LEFT JOIN alissonerp.usuarios sol ON sol.id = s.solicitante_id
+    LEFT JOIN alissonerp.usuarios ent ON ent.id = s.entregue_por_id
+    LEFT JOIN alissonerp.usuarios rec ON rec.id = s.recebido_por_id
+    LEFT JOIN alissonerp.usuarios fin ON fin.id = s.finalizado_por_id
+    ORDER BY s.id DESC
     LIMIT 200
   ` : [];
 

@@ -1,0 +1,188 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { X, Loader2, CheckCircle, AlertCircle, Camera, RotateCcw, Undo2, UserCheck } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+
+const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8" };
+
+type Tipo = "entregar" | "receber" | "finalizar";
+
+interface Props {
+  isOpen: boolean;
+  onClose: () => void;
+  solicitacaoId: number;
+  tipo: Tipo;
+  produtosLabel: string;
+  onSuccess?: () => void;
+}
+
+const CONFIG: Record<Tipo, { titulo: string; subtitulo: string; label: string }> = {
+  entregar:  { titulo: "Confirmar Entrega",     subtitulo: "Estoque separou e está entregando", label: "Confirmar entrega" },
+  receber:   { titulo: "Confirmar Recebimento", subtitulo: "Você está recebendo a peça",        label: "Confirmar recebimento" },
+  finalizar: { titulo: "Finalizar",             subtitulo: "Encerrar esta movimentação",        label: "Finalizar" },
+};
+
+const CAMPO_FOTO: Record<Tipo, string> = { entregar: "entrega", receber: "recebimento", finalizar: "devolucao" };
+
+/**
+ * REGRA DE NEGOCIO: transicoes do fluxo.
+ *  - entregar/receber: foto obrigatoria.
+ *  - finalizar: escolhe "devolvido" (foto obrigatoria) ou "cliente levou" (sem foto).
+ * A foto sobe CLIENT-side no bucket privado protocolo-fotos (sessao do usuario
+ * passa na RLS — mesmo padrao dos modais de Protocolo); o PATCH recebe so o path.
+ */
+export default function AcaoSolicitacaoModal({ isOpen, onClose, solicitacaoId, tipo, produtosLabel, onSuccess }: Props) {
+  const [fotoFile, setFotoFile] = useState<File | null>(null);
+  const [fotoPreview, setFotoPreview] = useState<string | null>(null);
+  const [motivo, setMotivo] = useState<"devolvido" | "cliente_levou" | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setFotoFile(null); setFotoPreview(null); setMotivo(null);
+    setError(""); setSuccess(false);
+  }, [isOpen]);
+
+  const cfg = CONFIG[tipo];
+  // Foto obrigatoria: entregar, receber, e finalizar-devolvido. Nao em cliente_levou.
+  const fotoObrigatoria = tipo === "entregar" || tipo === "receber" || (tipo === "finalizar" && motivo === "devolvido");
+  const podeEnviar =
+    tipo === "finalizar"
+      ? (motivo === "cliente_levou" || (motivo === "devolvido" && !!fotoFile))
+      : !!fotoFile;
+
+  async function handleSubmit() {
+    setError("");
+    if (tipo === "finalizar" && !motivo) { setError("Escolha o que aconteceu com a peça."); return; }
+    if (fotoObrigatoria && !fotoFile) { setError("Foto é obrigatória."); return; }
+    setLoading(true);
+    try {
+      let foto_path: string | undefined;
+      if (fotoFile) {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        const path = `movimentacao-interna/${CAMPO_FOTO[tipo]}/${solicitacaoId}/${user?.id ?? "anon"}-${Date.now()}.jpg`;
+        const { error: upErr } = await supabase.storage
+          .from("protocolo-fotos")
+          .upload(path, fotoFile, { contentType: fotoFile.type || "image/jpeg", upsert: false });
+        if (upErr) throw new Error(`Upload foto: ${upErr.message}`);
+        foto_path = path;
+      }
+      const res = await fetch(`/api/solicitacao-peca/${solicitacaoId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: tipo,
+          foto_path,
+          motivo_final: tipo === "finalizar" ? motivo : undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`);
+      setSuccess(true);
+      setTimeout(() => { onSuccess?.(); onClose(); }, 1000);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Erro ao confirmar");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-md md:mx-4 md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
+          <div>
+            <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>{cfg.titulo}</h3>
+            <p className="text-[12px] mt-0.5" style={{ color: "#9CA3AF" }}>#{solicitacaoId} · {cfg.subtitulo}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100">
+            <X size={17} style={{ color: "#9CA3AF" }} />
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          <div className="rounded-xl px-3 py-2.5 text-sm" style={{ border: `1px solid ${C.cremeBorder}`, color: "#374151" }}>
+            {produtosLabel}
+          </div>
+
+          {/* Finalizar: escolha do motivo */}
+          {tipo === "finalizar" && (
+            <div className="grid grid-cols-1 gap-2">
+              <button onClick={() => setMotivo("devolvido")}
+                className="flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-colors"
+                style={{ borderColor: motivo === "devolvido" ? C.esmeralda : C.cremeBorder, backgroundColor: motivo === "devolvido" ? "#18403612" : "#fff" }}>
+                <Undo2 size={18} style={{ color: C.esmeralda }} />
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>Voltou ao estoque</p>
+                  <p className="text-xs" style={{ color: "#9CA3AF" }}>cliente não levou · exige foto</p>
+                </div>
+              </button>
+              <button onClick={() => setMotivo("cliente_levou")}
+                className="flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-colors"
+                style={{ borderColor: motivo === "cliente_levou" ? C.esmeralda : C.cremeBorder, backgroundColor: motivo === "cliente_levou" ? "#18403612" : "#fff" }}>
+                <UserCheck size={18} style={{ color: C.esmeralda }} />
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>Cliente levou</p>
+                  <p className="text-xs" style={{ color: "#9CA3AF" }}>saiu de vez · sem foto</p>
+                </div>
+              </button>
+            </div>
+          )}
+
+          {/* Foto (quando obrigatoria) */}
+          {fotoObrigatoria && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#9CA3AF" }}>
+                Foto <span style={{ color: "#DC2626" }}>*</span>
+              </p>
+              {fotoPreview ? (
+                <div className="relative rounded-xl overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={fotoPreview} alt="Foto" className="w-full max-h-36 object-cover rounded-xl" />
+                  <button onClick={() => { setFotoFile(null); setFotoPreview(null); }}
+                    className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.55)" }}>
+                    <RotateCcw size={13} color="white" />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex flex-col items-center justify-center h-24 rounded-xl cursor-pointer transition-colors"
+                  style={{ border: `2px dashed ${C.cremeBorder}`, backgroundColor: "#FAFAF7" }}>
+                  <Camera size={22} style={{ color: "#9CA3AF" }} />
+                  <span className="text-xs mt-1.5" style={{ color: "#9CA3AF" }}>Tirar foto ou selecionar</span>
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) { setFotoFile(f); setFotoPreview(URL.createObjectURL(f)); } }} />
+                </label>
+              )}
+            </div>
+          )}
+
+          {error && (
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]" style={{ backgroundColor: "#FEF2F2", color: "#DC2626" }}>
+              <AlertCircle size={14} className="shrink-0" />{error}
+            </div>
+          )}
+          {success && (
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]" style={{ backgroundColor: "#ECFDF5", color: "#059669" }}>
+              <CheckCircle size={14} className="shrink-0" />Feito!
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t" style={{ borderColor: C.cremeBorder }}>
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px]" style={{ color: "#6B7280" }}>Cancelar</button>
+          <button onClick={handleSubmit} disabled={loading || success || !podeEnviar}
+            className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+            {loading ? <><Loader2 size={14} className="animate-spin" />Salvando...</> : cfg.label}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
