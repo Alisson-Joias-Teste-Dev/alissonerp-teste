@@ -30,7 +30,7 @@ export default async function ProtocoloPage() {
     }
   }
 
-  const [ida, volta, interno, aprovacoes, entregas] = await Promise.all([
+  const [ida, volta, aprovacoes, entregas] = await Promise.all([
     sql`
       SELECT
         p.id,
@@ -75,30 +75,6 @@ export default async function ProtocoloPage() {
     `,
     sql`
       SELECT
-        p.id,
-        p.etapas::text,
-        p.data_conclusao,
-        p.created_at,
-        p.foto_criacao,
-        p.foto_conclusao,
-        m.nome AS criado_por_nome,
-        r.nome AS concluido_por_nome,
-        COALESCE(
-          (SELECT json_agg(json_build_object('nome', pr.nome, 'sku', pr.sku) ORDER BY pr.nome)
-           FROM alissonerp.protocolo_produtos pp
-           JOIN public.produtos pr ON pr.id_produto = pp.produto_id
-           WHERE pp.protocolo_id = p.id),
-          '[]'::json
-        ) AS produtos
-      FROM alissonerp.protocolos p
-      LEFT JOIN alissonerp.usuarios m ON m.id = p.created_by
-      LEFT JOIN alissonerp.usuarios r ON r.id = p.recebedor_id
-      WHERE p.tipo_protocolo = 'interno'
-      ORDER BY p.id DESC
-      LIMIT 200
-    `,
-    sql`
-      SELECT
         ac.id,
         ac.etapas::text,
         ac.ordem_id,
@@ -131,7 +107,6 @@ export default async function ProtocoloPage() {
     <ProtocoloClient
       ida={ida as any[]}
       volta={volta as any[]}
-      interno={interno as any[]}
       aprovacoes={aprovacoes as any[]}
       entregas={entregas as any[]}
       tiposProtocoloPermitidos={tiposProtocoloPermitidos}
