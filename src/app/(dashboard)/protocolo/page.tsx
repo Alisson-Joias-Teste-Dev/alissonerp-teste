@@ -6,7 +6,7 @@ import ProtocoloMotoboy from "@/components/motoboy/ProtocoloMotoboy";
 export const dynamic = 'force-dynamic';
 
 const FULL_ACCESS_ROLES = ["admin", "desenvolvedor"];
-const ALL_TIPOS_PROTOCOLO = ["fabrica", "service"];
+const ALL_TIPOS_PROTOCOLO = ["fabrica"];
 
 export default async function ProtocoloPage() {
   const supabase = await createServerSupabase();

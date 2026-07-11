@@ -11,7 +11,6 @@ import { getPublicUrl } from "@/lib/storage-url";
 
 const TIPOS_PROTOCOLO_DROPDOWN = [
   { tipo: "fabrica", label: "Fábrica", emoji: "🏭" },
-  { tipo: "service", label: "Service", emoji: "🔧" },
 ];
 
 /**
