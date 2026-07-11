@@ -46,9 +46,29 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 ## Status
 
 - [x] Fase 0 — mapa (11/07/2026)
-- [ ] Fase 1 — camada central
+- [x] Fase 1 — camada central (11/07/2026, commit `3efb6f02`) — aguardando revisão do Opus antes da Fase 2
 - [ ] Fase 2 — golden tests
 - [ ] Fase 3 — migração
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
+
+### Fase 1 — nota pro Opus revisar
+
+- `src/lib/aprovacoes/` criado (tipos, catálogo dos 18 eventos, autoridade — puras + wrappers
+  async, override-log, testes). `npx tsc --noEmit` zero erros. 16 testes unitários passando
+  (`npx vitest run src/lib/aprovacoes`). `git status` confirma: nada fora de
+  `src/lib/aprovacoes/` foi tocado; nenhum import em `src/app/`/`src/components/`.
+- 2 desvios do pacote, decididos por não poder tocar arquivo fora do escopo (reportar se
+  quiser outra decisão):
+  1. `ROLES_ESTOQUE` (evento `devolver_peca`) não está exportada em `src/lib/roles.ts` —
+     só existe como const local em
+     `src/app/api/crediario/reserva/[vendaId]/devolver-peca/route.ts`. Replicada em
+     `catalogo.ts` como `ROLES_ESTOQUE_DEVOLVER_PECA`, com comentário explicando. Avaliar
+     promover pra `roles.ts` quando a Fase 3 migrar esse endpoint.
+  2. `logAudit` (`src/lib/audit.ts`) só aceita `operacao: 'INSERT'|'UPDATE'|'DELETE'` — não
+     tem `'APROVACAO_OVERRIDE'` como o pacote pedia. `registrarOverride` usa
+     `operacao:'INSERT'` e coloca a marca em `dados_depois.tipo_operacao`. Avaliar na Fase 5
+     se vale estender o union de `audit.ts`.
+- Worktree usado: `/home/jonathan_arajo/projetos/alissonerp-wt-centralizar-aprovacoes`
+  (`node_modules` é um symlink local pro repo principal — não commitado, `.gitignore` já cobre).
