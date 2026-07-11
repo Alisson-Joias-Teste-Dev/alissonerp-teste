@@ -9,16 +9,16 @@ const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8" };
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  protocoloId: number;
+  movimentacaoId: number;
   produtos: string[];
   onSuccess?: () => void;
 }
 
 /**
- * REGRA DE NEGÓCIO: confirmar recebimento do protocolo interno — sem role,
+ * REGRA DE NEGÓCIO: confirmar recebimento da movimentação interna — sem role,
  * sem PCP, sem aprovação. Só quem confirma (usuário logado) + foto obrigatória.
  */
-export default function ConcluirProtocoloInternoModal({ isOpen, onClose, protocoloId, produtos, onSuccess }: Props) {
+export default function ConcluirMovimentacaoInternaModal({ isOpen, onClose, movimentacaoId, produtos, onSuccess }: Props) {
   const [fotoFile, setFotoFile] = useState<File | null>(null);
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -42,13 +42,13 @@ export default function ConcluirProtocoloInternoModal({ isOpen, onClose, protoco
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
 
-      const fotoPath = `conclusao/${protocoloId}/${Date.now()}.jpg`;
+      const fotoPath = `conclusao/${movimentacaoId}/${Date.now()}.jpg`;
       const { error: uploadErr } = await supabase.storage
         .from("protocolo-fotos")
         .upload(fotoPath, fotoFile, { contentType: fotoFile.type || "image/jpeg", upsert: false });
       if (uploadErr) throw new Error(`Upload foto: ${uploadErr.message}`);
 
-      const res = await fetch(`/api/protocolo/${protocoloId}`, {
+      const res = await fetch(`/api/protocolo/${movimentacaoId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -84,7 +84,7 @@ export default function ConcluirProtocoloInternoModal({ isOpen, onClose, protoco
         <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
           <div>
             <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>Confirmar Recebimento</h3>
-            <p className="text-[12px] mt-0.5" style={{ color: "#9CA3AF" }}>Protocolo Interno #{protocoloId}</p>
+            <p className="text-[12px] mt-0.5" style={{ color: "#9CA3AF" }}>Movimentação #{movimentacaoId}</p>
           </div>
           <button onClick={handleClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100">
             <X size={17} style={{ color: "#9CA3AF" }} />

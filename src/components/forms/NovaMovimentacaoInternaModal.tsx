@@ -19,11 +19,13 @@ interface Props {
 }
 
 /**
- * REGRA DE NEGÓCIO: protocolo interno registra retirada de produto do estoque
- * para a consultora (ou devolução, dependendo de quem abre) — dentro da mesma
- * loja. Sem ordem, sem role, sem direção: só produtos + foto obrigatória.
+ * REGRA DE NEGÓCIO: registra retirada de produto do estoque da loja (para a
+ * consultora, ou devolução, dependendo de quem abre). Sem role, sem ordem,
+ * só produtos + foto obrigatória. Por trás usa alissonerp.protocolos com
+ * tipo_protocolo='interno' — implementação reaproveitada, mas a tela é
+ * independente do módulo Protocolo (que é sobre transporte Loja↔Fábrica).
  */
-export default function NovoProtocoloInternoModal({ isOpen, onClose, onSuccess }: Props) {
+export default function NovaMovimentacaoInternaModal({ isOpen, onClose, onSuccess }: Props) {
   const [busca, setBusca] = useState("");
   const [resultados, setResultados] = useState<ProdutoOption[]>([]);
   const [buscando, setBuscando] = useState(false);
@@ -102,7 +104,7 @@ export default function NovoProtocoloInternoModal({ isOpen, onClose, onSuccess }
       setSuccess(true);
       setTimeout(() => { onSuccess?.(); onClose(); }, 1200);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Erro ao abrir protocolo interno");
+      setError(e instanceof Error ? e.message : "Erro ao registrar retirada");
     } finally {
       setLoading(false);
     }
@@ -115,7 +117,7 @@ export default function NovoProtocoloInternoModal({ isOpen, onClose, onSuccess }
       <div className="bg-white w-full max-h-[92vh] overflow-y-auto flex flex-col rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-lg md:mx-4 md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b shrink-0 sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
           <div>
-            <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>Abrir Protocolo Interno</h3>
+            <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>Registrar Retirada</h3>
             <p className="text-[12px] mt-0.5" style={{ color: "#9CA3AF" }}>
               {selecionados.length} produto{selecionados.length !== 1 ? "s" : ""} selecionado{selecionados.length !== 1 ? "s" : ""}
             </p>
@@ -244,7 +246,7 @@ export default function NovoProtocoloInternoModal({ isOpen, onClose, onSuccess }
           )}
           {success && (
             <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]" style={{ backgroundColor: "#ECFDF5", color: "#059669" }}>
-              <CheckCircle size={14} className="shrink-0" />Protocolo aberto!
+              <CheckCircle size={14} className="shrink-0" />Registrado!
             </div>
           )}
           <div className="flex flex-col-reverse md:flex-row md:items-center md:justify-end gap-2 md:gap-3">
@@ -261,7 +263,7 @@ export default function NovoProtocoloInternoModal({ isOpen, onClose, onSuccess }
               className="flex items-center justify-center gap-2 px-5 py-3 md:py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50 w-full md:w-auto"
               style={{ backgroundColor: C.esmeralda, color: C.creme, minHeight: 44 }}
             >
-              {loading ? <><Loader2 size={14} className="animate-spin" />Abrindo...</> : `Abrir Protocolo (${selecionados.length})`}
+              {loading ? <><Loader2 size={14} className="animate-spin" />Registrando...</> : `Registrar (${selecionados.length})`}
             </button>
           </div>
         </div>

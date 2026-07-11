@@ -133,6 +133,10 @@ export default function Sidebar() {
   const ROLES_SITE = ["desenvolvedor", "admin", "gerente_loja"];
   const ROLES_CREDIARIO_SIDEBAR = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
   const ROLES_ENTREGAS_VENDA = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica"];
+  // REGRA DE NEGÓCIO: Movimentação Interna (retirada/devolução de peça entre
+  // estoquista e consultora) é aberta pra quem de fato lida com isso na loja —
+  // sem checagem de role própria na API, só visibilidade de menu aqui.
+  const ROLES_MOVIMENTACAO_INTERNA = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "consultora", "estoquista_loja"];
   // REGRA DE NEGÓCIO: Acesso ao módulo Metal no menu lateral agora usa a
   // constante centralizada ROLES_METAL de @/lib/roles (fonte única da verdade).
   // Inclui estoquista_fabrica, que já tinha acesso à API mas não via o menu.
@@ -143,6 +147,7 @@ export default function Sidebar() {
   const hasSite = role && ROLES_SITE.includes(role);
   const hasCrediario = role && ROLES_CREDIARIO_SIDEBAR.includes(role);
   const hasEntregasVenda = role && ROLES_ENTREGAS_VENDA.includes(role);
+  const hasMovimentacaoInterna = role && ROLES_MOVIMENTACAO_INTERNA.includes(role);
   const modulosEfetivos = [...modulos_leitura];
   if (modulosEfetivos.length > 0) {
     if (hasServicePanel && !modulosEfetivos.includes("service_painel")) modulosEfetivos.push("service_painel");
@@ -162,6 +167,7 @@ export default function Sidebar() {
      */
     if (hasMetal && !modulosEfetivos.includes("metal")) modulosEfetivos.push("metal");
     if (hasEntregasVenda && !modulosEfetivos.includes("entregas_venda")) modulosEfetivos.push("entregas_venda");
+    if (hasMovimentacaoInterna && !modulosEfetivos.includes("movimentacao_interna")) modulosEfetivos.push("movimentacao_interna");
   }
 
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)
