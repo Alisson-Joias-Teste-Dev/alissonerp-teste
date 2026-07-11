@@ -62,6 +62,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN alissonerp.usuarios r        ON r.id = p.recebedor_id
     LEFT JOIN alissonerp.cofre_ouro_baixas b ON b.protocolo_id = p.id
     WHERE p.etapas = 'concluido'
+      AND p.tipo_protocolo != 'interno'
       ${direcao ? sql`AND p.direcao::text = ${direcao}` : sql``}
     GROUP BY p.id, m.nome, r.nome, b.id, b.gramas, b.destino, b.realizado_nome, b.created_at
     ORDER BY p.data_conclusao DESC NULLS LAST

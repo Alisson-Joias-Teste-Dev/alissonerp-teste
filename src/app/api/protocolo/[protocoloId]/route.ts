@@ -57,20 +57,31 @@ export async function PATCH(
 ) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
-  if (!ROLES_PROTOCOLO_PATCH.includes(user.role)) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
-  }
 
   const { protocoloId } = await params;
   const id = parseInt(protocoloId);
+
+  /**
+   * REGRA DE NEGÓCIO: protocolo interno (retirada/devolução entre estoquista
+   * e consultora) não tem restrição de role — qualquer usuário autenticado
+   * pode abrir e concluir. Só fabrica/service/sangria/ouro exigem os papéis
+   * de ROLES_PROTOCOLO_PATCH/ROLES_CONCLUIR_PROTOCOLO.
+   */
+  const [protoAtual] = await sql`SELECT tipo_protocolo FROM alissonerp.protocolos WHERE id = ${id}`;
+  const isInterno = protoAtual?.tipo_protocolo === "interno";
+
+  if (!isInterno && !ROLES_PROTOCOLO_PATCH.includes(user.role)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
   const raw = await req.json().catch(() => ({}));
   const parsed = ProtocoloPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;
   const { etapas, recebedor_id, foto_conclusao, ordens_detalhes } = body;
 
-  // Validar role ao concluir
-  if (etapas === "concluido" && recebedor_id) {
+  // Validar role ao concluir (protocolo interno não valida)
+  if (!isInterno && etapas === "concluido" && recebedor_id) {
     const roleResult = await sql`
       SELECT role::text AS role
       FROM alissonerp.usuarios
