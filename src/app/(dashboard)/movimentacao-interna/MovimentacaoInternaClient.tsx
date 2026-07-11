@@ -2,16 +2,15 @@
 
 import { useState, useCallback, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, CheckCircle2, Clock, Search, Truck, HandHeart } from "lucide-react";
+import { Plus, CheckCircle2, Clock, Search, Truck, HandHeart, Undo2, UserCheck } from "lucide-react";
 import SolicitarPecaModal from "@/components/forms/SolicitarPecaModal";
-import AcaoSolicitacaoModal from "@/components/forms/AcaoSolicitacaoModal";
+import AcaoSolicitacaoModal, { type AcaoTipo } from "@/components/forms/AcaoSolicitacaoModal";
 import { MobileCard } from "@/components/ui/MobileCard";
 import { getPublicUrl } from "@/lib/storage-url";
 
 const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8", cremeBg: "#FAFAF7" };
 
 type Filtro = "abertas" | "finalizadas" | "todas";
-type AcaoTipo = "entregar" | "receber" | "finalizar";
 
 interface Produto { nome: string; sku: string | null; }
 
@@ -22,6 +21,7 @@ interface SolicitacaoRow {
   created_at: string;
   entregue_em: string | null;
   recebido_em: string | null;
+  volta_solicitada_em: string | null;
   finalizado_em: string | null;
   motivo_final: string | null;
   foto_entrega: string | null;
@@ -30,6 +30,7 @@ interface SolicitacaoRow {
   solicitante_nome: string | null;
   entregue_por_nome: string | null;
   recebido_por_nome: string | null;
+  volta_solicitada_por_nome: string | null;
   finalizado_por_nome: string | null;
   produtos: Produto[];
 }
@@ -55,19 +56,25 @@ function produtosLabel(r: SolicitacaoRow) {
 
 // status atual → como mostrar (bg/color pro desktop, cor=classe Tailwind pro MobileCard)
 function statusInfo(r: SolicitacaoRow): { label: string; bg: string; color: string; cor: string } {
-  if (r.status === "solicitado") return { label: "Solicitado", bg: "#FEF3C7", color: "#92400E", cor: "bg-yellow-100 text-yellow-700" };
-  if (r.status === "entregue")   return { label: "Entregue",   bg: "#EFF6FF", color: "#2563EB", cor: "bg-blue-100 text-blue-700" };
-  if (r.status === "recebido")   return { label: "Com a solicitante", bg: "#F3F4F6", color: "#6B7280", cor: "bg-gray-100 text-gray-600" };
+  if (r.status === "solicitado")       return { label: "Solicitado", bg: "#FEF3C7", color: "#92400E", cor: "bg-yellow-100 text-yellow-700" };
+  if (r.status === "entregue")         return { label: "Entregue",   bg: "#EFF6FF", color: "#2563EB", cor: "bg-blue-100 text-blue-700" };
+  if (r.status === "recebido")         return { label: "Com a solicitante", bg: "#F3F4F6", color: "#6B7280", cor: "bg-gray-100 text-gray-600" };
+  if (r.status === "volta_solicitada") return { label: "Volta solicitada", bg: "#FEF3C7", color: "#92400E", cor: "bg-yellow-100 text-yellow-700" };
   // finalizado
   if (r.motivo_final === "cliente_levou") return { label: "Cliente levou", bg: "#ECFDF5", color: "#059669", cor: "bg-green-100 text-green-700" };
   return { label: "Devolvido", bg: "#F3F4F6", color: "#6B7280", cor: "bg-gray-100 text-gray-600" };
 }
 
-function acaoDoStatus(status: string): { tipo: AcaoTipo; label: string } | null {
-  if (status === "solicitado") return { tipo: "entregar",  label: "Confirmar entrega" };
-  if (status === "entregue")   return { tipo: "receber",   label: "Confirmar recebimento" };
-  if (status === "recebido")   return { tipo: "finalizar", label: "Finalizar" };
-  return null;
+// acoes disponiveis no estado atual (recebido tem 2: cliente levou / devolver)
+function acoesDoStatus(status: string): { tipo: AcaoTipo; label: string; icon: typeof Truck }[] {
+  if (status === "solicitado")       return [{ tipo: "entregar", label: "Confirmar entrega", icon: Truck }];
+  if (status === "entregue")         return [{ tipo: "receber", label: "Confirmar recebimento", icon: HandHeart }];
+  if (status === "recebido")         return [
+    { tipo: "cliente_levou", label: "Cliente levou", icon: UserCheck },
+    { tipo: "solicitar_volta", label: "Devolver ao estoque", icon: Undo2 },
+  ];
+  if (status === "volta_solicitada") return [{ tipo: "confirmar_devolucao", label: "Confirmar devolução", icon: CheckCircle2 }];
+  return [];
 }
 
 export default function MovimentacaoInternaClient({ rows }: Props) {
@@ -165,7 +172,7 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
           {rowsFiltrados.length === 0 && <p className="text-center py-8 text-sm" style={{ color: "#9CA3AF" }}>Nenhuma solicitação encontrada</p>}
           {rowsFiltrados.map((r) => {
             const si = statusInfo(r);
-            const ac = acaoDoStatus(r.status);
+            const acoes = acoesDoStatus(r.status);
             return (
               <MobileCard key={r.id} titulo={`#${r.id}`} subtitulo={produtosLabel(r)}
                 badges={[{ label: si.label, cor: si.cor }]}
@@ -174,13 +181,18 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
                   { label: "Solicitado em", valor: fmt(r.created_at) },
                   ...(r.entregue_por_nome ? [{ label: "Entregue por", valor: r.entregue_por_nome }] : []),
                   ...(r.recebido_por_nome ? [{ label: "Recebido por", valor: r.recebido_por_nome }] : []),
+                  ...(r.volta_solicitada_por_nome ? [{ label: "Volta pedida por", valor: r.volta_solicitada_por_nome }] : []),
                   ...(r.finalizado_por_nome ? [{ label: "Finalizado por", valor: r.finalizado_por_nome }] : []),
                   { label: "Fotos", valor: <FotosCell r={r} small /> },
-                  { label: "Ação", valor: ac ? (
-                    <button onClick={(e) => { e.stopPropagation(); setAcao({ row: r, tipo: ac.tipo }); }}
-                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: "#18403612", color: C.esmeralda }}>
-                      <CheckCircle2 size={11} /> {ac.label}
-                    </button>
+                  { label: "Ação", valor: acoes.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {acoes.map((ac) => (
+                        <button key={ac.tipo} onClick={(e) => { e.stopPropagation(); setAcao({ row: r, tipo: ac.tipo }); }}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: "#18403612", color: C.esmeralda }}>
+                          <ac.icon size={11} /> {ac.label}
+                        </button>
+                      ))}
+                    </div>
                   ) : "—" },
                 ]} />
             );
@@ -201,7 +213,7 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
               {rowsFiltrados.length === 0 && <tr><td colSpan={6} className="text-center py-12 text-sm" style={{ color: "#9CA3AF" }}>Nenhuma solicitação encontrada</td></tr>}
               {rowsFiltrados.map((r, i) => {
                 const si = statusInfo(r);
-                const ac = acaoDoStatus(r.status);
+                const acoes = acoesDoStatus(r.status);
                 return (
                   <tr key={r.id} style={{ borderTop: i > 0 ? "1px solid #F3EADA" : undefined }}>
                     <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#6B7280" }}>#{r.id}</td>
@@ -215,12 +227,15 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
                     </td>
                     <td className="px-4 py-3"><FotosCell r={r} /></td>
                     <td className="px-4 py-3 text-right">
-                      {ac && (
-                        <button onClick={() => setAcao({ row: r, tipo: ac.tipo })}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold ml-auto" style={{ backgroundColor: "#18403612", color: C.esmeralda }}>
-                          {ac.tipo === "entregar" ? <Truck size={12} /> : ac.tipo === "receber" ? <HandHeart size={12} /> : <CheckCircle2 size={12} />}
-                          {ac.label}
-                        </button>
+                      {acoes.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 justify-end">
+                          {acoes.map((ac) => (
+                            <button key={ac.tipo} onClick={() => setAcao({ row: r, tipo: ac.tipo })}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold" style={{ backgroundColor: "#18403612", color: C.esmeralda }}>
+                              <ac.icon size={12} /> {ac.label}
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </td>
                   </tr>

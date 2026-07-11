@@ -1,10 +1,12 @@
 -- Movimentacao Interna / Solicitacao de Peca (v1)
 --
--- Ciclo: solicitado -> entregue -> recebido -> finalizado (devolvido | cliente_levou)
+-- Ciclo: solicitado -> entregue -> recebido -> [ cliente_levou => finalizado ]
+--                                            \-> volta_solicitada -> finalizado (devolvido)
 -- Registra quem esta com a peca dentro da loja: consultora solicita, estoque
--- entrega, solicitante confirma recebimento, e finaliza (voltou ao estoque ou o
--- cliente levou). Sem PCP, sem aprovacao, sem role propria — qualquer usuario
--- autenticado opera; o sistema so grava quem fez cada passo + data + foto.
+-- entrega, solicitante confirma recebimento, e resolve — cliente levou (encerra
+-- na hora) ou devolucao ao estoque (solicitante pede a volta, estoque confirma
+-- o recebimento de volta com foto, ai encerra). Sem PCP, sem aprovacao, sem role
+-- propria — qualquer usuario autenticado opera; grava quem fez cada passo + data.
 --
 -- Independente do modulo Protocolo (que e transporte Loja<->Fabrica com motoboy).
 
@@ -27,13 +29,17 @@ CREATE TABLE IF NOT EXISTS alissonerp.solicitacoes_peca (
   recebido_por_id   UUID,
   recebido_em       TIMESTAMPTZ,
   foto_recebimento  TEXT,
-  -- passo 4: finalizacao
+  -- passo 4b (opcional): solicitante pede a volta ao estoque — sem foto
+  volta_solicitada_por_id UUID,
+  volta_solicitada_em     TIMESTAMPTZ,
+  -- passo final: cliente_levou (a partir de recebido) OU devolvido (estoque
+  -- confirma a volta, com foto em foto_devolucao)
   finalizado_por_id UUID,
   finalizado_em     TIMESTAMPTZ,
   motivo_final      VARCHAR(20),                   -- devolvido | cliente_levou
-  foto_devolucao    TEXT,                          -- obrigatoria so quando devolvido
+  foto_devolucao    TEXT,                          -- foto do estoque ao confirmar a devolucao
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT chk_solic_peca_status CHECK (status IN ('solicitado','entregue','recebido','finalizado')),
+  CONSTRAINT chk_solic_peca_status CHECK (status IN ('solicitado','entregue','recebido','volta_solicitada','finalizado')),
   CONSTRAINT chk_solic_peca_motivo CHECK (motivo_final IS NULL OR motivo_final IN ('devolvido','cliente_levou'))
 );
 

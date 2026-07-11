@@ -23,6 +23,7 @@ export default async function MovimentacaoInternaPage() {
       s.created_at,
       s.entregue_em,
       s.recebido_em,
+      s.volta_solicitada_em,
       s.finalizado_em,
       s.motivo_final,
       s.foto_entrega,
@@ -31,6 +32,7 @@ export default async function MovimentacaoInternaPage() {
       sol.nome AS solicitante_nome,
       ent.nome AS entregue_por_nome,
       rec.nome AS recebido_por_nome,
+      vlt.nome AS volta_solicitada_por_nome,
       fin.nome AS finalizado_por_nome,
       COALESCE(
         (SELECT json_agg(json_build_object('nome', pr.nome, 'sku', pr.sku) ORDER BY pr.nome)
@@ -43,6 +45,7 @@ export default async function MovimentacaoInternaPage() {
     LEFT JOIN alissonerp.usuarios sol ON sol.id = s.solicitante_id
     LEFT JOIN alissonerp.usuarios ent ON ent.id = s.entregue_por_id
     LEFT JOIN alissonerp.usuarios rec ON rec.id = s.recebido_por_id
+    LEFT JOIN alissonerp.usuarios vlt ON vlt.id = s.volta_solicitada_por_id
     LEFT JOIN alissonerp.usuarios fin ON fin.id = s.finalizado_por_id
     ORDER BY s.id DESC
     LIMIT 200

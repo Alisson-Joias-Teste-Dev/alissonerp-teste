@@ -8,23 +8,24 @@ import { zodError } from "@/lib/schemas/common";
 /**
  * Movimentacao Interna / Solicitacao de Peca — transicoes de estado.
  *
- * REGRA DE NEGOCIO: ciclo solicitado -> entregue -> recebido -> finalizado.
- *  - entregar   (estoque separa e entrega): foto obrigatoria
- *  - receber    (solicitante confirma recebimento): foto obrigatoria
- *  - finalizar  (motivo devolvido -> foto obrigatoria; cliente_levou -> sem foto)
- * Sem checagem de role: qualquer usuario autenticado opera; grava quem fez cada
- * passo. As transicoes so avancam a partir do estado correto (nao pula etapa,
- * nao repete).
+ * REGRA DE NEGOCIO:
+ *   solicitado --entregar(foto)--> entregue --receber(foto)--> recebido
+ *   recebido --cliente_levou--> finalizado (sem foto)
+ *   recebido --solicitar_volta--> volta_solicitada --confirmar_devolucao(foto)--> finalizado
  *
- * A FOTO ja vem enviada pelo client (foto_path) direto no bucket privado
- * protocolo-fotos — mesmo padrao dos modais de Protocolo (NovaProtocoloModal),
- * que e o unico jeito provado em prod de escrever nesse bucket privado (a
- * sessao do usuario passa na RLS; upload server-side com anon-key nao passa).
+ * A volta ao estoque e um handshake dentro da MESMA solicitacao (nao cria
+ * registro novo): a solicitante pede a volta (sem foto), o estoque confirma o
+ * recebimento de volta (com foto), ai encerra.
+ *
+ * Sem checagem de role: qualquer usuario autenticado opera; grava quem fez cada
+ * passo. As transicoes so avancam a partir do estado correto (nao pula, nao
+ * repete). A FOTO ja vem enviada pelo client (foto_path) direto no bucket
+ * privado protocolo-fotos — mesmo padrao provado em prod dos modais de Protocolo
+ * (a sessao do usuario passa na RLS; upload server-side com anon-key nao passa).
  */
 const SolicitacaoPatchSchema = z.object({
-  action: z.enum(["entregar", "receber", "finalizar"]),
+  action: z.enum(["entregar", "receber", "cliente_levou", "solicitar_volta", "confirmar_devolucao"]),
   foto_path: z.string().max(500).optional(),
-  motivo_final: z.enum(["devolvido", "cliente_levou"]).optional(),
 }).passthrough();
 
 export async function PATCH(
@@ -43,7 +44,7 @@ export async function PATCH(
   const raw = await req.json().catch(() => ({}));
   const parsed = SolicitacaoPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
-  const { action, foto_path, motivo_final } = parsed.data;
+  const { action, foto_path } = parsed.data;
 
   const [sol] = await sql`
     SELECT id, status::text FROM alissonerp.solicitacoes_peca WHERE id = ${id}
@@ -78,23 +79,43 @@ export async function PATCH(
     `;
   }
 
-  // ── finalizar: recebido -> finalizado (devolvido | cliente_levou) ─────────
-  else if (action === "finalizar") {
+  // ── cliente_levou: recebido -> finalizado (sem foto) ──────────────────────
+  else if (action === "cliente_levou") {
     if (sol.status !== "recebido") {
-      return NextResponse.json({ error: `So da pra finalizar quando esta 'recebido' (atual: ${sol.status})` }, { status: 409 });
-    }
-    if (!motivo_final) return NextResponse.json({ error: "Informe o motivo (devolvido ou cliente_levou)" }, { status: 400 });
-    // REGRA: devolucao ao estoque exige foto; cliente levou nao (peca saiu de vez).
-    let fotoPath: string | null = null;
-    if (motivo_final === "devolvido") {
-      if (!foto_path) return NextResponse.json({ error: "Foto da devolucao ao estoque e obrigatoria" }, { status: 400 });
-      fotoPath = foto_path;
+      return NextResponse.json({ error: `So da pra marcar 'cliente levou' quando esta 'recebido' (atual: ${sol.status})` }, { status: 409 });
     }
     await sql`
       UPDATE alissonerp.solicitacoes_peca
       SET status = 'finalizado', finalizado_por_id = ${user.id}::uuid,
-          finalizado_em = now(), motivo_final = ${motivo_final},
-          foto_devolucao = ${fotoPath}, updated_at = now()
+          finalizado_em = now(), motivo_final = 'cliente_levou', updated_at = now()
+      WHERE id = ${id}
+    `;
+  }
+
+  // ── solicitar_volta: recebido -> volta_solicitada (sem foto) ──────────────
+  else if (action === "solicitar_volta") {
+    if (sol.status !== "recebido") {
+      return NextResponse.json({ error: `So da pra pedir a volta quando esta 'recebido' (atual: ${sol.status})` }, { status: 409 });
+    }
+    await sql`
+      UPDATE alissonerp.solicitacoes_peca
+      SET status = 'volta_solicitada', volta_solicitada_por_id = ${user.id}::uuid,
+          volta_solicitada_em = now(), updated_at = now()
+      WHERE id = ${id}
+    `;
+  }
+
+  // ── confirmar_devolucao: volta_solicitada -> finalizado (devolvido, foto) ──
+  else if (action === "confirmar_devolucao") {
+    if (sol.status !== "volta_solicitada") {
+      return NextResponse.json({ error: `So da pra confirmar a devolucao quando a volta foi solicitada (atual: ${sol.status})` }, { status: 409 });
+    }
+    if (!foto_path) return NextResponse.json({ error: "Foto da devolucao e obrigatoria" }, { status: 400 });
+    await sql`
+      UPDATE alissonerp.solicitacoes_peca
+      SET status = 'finalizado', finalizado_por_id = ${user.id}::uuid,
+          finalizado_em = now(), motivo_final = 'devolvido',
+          foto_devolucao = ${foto_path}, updated_at = now()
       WHERE id = ${id}
     `;
   }
@@ -104,7 +125,7 @@ export async function PATCH(
     operacao: "UPDATE",
     registro_id: id,
     usuario_id: user.id,
-    dados_depois: { action, motivo_final: motivo_final ?? null },
+    dados_depois: { action },
   });
 
   return NextResponse.json({ ok: true });

@@ -1,70 +1,55 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Loader2, CheckCircle, AlertCircle, Camera, RotateCcw, Undo2, UserCheck } from "lucide-react";
+import { X, Loader2, CheckCircle, AlertCircle, Camera, RotateCcw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8" };
 
-type Tipo = "entregar" | "receber" | "finalizar";
+export type AcaoTipo = "entregar" | "receber" | "cliente_levou" | "solicitar_volta" | "confirmar_devolucao";
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   solicitacaoId: number;
-  tipo: Tipo;
+  tipo: AcaoTipo;
   produtosLabel: string;
   onSuccess?: () => void;
 }
 
-const CONFIG: Record<Tipo, { titulo: string; subtitulo: string; label: string }> = {
-  entregar:  { titulo: "Confirmar Entrega",     subtitulo: "Estoque separou e está entregando", label: "Confirmar entrega" },
-  receber:   { titulo: "Confirmar Recebimento", subtitulo: "Você está recebendo a peça",        label: "Confirmar recebimento" },
-  finalizar: { titulo: "Finalizar",             subtitulo: "Encerrar esta movimentação",        label: "Finalizar" },
+const CONFIG: Record<AcaoTipo, { titulo: string; subtitulo: string; label: string; foto: boolean; campo: string }> = {
+  entregar:            { titulo: "Confirmar Entrega",     subtitulo: "Estoque separou e está entregando",  label: "Confirmar entrega",     foto: true,  campo: "entrega" },
+  receber:             { titulo: "Confirmar Recebimento", subtitulo: "Você está recebendo a peça",         label: "Confirmar recebimento", foto: true,  campo: "recebimento" },
+  cliente_levou:       { titulo: "Cliente Levou",         subtitulo: "A peça saiu de vez — encerra aqui",  label: "Confirmar",             foto: false, campo: "" },
+  solicitar_volta:     { titulo: "Devolver ao Estoque",   subtitulo: "Mandar a peça de volta pro estoque", label: "Solicitar volta",       foto: false, campo: "" },
+  confirmar_devolucao: { titulo: "Confirmar Devolução",   subtitulo: "Estoque recebeu a peça de volta",    label: "Confirmar devolução",   foto: true,  campo: "devolucao" },
 };
 
-const CAMPO_FOTO: Record<Tipo, string> = { entregar: "entrega", receber: "recebimento", finalizar: "devolucao" };
-
-/**
- * REGRA DE NEGOCIO: transicoes do fluxo.
- *  - entregar/receber: foto obrigatoria.
- *  - finalizar: escolhe "devolvido" (foto obrigatoria) ou "cliente levou" (sem foto).
- * A foto sobe CLIENT-side no bucket privado protocolo-fotos (sessao do usuario
- * passa na RLS — mesmo padrao dos modais de Protocolo); o PATCH recebe so o path.
- */
 export default function AcaoSolicitacaoModal({ isOpen, onClose, solicitacaoId, tipo, produtosLabel, onSuccess }: Props) {
   const [fotoFile, setFotoFile] = useState<File | null>(null);
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
-  const [motivo, setMotivo] = useState<"devolvido" | "cliente_levou" | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    setFotoFile(null); setFotoPreview(null); setMotivo(null);
-    setError(""); setSuccess(false);
+    setFotoFile(null); setFotoPreview(null); setError(""); setSuccess(false);
   }, [isOpen]);
 
   const cfg = CONFIG[tipo];
-  // Foto obrigatoria: entregar, receber, e finalizar-devolvido. Nao em cliente_levou.
-  const fotoObrigatoria = tipo === "entregar" || tipo === "receber" || (tipo === "finalizar" && motivo === "devolvido");
-  const podeEnviar =
-    tipo === "finalizar"
-      ? (motivo === "cliente_levou" || (motivo === "devolvido" && !!fotoFile))
-      : !!fotoFile;
+  const podeEnviar = cfg.foto ? !!fotoFile : true;
 
   async function handleSubmit() {
     setError("");
-    if (tipo === "finalizar" && !motivo) { setError("Escolha o que aconteceu com a peça."); return; }
-    if (fotoObrigatoria && !fotoFile) { setError("Foto é obrigatória."); return; }
+    if (cfg.foto && !fotoFile) { setError("Foto é obrigatória."); return; }
     setLoading(true);
     try {
       let foto_path: string | undefined;
       if (fotoFile) {
         const supabase = createClient();
         const { data: { user } } = await supabase.auth.getUser();
-        const path = `movimentacao-interna/${CAMPO_FOTO[tipo]}/${solicitacaoId}/${user?.id ?? "anon"}-${Date.now()}.jpg`;
+        const path = `movimentacao-interna/${cfg.campo}/${solicitacaoId}/${user?.id ?? "anon"}-${Date.now()}.jpg`;
         const { error: upErr } = await supabase.storage
           .from("protocolo-fotos")
           .upload(path, fotoFile, { contentType: fotoFile.type || "image/jpeg", upsert: false });
@@ -74,11 +59,7 @@ export default function AcaoSolicitacaoModal({ isOpen, onClose, solicitacaoId, t
       const res = await fetch(`/api/solicitacao-peca/${solicitacaoId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: tipo,
-          foto_path,
-          motivo_final: tipo === "finalizar" ? motivo : undefined,
-        }),
+        body: JSON.stringify({ action: tipo, foto_path }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`);
@@ -111,32 +92,7 @@ export default function AcaoSolicitacaoModal({ isOpen, onClose, solicitacaoId, t
             {produtosLabel}
           </div>
 
-          {/* Finalizar: escolha do motivo */}
-          {tipo === "finalizar" && (
-            <div className="grid grid-cols-1 gap-2">
-              <button onClick={() => setMotivo("devolvido")}
-                className="flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-colors"
-                style={{ borderColor: motivo === "devolvido" ? C.esmeralda : C.cremeBorder, backgroundColor: motivo === "devolvido" ? "#18403612" : "#fff" }}>
-                <Undo2 size={18} style={{ color: C.esmeralda }} />
-                <div>
-                  <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>Voltou ao estoque</p>
-                  <p className="text-xs" style={{ color: "#9CA3AF" }}>cliente não levou · exige foto</p>
-                </div>
-              </button>
-              <button onClick={() => setMotivo("cliente_levou")}
-                className="flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-colors"
-                style={{ borderColor: motivo === "cliente_levou" ? C.esmeralda : C.cremeBorder, backgroundColor: motivo === "cliente_levou" ? "#18403612" : "#fff" }}>
-                <UserCheck size={18} style={{ color: C.esmeralda }} />
-                <div>
-                  <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>Cliente levou</p>
-                  <p className="text-xs" style={{ color: "#9CA3AF" }}>saiu de vez · sem foto</p>
-                </div>
-              </button>
-            </div>
-          )}
-
-          {/* Foto (quando obrigatoria) */}
-          {fotoObrigatoria && (
+          {cfg.foto && (
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#9CA3AF" }}>
                 Foto <span style={{ color: "#DC2626" }}>*</span>
