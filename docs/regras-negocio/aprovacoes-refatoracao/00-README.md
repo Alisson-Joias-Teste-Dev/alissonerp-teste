@@ -50,11 +50,52 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 - [x] Fase 0 — mapa (11/07/2026)
 - [x] Fase 1 — camada central (11/07/2026) — **revisada e APROVADA pelo Opus** (ver nota abaixo). Branch reassentada em `origin/main` via rebase (11/07) — não carrega mais o banco-v2.
 - [x] Fase 1b — **política config-first estrita** (11/07/2026, pacote `03b`, commit `a76af5ce`) — aplicada. Só o aprovador configurado decide; sem config = `nao_configurado` (endpoint trava e avisa, na Fase 3). Sem cargo/master/override. 1 ou vários aprovadores por fluxo. Exceção: conferência da própria consultora. **Revisada e APROVADA pelo Opus (11/07)** — ver nota abaixo.
-- [ ] Fase 2 — golden tests (pacote `04`) — **liberada** (revisão da 1b aprovada)
+- [x] Fase 2 — caracterização + snapshot + mapa de divergências (11/07/2026, pacote `04`, commit `d8f1350f`) — feita. **Aguardando revisão do Opus e, principalmente, o aval do Jonathan no mapa de divergências** (05) antes da Fase 3.
 - [ ] Fase 3 — migração
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
+
+### Fase 2 — nota pro Opus revisar (mapa de divergências é com o Jonathan)
+
+- 3 arquivos novos, escopo fechado (`src/lib/aprovacoes/__tests__/` + `docs/`):
+  `__tests__/caracterizacao-catalogo.test.ts` (table-driven, 17 eventos normais × 4 invariantes +
+  casos especiais de `conferencia_consultora`/`devolucao`/`limpeza_ouro` — 75 testes),
+  `__tests__/catalogo.snapshot.test.ts` (snapshot explícito inline dos 18 eventos + guarda
+  anti-regressão — 24 testes), e `05-divergencias-alvo-x-atual.md`.
+  `npx tsc --noEmit` zero erros. `npx vitest run src/lib/aprovacoes` **122/122 passando** (3
+  arquivos: 23+24+75). `git status` limpo fora do escopo; nada plugado.
+- **`05-divergencias-alvo-x-atual.md`** (o entregável que importa pro Jonathan): 18 linhas com
+  veredito + `arquivo:linha`. Resultado: **2 🟢 IGUAL** (`entrega_sem_pagamento`, `limpeza_ouro` —
+  já eram config-only hoje), **16 🔵 FIX INTENCIONAL**, **0 🔴 regressão identificada pelo Sonnet**.
+  Achados que valem destaque:
+  - `desconto`/`cartao_desconto`: a config (`aprovador_desconto_padrao`/`_cartao_...`) existe na
+    tela mas **não é lida em nenhuma das portas hoje** — puramente decorativa.
+  - `compra_metal`/`recebimento_metal`: hoje a decisão **ignora** `metal_aprovador_id` — qualquer
+    um de 5 cargos (inclusive "qualquer consultora") aprova.
+  - `auditoria`: hoje é `void user` — zero checagem. Vira o mais rígido, era o mais aberto.
+  - `desconto` carrega o bug do R3 (dossiê): a porta `solicitacoes-desconto` nunca grava
+    `vendas_erp.desconto_aprovado_por` — a Fase 3 corrige isso de brinde ao unificar.
+  - `compra_comercial`: destacado que o endpoint `concluir` (zero checagem, `void user`) **não é
+    coberto por nenhum dos 18 eventos** — brecha fora do escopo desta centralização.
+  - **⚠️ Atenção pedida ao Jonathan em `conferencia_consultora`**: hoje gerência
+    (`gerente_loja`/`gerente_fabrica`) e admin/dev/diretor também podem aprovar a conferência de
+    QUALQUER consultora; no alvo, só a própria consultora decide a dela — gerência perde esse
+    caminho por completo. Marcado 🔵 mas com pedido explícito de confirmação (pode ser 🔴 se
+    gerência usa isso na prática).
+  - Checklist de **5 chaves de config novas** (nenhuma existe ainda em `configuracoes_sistema`):
+    `aprovador_conversao`, `aprovador_conversao_sku`, `aprovador_precificacao`,
+    `aprovador_auditoria`, `aprovador_alteracao_venda` — sem elas, o evento trava assim que
+    plugado na Fase 3.
+- Duas verificações pontuais feitas nesta fase que o dossiê não detalhava (citadas no mapa):
+  fallback por cargo em `credito_gerente`/`credito_diretor` (`vendas-credito-aprovar.ts:83-140`)
+  e o bypass permanente de admin em `devolver_peca` mesmo com config preenchida
+  (`devolver-peca/route.ts:41-45`). Um ponto ficou `⚠️ conferir` (não inventado): não achei no
+  código onde `aprovador_cartao_desconto_padrao` seria lido hoje — mesmo padrão decorativo do
+  desconto, a confirmar na Fase 3.
+
+**Não avancei pra Fase 3.** A revisão técnica é do Opus; a aprovação do mapa de divergências
+(caso a caso, especialmente `conferencia_consultora`) é do Jonathan.
 
 ### Fase 1b — nota pro Opus revisar
 
