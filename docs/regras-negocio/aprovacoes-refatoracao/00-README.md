@@ -56,9 +56,15 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 - [x] Fase 2 — caracterização + snapshot + mapa de divergências (11/07/2026, pacote `04`, commit `d8f1350f`) — **revisada e APROVADA pelo Opus** (tsc 0, 122 testes). **Mapa (05) VALIDADO pelo Jonathan (11/07)**: 2 iguais, 15 fixes intencionais, 0 regressões; `conferencia_consultora` DECIDIDO = só a própria consultora aprova a dela (é ela conferindo o próprio pedido). Libera a Fase 3.
 - [x] Fase 3a — **metal** (compra + recebimento) plugado na camada config-first (11/07/2026, pacote `06`, commit `ad612948`) — **código revisado e APROVADO pelo Opus** (tsc 0, contrato idêntico, escopo fechado; A/B confirmou que os 8 testes que falham no despachante são pré-existentes, não da 3a). **Miolo config-first TESTADO no banco de HOMOLOG** (12/07): `podeDecidir`/`resolverAprovadores` contra dados reais → só o configurado (Alisson) aprova; admin não-configurado (Paloma) e consultora (Cristiane) barrados = FIX confirmado (antes 5 cargos aprovavam). **Endpoint HTTP TESTADO end-to-end contra homolog** (12/07): `POST /api/metal/aprovacoes/[id]/aprovar` → Alisson (configurado) 200 + `aprovarCompra` chamado; Paloma (admin não-config) e Cristiane (consultora) 403 + `aprovarCompra` NUNCA chamado. Login mockado (não posso digitar senha do Jonathan) + efeito mockado (não sujou homolog); `sql` e `podeDecidir` REAIS. Rejeitar = mesmo gate (copy do aprovar). **Fase 3a FECHADA** — não vai a produção até o merge do Jonathan.
 - [x] Fase 3b — **conversão** (estoque + SKU) plugada na camada config-first (12/07/2026, pacote
-  `07`, commit `c0672e04`) — código pronto, **aguardando o Opus criar a chave `aprovador_conversao`
-  em homolog + testar end-to-end (back+front) antes de qualquer coisa ir adiante. NÃO testado em
-  homolog ainda, NÃO vai a produção.**
+  `07`, commit `c0672e04`) — **código revisado e APROVADO pelo Opus** (tsc 0, 122 testes, contrato
+  idêntico, escopo fechado; despachante e front de conversão intocados; chave antiga
+  `aprovador_conversao_sku` some — 1 chave só). **TESTADO end-to-end em HOMOLOG** (12/07): chave
+  `aprovador_conversao` criada (= Alisson); miolo — Alisson pode / Jonathan (dev) não, nos 2
+  sub-fluxos com a MESMA chave; `POST /api/conversao/aprovar` — Jonathan (dev) 403, Alisson passa o
+  gate (404 da tarefa-fake, não 403); SEM a chave → `nao_configurado` (conversão não nasceria, 409).
+  **Fase 3b FECHADA.** ⚠️ **PRA PROD**: criar a chave `aprovador_conversao` (via `/dba`, assinada) e
+  preencher ANTES de mergear/deployar — senão a conversão trava em produção. (A chave já existe em
+  homolog, preenchida.)
 - [ ] Fase 3c — preço (precificação)
 - [ ] Fase 3d — limpeza
 - [ ] Fase 3e — devolução
