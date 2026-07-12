@@ -29,6 +29,7 @@ interface UsuariosPorRole {
   aprovadores_limpeza: Usuario[];
   aprovadores_entrega_sem_pagamento: Usuario[];
   todos_usuarios: Usuario[];
+  conversao_aprovadores: Usuario[];
 }
 
 interface ConfigItem {
@@ -139,6 +140,13 @@ const CONFIG_ITENS: ConfigItem[] = [
     usuariosKey: "todos_usuarios",
     icone: "📦",
     multi: true,
+  },
+  {
+    chave: "aprovador_conversao",
+    titulo: "Conversão (estoque + SKU)",
+    descricao: "Aprova conversão de estoque em peso (Caixa de Ouro) e conversão de SKU — mesmo aprovador pros dois",
+    usuariosKey: "conversao_aprovadores",
+    icone: "🔄",
   },
 ];
 

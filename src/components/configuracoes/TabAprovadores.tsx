@@ -19,6 +19,7 @@ interface AprovadorConfig {
   aprovador_devolucao_estoque?: string;
   aprovador_vale_troca_excecao?: string;
   aprovadores_devolver_peca?: string; // MULTI: UUIDs separados por vírgula
+  aprovador_conversao?: string; // Fase 3b: conversão de estoque + SKU (mesmo aprovador)
 }
 
 interface Usuario {
@@ -35,6 +36,7 @@ interface UsuariosPorRole {
   aprovadores_limpeza: Usuario[];
   aprovadores_entrega_sem_pagamento: Usuario[];
   todos_usuarios: Usuario[];
+  conversao_aprovadores: Usuario[];
 }
 
 const P = {
@@ -63,6 +65,7 @@ export default function TabAprovadores() {
     aprovador_devolucao_estoque: "",
     aprovador_vale_troca_excecao: "",
     aprovadores_devolver_peca: "",
+    aprovador_conversao: "",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
     gerentes: [],
@@ -72,6 +75,7 @@ export default function TabAprovadores() {
     aprovadores_limpeza: [],
     aprovadores_entrega_sem_pagamento: [],
     todos_usuarios: [],
+    conversao_aprovadores: [],
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -94,8 +98,9 @@ export default function TabAprovadores() {
           aprovador_devolucao_estoque: d.aprovador_devolucao_estoque ?? "",
           aprovador_vale_troca_excecao: d.aprovador_vale_troca_excecao ?? "",
           aprovadores_devolver_peca: d.aprovadores_devolver_peca ?? "",
+          aprovador_conversao: d.aprovador_conversao ?? "",
         });
-        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [] });
+        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [], conversao_aprovadores: [] });
       })
       .finally(() => setLoading(false));
   }, []);
@@ -126,7 +131,7 @@ export default function TabAprovadores() {
   function getUserName(chave: string): string {
     const id = (config as any)[chave];
     if (!id) return "";
-    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores, ...usuarios.aprovadores_limpeza, ...usuarios.aprovadores_entrega_sem_pagamento, ...usuarios.todos_usuarios];
+    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores, ...usuarios.aprovadores_limpeza, ...usuarios.aprovadores_entrega_sem_pagamento, ...usuarios.todos_usuarios, ...usuarios.conversao_aprovadores];
     const u = all.find((x) => x.id === id);
     return u?.nome ?? "";
   }

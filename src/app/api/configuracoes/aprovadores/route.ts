@@ -11,6 +11,8 @@
 //   - aprovacao-regras.ts (aprovador_desconto, aprovador_cartao_desconto)
 //   - solicitar-aprovacao/route.ts
 //   - entrega-sem-pagamento.ts (Automacao de Estoque 2.0)
+//   - src/lib/aprovacoes/catalogo.ts (camada config-first, Fase 3 — metal já usa
+//     metal_aprovador_id; conversão/conversão-SKU usam aprovador_conversao)
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from "next/server";
@@ -36,6 +38,9 @@ const CHAVES = [
   // MULTI (vários UUIDs separados por vírgula): quem aprova a devolução da peça
   // quando a reserva do crediário vira vale-crédito (endpoint reserva/.../devolver-peca).
   "aprovadores_devolver_peca",
+  // Fase 3b (centralização de aprovações, 12/07): aprova conversão de estoque em peso
+  // E conversão de SKU — mesmo aprovador pros dois sub-fluxos (decisão do Jonathan).
+  "aprovador_conversao",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -125,6 +130,7 @@ export async function GET() {
       aprovador_vale_troca_excecao: configMap.get("aprovador_vale_troca_excecao") ?? "",
       // MULTI: lista de UUIDs separados por vírgula.
       aprovadores_devolver_peca: configMap.get("aprovadores_devolver_peca") ?? "",
+      aprovador_conversao: configMap.get("aprovador_conversao") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -133,6 +139,9 @@ export async function GET() {
         aprovadores_limpeza: aprovadoresLimpeza,
         aprovadores_entrega_sem_pagamento: aprovadoresEntregaSemPagamento,
         todos_usuarios: todosUsuarios,
+        // Conversão (estoque + SKU) hoje é aprovada por admin/desenvolvedor — mesma
+        // lista já usada por desconto/cartão/compra comercial (admins_devs).
+        conversao_aprovadores: adminsDevs,
       },
     });
   } catch {
@@ -212,6 +221,10 @@ export async function PUT(req: NextRequest) {
         String(body.aprovadores_devolver_peca).split(",").map((s) => s.trim()).filter(Boolean)
       )).join(",");
       updates.push({ chave: "aprovadores_devolver_peca", valor: lista });
+    }
+    // Fase 3b: aprovador de conversão (estoque + SKU — mesma chave pros dois).
+    if (body.aprovador_conversao !== undefined) {
+      updates.push({ chave: "aprovador_conversao", valor: body.aprovador_conversao });
     }
 
     for (const u of updates) {

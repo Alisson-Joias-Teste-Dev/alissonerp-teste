@@ -3,6 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { zodError } from "@/lib/schemas/common";
+import { podeDecidir } from "@/lib/aprovacoes";
 
 const ConversaoSkuAprovarSchema = z.object({
   tarefa_id: z.coerce.number().int().positive(),
@@ -16,10 +17,13 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
+  // REGRA DE NEGÓCIO: mesmo aprovador da conversão de estoque (decisão do
+  // Jonathan, 12/07) — aprovador_conversao decide os dois sub-fluxos.
   const [usuario] = await sql`
     SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
   `;
-  if (!usuario || !["admin", "desenvolvedor"].includes(usuario.role)) {
+  const decisao = await podeDecidir({ id: user.id, role: usuario?.role ?? null }, "conversao_sku");
+  if (!decisao.pode) {
     return NextResponse.json({ error: "Apenas administradores podem aprovar" }, { status: 403 });
   }
 

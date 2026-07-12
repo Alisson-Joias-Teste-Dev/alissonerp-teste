@@ -34,6 +34,7 @@ interface UsuariosPorRole {
   aprovadores_limpeza: Usuario[];
   aprovadores_entrega_sem_pagamento: Usuario[];
   todos_usuarios: Usuario[];
+  conversao_aprovadores: Usuario[];
 }
 
 interface FormularioAprovadorProps {

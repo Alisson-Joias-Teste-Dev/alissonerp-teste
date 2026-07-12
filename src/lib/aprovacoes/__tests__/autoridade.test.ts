@@ -98,15 +98,22 @@ describe("devolucao — configKeys dependem do prazo (ctx.foraPrazo)", () => {
   });
 });
 
-describe("5 chaves de config NOVAS (ainda não existem no banco — criadas via /dba na Fase 3)", () => {
+describe("4 chaves de config ainda NÃO plugadas (criadas via /dba quando cada fluxo migrar)", () => {
   it.each([
-    ["conversao", "aprovador_conversao"],
-    ["conversao_sku", "aprovador_conversao_sku"],
     ["alteracao_venda", "aprovador_alteracao_venda"],
     ["precificacao", "aprovador_precificacao"],
     ["auditoria", "aprovador_auditoria"],
   ] as const)("%s usa a chave '%s'", (evento, chave) => {
     expect(CATALOGO[evento].configKeys).toEqual([chave]);
+  });
+});
+
+describe("conversao / conversao_sku — Fase 3b: mesma chave (aprovador_conversao)", () => {
+  it("conversao usa aprovador_conversao", () => {
+    expect(CATALOGO.conversao.configKeys).toEqual(["aprovador_conversao"]);
+  });
+  it("conversao_sku usa a MESMA chave que conversao (decisão do Jonathan, 12/07)", () => {
+    expect(CATALOGO.conversao_sku.configKeys).toEqual(["aprovador_conversao"]);
   });
 });
 

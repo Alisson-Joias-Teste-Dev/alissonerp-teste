@@ -8,12 +8,14 @@
  * POR QUÊ: o sistema hoje "segue a role, não a config" — causa raiz do mapa de esbarros.
  *   Eliminar o fallback por cargo elimina o problema pela raiz (não só o sintoma do
  *   não-determinismo achado na revisão da Fase 1).
- * IMPACTO: nada lê este catálogo em produção ainda (Fase 1 não pluga em nada). 5 eventos
- *   (conversao, conversao_sku, alteracao_venda, precificacao, auditoria) ganham chave de
- *   config NOVA que ainda NÃO existe em alissonerp.configuracoes_sistema — será criada via
- *   skill /dba e ganha campo na tela Configurações na Fase 3. Até lá, esses eventos resolvem
- *   sempre "nao_configurado" — comportamento correto e esperado (destrava assim que a chave
- *   existir e for preenchida, sem precisar mudar código).
+ * IMPACTO: migração fluxo a fluxo (Fase 3) — metal (3a) e conversão/conversao_sku (3b) já
+ *   plugados em endpoints reais; os demais eventos abaixo ainda não. `conversao` e
+ *   `conversao_sku` usam a MESMA chave `aprovador_conversao` (decisão do Jonathan, 12/07 —
+ *   antes eram 2 chaves). `alteracao_venda`, `precificacao` e `auditoria` ainda usam chave de
+ *   config NOVA que NÃO existe em alissonerp.configuracoes_sistema — será criada via skill
+ *   `/dba` quando cada uma for plugada. Até lá, esses 3 eventos resolvem sempre
+ *   "nao_configurado" — comportamento correto e esperado (destrava assim que a chave existir
+ *   e for preenchida, sem precisar mudar código).
  */
 import type { EventoAprovacao, RegraAutoridade } from "./tipos";
 
@@ -134,16 +136,22 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
     configMulti: true,
     camposLock: ["conversoes_estoque.status_conversao", "tarefas.status"],
     observacao:
-      "Chave NOVA — ainda não existe em configuracoes_sistema (criar via /dba na Fase 3). Até lá resolve " +
-      "'nao_configurado'. Dossiê R6: se aprovada pela via genérica de tarefas (sem handler dedicado) fica presa em pendente.",
+      "Plugado na Fase 3b (12/07) em /api/conversao/{aprovar,recusar} e na criação " +
+      "(/api/estoque-comercial/converter). MESMA chave usada por 'conversao_sku' (decisão do " +
+      "Jonathan — os dois sub-fluxos têm o mesmo aprovador). Chave criada em homolog pelo Opus; " +
+      "produção via /dba. Dossiê R6: se aprovada pela via genérica de tarefas (sem handler " +
+      "dedicado) fica presa em pendente — o despachante NÃO decide conversão, só os endpoints dedicados.",
   },
   conversao_sku: {
     evento: "conversao_sku",
     rotulo: "Conversão SKU (troca de peça, via protocolo)",
-    configKeys: ["aprovador_conversao_sku"],
+    configKeys: ["aprovador_conversao"],
     configMulti: true,
     camposLock: ["conversoes_sku.status_conversao", "tarefas.status"],
-    observacao: "Chave NOVA (ver conversao). Dossiê R6: mesmo risco de handler ausente na via genérica.",
+    observacao:
+      "Decisão do Jonathan (12/07, Fase 3b): mesmo aprovador da conversão de estoque — usa a " +
+      "MESMA chave 'aprovador_conversao' (a antiga 'aprovador_conversao_sku' não existe mais). " +
+      "Dossiê R6: mesmo risco de handler ausente na via genérica.",
   },
   precificacao: {
     evento: "precificacao",

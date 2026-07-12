@@ -29,7 +29,8 @@ const SNAPSHOT_ESPERADO: Record<
   compra_metal: { configKeys: ["metal_aprovador_id"], configMulti: true },
   recebimento_metal: { configKeys: ["metal_aprovador_id"], configMulti: true },
   conversao: { configKeys: ["aprovador_conversao"], configMulti: true },
-  conversao_sku: { configKeys: ["aprovador_conversao_sku"], configMulti: true },
+  // Fase 3b (12/07): conversao_sku passa a usar a MESMA chave de conversao (decisão do Jonathan).
+  conversao_sku: { configKeys: ["aprovador_conversao"], configMulti: true },
   precificacao: { configKeys: ["aprovador_precificacao"], configMulti: true },
   limpeza_ouro: { configKeys: ["aprovador_limpeza"], configMulti: true },
   devolver_peca: { configKeys: ["aprovadores_devolver_peca"], configMulti: true },

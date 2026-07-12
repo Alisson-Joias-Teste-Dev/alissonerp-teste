@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { zodError } from "@/lib/schemas/common";
+import { podeDecidir } from "@/lib/aprovacoes";
 
 const ConversaoRecusarSchema = z.object({
   tarefa_id: z.coerce.number().int().positive(),
@@ -20,11 +21,14 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  // Verificar se usuário é admin/desenvolvedor (Alisson)
+  // REGRA DE NEGÓCIO: mesma autoridade do "aprovar" — só quem estiver em
+  // aprovador_conversao decide (política config-first). Sem ctx.solicitanteId
+  // (regra do pacote 3b): conversão não exclui quem criou.
   const [usuario] = await sql`
     SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
   `;
-  if (!usuario || !["admin", "desenvolvedor"].includes(usuario.role)) {
+  const decisao = await podeDecidir({ id: user.id, role: usuario?.role ?? null }, "conversao");
+  if (!decisao.pode) {
     return NextResponse.json({ error: "Apenas administradores podem recusar conversões" }, { status: 403 });
   }
 
