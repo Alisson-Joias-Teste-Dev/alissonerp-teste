@@ -50,8 +50,8 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 - [x] Fase 0 — mapa (11/07/2026)
 - [x] Fase 1 — camada central (11/07/2026) — **revisada e APROVADA pelo Opus** (ver nota abaixo). Branch reassentada em `origin/main` via rebase (11/07) — não carrega mais o banco-v2.
 - [x] Fase 1b — **política config-first estrita** (11/07/2026, pacote `03b`, commit `a76af5ce`) — aplicada. Só o aprovador configurado decide; sem config = `nao_configurado` (endpoint trava e avisa, na Fase 3). Sem cargo/master/override. 1 ou vários aprovadores por fluxo. Exceção: conferência da própria consultora. **Revisada e APROVADA pelo Opus (11/07)** — ver nota abaixo.
-- [x] Fase 2 — caracterização + snapshot + mapa de divergências (11/07/2026, pacote `04`, commit `d8f1350f`) — feita. **Aguardando revisão do Opus e, principalmente, o aval do Jonathan no mapa de divergências** (05) antes da Fase 3.
-- [ ] Fase 3 — migração
+- [x] Fase 2 — caracterização + snapshot + mapa de divergências (11/07/2026, pacote `04`, commit `d8f1350f`) — **revisada e APROVADA pelo Opus** (tsc 0, 122 testes). **Mapa (05) VALIDADO pelo Jonathan (11/07)**: 2 iguais, 15 fixes intencionais, 0 regressões; `conferencia_consultora` DECIDIDO = só a própria consultora aprova a dela (é ela conferindo o próprio pedido). Libera a Fase 3.
+- [ ] Fase 3 — migração fluxo a fluxo (metal → conversão → preço → limpeza → devolução → compra → venda). Cada fluxo: preencher aprovador na tela → testar homolog → ligar. 5 chaves novas via `/dba` antes dos fluxos que dependem delas.
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação

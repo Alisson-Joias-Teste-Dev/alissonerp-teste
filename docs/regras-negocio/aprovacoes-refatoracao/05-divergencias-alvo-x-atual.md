@@ -29,7 +29,7 @@
 | **limpeza_ouro** | Já config-only: só o UUID de `aprovador_limpeza`, sem fallback, sem override (`limpeza-ouro-aprovacao.ts:39`, dossiê Fluxo J). | Idêntico — é o modelo que a política nova generaliza pros outros 17 eventos. | 🟢 IGUAL *(exemplo citado no pacote 04)* |
 | **devolver_peca** | Config `aprovadores_devolver_peca` (multi) — mas **mesmo com config preenchida**, `isFullAccess` sempre pode decidir por cima (bypass permanente); se a config estiver vazia, cai pra `isFullAccess` OU cargo de estoque (`ROLES_ESTOQUE`) (`devolver-peca/route.ts:41-45`). | Só quem estiver na lista `aprovadores_devolver_peca`. Sem bypass de admin, sem fallback por cargo. | 🔵 FIX INTENCIONAL |
 | **auditoria** | **Zero checagem** — `void user`, qualquer autenticado decide (`auditoria/[auditoriaId]/route.ts:19`; mapa §C). A maior brecha do mapa. | `aprovador_auditoria` — **chave NOVA**, trava até criar. Vira o evento mais rígido, era o mais aberto. | 🔵 FIX INTENCIONAL (crítico — fecha brecha) |
-| **conferencia_consultora** | A própria consultora aprova a dela (`vendedor_id` bate) **OU** `podeAprovarTodas` = `isFullAccess` (admin/desenvolvedor/diretor) **OU** `gerente_loja`/`gerente_fabrica` — qualquer um desses aprova a conferência de **qualquer** consultora (`aprovacao/[aprovacaoId]/route.ts:33-42`). | **Só** a consultora dona (`vendedor_id === consultora_id`). Gerência e admin perdem a capacidade de aprovar/revisar a conferência de outra pessoa — não há mais nenhum caminho alternativo. | 🔵 FIX INTENCIONAL — ⚠️ **a mudança mais sensível do mapa, confirmar com o Jonathan** (ver nota abaixo) |
+| **conferencia_consultora** | A própria consultora aprova a dela (`vendedor_id` bate) **OU** `podeAprovarTodas` = `isFullAccess` (admin/desenvolvedor/diretor) **OU** `gerente_loja`/`gerente_fabrica` — qualquer um desses aprova a conferência de **qualquer** consultora (`aprovacao/[aprovacaoId]/route.ts:33-42`). | **Só** a consultora dona (`vendedor_id === consultora_id`). Gerência e admin perdem a capacidade de aprovar/revisar a conferência de outra pessoa — não há mais nenhum caminho alternativo. | 🔵 FIX INTENCIONAL — ⚠️ **a mudança mais sensível do mapa, DECIDIDO pelo Jonathan (ver nota abaixo) |
 | **alteracao_venda** | Fixo `ROLES_FINANCEIRO` inline = admin/desenvolvedor/diretor (`solicitacoes-alteracao/[id]/route.ts:26`; mapa §A). Sem config hoje. | `aprovador_alteracao_venda` — **chave NOVA**, trava até criar. | 🔵 FIX INTENCIONAL |
 
 ## R3 — nota específica sobre `desconto`
@@ -50,6 +50,12 @@ admin/desenvolvedor/diretor a capacidade de aprovar a conferência de qualquer c
 consultora decide a dela, sempre. Se gerência hoje usa esse caminho pra revisar/destravar conferências
 (ex.: consultora afastada, erro dela mesma), a Fase 3 desse fluxo específico precisa de uma decisão
 explícita (virar 🔴 e manter um caminho de gerência, ou confirmar que 🔵 está correto).
+
+> **DECISÃO do Jonathan (11/07):** `conferencia_consultora` fica 🔵 — **só a própria consultora aprova a
+> dela**. A conferência É a consultora conferindo se a venda saiu do jeito que foi pedido (etapa dela, não
+> controle de gerência); por isso gerência/admin não entram. Sem caminho alternativo.
+> *Nota de blindagem (Fase 3):* se algum dia uma venda travar porque a consultora saiu antes de conferir,
+> adiciona-se um caminho de exceção explícito então — não agora.
 
 ## Chaves de config que precisam existir antes de ligar (checklist pra Fase 3)
 
