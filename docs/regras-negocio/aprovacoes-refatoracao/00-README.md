@@ -27,6 +27,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 | 05 | [`05-divergencias-alvo-x-atual.md`](05-divergencias-alvo-x-atual.md) | **Mapa de divergências ALVO×ATUAL** (18 eventos) — VALIDADO pelo Jonathan. Guia da Fase 3. |
 | 06 | [`06-FASE-3a-metal.md`](06-FASE-3a-metal.md) | **Pacote da Fase 3a** — plugar o fluxo de metal (compra + recebimento) na camada config-first, contrato idêntico |
 | 07 | [`07-FASE-3b-conversao.md`](07-FASE-3b-conversao.md) | **Pacote da Fase 3b** — plugar conversão (estoque + SKU) na camada config-first; 1 chave só (`aprovador_conversao`), decisão do Jonathan |
+| 08 | [`08-FASE-3c-precificacao.md`](08-FASE-3c-precificacao.md) | **Pacote da Fase 3c** — plugar precificação (markup) na camada config-first; modelo metal + ajuste do botão da tela; chave `aprovador_precificacao` |
 
 ## O plano (7 fases)
 
@@ -65,7 +66,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   **Fase 3b FECHADA.** ⚠️ **PRA PROD**: criar a chave `aprovador_conversao` (via `/dba`, assinada) e
   preencher ANTES de mergear/deployar — senão a conversão trava em produção. (A chave já existe em
   homolog, preenchida.)
-- [ ] Fase 3c — preço (precificação)
+- [ ] Fase 3c — preço (precificação) — pacote `08` pronto (modelo metal; chave nova `aprovador_precificacao`; + ajuste do botão da tela pra refletir a config). Aguardando Sonnet plugar + Opus criar a chave em homolog e testar.
 - [ ] Fase 3d — limpeza
 - [ ] Fase 3e — devolução
 - [ ] Fase 3f — compra (comercial)
