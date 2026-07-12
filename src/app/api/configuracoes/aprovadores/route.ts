@@ -41,6 +41,8 @@ const CHAVES = [
   // Fase 3b (centralização de aprovações, 12/07): aprova conversão de estoque em peso
   // E conversão de SKU — mesmo aprovador pros dois sub-fluxos (decisão do Jonathan).
   "aprovador_conversao",
+  // Fase 3c (centralização de aprovações, 12/07): aprova alteração de markup (preço).
+  "aprovador_precificacao",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -131,6 +133,7 @@ export async function GET() {
       // MULTI: lista de UUIDs separados por vírgula.
       aprovadores_devolver_peca: configMap.get("aprovadores_devolver_peca") ?? "",
       aprovador_conversao: configMap.get("aprovador_conversao") ?? "",
+      aprovador_precificacao: configMap.get("aprovador_precificacao") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -142,6 +145,8 @@ export async function GET() {
         // Conversão (estoque + SKU) hoje é aprovada por admin/desenvolvedor — mesma
         // lista já usada por desconto/cartão/compra comercial (admins_devs).
         conversao_aprovadores: adminsDevs,
+        // Precificação hoje é isFullAccess (admin/dev/diretor) — reusa diretores_admins.
+        precificacao_aprovadores: diretoresAdmins,
       },
     });
   } catch {
@@ -225,6 +230,10 @@ export async function PUT(req: NextRequest) {
     // Fase 3b: aprovador de conversão (estoque + SKU — mesma chave pros dois).
     if (body.aprovador_conversao !== undefined) {
       updates.push({ chave: "aprovador_conversao", valor: body.aprovador_conversao });
+    }
+    // Fase 3c: aprovador de precificação (alteração de markup).
+    if (body.aprovador_precificacao !== undefined) {
+      updates.push({ chave: "aprovador_precificacao", valor: body.aprovador_precificacao });
     }
 
     for (const u of updates) {

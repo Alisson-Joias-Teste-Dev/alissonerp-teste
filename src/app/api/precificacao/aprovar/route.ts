@@ -7,17 +7,18 @@
  *   - Pedra: UPDATE alissonerp.markup_pedras SET markup = markup_novo
  *            → recalcularPrecoPedras chamado para cada produto afetado (após commit)
  *
- * Permissão: somente admin e desenvolvedor (isFullAccess)
+ * Permissão: quem estiver configurado em Configurações › Aprovadores › "Precificação"
+ * (chave aprovador_precificacao, política config-first — podeDecidir).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
-import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { recalcularPrecoPedras } from "@/lib/recalcular-preco-pedras";
 import { internalError } from "@/lib/api-error";
 import { zodError, IdSchema } from "@/lib/schemas/common";
+import { podeDecidir } from "@/lib/aprovacoes";
 
 const AprovarSchema = z.object({
   alteracao_id: IdSchema,
@@ -26,7 +27,12 @@ const AprovarSchema = z.object({
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
-  if (!isFullAccess(user.role)) {
+  // REGRA DE NEGÓCIO: só quem estiver em Configurações › Aprovadores ›
+  // "Precificação" (chave aprovador_precificacao) decide — política config-first
+  // (docs/regras-negocio/aprovacoes-refatoracao/03b-config-first-estrito.md). Sem
+  // ctx.solicitanteId: precificação não exclui quem solicitou.
+  const decisao = await podeDecidir({ id: user.id, role: user.role }, "precificacao");
+  if (!decisao.pode) {
     return NextResponse.json(
       { error: "Sem permissão — apenas admin e desenvolvedor podem aprovar" },
       { status: 403 }

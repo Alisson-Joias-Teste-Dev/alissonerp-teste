@@ -30,6 +30,7 @@ interface UsuariosPorRole {
   aprovadores_entrega_sem_pagamento: Usuario[];
   todos_usuarios: Usuario[];
   conversao_aprovadores: Usuario[];
+  precificacao_aprovadores: Usuario[];
 }
 
 interface ConfigItem {
@@ -147,6 +148,13 @@ const CONFIG_ITENS: ConfigItem[] = [
     descricao: "Aprova conversão de estoque em peso (Caixa de Ouro) e conversão de SKU — mesmo aprovador pros dois",
     usuariosKey: "conversao_aprovadores",
     icone: "🔄",
+  },
+  {
+    chave: "aprovador_precificacao",
+    titulo: "Precificação (markup)",
+    descricao: "Aprova alteração de markup de ouro ou pedras — aplica o novo preço imediatamente",
+    usuariosKey: "precificacao_aprovadores",
+    icone: "🏷️",
   },
 ];
 
