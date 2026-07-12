@@ -53,10 +53,56 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 - [x] Fase 1 — camada central (11/07/2026) — **revisada e APROVADA pelo Opus** (ver nota abaixo). Branch reassentada em `origin/main` via rebase (11/07) — não carrega mais o banco-v2.
 - [x] Fase 1b — **política config-first estrita** (11/07/2026, pacote `03b`, commit `a76af5ce`) — aplicada. Só o aprovador configurado decide; sem config = `nao_configurado` (endpoint trava e avisa, na Fase 3). Sem cargo/master/override. 1 ou vários aprovadores por fluxo. Exceção: conferência da própria consultora. **Revisada e APROVADA pelo Opus (11/07)** — ver nota abaixo.
 - [x] Fase 2 — caracterização + snapshot + mapa de divergências (11/07/2026, pacote `04`, commit `d8f1350f`) — **revisada e APROVADA pelo Opus** (tsc 0, 122 testes). **Mapa (05) VALIDADO pelo Jonathan (11/07)**: 2 iguais, 15 fixes intencionais, 0 regressões; `conferencia_consultora` DECIDIDO = só a própria consultora aprova a dela (é ela conferindo o próprio pedido). Libera a Fase 3.
-- [ ] Fase 3 — migração fluxo a fluxo (metal → conversão → preço → limpeza → devolução → compra → venda). Cada fluxo: preencher aprovador na tela → testar homolog → ligar. 5 chaves novas via `/dba` antes dos fluxos que dependem delas.
+- [x] Fase 3a — **metal** (compra + recebimento) plugado na camada config-first (11/07/2026, pacote `06`, commit `ad612948`) — código pronto, **aguardando revisão do Opus + teste em homolog (back+front) antes de qualquer coisa ir adiante. NÃO testado em homolog ainda, NÃO vai a produção.**
+- [ ] Fase 3b — conversão (próximo fluxo, ordem do dossiê)
+- [ ] Fase 3c — preço (precificação)
+- [ ] Fase 3d — limpeza
+- [ ] Fase 3e — devolução
+- [ ] Fase 3f — compra (comercial)
+- [ ] Fase 3g — venda (por último — desconto/cartão/crédito/entrega/alteração)
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
+
+### Fase 3a (metal) — nota pro Opus revisar e testar em homolog
+
+- 7 arquivos tocados, escopo fechado (só metal + os 2 handlers de metal no despachante de
+  tarefas): `metal/aprovacoes/[id]/{aprovar,rejeitar}/route.ts` (decisão via `podeDecidir`,
+  contrato 403 idêntico), `metal/compras/route.ts` + `lib/metal/compras.ts` (criação via
+  `resolverAprovadores`), `metal/recebimentos/route.ts` + `lib/metal/recebimentos.ts` (idem),
+  `tarefas/[id]/aprovacao/route.ts` (2 handlers específicos — `processarAprovacaoCompraMetal`
+  ganhou o gate `podeDecidir` no início; `recebimento_metal` ganhou o gate no bloco de
+  roteamento, antes de chamar o handler — checagem genérica do topo do PATCH, L326-333,
+  **intocada**, serve os outros fluxos).
+- `npx tsc --noEmit` zero erros. `git status` lista exatamente os 7 arquivos esperados — nada de
+  front (`src/components/metal/`, `src/app/(dashboard)/metal/`) nem `GET /api/metal/aprovacoes`
+  tocado (regras 5/6 do pacote).
+- **Achado tratado com cuidado extra**: o pacote alertou que `compras.ts` e `compras/route.ts`
+  liam `metal_aprovador_id` **duas vezes independentes** — risco de divergir se a config mudasse
+  entre as duas leituras. Resolvido lendo o aprovador **uma vez só** em `criarCompraMetal`
+  (grava em `compras_metal_aprovacoes.aprovador_id`) e fazendo `compras/route.ts` **ler de volta
+  esse mesmo valor gravado** (não resolve a config de novo) — fonte única, garantidamente
+  consistente. Para `recebimento_metal` não há coluna própria pra guardar o aprovador antes da
+  tarefa nascer (`recebimentos_metal` não tem esse campo), então ali a config é lida 2x
+  independentes (`recebimentos.ts` só pro guard/erro; `recebimentos/route.ts` pra criar a
+  tarefa) — mesma fonte, sem cache, risco de divergência é desprezível na prática; documentado
+  no código.
+- Regras do pacote respeitadas: (1) contrato idêntico — mensagens de erro, status codes e shape
+  de resposta **não mudaram**; (2) erro "aprovador não configurado" preservado com a MESMA
+  mensagem de hoje (compra: `"Aprovador de compra de metal acima do teto não configurado."`;
+  recebimento: `"Aprovador de metal acima do teto não configurado."`) — registro continua não
+  nascendo; (3) **nenhuma chamada a `podeDecidir`/`resolverAprovadores` de metal passa
+  `solicitanteId`** — metal não exclui quem cadastrou; (4) `configMulti` — grava sempre o **1º**
+  de `aprovadores[]` nas colunas UUID único, decisão valida contra a lista inteira; (5) `GET
+  /api/metal/aprovacoes` intocado — fila continua visível por `ROLES_METAL_APROVACOES`; (6)
+  zero arquivo de front tocado.
+- **Cenários pra validar em homolog** (C1-C6, descritos no pacote `06`): aprovador configurado
+  aprova; outro usuário (mesmo admin) leva 403; sem config a compra/recebimento não nasce
+  (mesma mensagem); config com 2 UUIDs — ambos aprovam, terceiro não; recebimento só pela tela
+  de Tarefas (sem endpoint dedicado); rejeitar segue a mesma regra de quem pode.
+
+**Não subi pra homolog nem testei back/front** — commit pronto, a validação (SQL + tela, com o
+Jonathan) é do Opus antes de avançar pra Fase 3b.
 
 ### Fase 2 — nota pro Opus revisar (mapa de divergências é com o Jonathan)
 
