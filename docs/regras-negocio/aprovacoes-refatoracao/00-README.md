@@ -49,8 +49,8 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 
 - [x] Fase 0 — mapa (11/07/2026)
 - [x] Fase 1 — camada central (11/07/2026) — **revisada e APROVADA pelo Opus** (ver nota abaixo). Branch reassentada em `origin/main` via rebase (11/07) — não carrega mais o banco-v2.
-- [x] Fase 1b — **política config-first estrita** (11/07/2026, pacote `03b`, commit `a76af5ce`) — aplicada. Só o aprovador configurado decide; sem config = `nao_configurado` (endpoint trava e avisa, na Fase 3). Sem cargo/master/override. 1 ou vários aprovadores por fluxo. Exceção: conferência da própria consultora. **Aguardando revisão do Opus antes da Fase 2.**
-- [ ] Fase 2 — golden tests (pacote `04`, roda **após** a revisão da `03b`)
+- [x] Fase 1b — **política config-first estrita** (11/07/2026, pacote `03b`, commit `a76af5ce`) — aplicada. Só o aprovador configurado decide; sem config = `nao_configurado` (endpoint trava e avisa, na Fase 3). Sem cargo/master/override. 1 ou vários aprovadores por fluxo. Exceção: conferência da própria consultora. **Revisada e APROVADA pelo Opus (11/07)** — ver nota abaixo.
+- [ ] Fase 2 — golden tests (pacote `04`) — **liberada** (revisão da 1b aprovada)
 - [ ] Fase 3 — migração
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
@@ -82,6 +82,21 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 - Nenhuma dívida nova pendente desta fase (as duas dívidas menores da Fase 1
   — override-log sem registroId; ordem de checagem em avaliarDecisao num caso raro — **caíram
   junto com o override**, que não existe mais).
+
+### Revisão do Opus (11/07) — Fase 1b APROVADA
+
+Verificação objetiva (worktree, sobre a main): `npx tsc --noEmit` **0 erros**; `npx vitest run
+src/lib/aprovacoes` **23/23 passando**; `override-log.ts` removido; guarda anti-regressão confirma que
+`ACESSO_PLENO`/`rolesFallback`/`permiteOverrideAdmin`/`buscarCandidatosPorRole`/`getMasterAdminId`/`registrarOverride`
+não voltam; nenhum import de `@/lib/aprovacoes` em `src/app`/`src/components`; `git status` limpo fora de
+`src/lib/aprovacoes/`. Catálogo: 18 eventos config-first, 5 chaves novas corretas, `conferencia_consultora`
+a única exceção. Lógica fiel à decisão: só o configurado decide; config vazia → `nao_configurado`;
+multi-aprovador via split por vírgula; `podeDecidir` re-resolve a config atual (não snapshot). **Nenhum
+achado bloqueante — liberada a Fase 2.**
+
+Nota pra Fase 3 (não bloqueia): a exclusão do solicitante e o multi-split vivem nos wrappers async (I/O),
+não cobertos por teste unitário — serão exercidos na caracterização/integração contra homolog. E o `ctx`
+(solicitanteId, foraPrazo, consultoraVendedorId) tem que ser montado certo pelo endpoint ao plugar.
 
 ### Fase 1 — nota pro Opus revisar
 
