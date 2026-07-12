@@ -22,6 +22,8 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 | 01 | [`01-dossie-dependencias.md`](01-dossie-dependencias.md) | Para cada fluxo A–M: front/banco/contrato/campos/estados/notificações + triggers vivos + **riscos R1–R11** |
 | 02 | [`02-mapa-esbarros.md`](02-mapa-esbarros.md) | Os 28 endpoints, autorização real de cada um, 7 grupos de conflito |
 | 03 | [`03-FASE-1-camada-central.md`](03-FASE-1-camada-central.md) | **Pacote de execução da Fase 1** (arquitetura + briefing pro Sonnet) |
+| 03b | [`03b-FIX-A1-determinismo-aprovador.md`](03b-FIX-A1-determinismo-aprovador.md) | **Mini-pacote** (achado da revisão) — escolha do aprovador por cargo determinística |
+| 04 | [`04-FASE-2-golden-tests.md`](04-FASE-2-golden-tests.md) | **Pacote de execução da Fase 2** (caracterização + mapa de divergências) |
 
 ## O plano (7 fases)
 
@@ -46,8 +48,9 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 ## Status
 
 - [x] Fase 0 — mapa (11/07/2026)
-- [x] Fase 1 — camada central (11/07/2026, commit `3efb6f02`) — aguardando revisão do Opus antes da Fase 2
-- [ ] Fase 2 — golden tests
+- [x] Fase 1 — camada central (11/07/2026) — **revisada e APROVADA pelo Opus** (ver nota abaixo). Branch reassentada em `origin/main` via rebase (11/07) — não carrega mais o banco-v2.
+- [ ] FIX A1 — determinismo do aprovador por cargo (pré-requisito da Fase 2, pacote `03b`) — **pendente (Sonnet)**
+- [ ] Fase 2 — golden tests (pacote `04`, rodar **após** o A1)
 - [ ] Fase 3 — migração
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
@@ -72,3 +75,20 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
      se vale estender o union de `audit.ts`.
 - Worktree usado: `/home/jonathan_arajo/projetos/alissonerp-wt-centralizar-aprovacoes`
   (`node_modules` é um symlink local pro repo principal — não commitado, `.gitignore` já cobre).
+
+### Revisão do Opus (11/07) — Fase 1 APROVADA
+
+Verificação objetiva (rodada em cima da `main`, pós-rebase): `npx tsc --noEmit` **0 erros**; `npx vitest
+run src/lib/aprovacoes` **16/16 passando**; nenhum import de `@/lib/aprovacoes` em `src/app`/`src/components`;
+`git status` limpo fora de `src/lib/aprovacoes/`; `ACESSO_PLENO` única; 18 eventos no catálogo (testados
+exaustivamente); `limpeza_ouro` rígido correto. Os 2 desvios reportados pelo Sonnet (ROLES_ESTOQUE não
+exportada; `logAudit` sem `APROVACAO_OVERRIDE`) são aceitáveis na Fase 1 → viram itens de Fase 3/5.
+
+**1 achado que precisa sair antes da Fase 2 — FIX A1 (pacote `03b`):** a escolha do aprovador por cargo
+(`buscarCandidatosPorRole` sem `ORDER BY` + `escolherAprovador` pegando `[0]`) é não-determinística e não
+respeita a precedência de `rolesFallback` (ex.: crédito de gerente podendo ir pra um admin). Torna os
+golden da Fase 2 instáveis. Corrigir com o pacote `03b`.
+
+Dívidas menores anotadas (não bloqueiam): override-log não recebe o `registroId` do objeto (venda/tarefa)
+— resolver na Fase 3 ao plugar; ordem de checagem em `avaliarDecisao` num caso raro (sem designado + `ACESSO_PLENO`
+também no fallback) registra override "espúrio" — ajustável junto do A1 se quiser.
