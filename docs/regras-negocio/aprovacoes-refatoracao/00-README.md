@@ -22,8 +22,8 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 | 01 | [`01-dossie-dependencias.md`](01-dossie-dependencias.md) | Para cada fluxo A–M: front/banco/contrato/campos/estados/notificações + triggers vivos + **riscos R1–R11** |
 | 02 | [`02-mapa-esbarros.md`](02-mapa-esbarros.md) | Os 28 endpoints, autorização real de cada um, 7 grupos de conflito |
 | 03 | [`03-FASE-1-camada-central.md`](03-FASE-1-camada-central.md) | **Pacote de execução da Fase 1** (arquitetura + briefing pro Sonnet) |
-| 03b | [`03b-FIX-A1-determinismo-aprovador.md`](03b-FIX-A1-determinismo-aprovador.md) | **Mini-pacote** (achado da revisão) — escolha do aprovador por cargo determinística |
-| 04 | [`04-FASE-2-golden-tests.md`](04-FASE-2-golden-tests.md) | **Pacote de execução da Fase 2** (caracterização + mapa de divergências) |
+| 03b | [`03b-config-first-estrito.md`](03b-config-first-estrito.md) | **Pacote** — política config-first estrita (só o configurado decide; substitui o fallback por cargo). Decisão do Jonathan 11/07. **Cancela** o antigo A1 de determinismo. |
+| 04 | [`04-FASE-2-golden-tests.md`](04-FASE-2-golden-tests.md) | **Pacote de execução da Fase 2** (caracterização + mapa de divergências) — roda **após** o `03b` |
 
 ## O plano (7 fases)
 
@@ -49,8 +49,8 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 
 - [x] Fase 0 — mapa (11/07/2026)
 - [x] Fase 1 — camada central (11/07/2026) — **revisada e APROVADA pelo Opus** (ver nota abaixo). Branch reassentada em `origin/main` via rebase (11/07) — não carrega mais o banco-v2.
-- [ ] FIX A1 — determinismo do aprovador por cargo (pré-requisito da Fase 2, pacote `03b`) — **pendente (Sonnet)**
-- [ ] Fase 2 — golden tests (pacote `04`, rodar **após** o A1)
+- [ ] Fase 1b — **política config-first estrita** (pacote `03b`, decisão do Jonathan 11/07) — **pendente (Sonnet)**. Só o aprovador configurado decide; sem config = trava e avisa. Sem cargo/master/override. 1 ou vários aprovadores por fluxo. Exceção: conferência da própria consultora.
+- [ ] Fase 2 — golden tests (pacote `04`, rodar **após** o `03b`)
 - [ ] Fase 3 — migração
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
@@ -84,10 +84,16 @@ run src/lib/aprovacoes` **16/16 passando**; nenhum import de `@/lib/aprovacoes` 
 exaustivamente); `limpeza_ouro` rígido correto. Os 2 desvios reportados pelo Sonnet (ROLES_ESTOQUE não
 exportada; `logAudit` sem `APROVACAO_OVERRIDE`) são aceitáveis na Fase 1 → viram itens de Fase 3/5.
 
-**1 achado que precisa sair antes da Fase 2 — FIX A1 (pacote `03b`):** a escolha do aprovador por cargo
+**1 achado que precisa sair antes da Fase 2:** a escolha do aprovador por cargo
 (`buscarCandidatosPorRole` sem `ORDER BY` + `escolherAprovador` pegando `[0]`) é não-determinística e não
-respeita a precedência de `rolesFallback` (ex.: crédito de gerente podendo ir pra um admin). Torna os
-golden da Fase 2 instáveis. Corrigir com o pacote `03b`.
+respeita a precedência de `rolesFallback` (ex.: crédito de gerente podendo ir pra um admin).
+
+**Decisão do Jonathan (11/07) — foi além do determinismo:** o fallback por cargo é a raiz do problema
+("o sistema segue a role, não a config"), então ele decidiu **eliminá-lo**. A camada passa a ser
+**config-first estrita** (pacote `03b-config-first-estrito`): só o aprovador configurado decide; sem
+config, trava e avisa pra configurar; sem cargo/master/override; 1 ou vários aprovadores por fluxo;
+exceção só na conferência da própria consultora. Isso torna o determinismo do fallback irrelevante (não
+há mais fallback). O antigo pacote `03b-FIX-A1-determinismo` foi **cancelado**.
 
 Dívidas menores anotadas (não bloqueiam): override-log não recebe o `registroId` do objeto (venda/tarefa)
 — resolver na Fase 3 ao plugar; ordem de checagem em `avaliarDecisao` num caso raro (sem designado + `ACESSO_PLENO`
