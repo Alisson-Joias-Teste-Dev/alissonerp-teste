@@ -25,6 +25,7 @@ import { zodError } from "@/lib/schemas/common";
 import { processarAprovacaoQuebraLimpeza } from "@/lib/limpeza-ouro-aprovacao";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } from "@/lib/entrega-sem-pagamento";
+import { podeDecidir } from "@/lib/aprovacoes";
 
 const AprovacaoTarefaPostSchema = z.object({
   aprovador_id: z.string().min(1, "obrigatório"),
@@ -196,9 +197,19 @@ async function processarAprovacaoRecebimentoMetal(
 async function processarAprovacaoCompraMetal(
   tarefaId: number,
   decisao: "aprovado" | "rejeitado",
-  aprovadorId: string,
+  user: { id: string; role: string | null },
   motivo?: string,
 ) {
+  // REGRA DE NEGÓCIO: este é um caminho LATENTE (o front usa os endpoints
+  // dedicados /api/metal/aprovacoes/[id]/{aprovar,rejeitar}) — mas se for
+  // acionado, tem que respeitar a MESMA autoridade config-first, não a checagem
+  // genérica do topo do PATCH (L326-333, que serve os outros fluxos e não muda).
+  const decisaoAutorizada = await podeDecidir(user, "compra_metal");
+  if (!decisaoAutorizada.pode) {
+    return { ok: false, motivo: "sem_permissao" };
+  }
+  const aprovadorId = user.id;
+
   const [compra] = await sql`
     SELECT * FROM alissonerp.compras_metal
     WHERE tarefa_aprovacao_id = ${tarefaId}
@@ -619,6 +630,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (tarefaInfo?.tipo === "recebimento_metal" || tags.includes("aprovacao_recebimento_metal")) {
+    // REGRA DE NEGÓCIO: recebimento de metal decidido pela camada config-first
+    // (metal_aprovador_id) — não mais pela checagem genérica do topo do PATCH.
+    // Sem ctx.solicitanteId: metal não exclui quem cadastrou o recebimento.
+    const decisaoAutorizada = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "recebimento_metal");
+    if (!decisaoAutorizada.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const resultado = await processarAprovacaoRecebimentoMetal(Number(id), body.decisao, user.id, body.motivo);
       return NextResponse.json({ ok: true, recebimento_metal: resultado });
@@ -629,7 +647,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (tarefaInfo?.tipo === "compra_metal" || tags.includes("aprovacao_compra_metal")) {
     try {
-      const resultado = await processarAprovacaoCompraMetal(Number(id), body.decisao, user.id, body.motivo);
+      const resultado = await processarAprovacaoCompraMetal(
+        Number(id), body.decisao, { id: user.id, role: usuarioLogado?.role ?? null }, body.motivo,
+      );
       return NextResponse.json({ ok: true, compra_metal: resultado });
     } catch (err) {
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] compra_metal`, err);

@@ -17,7 +17,6 @@ import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { internalError } from "@/lib/api-error";
 import { CompraPostSchema } from "@/lib/metal/types";
 import { criarCompraMetal, listarCompras } from "@/lib/metal/compras";
-import { getModuloConfig } from "@/lib/metal/config";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { ROLES_METAL } from "@/lib/roles";
 import sql from "@/lib/db";
@@ -50,10 +49,17 @@ export async function POST(req: NextRequest) {
   try {
     const result = await criarCompraMetal(parsed.data, user.id);
 
-    // Se compra foi criada como pendente_aprovacao, cria tarefa + notifica
+    // Se compra foi criada como pendente_aprovacao, cria tarefa + notifica.
+    // REGRA DE NEGÓCIO: lê o MESMO aprovador que criarCompraMetal() acabou de
+    // resolver e gravar em compras_metal_aprovacoes.aprovador_id — não resolve a
+    // config de novo aqui, pra não correr risco dos dois pontos divergirem se a
+    // config mudar entre as duas leituras (achado do pacote da Fase 3a).
     if (result.status === "pendente_aprovacao") {
-      const config = await getModuloConfig();
-      const aprovadorId = (config.metal_aprovador_id ?? "").trim();
+      const [aprovacaoRow] = await sql`
+        SELECT aprovador_id FROM alissonerp.compras_metal_aprovacoes
+        WHERE compra_id = ${result.id} LIMIT 1
+      `;
+      const aprovadorId = aprovacaoRow?.aprovador_id ? String(aprovacaoRow.aprovador_id) : "";
       if (aprovadorId) {
         // Cria tarefa no sistema de aprovações
         // Busca nome do fornecedor para o resumo da tarefa
