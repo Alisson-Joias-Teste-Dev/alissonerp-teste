@@ -28,6 +28,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 | 06 | [`06-FASE-3a-metal.md`](06-FASE-3a-metal.md) | **Pacote da Fase 3a** — plugar o fluxo de metal (compra + recebimento) na camada config-first, contrato idêntico |
 | 07 | [`07-FASE-3b-conversao.md`](07-FASE-3b-conversao.md) | **Pacote da Fase 3b** — plugar conversão (estoque + SKU) na camada config-first; 1 chave só (`aprovador_conversao`), decisão do Jonathan |
 | 08 | [`08-FASE-3c-precificacao.md`](08-FASE-3c-precificacao.md) | **Pacote da Fase 3c** — plugar precificação (markup) na camada config-first; modelo metal + ajuste do botão da tela; chave `aprovador_precificacao` |
+| 09 | [`09-FASE-3d-limpeza.md`](09-FASE-3d-limpeza.md) | **Pacote da Fase 3d** — limpeza de ouro: já é config-first, só trocar a validação manual pela camada (1 arquivo, ~6 linhas); ganha multi-aprovador |
 
 ## O plano (7 fases)
 
@@ -75,7 +76,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   Jonathan 403, Alisson passa o gate (404 da alteração-fake); sem a chave → `nao_configurado`
   (solicitar markup daria 409). **Fase 3c FECHADA.** ⚠️ **PRA PROD**: criar `aprovador_precificacao`
   (via `/dba`, assinada) antes de deployar. (Já existe em homolog.)
-- [ ] Fase 3d — limpeza
+- [ ] Fase 3d — limpeza (pacote `09` pronto — mudança mínima: 1 arquivo, ~6 linhas, trocar validação manual por `resolverAprovadores`; chave `aprovador_limpeza` já existe)
 - [ ] Fase 3e — devolução
 - [ ] Fase 3f — compra (comercial)
 - [ ] Fase 3g — venda (por último — desconto/cartão/crédito/entrega/alteração)
