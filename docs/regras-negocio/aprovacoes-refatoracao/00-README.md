@@ -49,12 +49,39 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 
 - [x] Fase 0 — mapa (11/07/2026)
 - [x] Fase 1 — camada central (11/07/2026) — **revisada e APROVADA pelo Opus** (ver nota abaixo). Branch reassentada em `origin/main` via rebase (11/07) — não carrega mais o banco-v2.
-- [ ] Fase 1b — **política config-first estrita** (pacote `03b`, decisão do Jonathan 11/07) — **pendente (Sonnet)**. Só o aprovador configurado decide; sem config = trava e avisa. Sem cargo/master/override. 1 ou vários aprovadores por fluxo. Exceção: conferência da própria consultora.
-- [ ] Fase 2 — golden tests (pacote `04`, rodar **após** o `03b`)
+- [x] Fase 1b — **política config-first estrita** (11/07/2026, pacote `03b`, commit `a76af5ce`) — aplicada. Só o aprovador configurado decide; sem config = `nao_configurado` (endpoint trava e avisa, na Fase 3). Sem cargo/master/override. 1 ou vários aprovadores por fluxo. Exceção: conferência da própria consultora. **Aguardando revisão do Opus antes da Fase 2.**
+- [ ] Fase 2 — golden tests (pacote `04`, roda **após** a revisão da `03b`)
 - [ ] Fase 3 — migração
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
+
+### Fase 1b — nota pro Opus revisar
+
+- `src/lib/aprovacoes/` reescrito (`tipos.ts`, `catalogo.ts`, `autoridade.ts`, `index.ts`,
+  `__tests__/autoridade.test.ts`); `override-log.ts` **removido** (não há mais override).
+  `npx tsc --noEmit` zero erros. 23 testes unitários passando
+  (`npx vitest run src/lib/aprovacoes`). `git status` confirma: nada fora de
+  `src/lib/aprovacoes/` foi tocado; nenhum import em `src/app/`/`src/components/`.
+- Removidos por completo: `rolesFallback`, `permiteOverrideAdmin`, `ACESSO_PLENO`,
+  `buscarCandidatosPorRole`, `getMasterAdminId`, `registrarOverride` — guarda anti-regressão
+  no teste confirma que a API antiga não é mais exportada.
+- `RegraAutoridade` agora só tem `configKeys`/`configMulti`/`solicitantePodeAprovar`/
+  `camposLock`/`observacao`. `ResolucaoAprovador` é a union `{status:"ok", aprovadores, origem}`
+  `| {status:"nao_configurado", evento, configKeys}` — a Fase 3, ao plugar, usa isso pra decidir
+  se cria a tarefa (`ok`) ou responde 409 com a mensagem pra Configurações (`nao_configurado`).
+- 5 chaves de config NOVAS declaradas no catálogo (ainda não existem em
+  `configuracoes_sistema` — criação via `/dba` fica pra Fase 3): `aprovador_conversao`,
+  `aprovador_conversao_sku`, `aprovador_alteracao_venda`, `aprovador_precificacao`,
+  `aprovador_auditoria`. Até lá esses 5 eventos sempre resolvem `nao_configurado` — é o
+  comportamento correto e esperado (não escolhe ninguém por engano).
+- `podeDecidir` mudou de assinatura: não recebe mais a tarefa (`aprovadorId` snapshot) —
+  re-resolve a config **agora**, na hora da decisão, e checa se o `user` está na lista atual.
+  Efeito colateral OK: se alguém tirar o aprovador da config depois da tarefa criada, quem
+  decidir precisa estar na lista de HOJE, não na de quando a tarefa nasceu.
+- Nenhuma dívida nova pendente desta fase (as duas dívidas menores da Fase 1
+  — override-log sem registroId; ordem de checagem em avaliarDecisao num caso raro — **caíram
+  junto com o override**, que não existe mais).
 
 ### Fase 1 — nota pro Opus revisar
 
