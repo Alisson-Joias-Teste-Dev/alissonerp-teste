@@ -66,7 +66,10 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   **Fase 3b FECHADA.** ⚠️ **PRA PROD**: criar a chave `aprovador_conversao` (via `/dba`, assinada) e
   preencher ANTES de mergear/deployar — senão a conversão trava em produção. (A chave já existe em
   homolog, preenchida.)
-- [ ] Fase 3c — preço (precificação) — pacote `08` pronto (modelo metal; chave nova `aprovador_precificacao`; + ajuste do botão da tela pra refletir a config). Aguardando Sonnet plugar + Opus criar a chave em homolog e testar.
+- [x] Fase 3c — **precificação** (markup) plugada na camada config-first (12/07/2026, pacote
+  `08`, commit `65dde11a`) — código pronto, **aguardando o Opus criar a chave
+  `aprovador_precificacao` em homolog + testar end-to-end (back+front) antes de qualquer coisa ir
+  adiante. NÃO testado em homolog ainda, NÃO vai a produção.**
 - [ ] Fase 3d — limpeza
 - [ ] Fase 3e — devolução
 - [ ] Fase 3f — compra (comercial)
@@ -74,6 +77,48 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
+
+### Fase 3c (precificação) — nota pro Opus revisar e testar em homolog
+
+- 9 arquivos tocados, escopo fechado (precificação + tela de Configurações — **nem o
+  despachante genérico, nem `pendentes/route.ts`** foram tocados, como pedido). Modelo = metal:
+  precificação não gera tarefa, não passa por `tarefas/[id]/aprovacao`.
+  - Decisão: `precificacao/aprovar/route.ts` e `precificacao/rejeitar/route.ts` trocaram
+    `isFullAccess(user.role)` por `podeDecidir(user, "precificacao")`. **As 2 strings de erro 403
+    ficaram EXATAMENTE iguais** (`"Sem permissão — apenas admin e desenvolvedor podem
+    aprovar/rejeitar"`), mesmo sabendo que o texto vira impreciso quando o aprovador configurado
+    não for admin/dev — o pacote foi explícito que ajuste de texto é Fase 4/5, não aqui.
+    `isFullAccess` sem uso, removido.
+  - Criação: `precificacao/solicitar-aprovacao/route.ts` ganhou o guard
+    `resolverAprovadores("precificacao")` antes do `INSERT INTO markup_alteracoes` — sem
+    `aprovador_precificacao`, 409 e a solicitação não nasce. `isPrecificacaoAccess` (quem PODE
+    solicitar) não mudou — só adicionei o guard de config em cima.
+  - Config: `aprovador_precificacao` exposta em `configuracoes/aprovadores/route.ts` (GET+PUT,
+    **este endpoint não tem PATCH** — o pacote citava PATCH por engano, confirmei no código antes
+    de mexer) seguindo o padrão exato da `aprovador_conversao` da 3b. Lista de elegíveis reusa
+    `diretores_admins` (não `admins_devs`) porque `isFullAccess` hoje inclui diretor — escolhi a
+    lista que bate com quem realmente aprova hoje.
+  - **Front (passo D, o que o pacote pediu pra avaliar com cuidado)**: `precificacao/page.tsx` é
+    um server component direto — sem estrutura complicada. Adicionei
+    `podeDecidir({id,role},"precificacao")` lá e passei como prop nova `podeAprovarPrecificacao`
+    pro client; `PrecificacaoClient.tsx:2205` trocou
+    `currentUserRole === "desenvolvedor" || "admin"` por `podeAprovarPrecificacao` direto. **Não
+    precisei parar/reportar** — não teve complicação que justificasse.
+  - `npx tsc --noEmit` zero erros. `npx vitest run src/lib/aprovacoes` **122/122 passando** (o
+    catálogo já tinha `precificacao`/`aprovador_precificacao` certos desde a Fase 1b — não mudei
+    nenhum teste).
+- **Não mexi no banco** — `aprovador_precificacao` ainda não existe em
+  `alissonerp.configuracoes_sistema`; isso é do Opus em homolog e depois `/dba` em produção. Sem
+  ela, `precificacao` sempre resolve `nao_configurado` — solicitar markup responde 409, aprovar/
+  rejeitar respondem 403 pra todo mundo (comportamento correto e esperado até a chave existir).
+- **Cenários pra validar em homolog** (pacote `08`): X (configurado) aprova alteração de markup →
+  200 (aplica); Y (≠X, mesmo admin/diretor) → 403; X rejeita → 200, Y → 403; sem
+  `aprovador_precificacao` → solicitar markup → 409 (não cria a alteração); front — só quem tem
+  `podeDecidir=true` vê o botão Aprovar (testar com um aprovador configurado que NÃO seja
+  admin/dev, pra confirmar que a regressão de UX foi mesmo evitada).
+
+**Não subi pra homolog nem testei back/front** — commit pronto, a criação da chave + validação
+(SQL + tela, com o Jonathan) é do Opus antes de avançar pra Fase 3d (limpeza).
 
 ### Fase 3b (conversão) — nota pro Opus revisar e testar em homolog
 
