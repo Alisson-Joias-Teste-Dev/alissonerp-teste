@@ -55,7 +55,10 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 - [x] Fase 1b — **política config-first estrita** (11/07/2026, pacote `03b`, commit `a76af5ce`) — aplicada. Só o aprovador configurado decide; sem config = `nao_configurado` (endpoint trava e avisa, na Fase 3). Sem cargo/master/override. 1 ou vários aprovadores por fluxo. Exceção: conferência da própria consultora. **Revisada e APROVADA pelo Opus (11/07)** — ver nota abaixo.
 - [x] Fase 2 — caracterização + snapshot + mapa de divergências (11/07/2026, pacote `04`, commit `d8f1350f`) — **revisada e APROVADA pelo Opus** (tsc 0, 122 testes). **Mapa (05) VALIDADO pelo Jonathan (11/07)**: 2 iguais, 15 fixes intencionais, 0 regressões; `conferencia_consultora` DECIDIDO = só a própria consultora aprova a dela (é ela conferindo o próprio pedido). Libera a Fase 3.
 - [x] Fase 3a — **metal** (compra + recebimento) plugado na camada config-first (11/07/2026, pacote `06`, commit `ad612948`) — **código revisado e APROVADO pelo Opus** (tsc 0, contrato idêntico, escopo fechado; A/B confirmou que os 8 testes que falham no despachante são pré-existentes, não da 3a). **Miolo config-first TESTADO no banco de HOMOLOG** (12/07): `podeDecidir`/`resolverAprovadores` contra dados reais → só o configurado (Alisson) aprova; admin não-configurado (Paloma) e consultora (Cristiane) barrados = FIX confirmado (antes 5 cargos aprovavam). **Endpoint HTTP TESTADO end-to-end contra homolog** (12/07): `POST /api/metal/aprovacoes/[id]/aprovar` → Alisson (configurado) 200 + `aprovarCompra` chamado; Paloma (admin não-config) e Cristiane (consultora) 403 + `aprovarCompra` NUNCA chamado. Login mockado (não posso digitar senha do Jonathan) + efeito mockado (não sujou homolog); `sql` e `podeDecidir` REAIS. Rejeitar = mesmo gate (copy do aprovar). **Fase 3a FECHADA** — não vai a produção até o merge do Jonathan.
-- [ ] Fase 3b — conversão (estoque + SKU) — pacote `07` pronto (1 chave `aprovador_conversao`, decisão Jonathan 12/07). Aguardando Sonnet plugar + Opus criar a chave em homolog e testar.
+- [x] Fase 3b — **conversão** (estoque + SKU) plugada na camada config-first (12/07/2026, pacote
+  `07`, commit `c0672e04`) — código pronto, **aguardando o Opus criar a chave `aprovador_conversao`
+  em homolog + testar end-to-end (back+front) antes de qualquer coisa ir adiante. NÃO testado em
+  homolog ainda, NÃO vai a produção.**
 - [ ] Fase 3c — preço (precificação)
 - [ ] Fase 3d — limpeza
 - [ ] Fase 3e — devolução
@@ -64,6 +67,48 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
+
+### Fase 3b (conversão) — nota pro Opus revisar e testar em homolog
+
+- 13 arquivos tocados, escopo fechado (conversão + catálogo/testes + tela de Configurações —
+  **nem o despachante genérico, nem o front de conversão** foram tocados, como pedido):
+  - Decisão: `conversao/{aprovar,recusar}/route.ts` e `conversao-sku/{aprovar,recusar}/route.ts`
+    trocaram `["admin","desenvolvedor"].includes(role)` por `podeDecidir(user, "conversao" |
+    "conversao_sku")`. Mensagem de erro e status 403 **idênticos**.
+  - Criação: `estoque-comercial/converter/route.ts` e `conversao-sku/route.ts` ganharam o guard
+    `resolverAprovadores(...)` **antes** da transação — sem `aprovador_conversao` configurado,
+    responde 409 `"Aprovador de conversão não configurado. Defina em Configurações ›
+    Aprovadores."` e a conversão **não nasce** (nem ordem, nem reserva).
+  - Catálogo: `conversao_sku` passou a usar a MESMA chave `aprovador_conversao` (decisão do
+    Jonathan 12/07 — antes seriam 2 chaves, `aprovador_conversao` e `aprovador_conversao_sku`).
+    Confirmei com `grep -rn aprovador_conversao_sku src` que a chave antiga **não sobra em lugar
+    nenhum** (só numa linha de comentário explicando a remoção). Testes atualizados: o
+    `it.each` das "5 chaves novas" virou "4 chaves ainda não plugadas" (`alteracao_venda`,
+    `precificacao`, `auditoria` — `conversao` saiu da lista porque já foi plugada) + 2 testes
+    novos confirmando que `conversao`/`conversao_sku` compartilham a chave.
+  - Tela Configurações › Aprovadores: `aprovador_conversao` exposta no `GET`/`PUT` de
+    `configuracoes/aprovadores/route.ts` **e** no front (`TabAprovadores.tsx` +
+    `ListaAprovadores.tsx` + `FormularioAprovador.tsx`) — o componente é 100% data-driven
+    (array `CONFIG_ITENS`), então dava pra fazer sem risco (não é "componente React grande" que
+    o pacote pedia pra reportar em vez de mexer). Lista de usuários elegíveis reusa
+    `admins_devs` (mesma que desconto/cartão/compra comercial já usam) — não criei query nova.
+  - `npx tsc --noEmit` zero erros. `npx vitest run src/lib/aprovacoes` **122/122 passando**
+    (mesma contagem de antes — a "5 chaves" virou "4 chaves"+2 testes novos, líquido zero).
+    `git status` lista exatamente os 13 arquivos esperados.
+- Despachante genérico (`tarefas/[id]/aprovacao/route.ts`) **intocado** — conversão não passa por
+  ali (a tarefa de conversão não gera `aprovacoes_tarefa`; os 4 endpoints dedicados são o único
+  caminho), confirmado no pacote e não mudou nada nessa investigação.
+- **Não mexi no banco** — a chave `aprovador_conversao` ainda não existe em
+  `alissonerp.configuracoes_sistema`; o pacote foi explícito que isso é do Opus em homolog (e
+  depois `/dba` em produção). Sem ela, `conversao`/`conversao_sku` sempre resolvem
+  `nao_configurado` — os 4 endpoints continuam funcionando (respondem 403/409 corretamente),
+  só não deixam ninguém aprovar/criar até a chave existir e estar preenchida.
+- **Cenários pra validar em homolog** (pacote `07`): X (configurado) aprova conversão de estoque
+  → ok; Y (≠X, mesmo admin) → 403; X recusa → ok, Y → 403; conversão SKU segue a MESMA regra,
+  mesmo aprovador; `aprovador_conversao` vazio → criar conversão (estoque ou SKU) → 409, não nasce.
+
+**Não subi pra homolog nem testei back/front** — commit pronto, a criação da chave + validação
+(SQL + tela, com o Jonathan) é do Opus antes de avançar pra Fase 3c (precificação).
 
 ### Fase 3a (metal) — nota pro Opus revisar e testar em homolog
 
