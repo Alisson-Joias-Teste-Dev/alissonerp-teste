@@ -67,9 +67,14 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   preencher ANTES de mergear/deployar — senão a conversão trava em produção. (A chave já existe em
   homolog, preenchida.)
 - [x] Fase 3c — **precificação** (markup) plugada na camada config-first (12/07/2026, pacote
-  `08`, commit `65dde11a`) — código pronto, **aguardando o Opus criar a chave
-  `aprovador_precificacao` em homolog + testar end-to-end (back+front) antes de qualquer coisa ir
-  adiante. NÃO testado em homolog ainda, NÃO vai a produção.**
+  `08`, commit `65dde11a`) — **código revisado e APROVADO pelo Opus** (tsc 0, 122 testes, contrato
+  idêntico, strings de 403 preservadas; despachante e `pendentes` intocados; modelo metal). Botão
+  "Aprovar" da tela agora reflete `podeDecidir` (server component `page.tsx` computa e passa prop —
+  sem regressão de UX). **TESTADO end-to-end em HOMOLOG** (12/07): chave `aprovador_precificacao`
+  criada (= Alisson); miolo — Alisson pode / Jonathan (dev) não; `POST /api/precificacao/aprovar` —
+  Jonathan 403, Alisson passa o gate (404 da alteração-fake); sem a chave → `nao_configurado`
+  (solicitar markup daria 409). **Fase 3c FECHADA.** ⚠️ **PRA PROD**: criar `aprovador_precificacao`
+  (via `/dba`, assinada) antes de deployar. (Já existe em homolog.)
 - [ ] Fase 3d — limpeza
 - [ ] Fase 3e — devolução
 - [ ] Fase 3f — compra (comercial)
