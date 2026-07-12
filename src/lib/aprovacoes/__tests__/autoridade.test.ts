@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { escolherAprovador, avaliarDecisao, ACESSO_PLENO } from "../autoridade";
+import { resolverPorConfig, avaliarDecisao } from "../autoridade";
+import * as autoridade from "../autoridade";
+import * as index from "../index";
 import { CATALOGO } from "../catalogo";
 import type { EventoAprovacao } from "../tipos";
 
@@ -24,88 +26,91 @@ const TODOS_EVENTOS: EventoAprovacao[] = [
   "alteracao_venda",
 ];
 
-describe("escolherAprovador", () => {
-  it("config presente → retorna o UUID da config (origem 'config')", () => {
+describe("resolverPorConfig", () => {
+  it("1 UUID configurado → status 'ok' com esse UUID (origem 'config')", () => {
     const regra = CATALOGO.desconto;
-    const resultado = escolherAprovador(regra, ["uuid-config-1"], ["uuid-role-1"], "uuid-solicitante");
-    expect(resultado).toEqual({ aprovadorId: "uuid-config-1", origem: "config" });
+    const resultado = resolverPorConfig(regra, ["uuid-config-1"]);
+    expect(resultado).toEqual({ status: "ok", aprovadores: ["uuid-config-1"], origem: "config" });
   });
 
-  it("config vazia → cai no fallback por role, excluindo o solicitante (origem 'role_fallback')", () => {
+  it("vários UUIDs configurados → status 'ok' com a lista inteira", () => {
+    const regra = CATALOGO.devolver_peca;
+    const resultado = resolverPorConfig(regra, ["uuid-a", "uuid-b", "uuid-c"]);
+    expect(resultado).toEqual({ status: "ok", aprovadores: ["uuid-a", "uuid-b", "uuid-c"], origem: "config" });
+  });
+
+  it("config vazia → status 'nao_configurado' com o evento e as configKeys (não escolhe ninguém sozinha)", () => {
     const regra = CATALOGO.desconto;
-    const resultado = escolherAprovador(regra, [], ["uuid-solicitante", "uuid-role-2"], "uuid-solicitante");
-    expect(resultado).toEqual({ aprovadorId: "uuid-role-2", origem: "role_fallback" });
+    const resultado = resolverPorConfig(regra, []);
+    expect(resultado).toEqual({
+      status: "nao_configurado",
+      evento: "desconto",
+      configKeys: ["aprovador_desconto_padrao"],
+    });
   });
 
-  it("sem candidato nenhum → null (o wrapper async resolverAprovador cai pro master)", () => {
-    const regra = CATALOGO.desconto;
-    const resultado = escolherAprovador(regra, [], [], "uuid-solicitante");
-    expect(resultado).toBeNull();
+  it("solicitante era o único configurado, já excluído pelo wrapper async → 'nao_configurado' (ninguém aprova a própria)", () => {
+    const regra = CATALOGO.compra_comercial;
+    // resolverAprovadores() filtra o solicitante ANTES de chamar esta função pura.
+    const resultado = resolverPorConfig(regra, []);
+    expect(resultado.status).toBe("nao_configurado");
   });
 
-  it("solicitante é o único candidato e regra NÃO permite auto-aprovação → null", () => {
-    const regra = CATALOGO.desconto; // solicitantePodeAprovar não está setado
-    const resultado = escolherAprovador(regra, [], ["uuid-solicitante"], "uuid-solicitante");
-    expect(resultado).toBeNull();
-  });
-
-  it("conferencia_consultora permite o solicitante como candidato (solicitantePodeAprovar:true)", () => {
+  it("conferencia_consultora com autoConsultoraId → status 'ok', origem 'auto_consultora'", () => {
     const regra = CATALOGO.conferencia_consultora;
-    const resultado = escolherAprovador(regra, [], ["uuid-solicitante"], "uuid-solicitante");
-    expect(resultado).toEqual({ aprovadorId: "uuid-solicitante", origem: "role_fallback" });
+    const resultado = resolverPorConfig(regra, [], "uuid-consultora");
+    expect(resultado).toEqual({ status: "ok", aprovadores: ["uuid-consultora"], origem: "auto_consultora" });
+  });
+
+  it("conferencia_consultora sem autoConsultoraId (vendedor_id não bateu) → 'nao_configurado'", () => {
+    const regra = CATALOGO.conferencia_consultora;
+    const resultado = resolverPorConfig(regra, []);
+    expect(resultado.status).toBe("nao_configurado");
   });
 });
 
 describe("avaliarDecisao", () => {
-  it("user é o aprovador designado → {pode:true, viaOverride:false}", () => {
-    const regra = CATALOGO.desconto;
-    const resultado = avaliarDecisao("consultora", "uuid-user", regra, "uuid-user");
-    expect(resultado).toEqual({ pode: true, viaOverride: false });
+  it("user está na lista de aprovadores → {pode:true}", () => {
+    expect(avaliarDecisao("uuid-aprovador", ["uuid-aprovador", "uuid-outro"])).toEqual({ pode: true });
   });
 
-  it("admin ≠ designado, com permiteOverrideAdmin:true → {pode:true, viaOverride:true}", () => {
-    const regra = CATALOGO.desconto;
-    expect(regra.permiteOverrideAdmin).toBe(true);
-    const resultado = avaliarDecisao("admin", "uuid-admin", regra, "uuid-outro-usuario");
-    expect(resultado.pode).toBe(true);
-    expect(resultado.viaOverride).toBe(true);
+  it("user NÃO está na lista (mesmo sendo admin) → {pode:false} — sem override, ninguém decide fora da lista", () => {
+    expect(avaliarDecisao("uuid-admin-fora-da-lista", ["uuid-aprovador"])).toEqual({
+      pode: false,
+      motivo: "nao_e_aprovador_configurado",
+    });
   });
 
-  it("limpeza_ouro (permiteOverrideAdmin:false): admin ≠ UUID configurado → {pode:false}", () => {
-    const regra = CATALOGO.limpeza_ouro;
-    expect(regra.permiteOverrideAdmin).toBe(false);
-    const resultado = avaliarDecisao("admin", "uuid-admin", regra, "uuid-do-aprovador-limpeza");
-    expect(resultado.pode).toBe(false);
+  it("lista vazia (equivalente ao 'nao_configurado' já filtrado) → {pode:false} pra qualquer user", () => {
+    expect(avaliarDecisao("uuid-qualquer", []).pode).toBe(false);
   });
 
-  it("conferencia_consultora: ctx.consultoraVendedorId batendo o solicitante → {pode:true}", () => {
-    const regra = CATALOGO.conferencia_consultora;
-    // aprovadorDesignado já resolvido = a própria consultora (resolverAprovador
-    // validou vendedor_id === consultoraVendedorId antes de chegar aqui).
-    const resultado = avaliarDecisao(
-      "consultora",
-      "uuid-consultora",
-      regra,
-      "uuid-consultora",
-      { solicitanteId: "uuid-consultora", consultoraVendedorId: 42 },
-    );
-    expect(resultado).toEqual({ pode: true, viaOverride: false });
-  });
-
-  it("sem aprovador designado, role fora do fallback e sem override → {pode:false}", () => {
-    const regra = CATALOGO.limpeza_ouro; // rolesFallback: [] e sem override
-    const resultado = avaliarDecisao("gerente_loja", "uuid-gerente", regra, null);
-    expect(resultado.pode).toBe(false);
-  });
-
-  it("sem aprovador designado, role no fallback → {pode:true, viaOverride:false}", () => {
-    const regra = CATALOGO.compra_metal;
-    const resultado = avaliarDecisao("gerente_fabrica", "uuid-gerente", regra, null);
-    expect(resultado).toEqual({ pode: true, viaOverride: false });
+  it("conferencia_consultora: a consultora dona da conferência → {pode:true}; outra consultora → {pode:false}", () => {
+    const aprovadores = ["uuid-consultora-dona"];
+    expect(avaliarDecisao("uuid-consultora-dona", aprovadores)).toEqual({ pode: true });
+    expect(avaliarDecisao("uuid-outra-consultora", aprovadores).pode).toBe(false);
   });
 });
 
-describe("CATALOGO — completude e consistência", () => {
+describe("devolucao — configKeys dependem do prazo (ctx.foraPrazo)", () => {
+  it("catálogo mantém as 2 chaves, dentro-do-prazo primeiro", () => {
+    expect(CATALOGO.devolucao.configKeys).toEqual(["aprovadora_credito_gerente", "aprovador_devolucao_fora_prazo"]);
+  });
+});
+
+describe("5 chaves de config NOVAS (ainda não existem no banco — criadas via /dba na Fase 3)", () => {
+  it.each([
+    ["conversao", "aprovador_conversao"],
+    ["conversao_sku", "aprovador_conversao_sku"],
+    ["alteracao_venda", "aprovador_alteracao_venda"],
+    ["precificacao", "aprovador_precificacao"],
+    ["auditoria", "aprovador_auditoria"],
+  ] as const)("%s usa a chave '%s'", (evento, chave) => {
+    expect(CATALOGO[evento].configKeys).toEqual([chave]);
+  });
+});
+
+describe("CATALOGO — completude e consistência (política config-first estrita)", () => {
   it("tem exatamente uma entrada por EventoAprovacao, sem sobras nem faltas", () => {
     const chavesDoCatalogo = Object.keys(CATALOGO).sort();
     expect(chavesDoCatalogo).toEqual([...TODOS_EVENTOS].sort());
@@ -117,27 +122,46 @@ describe("CATALOGO — completude e consistência", () => {
     }
   });
 
-  it("todo evento tem rolesFallback válido (array de strings não-vazias)", () => {
+  it("todo evento, EXCETO conferencia_consultora, tem configKeys não-vazio e configMulti:true", () => {
     for (const evento of TODOS_EVENTOS) {
+      if (evento === "conferencia_consultora") continue;
       const regra = CATALOGO[evento];
-      expect(Array.isArray(regra.rolesFallback)).toBe(true);
-      for (const role of regra.rolesFallback) {
-        expect(typeof role).toBe("string");
-        expect(role.length).toBeGreaterThan(0);
-      }
+      expect(regra.configKeys.length).toBeGreaterThan(0);
+      expect(regra.configMulti).toBe(true);
     }
   });
 
-  it("rolesFallback vazio só é aceitável quando o evento NÃO permite override do admin", () => {
+  it("conferencia_consultora é a ÚNICA exceção: configKeys vazio + solicitantePodeAprovar:true", () => {
+    const regra = CATALOGO.conferencia_consultora;
+    expect(regra.configKeys).toEqual([]);
+    expect(regra.solicitantePodeAprovar).toBe(true);
     for (const evento of TODOS_EVENTOS) {
-      const regra = CATALOGO[evento];
-      if (regra.rolesFallback.length === 0) {
-        expect(regra.permiteOverrideAdmin).toBe(false);
-      }
+      if (evento === "conferencia_consultora") continue;
+      expect(CATALOGO[evento].solicitantePodeAprovar).toBeFalsy();
     }
   });
+});
 
-  it("ACESSO_PLENO é a única lista de acesso total (admin, desenvolvedor, diretor)", () => {
-    expect(ACESSO_PLENO).toEqual(["admin", "desenvolvedor", "diretor"]);
+describe("guarda anti-regressão — política antiga (cargo/master/override) não pode voltar", () => {
+  it("autoridade.ts não exporta mais nada de cargo/master/override de admin", () => {
+    const api = autoridade as Record<string, unknown>;
+    expect(api.ACESSO_PLENO).toBeUndefined();
+    expect(api.isAcessoPleno).toBeUndefined();
+    expect(api.escolherAprovador).toBeUndefined();
+    expect(api.buscarCandidatosPorRole).toBeUndefined();
+    expect(api.getMasterAdminId).toBeUndefined();
+    expect(api.registrarOverride).toBeUndefined();
+  });
+
+  it("index.ts não re-exporta a API antiga (registrarOverride, AlvoOverride, ACESSO_PLENO)", () => {
+    const api = index as Record<string, unknown>;
+    expect(api.registrarOverride).toBeUndefined();
+    expect(api.ACESSO_PLENO).toBeUndefined();
+    expect(api.escolherAprovador).toBeUndefined();
+  });
+
+  it("podeDecidir tem a assinatura nova (2-3 args: user, evento, ctx?) — sem o 'tarefa' antigo", () => {
+    // função pura de 3 args nominais (user, evento, ctx?) — o antigo tinha 4 (user, evento, tarefa, ctx?)
+    expect(autoridade.podeDecidir.length).toBeLessThanOrEqual(3);
   });
 });

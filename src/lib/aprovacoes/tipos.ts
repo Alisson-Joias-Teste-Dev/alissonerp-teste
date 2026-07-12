@@ -4,8 +4,12 @@
  * POR QUÊ: hoje "quem aprova o quê" está espalhado em 3 fontes que não conversam
  *   (configuracoes_sistema, roles.ts, tarefas_regras_aprovacao) — ver
  *   docs/regras-negocio/aprovacoes-refatoracao/02-mapa-esbarros.md.
- * IMPACTO: Fase 1 não pluga em nada ainda. Mudar formato aqui quebra a Fase 2
- *   (golden tests) e a Fase 3 (migração fluxo a fluxo), que dependem deste contrato.
+ * POLÍTICA (decisão do Jonathan, 11/07 — 03b-config-first-estrito.md): config-first ESTRITA.
+ *   Só o(s) aprovador(es) configurado(s) decide(m) — nem admin, nem cargo, nem dono. Sem
+ *   config, ninguém decide (a camada retorna "nao_configurado"; o endpoint, na Fase 3, trava
+ *   e avisa pra configurar). Única exceção: conferência da própria consultora.
+ * IMPACTO: Fase 1 não pluga em nada ainda. Mudar formato aqui quebra a Fase 2 (golden tests)
+ *   e a Fase 3 (migração fluxo a fluxo), que dependem deste contrato.
  */
 
 export type EventoAprovacao =
@@ -31,17 +35,13 @@ export type EventoAprovacao =
 export interface RegraAutoridade {
   evento: EventoAprovacao;
   rotulo: string;
-  /** Chaves em alissonerp.configuracoes_sistema, em ordem de precedência. [] = sem config (cai direto no fallback por role). */
+  /** Chaves em alissonerp.configuracoes_sistema, em ordem de precedência. Vazio SÓ na exceção (conferencia_consultora). */
   configKeys: string[];
-  /** true = o valor da configKey é uma lista de UUIDs separada por vírgula (ex.: devolver_peca). */
+  /** true = o valor da configKey é lista de UUIDs separada por vírgula. Agora o padrão: todos true (1 ou vários aprovadores por fluxo). */
   configMulti?: boolean;
-  /** Roles usadas quando a config está vazia/ausente/usuário inativo. */
-  rolesFallback: readonly string[];
-  /** ACESSO_PLENO pode decidir mesmo não sendo o aprovador designado (fica registrado via registrarOverride). */
-  permiteOverrideAdmin: boolean;
-  /** Por desenho: o próprio solicitante pode ser o aprovador designado (ex.: conferência da própria consultora). */
+  /** Por desenho: o próprio solicitante é o aprovador — única exceção à regra "só a config decide" (conferência da própria consultora). */
   solicitantePodeAprovar?: boolean;
-  /** Documentação (dossiê R2/R3): campos que este fluxo lê/escreve fora desta camada. Fase 1 não escreve nada — só documenta pra Fase 3. */
+  /** Documentação (dossiê R2/R3): campos que este fluxo lê/escreve fora desta camada. Esta camada não escreve nada — só documenta pra Fase 3. */
   camposLock?: string[];
   observacao?: string;
 }
@@ -61,24 +61,15 @@ export interface UsuarioAprovacao {
   role: string | null;
 }
 
-export type OrigemAprovador = "config" | "role_fallback" | "master";
-
-export interface AprovadorResolvido {
-  aprovadorId: string;
-  origem: OrigemAprovador;
-}
+/**
+ * Resultado da resolução: ou há aprovador(es) — configurado(s) ou a exceção da consultora —
+ * ou NÃO há ninguém. A camada nunca "inventa" um aprovador por cargo ou por ser o dono.
+ */
+export type ResolucaoAprovador =
+  | { status: "ok"; aprovadores: string[]; origem: "config" | "auto_consultora" }
+  | { status: "nao_configurado"; evento: EventoAprovacao; configKeys: string[] };
 
 export interface ResultadoDecisao {
   pode: boolean;
-  viaOverride: boolean;
   motivo?: string;
-}
-
-/**
- * Referência mínima ao registro de aprovação já existente (ex.: aprovacoes_tarefa)
- * usada por `podeDecidir` — o aprovador já foi resolvido antes (por `resolverAprovador`,
- * na criação da tarefa); aqui só se avalia se ESTE usuário pode decidir sobre ELE.
- */
-export interface TarefaAprovacaoRef {
-  aprovadorId: string | null;
 }

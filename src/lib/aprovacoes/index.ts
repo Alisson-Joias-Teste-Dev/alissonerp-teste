@@ -1,29 +1,23 @@
 /**
  * Camada central de autoridade de aprovações — re-exports públicos.
- * Fase 1 (docs/regras-negocio/aprovacoes-refatoracao/03-FASE-1-camada-central.md):
- * NENHUM endpoint deve importar daqui ainda (Strangler Fig — nasce ao lado do código atual).
+ * Política config-first ESTRITA (docs/regras-negocio/aprovacoes-refatoracao/03b-config-first-estrito.md):
+ * só o(s) aprovador(es) configurado(s) decide(m) — sem cargo, sem master, sem override de admin.
+ * Fase 1: NENHUM endpoint deve importar daqui ainda (Strangler Fig — nasce ao lado do código atual).
  */
 export type {
   EventoAprovacao,
   RegraAutoridade,
   ContextoAprovacao,
   UsuarioAprovacao,
-  AprovadorResolvido,
-  OrigemAprovador,
+  ResolucaoAprovador,
   ResultadoDecisao,
-  TarefaAprovacaoRef,
 } from "./tipos";
 
 export { CATALOGO } from "./catalogo";
 
 export {
-  ACESSO_PLENO,
-  isAcessoPleno,
-  escolherAprovador,
+  resolverPorConfig,
   avaliarDecisao,
-  resolverAprovador,
+  resolverAprovadores,
   podeDecidir,
 } from "./autoridade";
-
-export { registrarOverride } from "./override-log";
-export type { AlvoOverride } from "./override-log";

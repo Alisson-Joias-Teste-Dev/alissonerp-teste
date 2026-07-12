@@ -1,88 +1,61 @@
 /**
- * REGRA DE NEGÓCIO: "quem é o aprovador" e "quem pode decidir", pra qualquer evento.
- * O QUÊ: funções PURAS (testáveis sem banco) + wrappers ASYNC que buscam do banco
- *   e chamam as puras. Config-first: config ativa > fallback por role > master.
- *   Solicitante nunca é o próprio aprovador, exceto master ou eventos com
- *   `solicitantePodeAprovar: true` (ex.: conferência da própria consultora).
- * POR QUÊ: unifica as 3 fontes de verdade hoje divergentes — ver
- *   docs/regras-negocio/aprovacoes-refatoracao/03-FASE-1-camada-central.md.
+ * REGRA DE NEGÓCIO: "quem pode decidir" cada evento de aprovação — política
+ * CONFIG-FIRST ESTRITA (decisão do Jonathan, 11/07 — 03b-config-first-estrito.md).
+ * O QUÊ: funções PURAS (testáveis sem banco) + wrappers ASYNC que buscam a config e
+ *   chamam as puras. Só o(s) aprovador(es) configurado(s) em Configurações decide(m).
+ *   SEM fallback por cargo, SEM master, SEM override de admin — nem admin decide se
+ *   não estiver na lista configurada. Config vazia/ausente/todos inativos → a camada
+ *   nunca escolhe sozinha: retorna "nao_configurado" (o endpoint, na Fase 3, trava e
+ *   avisa pra configurar). Única exceção: conferência da própria consultora.
+ * POR QUÊ: substitui a política original da Fase 1 (fallback por cargo + override de
+ *   admin). O Opus achou um bug de não-determinismo no fallback (busca por cargo sem
+ *   ORDER BY); na revisão, o Jonathan foi na raiz — "o sistema segue a role, não a
+ *   config" — e decidiu eliminar o fallback por completo, não só corrigir o sintoma.
  * IMPACTO: Fase 1 — nada importa este arquivo fora de src/lib/aprovacoes/ ainda.
- *   As funções async batem no banco de homolog em testes/uso futuro; nesta fase
- *   não são chamadas por nenhum endpoint (zero efeito em produção).
  */
 import sql from "@/lib/db";
-import { getMasterAdminId } from "@/lib/master-admin";
-import { CATALOGO, ACESSO_PLENO } from "./catalogo";
-import { registrarOverride } from "./override-log";
+import { CATALOGO } from "./catalogo";
 import type {
-  AprovadorResolvido,
   ContextoAprovacao,
   EventoAprovacao,
   RegraAutoridade,
+  ResolucaoAprovador,
   ResultadoDecisao,
-  TarefaAprovacaoRef,
   UsuarioAprovacao,
 } from "./tipos";
-
-export { ACESSO_PLENO };
-
-/** true se a role está na lista única de acesso pleno (resolve o mapa §A). */
-export function isAcessoPleno(role: string | null | undefined): boolean {
-  return ACESSO_PLENO.includes(role as (typeof ACESSO_PLENO)[number]);
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PURAS — sem I/O, cobertas pelos testes unitários
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Escolhe o aprovador dado os candidatos já resolvidos (config e role, ambos
- * já filtrados por "ativo=true" pelo wrapper async). Ordem: config > role.
- * Solicitante é removido dos candidatos, exceto quando `regra.solicitantePodeAprovar`.
+ * Resolve os aprovadores dado os UUIDs já buscados (ativos e ≠ solicitante — feito
+ * pelo wrapper async antes de chamar esta função). Sem cargo, sem master: config
+ * vazia = "nao_configurado" — esta função nunca escolhe ninguém por conta própria.
  */
-export function escolherAprovador(
+export function resolverPorConfig(
   regra: RegraAutoridade,
   configUUIDs: string[],
-  candidatosRole: string[],
-  solicitanteId?: string,
-): AprovadorResolvido | null {
-  const semSolicitante = (ids: string[]) =>
-    regra.solicitantePodeAprovar ? ids : ids.filter((id) => id !== solicitanteId);
-
-  const config = semSolicitante(configUUIDs);
-  if (config.length > 0) return { aprovadorId: config[0], origem: "config" };
-
-  const role = semSolicitante(candidatosRole);
-  if (role.length > 0) return { aprovadorId: role[0], origem: "role_fallback" };
-
-  return null;
+  autoConsultoraId?: string,
+): ResolucaoAprovador {
+  if (regra.solicitantePodeAprovar && autoConsultoraId) {
+    return { status: "ok", aprovadores: [autoConsultoraId], origem: "auto_consultora" };
+  }
+  if (configUUIDs.length > 0) {
+    return { status: "ok", aprovadores: configUUIDs, origem: "config" };
+  }
+  return { status: "nao_configurado", evento: regra.evento, configKeys: regra.configKeys };
 }
 
-/**
- * Decide se `userId`/`userRole` pode decidir esta aprovação, dado o aprovador
- * já designado (resolvido antes por `resolverAprovador`, na criação da tarefa).
- */
-export function avaliarDecisao(
-  userRole: string | null,
-  userId: string,
-  regra: RegraAutoridade,
-  aprovadorDesignado: string | null,
-  _ctx?: ContextoAprovacao,
-): ResultadoDecisao {
-  if (aprovadorDesignado && userId === aprovadorDesignado) {
-    return { pode: true, viaOverride: false };
-  }
-  if (regra.permiteOverrideAdmin && isAcessoPleno(userRole)) {
-    return { pode: true, viaOverride: true, motivo: "override_admin" };
-  }
-  if (!aprovadorDesignado && regra.rolesFallback.includes(userRole ?? "")) {
-    return { pode: true, viaOverride: false };
-  }
-  return { pode: false, viaOverride: false, motivo: "nao_e_o_aprovador_nem_tem_cargo_habilitado" };
+/** user pode decidir se está na lista de aprovadores ATUAL (config resolvida agora, não snapshot). */
+export function avaliarDecisao(userId: string, aprovadores: string[]): ResultadoDecisao {
+  return aprovadores.includes(userId)
+    ? { pode: true }
+    : { pode: false, motivo: "nao_e_aprovador_configurado" };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ASYNC (I/O) — buscam config/usuarios e chamam as puras acima
+// ASYNC (I/O) — buscam a config e chamam as puras acima
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -105,7 +78,10 @@ async function usuarioAtivoPorId(id: string): Promise<string | null> {
   return row ? String(row.id) : null;
 }
 
-/** UUIDs ativos configurados nas configKeys efetivas do evento (1ª chave com valor válido). */
+/**
+ * UUIDs ativos configurados (1ª chave efetiva com valor). Toda config é tratada como
+ * lista separada por vírgula — com 1 UUID só, o split vira um array de 1 elemento.
+ */
 async function buscarUUIDsDaConfig(regra: RegraAutoridade, ctx?: ContextoAprovacao): Promise<string[]> {
   const chaves = configKeysEfetivas(regra, ctx);
   if (chaves.length === 0) return [];
@@ -117,30 +93,17 @@ async function buscarUUIDsDaConfig(regra: RegraAutoridade, ctx?: ContextoAprovac
   const valor = chaves.map((c) => porChave.get(c)).find((v): v is string => !!v);
   if (!valor) return [];
 
-  if (regra.configMulti) {
-    const ids = valor.split(",").map((s) => s.trim()).filter(Boolean);
-    const ativos = await Promise.all(ids.map(usuarioAtivoPorId));
-    return ativos.filter((id): id is string => id !== null);
-  }
-
-  const ativo = await usuarioAtivoPorId(valor);
-  return ativo ? [ativo] : [];
-}
-
-async function buscarCandidatosPorRole(roles: readonly string[]): Promise<string[]> {
-  if (roles.length === 0) return [];
-  const rows = await sql<{ id: string }[]>`
-    SELECT id FROM alissonerp.usuarios WHERE role = ANY(${[...roles]}) AND ativo = true
-  `;
-  return rows.map((r) => String(r.id));
+  const ids = valor.split(",").map((s) => s.trim()).filter(Boolean);
+  const ativos = await Promise.all(ids.map(usuarioAtivoPorId));
+  return ativos.filter((id): id is string => id !== null);
 }
 
 /**
  * REGRA DE NEGÓCIO: `conferencia_consultora` — a consultora aprova a PRÓPRIA
- * conferência quando `ctx.consultoraVendedorId` bate com o `vendedor_id` dela
- * em alissonerp.usuarios (mesma checagem de
- * src/app/api/aprovacao/[aprovacaoId]/route.ts). Vira mais um candidato de
- * fallback — não substitui a config nem os cargos de gerência.
+ * conferência quando `ctx.consultoraVendedorId` bate com o `vendedor_id` dela em
+ * alissonerp.usuarios (mesma checagem de
+ * src/app/api/aprovacao/[aprovacaoId]/route.ts). Única exceção à política
+ * config-first — não há aprovador a configurar pra este evento.
  */
 async function candidatoAutoAprovacao(regra: RegraAutoridade, ctx?: ContextoAprovacao): Promise<string | null> {
   if (!regra.solicitantePodeAprovar || !ctx?.solicitanteId || ctx?.consultoraVendedorId == null) {
@@ -155,40 +118,34 @@ async function candidatoAutoAprovacao(regra: RegraAutoridade, ctx?: ContextoApro
   return null;
 }
 
-/** Resolve o aprovador designado do evento: config ativa → fallback por role (≠ solicitante) → master. */
-export async function resolverAprovador(
+/** Resolve quem decide o evento: config ativa (≠ solicitante) → auto-aprovação (exceção) → "nao_configurado". */
+export async function resolverAprovadores(
   evento: EventoAprovacao,
   ctx?: ContextoAprovacao,
-): Promise<AprovadorResolvido> {
+): Promise<ResolucaoAprovador> {
   const regra = CATALOGO[evento];
 
-  const configUUIDs = await buscarUUIDsDaConfig(regra, ctx);
-  const autoAprovacaoId = await candidatoAutoAprovacao(regra, ctx);
-  const candidatosRoleBase = await buscarCandidatosPorRole(regra.rolesFallback);
-  const candidatosRole = autoAprovacaoId ? [autoAprovacaoId, ...candidatosRoleBase] : candidatosRoleBase;
+  let configUUIDs = await buscarUUIDsDaConfig(regra, ctx);
+  if (!regra.solicitantePodeAprovar && ctx?.solicitanteId) {
+    configUUIDs = configUUIDs.filter((id) => id !== ctx.solicitanteId);
+  }
+  const autoConsultoraId = (await candidatoAutoAprovacao(regra, ctx)) ?? undefined;
 
-  const escolhido = escolherAprovador(regra, configUUIDs, candidatosRole, ctx?.solicitanteId);
-  if (escolhido) return escolhido;
-
-  const masterId = await getMasterAdminId();
-  return { aprovadorId: masterId, origem: "master" };
+  return resolverPorConfig(regra, configUUIDs, autoConsultoraId);
 }
 
 /**
- * Avalia se `user` pode decidir `evento` para a `tarefa` já existente (aprovador
- * já foi resolvido antes, na criação — `tarefa.aprovadorId`). Se a decisão for
- * via override do admin, registra em audit_log (registrarOverride).
+ * Autoridade = config ATUAL, não snapshot da tarefa: re-resolve os aprovadores agora
+ * e checa se `user` está na lista. Sem config configurada, ninguém decide.
  */
 export async function podeDecidir(
   user: UsuarioAprovacao,
   evento: EventoAprovacao,
-  tarefa: TarefaAprovacaoRef,
   ctx?: ContextoAprovacao,
 ): Promise<ResultadoDecisao> {
-  const regra = CATALOGO[evento];
-  const resultado = avaliarDecisao(user.role, user.id, regra, tarefa.aprovadorId, ctx);
-  if (resultado.pode && resultado.viaOverride) {
-    await registrarOverride(user, evento, { aprovadorDesignadoId: tarefa.aprovadorId });
+  const r = await resolverAprovadores(evento, ctx);
+  if (r.status === "nao_configurado") {
+    return { pode: false, motivo: "aprovador_nao_configurado" };
   }
-  return resultado;
+  return avaliarDecisao(user.id, r.aprovadores);
 }
