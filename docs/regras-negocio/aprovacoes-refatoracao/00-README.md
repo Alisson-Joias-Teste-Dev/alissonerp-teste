@@ -26,6 +26,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 | 04 | [`04-FASE-2-golden-tests.md`](04-FASE-2-golden-tests.md) | **Pacote de execução da Fase 2** (caracterização + mapa de divergências) — roda **após** o `03b` |
 | 05 | [`05-divergencias-alvo-x-atual.md`](05-divergencias-alvo-x-atual.md) | **Mapa de divergências ALVO×ATUAL** (18 eventos) — VALIDADO pelo Jonathan. Guia da Fase 3. |
 | 06 | [`06-FASE-3a-metal.md`](06-FASE-3a-metal.md) | **Pacote da Fase 3a** — plugar o fluxo de metal (compra + recebimento) na camada config-first, contrato idêntico |
+| 07 | [`07-FASE-3b-conversao.md`](07-FASE-3b-conversao.md) | **Pacote da Fase 3b** — plugar conversão (estoque + SKU) na camada config-first; 1 chave só (`aprovador_conversao`), decisão do Jonathan |
 
 ## O plano (7 fases)
 
@@ -54,7 +55,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 - [x] Fase 1b — **política config-first estrita** (11/07/2026, pacote `03b`, commit `a76af5ce`) — aplicada. Só o aprovador configurado decide; sem config = `nao_configurado` (endpoint trava e avisa, na Fase 3). Sem cargo/master/override. 1 ou vários aprovadores por fluxo. Exceção: conferência da própria consultora. **Revisada e APROVADA pelo Opus (11/07)** — ver nota abaixo.
 - [x] Fase 2 — caracterização + snapshot + mapa de divergências (11/07/2026, pacote `04`, commit `d8f1350f`) — **revisada e APROVADA pelo Opus** (tsc 0, 122 testes). **Mapa (05) VALIDADO pelo Jonathan (11/07)**: 2 iguais, 15 fixes intencionais, 0 regressões; `conferencia_consultora` DECIDIDO = só a própria consultora aprova a dela (é ela conferindo o próprio pedido). Libera a Fase 3.
 - [x] Fase 3a — **metal** (compra + recebimento) plugado na camada config-first (11/07/2026, pacote `06`, commit `ad612948`) — **código revisado e APROVADO pelo Opus** (tsc 0, contrato idêntico, escopo fechado; A/B confirmou que os 8 testes que falham no despachante são pré-existentes, não da 3a). **Miolo config-first TESTADO no banco de HOMOLOG** (12/07): `podeDecidir`/`resolverAprovadores` contra dados reais → só o configurado (Alisson) aprova; admin não-configurado (Paloma) e consultora (Cristiane) barrados = FIX confirmado (antes 5 cargos aprovavam). **Endpoint HTTP TESTADO end-to-end contra homolog** (12/07): `POST /api/metal/aprovacoes/[id]/aprovar` → Alisson (configurado) 200 + `aprovarCompra` chamado; Paloma (admin não-config) e Cristiane (consultora) 403 + `aprovarCompra` NUNCA chamado. Login mockado (não posso digitar senha do Jonathan) + efeito mockado (não sujou homolog); `sql` e `podeDecidir` REAIS. Rejeitar = mesmo gate (copy do aprovar). **Fase 3a FECHADA** — não vai a produção até o merge do Jonathan.
-- [ ] Fase 3b — conversão (próximo fluxo, ordem do dossiê)
+- [ ] Fase 3b — conversão (estoque + SKU) — pacote `07` pronto (1 chave `aprovador_conversao`, decisão Jonathan 12/07). Aguardando Sonnet plugar + Opus criar a chave em homolog e testar.
 - [ ] Fase 3c — preço (precificação)
 - [ ] Fase 3d — limpeza
 - [ ] Fase 3e — devolução
