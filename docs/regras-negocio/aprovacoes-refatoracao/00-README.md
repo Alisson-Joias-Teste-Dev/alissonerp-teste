@@ -89,11 +89,48 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   Descoberta: `aprovador_devolucao_estoque` já existia em homolog (= Jonathan) — restaurado após o
   teste; `aprovador_devolucao` (nova) = Alisson em homolog. **Fase 3e FECHADA.** ⚠️ PRA PROD: criar
   `aprovador_devolucao` via `/dba` antes de deployar (`aprovador_devolucao_estoque` já existe).
-- [ ] Fase 3f — compra comercial (pacote `11` pronto) — modelo metal/devolução, 2 arquivos (gate no despachante + criação); chave `aprovador_compra_comercial` já existe. Aguardando Sonnet plugar + Opus testar em homolog. (Brecha do `concluir` void user + R4 duplicação conta a pagar = Fase 4.)
+- [x] Fase 3f — **compra comercial** plugada na camada config-first (12/07/2026, pacote `11`,
+  commit `d5242037`) — só 2 arquivos (chave `aprovador_compra_comercial` já existia, sem
+  camada/front tocados). Código pronto, **aguardando o Opus testar end-to-end em homolog. NÃO
+  testado ainda, NÃO vai a produção.** (Brecha do `concluir` void user + R4 duplicação conta a
+  pagar continuam como estão — são Fase 4.)
 - [ ] Fase 3g — venda (por último — desconto/cartão/crédito/entrega/alteração)
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
+
+### Fase 3f (compra comercial) — nota pro Opus revisar e testar em homolog
+
+- Exatamente 2 arquivos, como o pacote pediu — nem camada, nem front, nem config-UI tocados
+  (a chave `aprovador_compra_comercial` já existia e já estava exposta na tela):
+  - `tarefas/[id]/aprovacao/route.ts`: o bloco `compra_comercial` ganhou o gate `podeDecidir`
+    logo antes do `try`, espelhando `recebimento_metal`/`devolucao`. Checagem genérica do topo
+    do PATCH intocada; assinatura de `processarAprovacaoCompraComercial` intocada (continua
+    recebendo `user.id`).
+  - `compras-comercial/[id]/solicitar-aprovacao/route.ts`: a leitura crua da config
+    (`SELECT valor FROM configuracoes_sistema WHERE chave='aprovador_compra_comercial'`) virou
+    `resolverAprovadores("compra_comercial")`. **Mensagem do 409 preservada literalmente**:
+    "Nenhum aprovador configurado para compra comercial" (não a aproximação genérica que o
+    pacote usou no exemplo — conferi a string exata no código antes de trocar).
+  - **Simplificação que o próprio pacote autorizou**: removi a checagem separada de "usuário
+    ativo" (query own + 409 "Aprovador inválido ou inativo") porque `resolverAprovadores` já
+    filtra `ativo=true` internamente — ficaria código morto. Efeito: se o UUID configurado virar
+    inativo, a mensagem que aparece agora é a mesma de "não configurado" (era uma mensagem
+    própria antes) — mesmo status 409, resultado prático idêntico (usuário vê que precisa
+    reconfigurar), só o texto exato desse caso-de-borda específico mudou.
+  - `npx tsc --noEmit` zero erros. `npx vitest run src/lib/aprovacoes` **121/121 passando**
+    (nada da camada mudou, contagem idêntica à Fase 3e).
+- **Não toquei** na brecha do `[id]/concluir/route.ts` (`void user`) nem no risco R4 (duplicação
+  de `contas_pagar` no handler `processarAprovacaoCompraComercial`) — ficam registrados pra
+  Fase 4, como o pacote determinou.
+
+**Cenários pra validar em homolog** (pacote `11`): X (configurado) aprova/rejeita uma compra
+comercial via tarefa → passa; Y (≠X, mesmo admin/dev) → 403; sem
+`aprovador_compra_comercial` → solicitar aprovação → 409 "Nenhum aprovador configurado para
+compra comercial".
+
+**Não subi pra homolog nem testei back/front** — commit pronto, a validação (SQL + tela, com o
+Jonathan) é do Opus antes de avançar pra Fase 3g (venda — a mais arriscada, por último).
 
 ### Fase 3e (devolução) — nota pro Opus revisar e testar em homolog
 
