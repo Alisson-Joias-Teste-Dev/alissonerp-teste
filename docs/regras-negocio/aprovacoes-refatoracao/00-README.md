@@ -29,6 +29,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 | 07 | [`07-FASE-3b-conversao.md`](07-FASE-3b-conversao.md) | **Pacote da Fase 3b** — plugar conversão (estoque + SKU) na camada config-first; 1 chave só (`aprovador_conversao`), decisão do Jonathan |
 | 08 | [`08-FASE-3c-precificacao.md`](08-FASE-3c-precificacao.md) | **Pacote da Fase 3c** — plugar precificação (markup) na camada config-first; modelo metal + ajuste do botão da tela; chave `aprovador_precificacao` |
 | 09 | [`09-FASE-3d-limpeza.md`](09-FASE-3d-limpeza.md) | **Pacote da Fase 3d** — limpeza de ouro: já é config-first, só trocar a validação manual pela camada (1 arquivo, ~6 linhas); ganha multi-aprovador |
+| 10 | [`10-FASE-3e-devolucao.md`](10-FASE-3e-devolucao.md) | **Pacote da Fase 3e** — devolução (2 etapas: devolução + estoque) na camada config-first; **1 aprovador** (decisão do Jonathan, sem distinção de prazo); chave nova `aprovador_devolucao` |
 
 ## O plano (7 fases)
 
@@ -77,7 +78,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   (solicitar markup daria 409). **Fase 3c FECHADA.** ⚠️ **PRA PROD**: criar `aprovador_precificacao`
   (via `/dba`, assinada) antes de deployar. (Já existe em homolog.)
 - [x] Fase 3d — limpeza — **código plugado (pelo Opus) e revisado** (commit `c951cc7f`; tsc 0, 122 testes, 1 arquivo `limpeza-ouro-aprovacao.ts`, contrato idêntico — 2 erros 409/403 preservados; ganha multi-aprovador). **TESTADO end-to-end em HOMOLOG** (12/07, após o homolog voltar): `aprovador_limpeza` = Alisson; miolo — Alisson pode / Jonathan (dev) não; `POST /api/purificacao/limpeza/aprovacao` → Jonathan 403 (msg "Apenas o aprovador configurado..." preservada), Alisson passa o gate (404 da baixa-fake). **Fase 3d FECHADA.** `aprovador_limpeza` já existe (não precisa criar em prod).
-- [ ] Fase 3e — devolução
+- [ ] Fase 3e — devolução (pacote `10` pronto) — 2 etapas (devolução + estoque); **DECISÃO Jonathan 12/07: 1 aprovador só** (autorização não depende mais do prazo de 7 dias úteis — o prazo continua só pro aviso/retenção). Chave nova `aprovador_devolucao` + `aprovador_devolucao_estoque` (já existe). Aguardando Sonnet plugar + Opus criar a chave em homolog e testar.
 - [ ] Fase 3f — compra (comercial)
 - [ ] Fase 3g — venda (por último — desconto/cartão/crédito/entrega/alteração)
 - [ ] Fase 4 — brechas/atalhos
