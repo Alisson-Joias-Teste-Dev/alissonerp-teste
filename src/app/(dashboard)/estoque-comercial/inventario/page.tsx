@@ -68,6 +68,8 @@ export default function InventarioPage() {
   const [customDe,  setCustomDe]  = useState("");
   const [customAte, setCustomAte] = useState("");
   const [situacao,  setSituacao]  = useState<"aberto" | "concluido" | "cancelado" | null>(null);
+  const [local,      setLocal]     = useState<number | null>(null);
+  const [locaisDisp, setLocaisDisp] = useState<{ id: number; nome: string }[]>([]);
   const POR_PAGINA = 10;
   const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));
 
@@ -78,6 +80,7 @@ export default function InventarioPage() {
       const params = new URLSearchParams();
       params.set("pagina", String(pagina));
       if (situacao) params.set("situacao", situacao);
+      if (local) params.set("local", String(local));
       // Intervalo de datas (data de abertura) conforme o período escolhido
       const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       const hoje = new Date();
@@ -90,12 +93,13 @@ export default function InventarioPage() {
 
       const r = await fetch(`/api/estoque-comercial/inventario?${params.toString()}`);
       if (r.ok) {
-        const d = await r.json() as { items: Inventario[]; total: number };
+        const d = await r.json() as { items: Inventario[]; total: number; locaisDisponiveis?: { id: number; nome: string }[] };
         setItems(d.items ?? []);
         setTotal(d.total ?? 0);
+        if (d.locaisDisponiveis) setLocaisDisp(d.locaisDisponiveis);
       }
     } finally { setLoading(false); }
-  }, [pagina, situacao, periodo, customDe, customAte]);
+  }, [pagina, situacao, local, periodo, customDe, customAte]);
 
   const fetchLocais = useCallback(async () => {
     try {
@@ -204,6 +208,29 @@ export default function InventarioPage() {
             className="text-xs border rounded-lg px-2 py-1 outline-none" style={{ borderColor: "#E8DCC8" }} />
         </div>
       )}
+      {/* Filtro de LOCAL de estoque (só os locais que têm inventário) */}
+      {locaisDisp.length > 0 && (
+        <div className="mb-2 flex gap-1.5 flex-wrap items-center">
+          <span className="text-xs font-semibold shrink-0 w-16" style={{ color: "#7A5A4A" }}>Local</span>
+          <button onClick={() => { setLocal(null); setPagina(1); }}
+            className="text-xs px-2.5 py-1 rounded-full font-medium"
+            style={local === null
+              ? { background: "#184036", color: "#fff" }
+              : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
+            Todos
+          </button>
+          {locaisDisp.map(l => (
+            <button key={l.id} onClick={() => { setLocal(l.id); setPagina(1); }}
+              className="text-xs px-2.5 py-1 rounded-full font-medium"
+              style={local === l.id
+                ? { background: "#184036", color: "#fff" }
+                : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
+              {l.nome}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Filtro de SITUAÇÃO (Aberto inclui "Em contagem") */}
       <div className="mb-5 flex gap-1.5 flex-wrap items-center">
         <span className="text-xs font-semibold shrink-0 w-16" style={{ color: "#7A5A4A" }}>Situação</span>

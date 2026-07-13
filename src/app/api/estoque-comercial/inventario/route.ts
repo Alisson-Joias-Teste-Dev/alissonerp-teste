@@ -44,11 +44,16 @@ export async function GET(req: NextRequest) {
   const deCond  = de  ? sql`AND i.data_abertura >= ${de}::date` : sql``;
   const ateCond = ate ? sql`AND i.data_abertura < (${ate}::date + INTERVAL '1 day')` : sql``;
 
+  // Filtro de LOCAL de estoque (Loja, Fábrica, Reposição, Service...).
+  const localRaw = Number(url.searchParams.get("local"));
+  const local = Number.isInteger(localRaw) && localRaw > 0 ? localRaw : null;
+  const localCond = local ? sql`AND i.local_estoque_id = ${local}` : sql``;
+
   // Total para a paginação (sem o LATERAL — barato).
   const [{ total }] = await sql`
     SELECT COUNT(*)::int AS total
     FROM alissonerp.inventarios_comercial i
-    WHERE true ${situacaoCond} ${deCond} ${ateCond}
+    WHERE true ${situacaoCond} ${localCond} ${deCond} ${ateCond}
   `;
 
   // Página: filtra/ordena/limita PRIMEIRO (subquery) e só então o LATERAL roda —
@@ -68,7 +73,7 @@ export async function GET(req: NextRequest) {
     FROM (
       SELECT *
       FROM alissonerp.inventarios_comercial i
-      WHERE true ${situacaoCond} ${deCond} ${ateCond}
+      WHERE true ${situacaoCond} ${localCond} ${deCond} ${ateCond}
       ORDER BY i.created_at DESC
       LIMIT ${POR_PAGINA} OFFSET ${offset}
     ) i
@@ -89,7 +94,16 @@ export async function GET(req: NextRequest) {
     ORDER BY i.created_at DESC
   `;
 
-  return NextResponse.json({ items, total, pagina, porPagina: POR_PAGINA });
+  // Locais que TÊM inventário (chips do filtro) — independe dos filtros ativos,
+  // pra o chip do local não sumir quando você filtra por outra coisa.
+  const locaisDisponiveis = await sql`
+    SELECT DISTINCT le.id, le.nome
+    FROM alissonerp.inventarios_comercial i
+    JOIN alissonerp.locais_estoque le ON le.id = i.local_estoque_id
+    ORDER BY le.nome
+  `;
+
+  return NextResponse.json({ items, total, pagina, porPagina: POR_PAGINA, locaisDisponiveis });
 }
 
 // POST /api/estoque-comercial/inventario — abrir novo inventário
