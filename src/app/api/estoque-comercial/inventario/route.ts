@@ -23,24 +23,55 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const rows = await sql`
+  const url = new URL(req.url);
+  const POR_PAGINA = 10;
+  const pagina = Math.max(1, Math.trunc(Number(url.searchParams.get("pagina")) || 1));
+  const offset = (pagina - 1) * POR_PAGINA;
+
+  // Filtro de SITUAÇÃO: "aberto" = aberto OU em_contagem (ambos em andamento).
+  const situacaoRaw = url.searchParams.get("situacao");
+  const situacaoCond =
+    situacaoRaw === "aberto"      ? sql`AND i.status IN ('aberto', 'em_contagem')`
+    : situacaoRaw === "concluido" ? sql`AND i.status = 'concluido'`
+    : situacaoRaw === "cancelado" ? sql`AND i.status = 'cancelado'`
+    : sql``;
+
+  // Filtro de PERÍODO pela data de abertura (ate INCLUSIVO → < ate + 1 dia).
+  // Aceita só YYYY-MM-DD (ignora fora do formato — nunca injeta na query).
+  const dataOk = (s: string | null) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s)) ? s : null;
+  const de = dataOk(url.searchParams.get("de"));
+  const ate = dataOk(url.searchParams.get("ate"));
+  const deCond  = de  ? sql`AND i.data_abertura >= ${de}::date` : sql``;
+  const ateCond = ate ? sql`AND i.data_abertura < (${ate}::date + INTERVAL '1 day')` : sql``;
+
+  // Total para a paginação (sem o LATERAL — barato).
+  const [{ total }] = await sql`
+    SELECT COUNT(*)::int AS total
+    FROM alissonerp.inventarios_comercial i
+    WHERE true ${situacaoCond} ${deCond} ${ateCond}
+  `;
+
+  // Página: filtra/ordena/limita PRIMEIRO (subquery) e só então o LATERAL roda —
+  // assim as somas de peças processam só os 10 inventários da página.
+  const items = await sql`
     SELECT
       i.id, i.local_estoque_id, le.nome AS local_nome,
       i.status, i.obs, i.data_abertura, i.data_conclusao,
       i.created_at, i.categoria,
       uc.email AS criado_por_email,
       uf.email AS concluido_por_email,
-      -- Um único scan por inventário (LATERAL) calcula tudo — LINHA (SKU) e PEÇA.
-      -- PEÇA = unidades (o que a lista EXIBE, regra do Jonathan):
-      --   pecas_esperadas = SUM(quantidade_sistema); pecas_contadas = SUM(quantidade_contada);
-      --   pecas_divergentes = faltando + excesso em PEÇAS, SÓ de item CONTADO
-      --   (item sem contagem não é "divergência" — aparece no progresso; mesma
-      --    regra do detalhe, pra lista e detalhe usarem o mesmo conceito).
-      -- OBS: sem o filtro de "peça pronta" do detalhe (custo alto na lista);
-      -- mantém o comportamento pré-existente da lista (que já não filtrava).
+      -- PEÇA = unidades (o que a lista EXIBE); pecas_divergentes = faltando+excesso
+      -- de item CONTADO (sem-contagem vira progresso). Sem o filtro de "peça pronta"
+      -- do detalhe (custo alto na lista) — comportamento pré-existente da lista.
       agg.total_itens, agg.itens_contados, agg.itens_divergentes,
       agg.pecas_esperadas, agg.pecas_contadas, agg.pecas_divergentes
-    FROM alissonerp.inventarios_comercial i
+    FROM (
+      SELECT *
+      FROM alissonerp.inventarios_comercial i
+      WHERE true ${situacaoCond} ${deCond} ${ateCond}
+      ORDER BY i.created_at DESC
+      LIMIT ${POR_PAGINA} OFFSET ${offset}
+    ) i
     LEFT JOIN alissonerp.locais_estoque le ON le.id = i.local_estoque_id
     LEFT JOIN auth.users uc ON uc.id = i.created_by
     LEFT JOIN auth.users uf ON uf.id = i.concluido_por
@@ -55,13 +86,10 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.itens_inventario_comercial ii
       WHERE ii.inventario_id = i.id
     ) agg ON true
-    ORDER BY
-      CASE i.status WHEN 'aberto' THEN 0 WHEN 'em_contagem' THEN 1 ELSE 2 END,
-      i.created_at DESC
-    LIMIT 50
+    ORDER BY i.created_at DESC
   `;
 
-  return NextResponse.json(rows);
+  return NextResponse.json({ items, total, pagina, porPagina: POR_PAGINA });
 }
 
 // POST /api/estoque-comercial/inventario — abrir novo inventário
