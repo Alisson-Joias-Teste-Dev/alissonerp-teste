@@ -635,6 +635,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (tarefaInfo?.tipo === "compra_comercial" || tags.includes("aprovacao_compra_comercial")) {
+    // REGRA DE NEGÓCIO: compra comercial decidida pela camada config-first
+    // (aprovador_compra_comercial) — não mais pela checagem genérica do topo do
+    // PATCH. Sem ctx.solicitanteId: compra comercial não exclui quem solicitou.
+    const dec = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "compra_comercial");
+    if (!dec.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const resultado = await processarAprovacaoCompraComercial(Number(id), body.decisao, user.id, body.motivo);
       return NextResponse.json({ ok: true, compra_comercial: resultado });

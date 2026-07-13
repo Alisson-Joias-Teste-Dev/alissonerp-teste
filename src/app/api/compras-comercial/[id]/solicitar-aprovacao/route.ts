@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { criarNotificacao } from "@/lib/notificacoes";
+import { resolverAprovadores } from "@/lib/aprovacoes";
 
 type Params = Promise<{ id: string }>;
 
@@ -56,30 +57,16 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
   }
 
   // REGRA DE NEGOCIO:
-  // - O que faz: resolve o aprovador exclusivamente pela configuracao central do sistema.
+  // - O que faz: resolve o aprovador exclusivamente pela configuracao central do sistema
+  //   (política config-first — 03b-config-first-estrito.md). A camada já filtra usuário
+  //   ativo internamente. Sem ctx.solicitanteId: compra comercial não exclui quem solicitou.
   // - Por que: evita override manual pelo operador e garante governanca de aprovacao.
   // - Impacto se alterado/removido: usuario pode escolher aprovador indevido e quebrar compliance.
-  const [cfg] = await sql`
-    SELECT valor
-    FROM alissonerp.configuracoes_sistema
-    WHERE chave = 'aprovador_compra_comercial'
-    LIMIT 1
-  `;
-  const aprovadorId = String(cfg?.valor ?? "");
-
-  if (!aprovadorId) {
+  const resol = await resolverAprovadores("compra_comercial");
+  if (resol.status === "nao_configurado") {
     return NextResponse.json({ error: "Nenhum aprovador configurado para compra comercial" }, { status: 409 });
   }
-
-  const [aprovador] = await sql`
-    SELECT id, nome
-    FROM alissonerp.usuarios
-    WHERE id = ${aprovadorId}::uuid AND ativo = true
-    LIMIT 1
-  `;
-  if (!aprovador) {
-    return NextResponse.json({ error: "Aprovador inválido ou inativo" }, { status: 409 });
-  }
+  const aprovadorId = resol.aprovadores[0]; // colunas aprovacoes_tarefa.aprovador_id / compras_comercial.aprovador_id são UUID único
 
   // REGRA DE NEGOCIO:
   // - O que faz: gera um resumo estruturado na tarefa de aprovacao com fornecedor, total e quantidade de itens.
