@@ -145,5 +145,46 @@ export async function GET(req: NextRequest, { params }: Params) {
     ORDER BY p.sku
   `;
 
-  return NextResponse.json({ inventario, itens, leituras, total_leituras, excedentesForaInventario });
+  // O QUÊ: liga cada CHIP (EPC) lido à PEÇA/produto do inventário (produto_id -> [epc,...]).
+  // POR QUÊ: ao abrir uma divergência a tela mostra o número do chip de cada peça lida —
+  //   o dado já existe em joias_leituras; aqui só AGRUPAMOS por produto (100% leitura).
+  // COMO: o EPC de 24 dígitos carrega o id_api_produto nos dígitos 5-13; o id_api do item
+  //   é resolvido pela erp (produtos_compat) OU public, igual ao cálculo dos excedentes acima.
+  //   Agrupar por produto evita despejar milhares de EPCs soltos (o LIMIT 200 das leituras
+  //   não afeta isto — o mapa vem completo).
+  // IMPACTO SE ALTERADO/REMOVIDO: o drill-down "peça N · chip …" fica sem os números.
+  const epcsPorProdutoRows = await sql`
+    WITH epcs_lidos AS (
+      SELECT epc,
+        CASE
+          WHEN epc ~ '^[0-9]{24}$'
+          THEN CAST(SUBSTRING(epc FROM 5 FOR 9) AS BIGINT)
+          ELSE NULL
+        END AS id_api_produto
+      FROM alissonerp.joias_leituras
+      WHERE inventario_id = ${invId}
+    ),
+    item_api AS (
+      SELECT ii.produto_id,
+             COALESCE(pc.id_api_produto, p.id_api_produto) AS id_api_produto
+      FROM alissonerp.itens_inventario_comercial ii
+      JOIN public.produtos p ON p.id_produto = ii.produto_id
+      LEFT JOIN alissonerp.produtos_compat pc ON pc.id_produto = ii.produto_id
+      WHERE ii.inventario_id = ${invId}
+        AND COALESCE(pc.id_api_produto, p.id_api_produto) IS NOT NULL
+    )
+    SELECT ia.produto_id,
+           array_agg(el.epc ORDER BY el.epc) AS epcs
+    FROM item_api ia
+    JOIN epcs_lidos el ON el.id_api_produto = ia.id_api_produto
+    WHERE el.id_api_produto IS NOT NULL
+    GROUP BY ia.produto_id
+  `;
+  // produto_id -> [epc, ...] — mapa enxuto para o front montar "peça N · chip …"
+  const epcsPorProduto: Record<number, string[]> = {};
+  for (const r of epcsPorProdutoRows) {
+    epcsPorProduto[Number(r.produto_id)] = (r.epcs as string[]) ?? [];
+  }
+
+  return NextResponse.json({ inventario, itens, leituras, total_leituras, excedentesForaInventario, epcsPorProduto });
 }
