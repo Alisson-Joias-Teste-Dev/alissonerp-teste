@@ -30,6 +30,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 | 08 | [`08-FASE-3c-precificacao.md`](08-FASE-3c-precificacao.md) | **Pacote da Fase 3c** — plugar precificação (markup) na camada config-first; modelo metal + ajuste do botão da tela; chave `aprovador_precificacao` |
 | 09 | [`09-FASE-3d-limpeza.md`](09-FASE-3d-limpeza.md) | **Pacote da Fase 3d** — limpeza de ouro: já é config-first, só trocar a validação manual pela camada (1 arquivo, ~6 linhas); ganha multi-aprovador |
 | 10 | [`10-FASE-3e-devolucao.md`](10-FASE-3e-devolucao.md) | **Pacote da Fase 3e** — devolução (2 etapas: devolução + estoque) na camada config-first; **1 aprovador** (decisão do Jonathan, sem distinção de prazo); chave nova `aprovador_devolucao` |
+| 11 | [`11-FASE-3f-compra-comercial.md`](11-FASE-3f-compra-comercial.md) | **Pacote da Fase 3f** — compra comercial na camada config-first (2 arquivos: gate no despachante + criação); chave `aprovador_compra_comercial` já existe. Brecha do concluir + R4 (duplicação conta a pagar) = Fase 4 |
 
 ## O plano (7 fases)
 
@@ -88,7 +89,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   Descoberta: `aprovador_devolucao_estoque` já existia em homolog (= Jonathan) — restaurado após o
   teste; `aprovador_devolucao` (nova) = Alisson em homolog. **Fase 3e FECHADA.** ⚠️ PRA PROD: criar
   `aprovador_devolucao` via `/dba` antes de deployar (`aprovador_devolucao_estoque` já existe).
-- [ ] Fase 3f — compra (comercial)
+- [ ] Fase 3f — compra comercial (pacote `11` pronto) — modelo metal/devolução, 2 arquivos (gate no despachante + criação); chave `aprovador_compra_comercial` já existe. Aguardando Sonnet plugar + Opus testar em homolog. (Brecha do `concluir` void user + R4 duplicação conta a pagar = Fase 4.)
 - [ ] Fase 3g — venda (por último — desconto/cartão/crédito/entrega/alteração)
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
