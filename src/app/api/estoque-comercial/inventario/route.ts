@@ -30,13 +30,31 @@ export async function GET(req: NextRequest) {
       i.created_at, i.categoria,
       uc.email AS criado_por_email,
       uf.email AS concluido_por_email,
-      (SELECT COUNT(*) FROM alissonerp.itens_inventario_comercial WHERE inventario_id = i.id) AS total_itens,
-      (SELECT COUNT(*) FROM alissonerp.itens_inventario_comercial WHERE inventario_id = i.id AND quantidade_contada IS NOT NULL) AS itens_contados,
-      (SELECT COUNT(*) FROM alissonerp.itens_inventario_comercial WHERE inventario_id = i.id AND diferenca != 0) AS itens_divergentes
+      -- Um único scan por inventário (LATERAL) calcula tudo — LINHA (SKU) e PEÇA.
+      -- PEÇA = unidades (o que a lista EXIBE, regra do Jonathan):
+      --   pecas_esperadas = SUM(quantidade_sistema); pecas_contadas = SUM(quantidade_contada);
+      --   pecas_divergentes = faltando + excesso em PEÇAS, SÓ de item CONTADO
+      --   (item sem contagem não é "divergência" — aparece no progresso; mesma
+      --    regra do detalhe, pra lista e detalhe usarem o mesmo conceito).
+      -- OBS: sem o filtro de "peça pronta" do detalhe (custo alto na lista);
+      -- mantém o comportamento pré-existente da lista (que já não filtrava).
+      agg.total_itens, agg.itens_contados, agg.itens_divergentes,
+      agg.pecas_esperadas, agg.pecas_contadas, agg.pecas_divergentes
     FROM alissonerp.inventarios_comercial i
     LEFT JOIN alissonerp.locais_estoque le ON le.id = i.local_estoque_id
     LEFT JOIN auth.users uc ON uc.id = i.created_by
     LEFT JOIN auth.users uf ON uf.id = i.concluido_por
+    LEFT JOIN LATERAL (
+      SELECT
+        COUNT(*)::int                                                   AS total_itens,
+        COUNT(*) FILTER (WHERE ii.quantidade_contada IS NOT NULL)::int  AS itens_contados,
+        COUNT(*) FILTER (WHERE ii.quantidade_contada IS NOT NULL AND ii.diferenca != 0)::int AS itens_divergentes,
+        COALESCE(SUM(ii.quantidade_sistema), 0)::int                    AS pecas_esperadas,
+        COALESCE(SUM(ii.quantidade_contada), 0)::int                    AS pecas_contadas,
+        COALESCE(SUM(ABS(ii.diferenca)) FILTER (WHERE ii.quantidade_contada IS NOT NULL), 0)::int AS pecas_divergentes
+      FROM alissonerp.itens_inventario_comercial ii
+      WHERE ii.inventario_id = i.id
+    ) agg ON true
     ORDER BY
       CASE i.status WHEN 'aberto' THEN 0 WHEN 'em_contagem' THEN 1 ELSE 2 END,
       i.created_at DESC

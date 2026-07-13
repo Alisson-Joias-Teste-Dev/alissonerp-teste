@@ -20,6 +20,10 @@ interface Inventario {
   total_itens: number;
   itens_contados: number;
   itens_divergentes: number;
+  // Contagem por PEÇA (unidades) — o que a lista exibe
+  pecas_esperadas: number;
+  pecas_contadas: number;
+  pecas_divergentes: number;
   criado_por_email: string | null;
   concluido_por_email: string | null;
 }
@@ -164,9 +168,21 @@ export default function InventarioPage() {
         <div className="space-y-3">
           {items.map(inv => {
             const st = STATUS_STYLE[inv.status] ?? STATUS_STYLE.aberto;
-            const progresso = inv.total_itens > 0
-              ? Math.round((Number(inv.itens_contados) / Number(inv.total_itens)) * 100)
+            // Tudo em PEÇAS (unidades), não em SKUs (regra do Jonathan)
+            const pecasEsperadas   = Number(inv.pecas_esperadas);
+            const pecasContadas    = Number(inv.pecas_contadas);
+            const pecasDivergentes = Number(inv.pecas_divergentes);
+            const progresso = pecasEsperadas > 0
+              ? Math.min(100, Math.round((pecasContadas / pecasEsperadas) * 100))
               : 0;
+            const emAndamento = inv.status !== "concluido" && inv.status !== "cancelado";
+            // Veredito da lista em PEÇAS: divergências pintam de vermelho;
+            // concluído sem divergência = "bateu certo".
+            const veredito = pecasDivergentes > 0
+              ? { texto: `${pecasDivergentes} peça${pecasDivergentes > 1 ? "s" : ""} divergente${pecasDivergentes > 1 ? "s" : ""}`, bg: "#FEE2E2", tx: "#991B1B" }
+              : inv.status === "concluido"
+                ? { texto: "Bateu certo", bg: "#D1FAE5", tx: "#065F46" }
+                : null;
             return (
               <div
                 key={inv.id}
@@ -174,43 +190,42 @@ export default function InventarioPage() {
                 style={{ border: "1px solid #E8DCC8", background: "#FAFAF7" }}
                 onClick={() => router.push(`/estoque-comercial/inventario/${inv.id}`)}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3">
-                    <ClipboardList size={18} style={{ color: "#184036" }} />
-                    <div>
-                      <span className="font-medium text-sm" style={{ color: "#184036" }}>
-                        Inventario #{inv.id}
-                      </span>
-                      <span className="text-xs text-gray-400 ml-2">{inv.local_nome}</span>
-                      {inv.categoria && (
-                        <span className="text-[10px] ml-1 px-1.5 py-0.5 rounded" style={{ background: "#F3EADA", color: "#7A5A4A" }}>
-                          {inv.categoria}
-                        </span>
-                      )}
-
-                    </div>
-                  </div>
-                  <span
-                    className="text-xs px-2 py-0.5 rounded-full font-medium"
-                    style={{ background: st.bg, color: st.text }}
-                  >
-                    {st.label}
-                  </span>
-                </div>
-                <div className="flex items-center gap-4 text-xs text-gray-500">
-                  <span>Itens: {inv.itens_contados}/{inv.total_itens}</span>
-                  {Number(inv.itens_divergentes) > 0 && (
-                    <span style={{ color: "#DC2626" }}>
-                      {inv.itens_divergentes} divergencia(s)
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  {/* Ponto de status à esquerda + identificação do inventário */}
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: st.text }} />
+                    <span className="font-medium text-sm shrink-0" style={{ color: "#184036" }}>
+                      Inventário #{inv.id}
                     </span>
-                  )}
+                    <span className="text-xs text-gray-400 truncate">{inv.local_nome}</span>
+                    {inv.categoria && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0" style={{ background: "#F3EADA", color: "#7A5A4A" }}>
+                        {inv.categoria}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {veredito && (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                        style={{ background: veredito.bg, color: veredito.tx }}>
+                        {veredito.texto}
+                      </span>
+                    )}
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                      style={{ background: st.bg, color: st.text }}>
+                      {st.label}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
+                  <span><b style={{ color: "#184036" }}>{pecasContadas}/{pecasEsperadas}</b> peças contadas</span>
                   <span>{fmtDate(inv.data_abertura)}</span>
-                  {inv.status !== "concluido" && inv.status !== "cancelado" && (
+                  {emAndamento && (
                     <span style={{ color: "#2563EB" }}>{progresso}% contado</span>
                   )}
                 </div>
-                {inv.status !== "concluido" && inv.status !== "cancelado" && inv.total_itens > 0 && (
-                  <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                {emAndamento && pecasEsperadas > 0 && (
+                  <div className="mt-2 h-1.5 rounded-full overflow-hidden" style={{ background: "#EDE7DA" }}>
                     <div
                       className="h-full rounded-full transition-all"
                       style={{ width: `${progresso}%`, background: "#184036" }}
