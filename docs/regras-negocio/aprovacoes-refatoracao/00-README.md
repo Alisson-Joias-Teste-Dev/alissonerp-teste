@@ -31,6 +31,8 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 | 09 | [`09-FASE-3d-limpeza.md`](09-FASE-3d-limpeza.md) | **Pacote da Fase 3d** — limpeza de ouro: já é config-first, só trocar a validação manual pela camada (1 arquivo, ~6 linhas); ganha multi-aprovador |
 | 10 | [`10-FASE-3e-devolucao.md`](10-FASE-3e-devolucao.md) | **Pacote da Fase 3e** — devolução (2 etapas: devolução + estoque) na camada config-first; **1 aprovador** (decisão do Jonathan, sem distinção de prazo); chave nova `aprovador_devolucao` |
 | 11 | [`11-FASE-3f-compra-comercial.md`](11-FASE-3f-compra-comercial.md) | **Pacote da Fase 3f** — compra comercial na camada config-first (2 arquivos: gate no despachante + criação); chave `aprovador_compra_comercial` já existe. Brecha do concluir + R4 (duplicação conta a pagar) = Fase 4 |
+| 12 | [`12-FASE-3g-venda-plano.md`](12-FASE-3g-venda-plano.md) | **PLANO da Fase 3g (venda)** — mapa dos 6 eventos + fatiamento em 3 sub-fases + decisões (crédito = 2; desconto só porta oficial) + fronteira 3g/4/5 |
+| 13 | [`13-FASE-3g1-entrega-alteracao.md`](13-FASE-3g1-entrega-alteracao.md) | **Pacote da Fase 3g.1** — entrega sem pagamento (só o gate) + alteração de venda (troca cargo por config; chave nova `aprovador_alteracao_venda`) |
 
 ## O plano (7 fases)
 
@@ -98,7 +100,10 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   restaurei o valor original (Jonathan). Prova de que a autoridade é 100% a config. **Fase 3f
   FECHADA.** `aprovador_compra_comercial` já existe (não precisa criar em prod). (Brecha do
   `concluir` void user + R4 duplicação conta a pagar = Fase 4.)
-- [ ] Fase 3g — venda (por último — desconto/cartão/crédito/entrega/alteração)
+- [ ] Fase 3g — **venda** (a mais crítica, por último) — mapeada e fatiada em 3 sub-fases (plano `12`). Decisões do Jonathan (12/07): crédito mantém 2 aprovadores (gerente/diretor); desconto migra só a porta oficial (atalhos/comissão = Fase 4).
+  - [ ] 3g.1 — entrega sem pagamento + alteração de venda (pacote `13` pronto; chave nova `aprovador_alteracao_venda`). Aguardando Sonnet plugar + Opus testar.
+  - [ ] 3g.2 — crédito (gerente + diretor)
+  - [ ] 3g.3 — desconto + cartão (porta oficial)
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
