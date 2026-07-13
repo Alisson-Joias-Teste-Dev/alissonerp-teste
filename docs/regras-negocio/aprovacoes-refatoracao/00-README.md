@@ -76,7 +76,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   Jonathan 403, Alisson passa o gate (404 da alteração-fake); sem a chave → `nao_configurado`
   (solicitar markup daria 409). **Fase 3c FECHADA.** ⚠️ **PRA PROD**: criar `aprovador_precificacao`
   (via `/dba`, assinada) antes de deployar. (Já existe em homolog.)
-- [~] Fase 3d — limpeza — **código plugado (pelo Opus) e revisado** (commit `c951cc7f`; tsc 0, 122 testes, 1 arquivo `limpeza-ouro-aprovacao.ts`, contrato idêntico — 2 erros 409/403 preservados; ganha multi-aprovador). **Teste end-to-end em HOMOLOG PENDENTE** — homolog fora do ar (timeout em `cloud.alisson.api.br:5435`, 12/07); testar quando voltar. Confiança alta: usa a MESMA `resolverAprovadores('limpeza_ouro')` já provada end-to-end nos outros 3 fluxos, e `aprovador_limpeza` já existe.
+- [x] Fase 3d — limpeza — **código plugado (pelo Opus) e revisado** (commit `c951cc7f`; tsc 0, 122 testes, 1 arquivo `limpeza-ouro-aprovacao.ts`, contrato idêntico — 2 erros 409/403 preservados; ganha multi-aprovador). **TESTADO end-to-end em HOMOLOG** (12/07, após o homolog voltar): `aprovador_limpeza` = Alisson; miolo — Alisson pode / Jonathan (dev) não; `POST /api/purificacao/limpeza/aprovacao` → Jonathan 403 (msg "Apenas o aprovador configurado..." preservada), Alisson passa o gate (404 da baixa-fake). **Fase 3d FECHADA.** `aprovador_limpeza` já existe (não precisa criar em prod).
 - [ ] Fase 3e — devolução
 - [ ] Fase 3f — compra (comercial)
 - [ ] Fase 3g — venda (por último — desconto/cartão/crédito/entrega/alteração)
