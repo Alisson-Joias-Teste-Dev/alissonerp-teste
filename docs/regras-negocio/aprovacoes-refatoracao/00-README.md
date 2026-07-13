@@ -79,9 +79,15 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   (via `/dba`, assinada) antes de deployar. (Já existe em homolog.)
 - [x] Fase 3d — limpeza — **código plugado (pelo Opus) e revisado** (commit `c951cc7f`; tsc 0, 122 testes, 1 arquivo `limpeza-ouro-aprovacao.ts`, contrato idêntico — 2 erros 409/403 preservados; ganha multi-aprovador). **TESTADO end-to-end em HOMOLOG** (12/07, após o homolog voltar): `aprovador_limpeza` = Alisson; miolo — Alisson pode / Jonathan (dev) não; `POST /api/purificacao/limpeza/aprovacao` → Jonathan 403 (msg "Apenas o aprovador configurado..." preservada), Alisson passa o gate (404 da baixa-fake). **Fase 3d FECHADA.** `aprovador_limpeza` já existe (não precisa criar em prod).
 - [x] Fase 3e — **devolução** (2 etapas: devolução + estoque) plugada na camada config-first
-  (12/07/2026, pacote `10`, commit `2602ceab`) — código pronto, **aguardando o Opus criar a
-  chave `aprovador_devolucao` em homolog + testar end-to-end (back+front) antes de qualquer
-  coisa ir adiante. NÃO testado em homolog ainda, NÃO vai a produção.**
+  (12/07/2026, pacote `10`, commit `2602ceab`) — **código revisado e APROVADO pelo Opus** (tsc 0,
+  121 testes; 14 arquivos; `foraPrazo` totalmente removido da camada; 2 gates `podeDecidir` no
+  despachante; criação por `resolverAprovadores` sem fallback; `HttpError` propaga o 409 "não
+  configurado" pros endpoints, checado antes do catch-all — contrato idêntico; tela de devolução e
+  `prazo-devolucao.ts` intocados). **TESTADO em HOMOLOG** (13/07): chaves criadas; miolo das 2
+  etapas — Alisson (configurado) pode / Jonathan (dev) não; sem config → `nao_configurado` (409).
+  Descoberta: `aprovador_devolucao_estoque` já existia em homolog (= Jonathan) — restaurado após o
+  teste; `aprovador_devolucao` (nova) = Alisson em homolog. **Fase 3e FECHADA.** ⚠️ PRA PROD: criar
+  `aprovador_devolucao` via `/dba` antes de deployar (`aprovador_devolucao_estoque` já existe).
 - [ ] Fase 3f — compra (comercial)
 - [ ] Fase 3g — venda (por último — desconto/cartão/crédito/entrega/alteração)
 - [ ] Fase 4 — brechas/atalhos
