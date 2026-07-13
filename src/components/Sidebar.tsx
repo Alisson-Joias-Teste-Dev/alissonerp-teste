@@ -52,6 +52,8 @@ import {
   Banknote,
   Landmark,
   CreditCard,
+  GraduationCap,
+  HelpCircle,
 } from "lucide-react";
 import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import PerfilDrawer from "./PerfilDrawer";
@@ -107,6 +109,8 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; strokeWidth?
   Banknote,
   Landmark,
   CreditCard,
+  GraduationCap,
+  HelpCircle,
 };
 
 function isGroup(entry: MenuEntry): entry is MenuGroup {
@@ -176,8 +180,14 @@ export default function Sidebar() {
     : getMenuGroupsForRole(role);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const configEntry = allEntries.find(e => !isGroup(e) && (e as any).href === "/configuracoes") as (MenuEntry & { href: string; icon: string }) | undefined;
+  // Grupo Ajuda › Treinamentos — sempre visível pra qualquer usuário logado
+  // (a rota /treinamentos não é gateada por módulo no proxy).
+  const AJUDA_GROUP: MenuGroup = {
+    type: "group", label: "Ajuda", icon: "HelpCircle",
+    items: [{ label: "Treinamentos", href: "/treinamentos", icon: "GraduationCap" }],
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const entries     = allEntries.filter(e => isGroup(e) || (e as any).href !== "/configuracoes");
+  const entries     = [...allEntries.filter(e => isGroup(e) || (e as any).href !== "/configuracoes"), AJUDA_GROUP];
 
   // Item extra: Service (flag isOperadorService) — Painel Service é tratado pelo grupo Produção
   const serviceExtras: MenuItem[] = [];
