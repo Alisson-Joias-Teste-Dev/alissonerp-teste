@@ -90,10 +90,14 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   teste; `aprovador_devolucao` (nova) = Alisson em homolog. **Fase 3e FECHADA.** ⚠️ PRA PROD: criar
   `aprovador_devolucao` via `/dba` antes de deployar (`aprovador_devolucao_estoque` já existe).
 - [x] Fase 3f — **compra comercial** plugada na camada config-first (12/07/2026, pacote `11`,
-  commit `d5242037`) — só 2 arquivos (chave `aprovador_compra_comercial` já existia, sem
-  camada/front tocados). Código pronto, **aguardando o Opus testar end-to-end em homolog. NÃO
-  testado ainda, NÃO vai a produção.** (Brecha do `concluir` void user + R4 duplicação conta a
-  pagar continuam como estão — são Fase 4.)
+  commit `d5242037`) — **código revisado e APROVADO pelo Opus** (tsc 0, 121 testes; só 2 arquivos
+  — gate `podeDecidir` no despachante + criação por `resolverAprovadores`; camada/front/config-UI
+  intocados; 409 "Nenhum aprovador configurado para compra comercial" preservado; removida a
+  checagem de "ativo" que virou código morto). **TESTADO em HOMOLOG** (13/07): a chave já estava
+  configurada = Jonathan → miolo mostrou Jonathan pode / Alisson não; troquei p/ Alisson → inverteu;
+  restaurei o valor original (Jonathan). Prova de que a autoridade é 100% a config. **Fase 3f
+  FECHADA.** `aprovador_compra_comercial` já existe (não precisa criar em prod). (Brecha do
+  `concluir` void user + R4 duplicação conta a pagar = Fase 4.)
 - [ ] Fase 3g — venda (por último — desconto/cartão/crédito/entrega/alteração)
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
