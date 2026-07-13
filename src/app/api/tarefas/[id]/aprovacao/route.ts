@@ -578,6 +578,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // sobre a aprovacao normal — ambas as tarefas apontam pra mesma devolucao via
   // tarefa_id, entao desambiguamos pela tag. Ao aprovar, conclui e gera o vale.
   if (tags.includes("devolucao_estoque")) {
+    // REGRA DE NEGÓCIO: etapa 2 (estoque) decidida pela camada config-first
+    // (aprovador_devolucao_estoque) — não mais pela checagem genérica do topo do
+    // PATCH. Sem ctx.solicitanteId: devolução não exclui quem solicitou.
+    const decEstoque = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "devolucao_estoque");
+    if (!decEstoque.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const { processarAprovacaoEstoqueDevolucao } = await import("@/lib/devolucoes");
       const resultado = await processarAprovacaoEstoqueDevolucao(
@@ -593,6 +600,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     SELECT id FROM alissonerp.devolucoes_venda WHERE tarefa_id = ${Number(id)} LIMIT 1
   `;
   if (devLink || tags.includes("devolucao")) {
+    // REGRA DE NEGÓCIO: etapa 1 (devolução) decidida pela camada config-first
+    // (aprovador_devolucao) — 1 aprovador só, sem distinção de prazo (decisão do
+    // Jonathan, 12/07). Sem ctx.solicitanteId: devolução não exclui quem solicitou.
+    const decDevolucao = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "devolucao");
+    if (!decDevolucao.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const { processarAprovacaoDevolucao } = await import("@/lib/devolucoes");
       const resultado = await processarAprovacaoDevolucao(

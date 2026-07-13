@@ -43,6 +43,9 @@ const CHAVES = [
   "aprovador_conversao",
   // Fase 3c (centralização de aprovações, 12/07): aprova alteração de markup (preço).
   "aprovador_precificacao",
+  // Fase 3e (centralização de aprovações, 12/07): aprova a devolução (etapa 1) — 1
+  // aprovador só, decisão do Jonathan (não depende mais de dentro/fora do prazo).
+  "aprovador_devolucao",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -118,6 +121,22 @@ export async function GET() {
       WHERE ativo = true ORDER BY nome
     `;
 
+    // Fase 3e: elegíveis pra aprovar devolução (etapa 1) — mesmo conjunto de cargos
+    // do antigo fallback de src/lib/devolucoes.ts (gerente_loja→diretor→admin→dev),
+    // agora só como lista de escolha na tela (não mais fallback automático).
+    const aprovadoresDevolucao = await sql`
+      SELECT id, nome, role FROM alissonerp.usuarios
+      WHERE role IN ('gerente_loja', 'diretor', 'admin', 'desenvolvedor') AND ativo = true
+      ORDER BY
+        CASE role
+          WHEN 'gerente_loja' THEN 1
+          WHEN 'diretor' THEN 2
+          WHEN 'admin' THEN 3
+          ELSE 4
+        END,
+        nome
+    `;
+
     return NextResponse.json({
       aprovador_credito_diretor: configMap.get("aprovador_credito_diretor") ?? "",
       aprovador_desconto_padrao: configMap.get("aprovador_desconto_padrao") ?? "",
@@ -134,6 +153,7 @@ export async function GET() {
       aprovadores_devolver_peca: configMap.get("aprovadores_devolver_peca") ?? "",
       aprovador_conversao: configMap.get("aprovador_conversao") ?? "",
       aprovador_precificacao: configMap.get("aprovador_precificacao") ?? "",
+      aprovador_devolucao: configMap.get("aprovador_devolucao") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -147,6 +167,7 @@ export async function GET() {
         conversao_aprovadores: adminsDevs,
         // Precificação hoje é isFullAccess (admin/dev/diretor) — reusa diretores_admins.
         precificacao_aprovadores: diretoresAdmins,
+        devolucao_aprovadores: aprovadoresDevolucao,
       },
     });
   } catch {
@@ -234,6 +255,10 @@ export async function PUT(req: NextRequest) {
     // Fase 3c: aprovador de precificação (alteração de markup).
     if (body.aprovador_precificacao !== undefined) {
       updates.push({ chave: "aprovador_precificacao", valor: body.aprovador_precificacao });
+    }
+    // Fase 3e: aprovador da devolução (etapa 1) — 1 aprovador só, sem distinção de prazo.
+    if (body.aprovador_devolucao !== undefined) {
+      updates.push({ chave: "aprovador_devolucao", valor: body.aprovador_devolucao });
     }
 
     for (const u of updates) {

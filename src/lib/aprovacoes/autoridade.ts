@@ -59,15 +59,11 @@ export function avaliarDecisao(userId: string, aprovadores: string[]): Resultado
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * REGRA DE NEGÓCIO: 'devolucao' é o único evento cuja configKey muda com o
- * contexto — dentro do prazo usa 'aprovadora_credito_gerente'; fora do prazo
- * (>7 dias úteis da entrega) usa 'aprovador_devolucao_fora_prazo'. Replica
- * src/lib/devolucoes.ts:280-286 (solicitarAprovacaoDevolucao).
+ * Chaves efetivas do evento. Nenhum evento depende mais de contexto pra escolher a
+ * chave (Fase 3e removeu o caso de 'devolucao' por prazo — decisão do Jonathan: 1
+ * aprovador só, sem distinção dentro/fora dos 7 dias úteis).
  */
-function configKeysEfetivas(regra: RegraAutoridade, ctx?: ContextoAprovacao): string[] {
-  if (regra.evento === "devolucao") {
-    return ctx?.foraPrazo ? ["aprovador_devolucao_fora_prazo"] : ["aprovadora_credito_gerente"];
-  }
+function configKeysEfetivas(regra: RegraAutoridade, _ctx?: ContextoAprovacao): string[] {
   return regra.configKeys;
 }
 

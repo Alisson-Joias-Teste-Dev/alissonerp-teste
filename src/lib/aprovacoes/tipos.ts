@@ -49,8 +49,6 @@ export interface RegraAutoridade {
 export interface ContextoAprovacao {
   solicitanteId?: string;
   vendaId?: number;
-  /** devolucao: true troca a configKey de 'aprovadora_credito_gerente' para 'aprovador_devolucao_fora_prazo'. */
-  foraPrazo?: boolean;
   /** conferencia_consultora: consultora_id (=usuarios.vendedor_id) dono da conferência, pra validar "a própria". */
   consultoraVendedorId?: number;
   [k: string]: unknown;

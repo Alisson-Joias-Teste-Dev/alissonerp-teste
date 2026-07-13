@@ -31,6 +31,7 @@ interface UsuariosPorRole {
   todos_usuarios: Usuario[];
   conversao_aprovadores: Usuario[];
   precificacao_aprovadores: Usuario[];
+  devolucao_aprovadores: Usuario[];
 }
 
 interface ConfigItem {
@@ -114,18 +115,25 @@ const CONFIG_ITENS: ConfigItem[] = [
     icone: "📦",
   },
   {
-    chave: "aprovador_devolucao_fora_prazo",
-    titulo: "Devolução fora do prazo (7 dias úteis)",
-    descricao: "Aprova gerar vale-troca de devolução quando a venda passou de 7 dias úteis desde a entrega ao cliente",
-    usuariosKey: "todos_usuarios",
+    chave: "aprovador_devolucao",
+    titulo: "Devolução — etapa 1 (aprovação da compensação)",
+    descricao: "Aprova a devolução (crédito/vale) — mesmo aprovador dentro ou fora do prazo de 7 dias úteis",
+    usuariosKey: "devolucao_aprovadores",
     icone: "↩️",
   },
   {
     chave: "aprovador_devolucao_estoque",
-    titulo: "Devolução — aprovação do estoque",
+    titulo: "Devolução — etapa 2 (aprovação do estoque)",
     descricao: "Confere o estoque da devolução antes de gerar o vale-troca/reembolso (conclui a devolução ao aprovar)",
     usuariosKey: "todos_usuarios",
     icone: "📦",
+  },
+  {
+    chave: "aprovador_devolucao_fora_prazo",
+    titulo: "Devolução fora do prazo (legado — não usado mais)",
+    descricao: "Fase 3e (12/07): a devolução passou a ter 1 aprovador só (ver \"Devolução — etapa 1\" acima), independente do prazo. Esta chave não é mais lida por nenhum fluxo — mantida só por histórico.",
+    usuariosKey: "todos_usuarios",
+    icone: "🗄️",
   },
   {
     chave: "aprovador_vale_troca_excecao",

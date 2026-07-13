@@ -23,7 +23,8 @@ const SNAPSHOT_ESPERADO: Record<
   credito_gerente: { configKeys: ["aprovadora_credito_gerente"], configMulti: true },
   credito_diretor: { configKeys: ["aprovador_credito_diretor"], configMulti: true },
   entrega_sem_pagamento: { configKeys: ["aprovador_entrega_sem_pagamento"], configMulti: true },
-  devolucao: { configKeys: ["aprovadora_credito_gerente", "aprovador_devolucao_fora_prazo"], configMulti: true },
+  // Fase 3e (12/07): 1 aprovador só — não depende mais de dentro/fora do prazo.
+  devolucao: { configKeys: ["aprovador_devolucao"], configMulti: true },
   devolucao_estoque: { configKeys: ["aprovador_devolucao_estoque"], configMulti: true },
   compra_comercial: { configKeys: ["aprovador_compra_comercial"], configMulti: true },
   compra_metal: { configKeys: ["metal_aprovador_id"], configMulti: true },

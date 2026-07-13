@@ -96,17 +96,14 @@ describe("conferencia_consultora — exceção única da política (auto-aprova�
   });
 });
 
-describe("devolucao — a configKey efetiva depende de ctx.foraPrazo", () => {
-  it("catálogo lista as 2 chaves, dentro-do-prazo ('aprovadora_credito_gerente') primeiro", () => {
-    expect(CATALOGO.devolucao.configKeys[0]).toBe("aprovadora_credito_gerente");
+describe("devolucao — Fase 3e: 1 aprovador só (aprovador_devolucao), sem distinção de prazo", () => {
+  it("catálogo tem 1 chave só", () => {
+    expect(CATALOGO.devolucao.configKeys).toEqual(["aprovador_devolucao"]);
   });
-  it("2ª chave é a de fora do prazo ('aprovador_devolucao_fora_prazo')", () => {
-    expect(CATALOGO.devolucao.configKeys[1]).toBe("aprovador_devolucao_fora_prazo");
-  });
-  // A seleção em si (qual chave é lida, dado ctx.foraPrazo) acontece em `configKeysEfetivas`,
-  // função interna (I/O) de resolverAprovadores() — não exportada, não pura. É replicação
-  // fiel de src/lib/devolucoes.ts:280-286 (documentado no catálogo). Exercida na Fase 3,
-  // via integração contra homolog (dois cenários: dentro e fora do prazo).
+  // O cálculo de prazo (avaliarPrazoDevolucao) continua existindo em
+  // src/lib/devolucoes.ts — só pro aviso "⚠️ FORA DO PRAZO" e a retenção. A ESCOLHA DE
+  // QUEM APROVA não depende mais dele (decisão do Jonathan, 12/07). Exercido na Fase 3e
+  // via integração contra homolog.
 });
 
 describe("limpeza_ouro — a regra rígida de sempre virou a regra geral (sem override, só o UUID)", () => {

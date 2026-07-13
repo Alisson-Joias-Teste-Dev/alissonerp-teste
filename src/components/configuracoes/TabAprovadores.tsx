@@ -21,6 +21,7 @@ interface AprovadorConfig {
   aprovadores_devolver_peca?: string; // MULTI: UUIDs separados por vírgula
   aprovador_conversao?: string; // Fase 3b: conversão de estoque + SKU (mesmo aprovador)
   aprovador_precificacao?: string; // Fase 3c: alteração de markup
+  aprovador_devolucao?: string; // Fase 3e: devolução etapa 1 (1 aprovador, sem distinção de prazo)
 }
 
 interface Usuario {
@@ -39,6 +40,7 @@ interface UsuariosPorRole {
   todos_usuarios: Usuario[];
   conversao_aprovadores: Usuario[];
   precificacao_aprovadores: Usuario[];
+  devolucao_aprovadores: Usuario[];
 }
 
 const P = {
@@ -69,6 +71,7 @@ export default function TabAprovadores() {
     aprovadores_devolver_peca: "",
     aprovador_conversao: "",
     aprovador_precificacao: "",
+    aprovador_devolucao: "",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
     gerentes: [],
@@ -80,6 +83,7 @@ export default function TabAprovadores() {
     todos_usuarios: [],
     conversao_aprovadores: [],
     precificacao_aprovadores: [],
+    devolucao_aprovadores: [],
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -104,8 +108,9 @@ export default function TabAprovadores() {
           aprovadores_devolver_peca: d.aprovadores_devolver_peca ?? "",
           aprovador_conversao: d.aprovador_conversao ?? "",
           aprovador_precificacao: d.aprovador_precificacao ?? "",
+          aprovador_devolucao: d.aprovador_devolucao ?? "",
         });
-        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [], conversao_aprovadores: [], precificacao_aprovadores: [] });
+        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [], conversao_aprovadores: [], precificacao_aprovadores: [], devolucao_aprovadores: [] });
       })
       .finally(() => setLoading(false));
   }, []);
@@ -136,7 +141,7 @@ export default function TabAprovadores() {
   function getUserName(chave: string): string {
     const id = (config as any)[chave];
     if (!id) return "";
-    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores, ...usuarios.aprovadores_limpeza, ...usuarios.aprovadores_entrega_sem_pagamento, ...usuarios.todos_usuarios, ...usuarios.conversao_aprovadores, ...usuarios.precificacao_aprovadores];
+    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores, ...usuarios.aprovadores_limpeza, ...usuarios.aprovadores_entrega_sem_pagamento, ...usuarios.todos_usuarios, ...usuarios.conversao_aprovadores, ...usuarios.precificacao_aprovadores, ...usuarios.devolucao_aprovadores];
     const u = all.find((x) => x.id === id);
     return u?.nome ?? "";
   }

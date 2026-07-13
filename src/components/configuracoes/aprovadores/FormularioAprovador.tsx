@@ -36,6 +36,7 @@ interface UsuariosPorRole {
   todos_usuarios: Usuario[];
   conversao_aprovadores: Usuario[];
   precificacao_aprovadores: Usuario[];
+  devolucao_aprovadores: Usuario[];
 }
 
 interface FormularioAprovadorProps {

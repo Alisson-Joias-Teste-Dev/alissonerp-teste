@@ -85,13 +85,15 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
   devolucao: {
     evento: "devolucao",
     rotulo: "Devolução — aprovação da compensação (crédito/vale)",
-    configKeys: ["aprovadora_credito_gerente", "aprovador_devolucao_fora_prazo"],
+    configKeys: ["aprovador_devolucao"],
     configMulti: true,
     camposLock: ["devolucoes_venda.status", "devolucoes_venda.tarefa_id"],
     observacao:
-      "Chave depende de ctx.foraPrazo: dentro do prazo usa 'aprovadora_credito_gerente'; " +
-      "fora do prazo (>7 dias úteis da entrega) usa 'aprovador_devolucao_fora_prazo' — replica " +
-      "src/lib/devolucoes.ts:280-286 (solicitarAprovacaoDevolucao).",
+      "Fase 3e (12/07) — decisão do Jonathan: 1 aprovador só, a autoridade NÃO depende mais de " +
+      "dentro/fora dos 7 dias úteis (substitui o par 'aprovadora_credito_gerente'/" +
+      "'aprovador_devolucao_fora_prazo' que a devolução usava por prazo). O cálculo do prazo " +
+      "(avaliarPrazoDevolucao) continua existindo só pro aviso '⚠️ FORA DO PRAZO' na descrição da " +
+      "tarefa e pra retenção — não influencia mais quem aprova.",
   },
   devolucao_estoque: {
     evento: "devolucao_estoque",

@@ -92,9 +92,9 @@ describe("avaliarDecisao", () => {
   });
 });
 
-describe("devolucao — configKeys dependem do prazo (ctx.foraPrazo)", () => {
-  it("catálogo mantém as 2 chaves, dentro-do-prazo primeiro", () => {
-    expect(CATALOGO.devolucao.configKeys).toEqual(["aprovadora_credito_gerente", "aprovador_devolucao_fora_prazo"]);
+describe("devolucao — Fase 3e: 1 aprovador só, sem distinção de prazo", () => {
+  it("catálogo tem 1 chave só (aprovador_devolucao) — prazo não influencia mais quem aprova", () => {
+    expect(CATALOGO.devolucao.configKeys).toEqual(["aprovador_devolucao"]);
   });
 });
 
