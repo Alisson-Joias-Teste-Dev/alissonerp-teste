@@ -61,15 +61,41 @@ export default function InventarioPage() {
   const [novoObs,     setNovoObs]    = useState("");
   const [criando,     setCriando]    = useState(false);
   const [err,          setErr]       = useState("");
+  // Paginação (10 por página, server-side) + filtros de período e situação
+  const [total,   setTotal]   = useState(0);
+  const [pagina,  setPagina]  = useState(1);
+  const [periodo, setPeriodo] = useState<"todos" | "hoje" | "ontem" | "mes" | "custom">("todos");
+  const [customDe,  setCustomDe]  = useState("");
+  const [customAte, setCustomAte] = useState("");
+  const [situacao,  setSituacao]  = useState<"aberto" | "concluido" | "cancelado" | null>(null);
+  const POR_PAGINA = 10;
+  const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));
 
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/estoque-comercial/inventario");
-      if (r.ok) setItems(await r.json());
+      const params = new URLSearchParams();
+      params.set("pagina", String(pagina));
+      if (situacao) params.set("situacao", situacao);
+      // Intervalo de datas (data de abertura) conforme o período escolhido
+      const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const hoje = new Date();
+      let de = "", ate = "";
+      if (periodo === "hoje") { de = ate = fmt(hoje); }
+      else if (periodo === "ontem") { const o = new Date(hoje); o.setDate(o.getDate() - 1); de = ate = fmt(o); }
+      else if (periodo === "mes") { de = fmt(new Date(hoje.getFullYear(), hoje.getMonth(), 1)); ate = fmt(hoje); }
+      else if (periodo === "custom" && customDe && customAte) { de = customDe; ate = customAte; }
+      if (de && ate) { params.set("de", de); params.set("ate", ate); }
+
+      const r = await fetch(`/api/estoque-comercial/inventario?${params.toString()}`);
+      if (r.ok) {
+        const d = await r.json() as { items: Inventario[]; total: number };
+        setItems(d.items ?? []);
+        setTotal(d.total ?? 0);
+      }
     } finally { setLoading(false); }
-  }, []);
+  }, [pagina, situacao, periodo, customDe, customAte]);
 
   const fetchLocais = useCallback(async () => {
     try {
@@ -155,6 +181,43 @@ export default function InventarioPage() {
         </div>
       </div>
 
+      {/* Filtro de PERÍODO (pela data de abertura) — muda o filtro volta pra pág. 1 */}
+      <div className="mb-2 flex gap-1.5 flex-wrap items-center">
+        <span className="text-xs font-semibold shrink-0 w-16" style={{ color: "#7A5A4A" }}>Período</span>
+        {([["todos", "Todos"], ["hoje", "Hoje"], ["ontem", "Ontem"], ["mes", "Este mês"], ["custom", "Personalizado"]] as const).map(([v, label]) => (
+          <button key={v} onClick={() => { setPeriodo(v); setPagina(1); }}
+            className="text-xs px-2.5 py-1 rounded-full font-medium"
+            style={periodo === v
+              ? { background: "#184036", color: "#fff" }
+              : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {periodo === "custom" && (
+        <div className="mb-2 flex gap-2 items-center flex-wrap" style={{ marginLeft: "4.5rem" }}>
+          <span className="text-xs text-gray-400">de</span>
+          <input type="date" value={customDe} onChange={e => { setCustomDe(e.target.value); setPagina(1); }}
+            className="text-xs border rounded-lg px-2 py-1 outline-none" style={{ borderColor: "#E8DCC8" }} />
+          <span className="text-xs text-gray-400">até</span>
+          <input type="date" value={customAte} onChange={e => { setCustomAte(e.target.value); setPagina(1); }}
+            className="text-xs border rounded-lg px-2 py-1 outline-none" style={{ borderColor: "#E8DCC8" }} />
+        </div>
+      )}
+      {/* Filtro de SITUAÇÃO (Aberto inclui "Em contagem") */}
+      <div className="mb-5 flex gap-1.5 flex-wrap items-center">
+        <span className="text-xs font-semibold shrink-0 w-16" style={{ color: "#7A5A4A" }}>Situação</span>
+        {([[null, "Todas"], ["aberto", "Aberto"], ["concluido", "Concluído"], ["cancelado", "Cancelado"]] as const).map(([v, label]) => (
+          <button key={label} onClick={() => { setSituacao(v); setPagina(1); }}
+            className="text-xs px-2.5 py-1 rounded-full font-medium"
+            style={situacao === v
+              ? { background: "#184036", color: "#fff" }
+              : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 size={24} className="animate-spin" style={{ color: "#184036" }} />
@@ -162,7 +225,7 @@ export default function InventarioPage() {
       ) : items.length === 0 ? (
         <div className="text-center py-16">
           <ClipboardList size={32} className="mx-auto mb-3 text-gray-300" />
-          <p className="text-gray-500 text-sm">Nenhum inventario realizado.</p>
+          <p className="text-gray-500 text-sm">Nenhum inventário encontrado.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -235,6 +298,30 @@ export default function InventarioPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Paginação — 10 por página, mais recentes primeiro */}
+      {total > 0 && (
+        <div className="flex items-center justify-between mt-4 pt-3" style={{ borderTop: "1px solid #E8DCC8" }}>
+          <span className="text-xs text-gray-400">
+            {POR_PAGINA} por página · {total} inventário{total !== 1 ? "s" : ""}
+          </span>
+          <div className="flex items-center gap-2">
+            <button disabled={pagina <= 1} onClick={() => setPagina(p => Math.max(1, p - 1))}
+              className="text-sm px-3 py-1.5 rounded-lg disabled:opacity-40"
+              style={{ border: "1px solid #E8DCC8", color: "#184036" }}>
+              ‹ Anterior
+            </button>
+            <span className="text-sm font-semibold" style={{ color: "#184036" }}>
+              página {pagina} de {totalPaginas}
+            </span>
+            <button disabled={pagina >= totalPaginas} onClick={() => setPagina(p => p + 1)}
+              className="text-sm px-3 py-1.5 rounded-lg disabled:opacity-40"
+              style={{ border: "1px solid #E8DCC8", color: "#184036" }}>
+              Próximo ›
+            </button>
+          </div>
         </div>
       )}
 
