@@ -78,12 +78,73 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   (solicitar markup daria 409). **Fase 3c FECHADA.** ⚠️ **PRA PROD**: criar `aprovador_precificacao`
   (via `/dba`, assinada) antes de deployar. (Já existe em homolog.)
 - [x] Fase 3d — limpeza — **código plugado (pelo Opus) e revisado** (commit `c951cc7f`; tsc 0, 122 testes, 1 arquivo `limpeza-ouro-aprovacao.ts`, contrato idêntico — 2 erros 409/403 preservados; ganha multi-aprovador). **TESTADO end-to-end em HOMOLOG** (12/07, após o homolog voltar): `aprovador_limpeza` = Alisson; miolo — Alisson pode / Jonathan (dev) não; `POST /api/purificacao/limpeza/aprovacao` → Jonathan 403 (msg "Apenas o aprovador configurado..." preservada), Alisson passa o gate (404 da baixa-fake). **Fase 3d FECHADA.** `aprovador_limpeza` já existe (não precisa criar em prod).
-- [ ] Fase 3e — devolução (pacote `10` pronto) — 2 etapas (devolução + estoque); **DECISÃO Jonathan 12/07: 1 aprovador só** (autorização não depende mais do prazo de 7 dias úteis — o prazo continua só pro aviso/retenção). Chave nova `aprovador_devolucao` + `aprovador_devolucao_estoque` (já existe). Aguardando Sonnet plugar + Opus criar a chave em homolog e testar.
+- [x] Fase 3e — **devolução** (2 etapas: devolução + estoque) plugada na camada config-first
+  (12/07/2026, pacote `10`, commit `2602ceab`) — código pronto, **aguardando o Opus criar a
+  chave `aprovador_devolucao` em homolog + testar end-to-end (back+front) antes de qualquer
+  coisa ir adiante. NÃO testado em homolog ainda, NÃO vai a produção.**
 - [ ] Fase 3f — compra (comercial)
 - [ ] Fase 3g — venda (por último — desconto/cartão/crédito/entrega/alteração)
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
+
+### Fase 3e (devolução) — nota pro Opus revisar e testar em homolog
+
+- 14 arquivos tocados, escopo fechado (camada + `devolucoes.ts` + despachante (2 gates) + config
+  route + config UI + 2 rotas de devolução que precisaram do `HttpError` — ver abaixo). **Sem**
+  tocar a tela de devolução (`DevolucaoDetalheClient`) nem o cálculo de prazo
+  (`prazo-devolucao.ts`, `dias-uteis.ts`), como pedido.
+  - **Camada**: `catalogo.ts` — evento `devolucao` passou de 2 chaves (`aprovadora_credito_gerente`
+    dentro do prazo / `aprovador_devolucao_fora_prazo` fora do prazo) pra **1 chave só**
+    (`aprovador_devolucao`), decisão do Jonathan (12/07). `autoridade.ts` —
+    `configKeysEfetivas` não tem mais o `if (evento === "devolucao")`, virou `return
+    regra.configKeys` puro. `tipos.ts` — removi o campo `ContextoAprovacao.foraPrazo` (grep
+    confirmou zero uso fora dali). Testes das 2 chaves/prazo trocados por testes da chave única
+    (121 testes, era 122 — um teste a menos porque "2 chaves de prazo" virou "1 chave").
+  - **Despachante**: os 2 blocos (`devolucao_estoque` e `devolucao`, nessa ordem — a etapa 2
+    sobrescreve `tarefa_id` da mesma tarefa, desambiguado por tag) ganharam o gate `podeDecidir`
+    logo no início, espelhando o padrão do `recebimento_metal`. A checagem genérica do topo do
+    PATCH ficou intocada.
+  - **Criação** (`devolucoes.ts`): as duas funções (`solicitarAprovacaoDevolucao` e
+    `solicitarAprovacaoEstoqueDevolucao`) perderam o fallback por cargo e passaram a usar
+    `resolverAprovadores`. **O cálculo de prazo (`avaliarPrazoDevolucao`) continua chamado** —
+    só não decide mais quem aprova, só alimenta o aviso "⚠️ FORA DO PRAZO" na descrição da
+    tarefa.
+  - **Achado que exigiu mexer em 2 rotas a mais do que a lista mínima**: `solicitar-aprovacao/
+    route.ts` usa `internalError(...)`, que **sempre** devolve uma mensagem genérica fixa
+    (nunca expõe `err.message`) — se eu só tivesse dado `throw new Error("não configurado")`, a
+    mensagem específica NUNCA chegaria ao front (o pacote pedia explicitamente "pra o 409 chegar
+    ao front com a mensagem certa"). Resolvido reusando um padrão que já existe em outras partes
+    do projeto (`class HttpError extends Error { status; }`, ex.:
+    `src/app/api/rfid/cadastrar/route.ts`) — agora exportado de `devolucoes.ts` — e um `if (err
+    instanceof HttpError)` **antes** do catch genérico nos 2 endpoints
+    (`solicitar-aprovacao/route.ts`, `concluir/route.ts`). Isso NÃO muda nenhuma mensagem/status
+    que já existia — só dá um caminho novo pro erro novo (409, mensagem clara). Confirmei que
+    `concluir/route.ts` já tinha um padrão parecido (expõe `err.message` pra erros de domínio) —
+    segui a mesma linha, só adicionando o `instanceof HttpError` antes.
+  - **Config**: `aprovador_devolucao` exposta em `configuracoes/aprovadores/route.ts` (GET+PUT) e
+    no front, seguindo o padrão da Fase 3b. Lista de elegíveis é uma query nova
+    (`aprovadoresDevolucao`, gerente_loja→diretor→admin→desenvolvedor) — é exatamente o conjunto
+    de cargos que o fallback antigo usava, então não inventei critério novo, só virou lista de
+    escolha em vez de fallback automático. **Decisão de UX que tomei sem perguntar antes**: a
+    chave `aprovador_devolucao_fora_prazo` continua no array `CHAVES` (o pacote pediu pra manter,
+    não remover), mas como ela ficou **completamente sem uso** depois desta fase, deixei o card
+    dela na tela com título "(legado — não usado mais)" e descrição explicando o porquê — pra não
+    confundir você pensando que ainda configura alguma coisa. Se preferir, dá pra tirar o card de
+    vez (fica só a chave "morta" no banco, sem UI).
+- `npx tsc --noEmit` zero erros. `npx vitest run src/lib/aprovacoes` **121/121 passando**.
+- **Não mexi no banco** — `aprovador_devolucao` ainda não existe em `configuracoes_sistema`; isso
+  é do Opus em homolog e depois `/dba` em produção. `aprovador_devolucao_estoque` já existe (não
+  precisa criar).
+
+**Cenários pra validar em homolog** (pacote `10`): etapa 1 — X (configurado) aprova/rejeita a
+devolução, Y (≠X, mesmo admin/dev) leva 403; etapa 2 — idem com `aprovador_devolucao_estoque`;
+sem `aprovador_devolucao` → solicitar aprovação da devolução → erro "não configurado" (409, com a
+mensagem específica chegando ao front — vale conferir isso especificamente, é o ponto mais frágil
+desta fase).
+
+**Não subi pra homolog nem testei back/front** — commit pronto, a criação da chave + validação
+(SQL + tela, com o Jonathan) é do Opus antes de avançar pra Fase 3f (compra comercial).
 
 ### Fase 3c (precificação) — nota pro Opus revisar e testar em homolog
 
