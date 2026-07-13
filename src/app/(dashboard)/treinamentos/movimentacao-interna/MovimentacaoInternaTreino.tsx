@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Play, Pause, Search, Camera, CheckCircle2, Truck, HandHeart,
-  Undo2, UserCheck, X, Info,
+  Undo2, UserCheck, X, Info, Upload, Loader2,
 } from "lucide-react";
 
 const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8", cremeBg: "#FAFAF7" };
@@ -229,7 +230,64 @@ const PASSOS = [
   { n: "4", titulo: "Finalizar", quem: "Consultora / Estoque", oque: "Cliente levou (encerra) ou Devolver ao estoque (o estoque confirma com foto).", porque: "Sem finalizar, a peça fica “em aberto” pra sempre. A devolução em 2 passos garante que o estoque confirmou o retorno — não basta dizer que devolveu." },
 ];
 
-export default function MovimentacaoInternaTreino() {
+// ─── Vídeo do treinamento (upload só pra desenvolvedor) ───────────────────────
+function VideoTreinamento({ videoUrl, isDev, treinamentoKey }: { videoUrl: string | null; isDev: boolean; treinamentoKey: string }) {
+  const router = useRouter();
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState("");
+
+  if (!videoUrl && !isDev) return null;
+
+  async function enviar(file: File) {
+    setErro("");
+    if (file.size > 37 * 1024 * 1024) { setErro("Vídeo muito grande (máx ~37MB)."); return; }
+    setEnviando(true);
+    try {
+      const base64 = await new Promise<string>((res, rej) => {
+        const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(file);
+      });
+      const resp = await fetch("/api/treinamentos/video", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ treinamento_key: treinamentoKey, base64, mime: file.type || "video/mp4" }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.error ?? `Erro ${resp.status}`);
+      router.refresh();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao enviar vídeo");
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  return (
+    <div className="mb-6">
+      {videoUrl ? (
+        <video controls preload="metadata" className="w-full rounded-2xl border" style={{ borderColor: C.cremeBorder, background: "#000", maxHeight: 420 }} src={videoUrl} />
+      ) : (
+        <div className="rounded-2xl border border-dashed p-6 text-center" style={{ borderColor: C.cremeBorder, background: C.cremeBg }}>
+          <p className="text-sm" style={{ color: "#6B7280" }}>Nenhum vídeo anexado a este treinamento ainda.</p>
+        </div>
+      )}
+      {isDev && (
+        <div className="mt-2 flex items-center gap-3 flex-wrap">
+          <label className="inline-flex items-center gap-2 text-[13px] font-semibold px-3 py-2 rounded-lg cursor-pointer" style={{ background: "#18403612", color: C.esmeralda }}>
+            {enviando ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+            {enviando ? "Enviando…" : videoUrl ? "Trocar vídeo" : "Anexar vídeo"}
+            <input type="file" accept="video/*" className="hidden" disabled={enviando}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) enviar(f); }} />
+          </label>
+          <span className="text-[12px]" style={{ color: "#9CA3AF" }}>Só o desenvolvedor vê este botão · máx ~37MB</span>
+          {erro && <span className="text-[12px]" style={{ color: "#DC2626" }}>{erro}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface TreinoProps { videoUrl: string | null; isDev: boolean; treinamentoKey: string }
+
+export default function MovimentacaoInternaTreino({ videoUrl, isDev, treinamentoKey }: TreinoProps) {
   return (
     <div className="px-3 md:px-6 py-4 md:py-8 max-w-3xl">
       <Link href="/treinamentos" className="inline-flex items-center gap-1.5 text-sm mb-4" style={{ color: C.esmeralda }}>
@@ -247,6 +305,8 @@ export default function MovimentacaoInternaTreino() {
         <Info size={16} className="mt-0.5 shrink-0" style={{ color: C.esmeralda }} />
         <p className="text-[13px]" style={{ color: "#4B5563" }}><b style={{ color: "#111827" }}>Regra de ouro:</b> foto em toda troca de mão (entrega, recebimento, devolução). Nada é apagado — tudo grava quem fez, a data e a hora.</p>
       </div>
+
+      <VideoTreinamento videoUrl={videoUrl} isDev={isDev} treinamentoKey={treinamentoKey} />
 
       <SimuladorAutomatico />
 
