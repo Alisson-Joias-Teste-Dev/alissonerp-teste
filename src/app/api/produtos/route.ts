@@ -271,7 +271,11 @@ export async function GET(req: NextRequest) {
           p.nome,
           p.sku,
           p.tipo_metal,
-          p.peso_precificado,
+          -- Peso da FONTE (alissonerp.erp_produtos) — mesma origem usada no calculo
+          -- do preco (vw_produtos_geral_preco). O espelho public.produtos so replica
+          -- INSERT, nao UPDATE, entao ao editar o peso o public ficava com o valor
+          -- antigo e a tela exibia peso diferente do preco. Fallback p.* so se nao houver erp.
+          COALESCE(ep.peso_precificado, p.peso_precificado) AS peso_precificado,
           -- Pedras: peso fiel em ct vem de produto_pedra_extras (peso_precificado
           -- é arredondado pelo trigger arredondar_peso_para_cima).
           (SELECT peso_ct FROM alissonerp.produto_pedra_extras
