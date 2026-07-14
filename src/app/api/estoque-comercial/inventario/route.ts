@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   }
 
   const url = new URL(req.url);
-  const POR_PAGINA = 10;
+  const POR_PAGINA = 7;
   const pagina = Math.max(1, Math.trunc(Number(url.searchParams.get("pagina")) || 1));
   const offset = (pagina - 1) * POR_PAGINA;
 

@@ -70,7 +70,7 @@ export default function InventarioPage() {
   const [situacao,  setSituacao]  = useState<"aberto" | "concluido" | "cancelado" | null>(null);
   const [local,      setLocal]     = useState<number | null>(null);
   const [locaisDisp, setLocaisDisp] = useState<{ id: number; nome: string }[]>([]);
-  const POR_PAGINA = 10;
+  const POR_PAGINA = 7;
   const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));
 
 
