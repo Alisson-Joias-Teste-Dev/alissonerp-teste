@@ -1060,22 +1060,32 @@ export default function InventarioDetalhePage() {
   //   tamanho real da falta. Tudo derivado do que a API já devolve.
   const esperadoPecas = itens.reduce((s, i) => s + i.quantidade_sistema, 0);
   const contadoPecas  = itens.reduce((s, i) => s + (i.quantidade_contada ?? 0), 0);
-  // Faltando conta SÓ itens contados (diferenca<0 com contagem). Item sem
-  // contagem é categoria própria ("Sem contagem") — não vira "falta", senão
-  // duplicaria (o card Faltando mostraria peças de um conjunto e SKUs de outro).
-  const faltandoPecas = itens.reduce((s, i) => s + (i.quantidade_contada !== null && i.diferenca < 0 ? -i.diferenca : 0), 0);
-  const foraPecas     = excedentesForaInventario.reduce((s, e) => s + e.quantidade, 0);
-  const excessoPecas  = itens.reduce((s, i) => s + (i.diferenca > 0 ? i.diferenca : 0), 0) + foraPecas;
-  const excessoSkusTotal = excessoCount + foraCount;
+  // FALTANDO = peças esperadas NÃO encontradas = contadas A MENOS + NUNCA contadas.
+  //   (regra do Jonathan 13/07: item sem contagem = peça não encontrada. Antes o
+  //    card mostrava só as "a menos" e escondia as nunca contadas, subestimando a
+  //    falta.) O "Sem contagem" segue como filtro/seção pra achar o que falta contar.
+  const faltandoContadasPecas = itens.reduce((s, i) => s + (i.quantidade_contada !== null && i.diferenca < 0 ? -i.diferenca : 0), 0);
+  const naoContadasPecas      = itens.reduce((s, i) => s + (i.quantidade_contada === null ? i.quantidade_sistema : 0), 0);
+  const faltandoPecas = faltandoContadasPecas + naoContadasPecas;
+  const faltandoSkus  = itens.filter(i => i.quantidade_sistema > (i.quantidade_contada ?? 0)).length;
+  // EXCESSO = só peças contadas A MAIS de itens DA LISTA. O "fora do inventário"
+  //   (etiqueta de produto que nem está na lista) tem seção/filtro próprios.
+  const excessoPecas  = itens.reduce((s, i) => s + (i.diferenca > 0 ? i.diferenca : 0), 0);
+  const excessoSkus   = excessoCount;
 
-  // Veredito — resumo em uma linha (o operador entende numa olhada)
+  // Veredito — resumo em uma linha (o operador entende numa olhada).
+  // "Falta" mostra o total e o detalhe (a menos + não contadas) entre parênteses.
   const veredParts: string[] = [];
-  if (faltandoPecas > 0) veredParts.push(`Falta ${faltandoPecas} peça${faltandoPecas > 1 ? "s" : ""}`);
+  if (faltandoPecas > 0) {
+    const det = (faltandoContadasPecas > 0 && naoContadasPecas > 0)
+      ? ` (${faltandoContadasPecas} a menos + ${naoContadasPecas} não contadas)`
+      : naoContadasPecas > 0 ? ` (não contadas)` : "";
+    veredParts.push(`Falta ${faltandoPecas} peça${faltandoPecas > 1 ? "s" : ""}${det}`);
+  }
   if (excessoPecas > 0) veredParts.push(`${excessoPecas} peça${excessoPecas > 1 ? "s" : ""} a mais`);
-  if (semContagem > 0) veredParts.push(`${semContagem} sem contagem`);
   if (pendAbertas > 0) veredParts.push(`${pendAbertas} pendência${pendAbertas > 1 ? "s" : ""} aguardando`);
   const veredTom: "alerta" | "atencao" | "ok" =
-    (faltandoPecas > 0 || semContagem > 0 || pendAbertas > 0) ? "alerta"
+    (faltandoPecas > 0 || pendAbertas > 0) ? "alerta"
     : excessoPecas > 0 ? "atencao" : "ok";
   const veredTexto = veredParts.length ? veredParts.join(" · ") : "Inventário sem divergências";
   const veredStyle = veredTom === "alerta" ? { bg: "#FEF2F2", bd: "#FCA5A5", tx: "#991B1B" }
@@ -1106,7 +1116,13 @@ export default function InventarioDetalhePage() {
     return i.pendencia_resolvida === false;
   };
   const matchCategoria = (i: ItemInventario): boolean => !filtroCategoria || i.categoria_produto === filtroCategoria;
-  const matchStatus = (i: ItemInventario): boolean => !filtroStatus || getStatus(i) === filtroStatus;
+  // "Faltando" (card) mostra faltando + sem contagem (ambos = peças não
+  // encontradas). O chip "Sem contagem" filtra só as nunca contadas (subconjunto).
+  const matchStatus = (i: ItemInventario): boolean => {
+    if (!filtroStatus) return true;
+    if (filtroStatus === "faltando") { const st = getStatus(i); return st === "faltando" || st === "pendente"; }
+    return getStatus(i) === filtroStatus;
+  };
   const filtro = busca.trim().toLowerCase();
   const itensFiltrados = itens.filter(i =>
     matchPendencia(i) && matchCategoria(i) && matchStatus(i) &&
@@ -1135,7 +1151,7 @@ export default function InventarioDetalhePage() {
     (!filtroCategoria || e.categoria_produto === filtroCategoria) &&
     (!filtro || e.sku.toLowerCase().includes(filtro) || e.nome_produto.toLowerCase().includes(filtro))
   );
-  const mostraForaInventario = filtroStatus === null || filtroStatus === "excesso" || filtroStatus === "fora";
+  const mostraForaInventario = filtroStatus === null || filtroStatus === "fora";
 
   const statusMap: Record<string, { label: string; bg: string; txt: string }> = {
     aberto:      { label: "Aberto",      bg: "#DBEAFE", txt: "#1E40AF" },
@@ -1275,9 +1291,9 @@ export default function InventarioDetalhePage() {
       <div className="flex gap-2 mb-3">
         <MetricCard label="Esperado" pecas={esperadoPecas} skus={totalEsperado} color="#184036" />
         <MetricCard label="Contado"  pecas={contadoPecas}  skus={contados}      color="#184036" />
-        <MetricCard label="Faltando" pecas={faltandoPecas} skus={faltandoCount} color="#DC2626"
+        <MetricCard label="Faltando" pecas={faltandoPecas} skus={faltandoSkus} color="#DC2626"
           ativo={filtroStatus === "faltando"} onClick={() => setFiltroStatus(p => p === "faltando" ? null : "faltando")} />
-        <MetricCard label="Excesso"  pecas={excessoPecas}  skus={excessoSkusTotal} color="#2563EB"
+        <MetricCard label="Excesso"  pecas={excessoPecas}  skus={excessoSkus} color="#2563EB"
           ativo={filtroStatus === "excesso"} onClick={() => setFiltroStatus(p => p === "excesso" ? null : "excesso")} />
       </div>
 

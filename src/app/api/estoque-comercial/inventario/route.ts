@@ -65,9 +65,10 @@ export async function GET(req: NextRequest) {
       i.created_at, i.categoria,
       uc.email AS criado_por_email,
       uf.email AS concluido_por_email,
-      -- PEÇA = unidades (o que a lista EXIBE); pecas_divergentes = faltando+excesso
-      -- de item CONTADO (sem-contagem vira progresso). Sem o filtro de "peça pronta"
-      -- do detalhe (custo alto na lista) — comportamento pré-existente da lista.
+      -- PEÇA = unidades (o que a lista EXIBE); pecas_divergentes = peças que NÃO
+      -- batem = |esperado − contado| por item, INCLUINDO as nunca contadas (mesma
+      -- regra do "Faltando" do detalhe — não conta 'contada' como 0). Sem o filtro
+      -- de "peça pronta" do detalhe (custo alto na lista).
       agg.total_itens, agg.itens_contados, agg.itens_divergentes,
       agg.pecas_esperadas, agg.pecas_contadas, agg.pecas_divergentes
     FROM (
@@ -87,7 +88,7 @@ export async function GET(req: NextRequest) {
         COUNT(*) FILTER (WHERE ii.quantidade_contada IS NOT NULL AND ii.diferenca != 0)::int AS itens_divergentes,
         COALESCE(SUM(ii.quantidade_sistema), 0)::int                    AS pecas_esperadas,
         COALESCE(SUM(ii.quantidade_contada), 0)::int                    AS pecas_contadas,
-        COALESCE(SUM(ABS(ii.diferenca)) FILTER (WHERE ii.quantidade_contada IS NOT NULL), 0)::int AS pecas_divergentes
+        COALESCE(SUM(ABS(ii.quantidade_sistema - COALESCE(ii.quantidade_contada, 0))), 0)::int AS pecas_divergentes
       FROM alissonerp.itens_inventario_comercial ii
       WHERE ii.inventario_id = i.id
     ) agg ON true
