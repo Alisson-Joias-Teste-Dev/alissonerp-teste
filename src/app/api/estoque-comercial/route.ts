@@ -37,20 +37,22 @@ export async function GET(req: NextRequest) {
     if (consolidado) {
       const rows = await sql`
         SELECT
-          produto_id, nome_produto, sku, categoria,
-          saldo_fisico, reservado, disponivel, em_transito,
-          estoque_minimo, ativo, config_id, total_movimentacoes,
-          alerta
-        FROM alissonerp.vw_estoque_comercial_alerta_v2
+          v.produto_id, v.nome_produto, v.sku, v.categoria,
+          v.saldo_fisico, v.reservado, v.disponivel, v.em_transito,
+          v.estoque_minimo, v.ativo, v.config_id, v.total_movimentacoes,
+          v.alerta,
+          ep.localizacao
+        FROM alissonerp.vw_estoque_comercial_alerta_v2 v
+        LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = v.produto_id
         ORDER BY
-          CASE alerta
+          CASE v.alerta
             WHEN 'negativo'       THEN 0
             WHEN 'zerado'         THEN 1
             WHEN 'abaixo_minimo'  THEN 2
             WHEN 'no_minimo'      THEN 3
             ELSE                       4
           END,
-          nome_produto
+          v.nome_produto
       `;
       return NextResponse.json(rows.map(mapRow));
     }
@@ -58,25 +60,29 @@ export async function GET(req: NextRequest) {
     if (localId) {
       const rows = await sql`
         SELECT
-          produto_id, nome_produto, sku, categoria,
-          local_estoque_id, local_nome,
-          saldo_fisico, reservado, disponivel, em_transito,
-          estoque_minimo, ativo, config_id, total_movimentacoes
-        FROM alissonerp.vw_saldo_estoque_comercial_v2
-        WHERE local_estoque_id = ${Number(localId)}
-        ORDER BY nome_produto
+          s.produto_id, s.nome_produto, s.sku, s.categoria,
+          s.local_estoque_id, s.local_nome,
+          s.saldo_fisico, s.reservado, s.disponivel, s.em_transito,
+          s.estoque_minimo, s.ativo, s.config_id, s.total_movimentacoes,
+          ep.localizacao
+        FROM alissonerp.vw_saldo_estoque_comercial_v2 s
+        LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = s.produto_id
+        WHERE s.local_estoque_id = ${Number(localId)}
+        ORDER BY s.nome_produto
       `;
       return NextResponse.json(rows.map(mapRow));
     }
 
     const rows = await sql`
       SELECT
-        produto_id, nome_produto, sku, categoria,
-        local_estoque_id, local_nome,
-        saldo_fisico, reservado, disponivel, em_transito,
-        estoque_minimo, ativo, config_id, total_movimentacoes
-      FROM alissonerp.vw_saldo_estoque_comercial_v2
-      ORDER BY nome_produto, local_estoque_id
+        s.produto_id, s.nome_produto, s.sku, s.categoria,
+        s.local_estoque_id, s.local_nome,
+        s.saldo_fisico, s.reservado, s.disponivel, s.em_transito,
+        s.estoque_minimo, s.ativo, s.config_id, s.total_movimentacoes,
+        ep.localizacao
+      FROM alissonerp.vw_saldo_estoque_comercial_v2 s
+      LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = s.produto_id
+      ORDER BY s.nome_produto, s.local_estoque_id
     `;
     return NextResponse.json(rows.map(mapRow));
   }

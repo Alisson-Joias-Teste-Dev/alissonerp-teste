@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft, ArrowUpCircle, ArrowDownCircle,
   Settings2, Loader2, Save, AlertTriangle, CheckCircle,
-  RotateCcw, ArrowRightLeft, Bookmark, X, TrendingDown, RefreshCw,
+  RotateCcw, ArrowRightLeft, Bookmark, X, TrendingDown, RefreshCw, MapPin,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
@@ -91,6 +91,7 @@ interface RfidItem {
 
 interface DetalheData {
   consolidado:    Consolidado | null;
+  localizacao:    string | null;
   saldoPorLocal:  SaldoLocal[];
   movimentos:     Movimento[];
   reservas:       Reserva[];
@@ -311,6 +312,11 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
   const [savingCfg,  setSavingCfg]  = useState(false);
   const [cfgMsg,     setCfgMsg]     = useState("");
 
+  // Localizacao (edicao manual — o ERP e o dono do dado apos a carga inicial)
+  const [locEdit,   setLocEdit]   = useState("");
+  const [savingLoc, setSavingLoc] = useState(false);
+  const [locMsg,    setLocMsg]    = useState("");
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -318,6 +324,7 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
       if (r.ok) {
         const d = await r.json() as DetalheData;
         setData(d);
+        setLocEdit(d.localizacao ?? "");
         if (d.consolidado) {
           setEditMin(d.consolidado.estoque_minimo);
           setEditAtivo(d.consolidado.ativo);
@@ -329,6 +336,26 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
   }, [produtoId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Grava a localizacao editada a mao (o ERP e o dono do dado). String vazia limpa.
+  async function saveLocalizacao() {
+    setSavingLoc(true); setLocMsg("");
+    try {
+      const r = await fetch(`/api/estoque-comercial/${produtoId}/localizacao`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ localizacao: locEdit }),
+      });
+      if (!r.ok) throw new Error((await r.json() as { error?: string }).error ?? "Erro");
+      setLocMsg("Salvo!");
+      await fetchData();
+    } catch (e) {
+      setLocMsg(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setSavingLoc(false);
+      setTimeout(() => setLocMsg(""), 3000);
+    }
+  }
 
   async function saveConfig() {
     setSavingCfg(true); setCfgMsg("");
@@ -464,6 +491,41 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
                 )}
               </div>
             )}
+
+            {/* Localizacao fisica da peca: importada da fonte externa e editavel aqui
+                (o ERP e o dono do dado apos a carga inicial). */}
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              <span className="flex items-center gap-1 text-xs text-gray-500">
+                <MapPin size={13} /> Localização
+              </span>
+              {podeAdminDev ? (
+                <>
+                  <input
+                    value={locEdit}
+                    onChange={e => setLocEdit(e.target.value)}
+                    placeholder="ex: LJ-ET04"
+                    className="border rounded-lg px-2 py-1 text-sm font-mono outline-none"
+                    style={{ borderColor: "#E8DCC8", minWidth: 140 }}
+                  />
+                  <button
+                    onClick={saveLocalizacao}
+                    disabled={savingLoc || locEdit.trim() === (data?.localizacao ?? "")}
+                    className="flex items-center gap-1 px-3 py-1 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
+                    style={{ background: "#184036", color: "#fff" }}
+                  >
+                    {savingLoc ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                    Salvar
+                  </button>
+                  {locMsg && (
+                    <span className="text-xs" style={{ color: locMsg === "Salvo!" ? "#059669" : "#DC2626" }}>{locMsg}</span>
+                  )}
+                </>
+              ) : (
+                <span className="text-sm font-mono px-2 py-0.5 rounded" style={{ background: "#F3F4F6", color: "#374151" }}>
+                  {data?.localizacao || "—"}
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
             {podeAdminDev && (
