@@ -90,6 +90,7 @@ interface ExcedenteForaInventario {
   nome_produto: string;
   categoria_produto: string | null;
   quantidade: number;
+  epcs: string[];   // números dos chips lidos deste produto (fora da lista)
 }
 
 // Valores do inventário (restrito a desenvolvedor + dono): valor de venda e
@@ -326,11 +327,12 @@ function PecasChips({ item, epcs }: { item: ItemInventario; epcs: string[] }) {
  * IMPACTO SE ALTERADO: sem o desfecho tipado a API rejeita o "Sim" (422).
  */
 function PendenciaPanel({
-  item, invId, epcs, podeEditar, salvando, onSalvarPendencia, onResolver, onContar, precisaContagem,
+  item, invId, epcs, apenasChips, podeEditar, salvando, onSalvarPendencia, onResolver, onContar, precisaContagem,
 }: {
   item: ItemInventario;
   invId: number;
   epcs: string[];
+  apenasChips: boolean;     // item OK sem pendência: mostra só o bloco de chips
   podeEditar: boolean;      // inventário não cancelado
   salvando: boolean;
   onSalvarPendencia: (obs: string) => void;
@@ -387,6 +389,16 @@ function PendenciaPanel({
     } finally {
       setInvestigando(false);
     }
+  }
+
+  // Item OK sem pendência: só o bloco de peças e chips (nada de pendência/detetive).
+  if (apenasChips) {
+    return (
+      <div className="px-4 py-3 rounded-b-xl"
+        style={{ background: "#FDFBF6", border: "1px solid #F3F0E8", borderTop: "none" }}>
+        <PecasChips item={item} epcs={epcs} />
+      </div>
+    );
   }
 
   return (
@@ -677,7 +689,11 @@ function ItemRow({
   const lido = item.quantidade_contada ?? 0;
   // Pendência só existe onde há problema: divergente ou sem contagem
   const temProblema = status !== "ok";
-  const expandivel = temProblema || !!item.pendencia_obs;
+  const temChips = epcs.length > 0;
+  // Item OK também abre quando tem chip lido — pra ver o número da(s) peça(s).
+  const expandivel = temProblema || !!item.pendencia_obs || temChips;
+  // OK sem pendência: expandir mostra SÓ os chips (sem a caixa de pendência/detetive).
+  const apenasChips = !temProblema && !item.pendencia_obs;
   const statusDot = STATUS_COLOR[status].text;
 
   return (
@@ -744,7 +760,7 @@ function ItemRow({
         <Badge status={status} />
         {expandivel && (
           <button onClick={onToggleExpand} className="shrink-0 text-gray-400 hover:text-gray-600"
-            title={expandido ? "Fechar detalhes" : "Detalhar pendência"}>
+            title={expandido ? "Fechar detalhes" : apenasChips ? "Ver peças e chips" : "Detalhar pendência"}>
             {expandido ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
         )}
@@ -754,6 +770,7 @@ function ItemRow({
           item={item}
           invId={invId}
           epcs={epcs}
+          apenasChips={apenasChips}
           podeEditar={podeEditarPendencia}
           salvando={salvando}
           onSalvarPendencia={onSalvarPendencia}
@@ -882,6 +899,8 @@ export default function InventarioDetalhePage() {
   const [epcsPorProduto, setEpcsPorProduto] = useState<Record<number, string[]>>({});
   // Valores (restrito): null quando o usuário não pode ver (a API não envia)
   const [valores, setValores] = useState<Valores | null>(null);
+  // Linhas "fora do inventário" expandidas (mostram os chips lidos)
+  const [foraExpandido, setForaExpandido] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [concluindo, setConcluindo] = useState(false);
   const [cancelModalAberto, setCancelModalAberto] = useState(false);
@@ -1530,27 +1549,59 @@ export default function InventarioDetalhePage() {
             Chips fora do inventario ({excedentesFiltrados.length})
           </p>
           <div className="flex flex-col gap-1.5">
-            {excedentesFiltrados.map(e => (
-              <div key={e.id_api_produto}
-                className="flex items-center gap-3 px-4 py-3 rounded-xl"
-                style={{ background: "#F5F3FF", border: "1px solid #DDD6FE" }}>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate" style={{ fontFamily: "monospace", color: "#184036" }}>
-                    {e.sku}
-                  </p>
-                  <p className="text-xs text-gray-400 truncate">
-                    {e.nome_produto}{e.categoria_produto ? ` · ${e.categoria_produto}` : ""}
-                  </p>
+            {excedentesFiltrados.map(e => {
+              const aberto = foraExpandido.has(e.id_api_produto);
+              const temChips = (e.epcs?.length ?? 0) > 0;
+              return (
+              <div key={e.id_api_produto}>
+                <div
+                  className="flex items-center gap-3 px-4 py-3"
+                  style={{ background: "#F5F3FF", border: "1px solid #DDD6FE",
+                    borderRadius: aberto ? "0.75rem 0.75rem 0 0" : "0.75rem",
+                    cursor: temChips ? "pointer" : "default" }}
+                  onClick={() => temChips && setForaExpandido(prev => {
+                    const s = new Set(prev);
+                    if (s.has(e.id_api_produto)) s.delete(e.id_api_produto); else s.add(e.id_api_produto);
+                    return s;
+                  })}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate" style={{ fontFamily: "monospace", color: "#184036" }}>
+                      {e.sku}
+                    </p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {e.nome_produto}{e.categoria_produto ? ` · ${e.categoria_produto}` : ""}
+                    </p>
+                  </div>
+                  <span className="text-sm font-bold shrink-0" style={{ color: "#374151" }}>
+                    {e.quantidade}/0
+                  </span>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                    style={{ background: "#EDE9FE", color: "#6D28D9", border: "1px solid #C4B5FD" }}>
+                    Fora do inventário
+                  </span>
+                  {temChips && (aberto
+                    ? <ChevronUp size={16} className="shrink-0 text-gray-400" />
+                    : <ChevronDown size={16} className="shrink-0 text-gray-400" />)}
                 </div>
-                <span className="text-sm font-bold shrink-0" style={{ color: "#374151" }}>
-                  {e.quantidade}/0
-                </span>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                  style={{ background: "#EDE9FE", color: "#6D28D9", border: "1px solid #C4B5FD" }}>
-                  Fora do inventário
-                </span>
+                {aberto && temChips && (
+                  <div className="px-4 py-2.5 rounded-b-xl"
+                    style={{ background: "#FAF9FF", border: "1px solid #DDD6FE", borderTop: "none" }}>
+                    <p className="text-xs font-semibold mb-1" style={{ color: "#6D28D9" }}>Peças e chips</p>
+                    <div className="rounded-lg overflow-hidden" style={{ border: "1px solid #E9E3FB" }}>
+                      {e.epcs.map((epc, i) => (
+                        <div key={epc} className="flex items-center gap-2 px-2.5 py-1.5 text-[13px]"
+                          style={{ borderTop: i === 0 ? "none" : "1px solid #E9E3FB" }}>
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: "#7C3AED" }} />
+                          <span className="flex-1 min-w-0">peça {i + 1} · <span className="font-mono text-gray-500 break-all">chip {epc}</span></span>
+                          <span className="text-xs px-2 py-0.5 rounded-full shrink-0" style={{ background: "#EDE9FE", color: "#6D28D9" }}>lida</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

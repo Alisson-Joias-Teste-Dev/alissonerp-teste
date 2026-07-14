@@ -136,7 +136,10 @@ export async function GET(req: NextRequest, { params }: Params) {
       p.sku,
       p.nome AS nome_produto,
       COALESCE(p.categoria, '') AS categoria_produto,
-      COUNT(*)::int AS quantidade
+      COUNT(*)::int AS quantidade,
+      -- Números dos chips lidos deste produto fora do inventário (mesmo dado do
+      -- drill-down dos itens de dentro, agora exposto também para os de fora).
+      array_agg(el.epc ORDER BY el.epc) AS epcs
     FROM epcs_lidos el
     JOIN prod_por_api p ON p.id_api_produto = el.id_api_produto
     WHERE el.id_api_produto IS NOT NULL
