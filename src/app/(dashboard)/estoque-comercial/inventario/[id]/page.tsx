@@ -34,7 +34,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft, Loader2, CheckCircle, XCircle, Search, X, FileDown,
-  ChevronDown, ChevronUp, AlertTriangle, MessageSquareText, Info,
+  ChevronDown, ChevronUp, AlertTriangle, MessageSquareText, Info, Gem,
 } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
@@ -90,6 +90,26 @@ interface ExcedenteForaInventario {
   nome_produto: string;
   categoria_produto: string | null;
   quantidade: number;
+  epcs: string[];   // números dos chips lidos deste produto (fora da lista)
+  valor_unitario?: number;  // restrito: só vem quando podeVerValores
+  peso_unitario?: number;   // restrito
+}
+
+// Valores do inventário (restrito a desenvolvedor + dono): valor de venda e
+// peso da FONTE por SKU, com totais em esperado e contado. Só chega no JSON
+// quando o usuário tem permissão (a API não envia para os demais).
+interface ValorItem {
+  produto_id: number;
+  sku: string | null;
+  nome_produto: string;
+  quantidade_sistema: number;
+  quantidade_contada: number | null;
+  valor_unitario: number;   // preço de venda (R$, inteiro)
+  peso_unitario: number;    // peso da fonte (g)
+}
+interface Valores {
+  itens: ValorItem[];
+  totais: { valor_esperado: number; valor_contado: number; peso_esperado: number; peso_contado: number };
 }
 
 type StatusItem = "ok" | "faltando" | "excesso" | "pendente";
@@ -119,6 +139,12 @@ function nomeDoEmail(email: string | null | undefined): string {
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
 }
+
+// R$ sem centavos (o preço de venda já é inteiro) e peso em gramas com 1 casa.
+const fmtBRL = (n: number) =>
+  (n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+const fmtG = (n: number) =>
+  `${(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} g`;
 
 const STATUS_LABEL: Record<StatusItem, string> = {
   ok: "OK", faltando: "Faltando", excesso: "Excedente", pendente: "Sem contagem",
@@ -303,11 +329,12 @@ function PecasChips({ item, epcs }: { item: ItemInventario; epcs: string[] }) {
  * IMPACTO SE ALTERADO: sem o desfecho tipado a API rejeita o "Sim" (422).
  */
 function PendenciaPanel({
-  item, invId, epcs, podeEditar, salvando, onSalvarPendencia, onResolver, onContar, precisaContagem,
+  item, invId, epcs, apenasChips, podeEditar, salvando, onSalvarPendencia, onResolver, onContar, precisaContagem,
 }: {
   item: ItemInventario;
   invId: number;
   epcs: string[];
+  apenasChips: boolean;     // item OK sem pendência: mostra só o bloco de chips
   podeEditar: boolean;      // inventário não cancelado
   salvando: boolean;
   onSalvarPendencia: (obs: string) => void;
@@ -364,6 +391,16 @@ function PendenciaPanel({
     } finally {
       setInvestigando(false);
     }
+  }
+
+  // Item OK sem pendência: só o bloco de peças e chips (nada de pendência/detetive).
+  if (apenasChips) {
+    return (
+      <div className="px-4 py-3 rounded-b-xl"
+        style={{ background: "#FDFBF6", border: "1px solid #F3F0E8", borderTop: "none" }}>
+        <PecasChips item={item} epcs={epcs} />
+      </div>
+    );
   }
 
   return (
@@ -631,7 +668,7 @@ function PendenciaPanel({
 
 function ItemRow({
   item, invId, status, epcs, conferido, salvando, expandido, onToggleConferido, onToggleExpand, isAberto, podeEditarPendencia,
-  onSalvarPendencia, onResolver, onContar, investigacao,
+  onSalvarPendencia, onResolver, onContar, investigacao, podeVerValores, valorInfo,
 }: {
   item: ItemInventario;
   invId: number;
@@ -648,11 +685,17 @@ function ItemRow({
   onResolver: (payload: { resolvida: boolean | null; resolucao_obs?: string; desfecho_tipo?: string; numero_venda?: string; numero_devolucao?: string; confirmar_baixa?: boolean }) => void;
   onContar: (qtd: number) => void;
   investigacao?: { conclusao: { tipo: string; confianca: "alta" | "media"; resumo: string } | null; temPistas: boolean } | null;
+  podeVerValores: boolean;
+  valorInfo?: ValorItem | null;
 }) {
   const lido = item.quantidade_contada ?? 0;
   // Pendência só existe onde há problema: divergente ou sem contagem
   const temProblema = status !== "ok";
-  const expandivel = temProblema || !!item.pendencia_obs;
+  const temChips = epcs.length > 0;
+  // Item OK também abre quando tem chip lido — pra ver o número da(s) peça(s).
+  const expandivel = temProblema || !!item.pendencia_obs || temChips;
+  // OK sem pendência: expandir mostra SÓ os chips (sem a caixa de pendência/detetive).
+  const apenasChips = !temProblema && !item.pendencia_obs;
   const statusDot = STATUS_COLOR[status].text;
 
   return (
@@ -704,6 +747,15 @@ function ItemRow({
               🔍 há pistas — abra para investigar
             </p>
           ) : null}
+          {/* Valor + peso (RESTRITO): unitário e total da quantidade deste SKU. O
+              total usa a qtd contada (o que está em mãos); sem contagem, a do sistema. */}
+          {podeVerValores && valorInfo && (
+            <p className="text-[11px] truncate mt-0.5" style={{ color: "#7A5A4A" }}>
+              💠 un {fmtBRL(valorInfo.valor_unitario)} · {fmtG(valorInfo.peso_unitario)}
+              {" · total "}{fmtBRL(valorInfo.valor_unitario * (item.quantidade_contada ?? item.quantidade_sistema))}
+              {" · "}{fmtG(valorInfo.peso_unitario * (item.quantidade_contada ?? item.quantidade_sistema))}
+            </p>
+          )}
         </div>
         <PendenciaBadge item={item} />
         <span className="text-sm font-bold shrink-0" style={{ color: "#374151" }}>
@@ -712,7 +764,7 @@ function ItemRow({
         <Badge status={status} />
         {expandivel && (
           <button onClick={onToggleExpand} className="shrink-0 text-gray-400 hover:text-gray-600"
-            title={expandido ? "Fechar detalhes" : "Detalhar pendência"}>
+            title={expandido ? "Fechar detalhes" : apenasChips ? "Ver peças e chips" : "Detalhar pendência"}>
             {expandido ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
         )}
@@ -722,6 +774,7 @@ function ItemRow({
           item={item}
           invId={invId}
           epcs={epcs}
+          apenasChips={apenasChips}
           podeEditar={podeEditarPendencia}
           salvando={salvando}
           onSalvarPendencia={onSalvarPendencia}
@@ -734,14 +787,113 @@ function ItemRow({
   );
 }
 
+// Caixa de total geral (valor ou peso). `destaque` = borda esmeralda (o número
+// que mais importa: o contado).
+function ValorBox({ label, valor, destaque }: { label: string; valor: string; destaque?: boolean }) {
+  return (
+    <div className="rounded-lg px-3 py-2" style={{ background: "#fff", border: `1px solid ${destaque ? "#184036" : "#E8DCC8"}` }}>
+      <p className="text-[11px]" style={{ color: "#8A857A" }}>{label}</p>
+      <p className="text-base font-bold leading-tight" style={{ color: destaque ? "#184036" : "#374151" }}>{valor}</p>
+    </div>
+  );
+}
+
+/**
+ * Painel RESTRITO de valores (só desenvolvedor + dono; a API nem manda o dado
+ * para os demais). Mostra os TOTAIS gerais (valor/peso, esperado e contado) e,
+ * recolhível, a tabela por SKU com o UNITÁRIO (valor e peso), a quantidade e o
+ * total de cada SKU. Só leitura — nada aqui altera estoque.
+ */
+function ValoresPanel({ valores }: { valores: Valores }) {
+  const [aberto, setAberto] = useState(true);
+  const [tabelaAberta, setTabelaAberta] = useState(false);
+  const t = valores.totais;
+  const itens = [...valores.itens].sort((a, b) => (a.sku ?? "").localeCompare(b.sku ?? ""));
+
+  return (
+    <div className="mb-4 rounded-xl overflow-hidden" style={{ border: "1px solid #E8DCC8", background: "#F9F6F0" }}>
+      <button onClick={() => setAberto(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold"
+        style={{ color: "#184036" }}>
+        <span className="flex items-center gap-2">
+          <Gem size={15} /> Valores do inventário
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "#184036", color: "#F3EADA" }}>RESTRITO</span>
+        </span>
+        <span className="text-xs font-normal" style={{ color: "#6B7280" }}>{aberto ? "▲ ocultar" : "▼ mostrar"}</span>
+      </button>
+
+      {aberto && (
+        <div className="px-4 pb-4">
+          {/* Totais gerais: valor e peso, esperado × contado (o contado em destaque) */}
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <ValorBox label="Valor esperado" valor={fmtBRL(t.valor_esperado)} />
+            <ValorBox label="Valor contado (total geral)" valor={fmtBRL(t.valor_contado)} destaque />
+            <ValorBox label="Peso esperado" valor={fmtG(t.peso_esperado)} />
+            <ValorBox label="Peso contado" valor={fmtG(t.peso_contado)} />
+          </div>
+
+          {/* Detalhe por SKU: unitário (R$/g), quantidade e total de cada SKU */}
+          <button onClick={() => setTabelaAberta(v => !v)}
+            className="text-xs font-medium underline" style={{ color: "#184036" }}>
+            {tabelaAberta ? "▲ ocultar detalhe por SKU" : `▼ ver detalhe por SKU (${itens.length})`}
+          </button>
+          {tabelaAberta && (
+            <div className="mt-2 overflow-x-auto rounded-lg" style={{ border: "1px solid #E8DCC8" }}>
+              <table className="w-full text-xs" style={{ minWidth: 620 }}>
+                <thead style={{ background: "#EFE7D6" }}>
+                  <tr style={{ color: "#7A5A4A" }}>
+                    <th className="text-left px-2.5 py-1.5 font-semibold">SKU</th>
+                    <th className="text-right px-2.5 py-1.5 font-semibold">un. R$</th>
+                    <th className="text-right px-2.5 py-1.5 font-semibold">un. g</th>
+                    <th className="text-right px-2.5 py-1.5 font-semibold">qtd esp→cont</th>
+                    <th className="text-right px-2.5 py-1.5 font-semibold">R$ esp / cont</th>
+                    <th className="text-right px-2.5 py-1.5 font-semibold">g esp / cont</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {itens.map(it => {
+                    const qs = it.quantidade_sistema;
+                    const qc = it.quantidade_contada;
+                    return (
+                      <tr key={it.produto_id} style={{ borderTop: "1px solid #F1ECE1" }}>
+                        <td className="px-2.5 py-1.5 font-mono whitespace-nowrap" style={{ color: "#184036" }}>{it.sku ?? "—"}</td>
+                        <td className="px-2.5 py-1.5 text-right whitespace-nowrap">{fmtBRL(it.valor_unitario)}</td>
+                        <td className="px-2.5 py-1.5 text-right whitespace-nowrap">{it.peso_unitario.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
+                        <td className="px-2.5 py-1.5 text-right whitespace-nowrap">{qs}→{qc ?? "—"}</td>
+                        <td className="px-2.5 py-1.5 text-right whitespace-nowrap">{fmtBRL(qs * it.valor_unitario)} / {qc == null ? "—" : fmtBRL(qc * it.valor_unitario)}</td>
+                        <td className="px-2.5 py-1.5 text-right whitespace-nowrap">{fmtG(qs * it.peso_unitario)} / {qc == null ? "—" : fmtG(qc * it.peso_unitario)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: "2px solid #E8DCC8", background: "#F3EADA" }}>
+                    <td className="px-2.5 py-2 font-bold whitespace-nowrap" style={{ color: "#184036" }}>Total ({itens.length})</td>
+                    <td /><td /><td />
+                    <td className="px-2.5 py-2 text-right font-bold whitespace-nowrap" style={{ color: "#184036" }}>{fmtBRL(t.valor_esperado)} / {fmtBRL(t.valor_contado)}</td>
+                    <td className="px-2.5 py-2 text-right font-bold whitespace-nowrap" style={{ color: "#184036" }}>{fmtG(t.peso_esperado)} / {fmtG(t.peso_contado)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function InventarioDetalhePage() {
   const router = useRouter();
   const params = useParams();
   const invId = Number(params.id);
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   // Operador de inventário: ações viram PEDIDO de aprovação — os textos e
   // rótulos abaixo mudam para deixar isso claro (não conclui/cancela na hora).
   const isOperador = role === "operador_inventario";
+  // Valores (R$/peso) são RESTRITOS: só desenvolvedor e o dono (Alisson). O
+  // back também trava — este flag só decide o que renderizar (não é a barreira).
+  const podeVerValores = role === "desenvolvedor" || user?.email === "alisson@alissonjoias.com.br";
 
   const [inventario, setInventario] = useState<InventarioHeader | null>(null);
   const [itens, setItens] = useState<ItemInventario[]>([]);
@@ -749,6 +901,10 @@ export default function InventarioDetalhePage() {
   const [totalLeituras, setTotalLeituras] = useState(0);
   // Mapa produto_id -> [epc,...] (número do chip de cada peça lida)
   const [epcsPorProduto, setEpcsPorProduto] = useState<Record<number, string[]>>({});
+  // Valores (restrito): null quando o usuário não pode ver (a API não envia)
+  const [valores, setValores] = useState<Valores | null>(null);
+  // Linhas "fora do inventário" expandidas (mostram os chips lidos)
+  const [foraExpandido, setForaExpandido] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [concluindo, setConcluindo] = useState(false);
   const [cancelModalAberto, setCancelModalAberto] = useState(false);
@@ -792,12 +948,14 @@ export default function InventarioDetalhePage() {
         total_leituras?: number;
         excedentesForaInventario?: ExcedenteForaInventario[];
         epcsPorProduto?: Record<number, string[]>;
+        valores?: Valores | null;
       };
       setInventario(d.inventario);
       setItens(d.itens);
       setLeituras(d.leituras ?? []);
       setTotalLeituras(d.total_leituras ?? d.leituras?.length ?? 0);
       setEpcsPorProduto(d.epcsPorProduto ?? {});
+      setValores(d.valores ?? null);
       setExcedentesForaInventario(d.excedentesForaInventario ?? []);
       setConferidoIds(new Set(d.itens.filter(i => i.conferido).map(i => i.produto_id)));
 
@@ -1148,9 +1306,15 @@ export default function InventarioDetalhePage() {
   };
   const s = statusMap[inventario.status] ?? { label: inventario.status, bg: "#F3F4F6", txt: "#6B7280" };
 
+  // Mapa produto_id -> valores (para a linha do item mostrar R$ inline, restrito)
+  const valorPorProduto: Record<number, ValorItem> = {};
+  if (valores) for (const v of valores.itens) valorPorProduto[v.produto_id] = v;
+
   const renderRow = (item: ItemInventario, status: StatusItem) => (
     <ItemRow key={item.id} item={item} invId={invId} status={status}
       epcs={epcsPorProduto[item.produto_id] ?? []}
+      podeVerValores={podeVerValores}
+      valorInfo={valorPorProduto[item.produto_id]}
       investigacao={investigacoes[item.produto_id] ?? null}
       conferido={conferidoIds.has(item.produto_id)}
       salvando={salvandoIds.has(item.produto_id)}
@@ -1305,6 +1469,10 @@ export default function InventarioDetalhePage() {
         </div>
       </div>
 
+      {/* Valores (RESTRITO): só desenvolvedor + dono. `valores` é null para os
+          demais (a API não envia) — dupla trava com podeVerValores. */}
+      {podeVerValores && valores && <ValoresPanel valores={valores} />}
+
       {/* Placar das pendências: aberta / resolvida / não resolvida.
           CLICÁVEL: filtra a lista pelo tipo (clicar de novo limpa) — é o caminho
           para achar pendência de item que já voltou a ficar OK. */}
@@ -1385,27 +1553,67 @@ export default function InventarioDetalhePage() {
             Chips fora do inventario ({excedentesFiltrados.length})
           </p>
           <div className="flex flex-col gap-1.5">
-            {excedentesFiltrados.map(e => (
-              <div key={e.id_api_produto}
-                className="flex items-center gap-3 px-4 py-3 rounded-xl"
-                style={{ background: "#F5F3FF", border: "1px solid #DDD6FE" }}>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate" style={{ fontFamily: "monospace", color: "#184036" }}>
-                    {e.sku}
-                  </p>
-                  <p className="text-xs text-gray-400 truncate">
-                    {e.nome_produto}{e.categoria_produto ? ` · ${e.categoria_produto}` : ""}
-                  </p>
+            {excedentesFiltrados.map(e => {
+              const aberto = foraExpandido.has(e.id_api_produto);
+              const temChips = (e.epcs?.length ?? 0) > 0;
+              return (
+              <div key={e.id_api_produto}>
+                <div
+                  className="flex items-center gap-3 px-4 py-3"
+                  style={{ background: "#F5F3FF", border: "1px solid #DDD6FE",
+                    borderRadius: aberto ? "0.75rem 0.75rem 0 0" : "0.75rem",
+                    cursor: temChips ? "pointer" : "default" }}
+                  onClick={() => temChips && setForaExpandido(prev => {
+                    const s = new Set(prev);
+                    if (s.has(e.id_api_produto)) s.delete(e.id_api_produto); else s.add(e.id_api_produto);
+                    return s;
+                  })}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate" style={{ fontFamily: "monospace", color: "#184036" }}>
+                      {e.sku}
+                    </p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {e.nome_produto}{e.categoria_produto ? ` · ${e.categoria_produto}` : ""}
+                    </p>
+                    {/* Valor + peso (RESTRITO): unitário e total da quantidade lida */}
+                    {podeVerValores && e.valor_unitario != null && (
+                      <p className="text-[11px] truncate mt-0.5" style={{ color: "#7A5A4A" }}>
+                        💠 un {fmtBRL(e.valor_unitario)} · {fmtG(e.peso_unitario ?? 0)}
+                        {" · total "}{fmtBRL(e.valor_unitario * e.quantidade)}
+                        {" · "}{fmtG((e.peso_unitario ?? 0) * e.quantidade)}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-sm font-bold shrink-0" style={{ color: "#374151" }}>
+                    {e.quantidade}/0
+                  </span>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                    style={{ background: "#EDE9FE", color: "#6D28D9", border: "1px solid #C4B5FD" }}>
+                    Fora do inventário
+                  </span>
+                  {temChips && (aberto
+                    ? <ChevronUp size={16} className="shrink-0 text-gray-400" />
+                    : <ChevronDown size={16} className="shrink-0 text-gray-400" />)}
                 </div>
-                <span className="text-sm font-bold shrink-0" style={{ color: "#374151" }}>
-                  {e.quantidade}/0
-                </span>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                  style={{ background: "#EDE9FE", color: "#6D28D9", border: "1px solid #C4B5FD" }}>
-                  Fora do inventário
-                </span>
+                {aberto && temChips && (
+                  <div className="px-4 py-2.5 rounded-b-xl"
+                    style={{ background: "#FAF9FF", border: "1px solid #DDD6FE", borderTop: "none" }}>
+                    <p className="text-xs font-semibold mb-1" style={{ color: "#6D28D9" }}>Peças e chips</p>
+                    <div className="rounded-lg overflow-hidden" style={{ border: "1px solid #E9E3FB" }}>
+                      {e.epcs.map((epc, i) => (
+                        <div key={epc} className="flex items-center gap-2 px-2.5 py-1.5 text-[13px]"
+                          style={{ borderTop: i === 0 ? "none" : "1px solid #E9E3FB" }}>
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: "#7C3AED" }} />
+                          <span className="flex-1 min-w-0">peça {i + 1} · <span className="font-mono text-gray-500 break-all">chip {epc}</span></span>
+                          <span className="text-xs px-2 py-0.5 rounded-full shrink-0" style={{ background: "#EDE9FE", color: "#6D28D9" }}>lida</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
