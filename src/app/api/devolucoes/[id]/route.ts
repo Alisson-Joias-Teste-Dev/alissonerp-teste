@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
+import { hasRole, ROLES_DEVOLUCAO_ABRIR } from "@/lib/roles";
 import { atualizarDevolucao, cancelarDevolucao, type PatchDevolucao } from "@/lib/devolucoes";
+// Ownership: consultora só acessa devolução da própria venda (escopo "só as dela").
+import { requireDevolucaoOwnership } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
 import { zodError, PercentSchema } from "@/lib/schemas/common";
 
@@ -30,13 +32,22 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
 
   const role = await getUserRole(user.id);
-  if (!hasRole(role, ROLES_DEVOLUCAO)) {
+  if (!hasRole(role, ROLES_DEVOLUCAO_ABRIR)) {
     return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
   }
 
   const { id } = await params;
   const devId = Number(id);
   if (isNaN(devId)) return NextResponse.json({ error: "id invalido" }, { status: 400 });
+
+  // ESCOPO (só as vendas dela): consultora só acessa devolução da própria venda.
+  // Roles full passam direto. 403 se não for dona, 404 se a devolução não existir.
+  try {
+    await requireDevolucaoOwnership({ id: user.id, role: role ?? "", email: "" }, devId);
+  } catch (e) {
+    const st = (e as { status?: number }).status ?? 403;
+    return NextResponse.json({ error: (e as Error).message }, { status: st });
+  }
 
   const [dev] = await sql`
     SELECT d.*, v.numero_venda, v.cliente_id AS venda_cliente_id,
@@ -134,13 +145,22 @@ export async function PATCH(
   if (!user) return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
 
   const role = await getUserRole(user.id);
-  if (!hasRole(role, ROLES_DEVOLUCAO)) {
+  if (!hasRole(role, ROLES_DEVOLUCAO_ABRIR)) {
     return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
   }
 
   const { id } = await params;
   const devId = Number(id);
   if (isNaN(devId)) return NextResponse.json({ error: "id invalido" }, { status: 400 });
+
+  // ESCOPO (só as vendas dela): consultora só acessa devolução da própria venda.
+  // Roles full passam direto. 403 se não for dona, 404 se a devolução não existir.
+  try {
+    await requireDevolucaoOwnership({ id: user.id, role: role ?? "", email: "" }, devId);
+  } catch (e) {
+    const st = (e as { status?: number }).status ?? 403;
+    return NextResponse.json({ error: (e as Error).message }, { status: st });
+  }
 
   const raw = await req.json().catch(() => ({}));
   const parsed = DevolucaoPatchSchema.safeParse(raw);
@@ -173,13 +193,22 @@ export async function DELETE(
   if (!user) return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
 
   const role = await getUserRole(user.id);
-  if (!hasRole(role, ROLES_DEVOLUCAO)) {
+  if (!hasRole(role, ROLES_DEVOLUCAO_ABRIR)) {
     return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
   }
 
   const { id } = await params;
   const devId = Number(id);
   if (isNaN(devId)) return NextResponse.json({ error: "id invalido" }, { status: 400 });
+
+  // ESCOPO (só as vendas dela): consultora só acessa devolução da própria venda.
+  // Roles full passam direto. 403 se não for dona, 404 se a devolução não existir.
+  try {
+    await requireDevolucaoOwnership({ id: user.id, role: role ?? "", email: "" }, devId);
+  } catch (e) {
+    const st = (e as { status?: number }).status ?? 403;
+    return NextResponse.json({ error: (e as Error).message }, { status: st });
+  }
 
   try {
     await cancelarDevolucao(devId, user.id);

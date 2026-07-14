@@ -6,7 +6,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
+import { hasRole, ROLES_DEVOLUCAO_ABRIR } from "@/lib/roles";
+// Ownership: consultora só vê/comenta devolução da própria venda.
+import { requireDevolucaoOwnership } from "@/lib/auth-vendas";
 import { uploadFile } from "@/lib/storage";
 import {
   LIMITS,
@@ -37,13 +39,22 @@ export async function GET(
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-  if (!hasRole(await getUserRole(user.id), ROLES_DEVOLUCAO)) {
+  const role = await getUserRole(user.id);
+  if (!hasRole(role, ROLES_DEVOLUCAO_ABRIR)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
   const { id } = await params;
   const devId = parseInt(id);
   if (isNaN(devId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+
+  // ESCOPO (só as vendas dela): consultora só vê/comenta devolução da própria venda.
+  try {
+    await requireDevolucaoOwnership({ id: user.id, role: role ?? "", email: "" }, devId);
+  } catch (e) {
+    const st = (e as { status?: number }).status ?? 403;
+    return NextResponse.json({ error: (e as Error).message }, { status: st });
+  }
 
   const comentarios = await sql`
     SELECT c.id, c.texto, c.mencoes, c.autor_id, c.editado, c.editado_em, c.created_at,
@@ -65,13 +76,22 @@ export async function POST(
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-  if (!hasRole(await getUserRole(user.id), ROLES_DEVOLUCAO)) {
+  const role = await getUserRole(user.id);
+  if (!hasRole(role, ROLES_DEVOLUCAO_ABRIR)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
   const { id } = await params;
   const devId = parseInt(id);
   if (isNaN(devId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+
+  // ESCOPO (só as vendas dela): consultora só vê/comenta devolução da própria venda.
+  try {
+    await requireDevolucaoOwnership({ id: user.id, role: role ?? "", email: "" }, devId);
+  } catch (e) {
+    const st = (e as { status?: number }).status ?? 403;
+    return NextResponse.json({ error: (e as Error).message }, { status: st });
+  }
 
   const raw = await req.json().catch(() => ({}));
   const parsed = ComentarioPostSchema.safeParse(raw);
