@@ -1084,25 +1084,6 @@ export default function InventarioDetalhePage() {
   const excessoPecas  = itens.reduce((s, i) => s + (i.diferenca > 0 ? i.diferenca : 0), 0);
   const excessoSkus   = excessoCount;
 
-  // Veredito — resumo em uma linha (o operador entende numa olhada).
-  // "Falta" mostra o total e o detalhe (a menos + não contadas) entre parênteses.
-  const veredParts: string[] = [];
-  if (faltandoPecas > 0) {
-    const det = (faltandoContadasPecas > 0 && naoContadasPecas > 0)
-      ? ` (${faltandoContadasPecas} a menos + ${naoContadasPecas} não contadas)`
-      : naoContadasPecas > 0 ? ` (não contadas)` : "";
-    veredParts.push(`Falta ${faltandoPecas} peça${faltandoPecas > 1 ? "s" : ""}${det}`);
-  }
-  if (excessoPecas > 0) veredParts.push(`${excessoPecas} peça${excessoPecas > 1 ? "s" : ""} a mais`);
-  if (pendAbertas > 0) veredParts.push(`${pendAbertas} pendência${pendAbertas > 1 ? "s" : ""} aguardando`);
-  const veredTom: "alerta" | "atencao" | "ok" =
-    (faltandoPecas > 0 || pendAbertas > 0) ? "alerta"
-    : excessoPecas > 0 ? "atencao" : "ok";
-  const veredTexto = veredParts.length ? veredParts.join(" · ") : "Inventário sem divergências";
-  const veredStyle = veredTom === "alerta" ? { bg: "#FEF2F2", bd: "#FCA5A5", tx: "#991B1B" }
-    : veredTom === "atencao" ? { bg: "#EFF6FF", bd: "#BFDBFE", tx: "#1E40AF" }
-    : { bg: "#F0FDF4", bd: "#BBF7D0", tx: "#065F46" };
-
   // Categorias existentes NESTE inventário, com a contagem de cada uma —
   // vira o filtro de chips no topo (combinável com status/pendência/busca)
   const categorias = Array.from(new Set(
@@ -1273,30 +1254,7 @@ export default function InventarioDetalhePage() {
         </div>
       )}
 
-      {/* VEREDITO: resumo em uma linha (falta / excesso / sem contagem / pendências) */}
-      <div className="flex items-center gap-2 rounded-xl px-4 py-2.5 mb-4"
-        style={{ background: veredStyle.bg, border: `1px solid ${veredStyle.bd}`, color: veredStyle.tx }}>
-        {veredTom === "ok"
-          ? <CheckCircle size={16} className="shrink-0" />
-          : <AlertTriangle size={16} className="shrink-0" />}
-        <span className="text-sm font-medium">{veredTexto}</span>
-      </div>
-
-      {/* Progresso da contagem — barra fina e discreta (o total de etiquetas
-          lidas via app fica no Diagnóstico, lá embaixo, pra não poluir o topo) */}
-      <div className="mb-3">
-        <div className="text-xs text-gray-500 mb-1">Contagem: {contados}/{totalEsperado} itens</div>
-        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "#F3F0E8" }}>
-          <div className="h-full rounded-full transition-all"
-            style={{
-              width: totalEsperado ? `${Math.round((contados / totalEsperado) * 100)}%` : "0%",
-              background: contados === totalEsperado ? "#059669" : "#B45309",
-            }} />
-        </div>
-      </div>
-
-      {/* 4 cartões de MÉTRICA em contagem dupla peças×SKU. Faltando/Excesso
-          clicáveis = filtram a lista (clicar de novo limpa). */}
+      {/* 1) 4 cartões de MÉTRICA (peças×SKU) no topo. Faltando/Excesso clicáveis = filtram. */}
       <div className="flex gap-2 mb-3">
         <MetricCard label="Esperado" pecas={esperadoPecas} skus={totalEsperado} color="#184036" />
         <MetricCard label="Contado"  pecas={contadoPecas}  skus={contados}      color="#184036" />
@@ -1306,38 +1264,51 @@ export default function InventarioDetalhePage() {
           ativo={filtroStatus === "excesso"} onClick={() => setFiltroStatus(p => p === "excesso" ? null : "excesso")} />
       </div>
 
-      {/* Filtros numa linha: status que NÃO tem card (OK / Sem contagem / Fora —
-          Faltando e Excesso já são os cards clicáveis) + Categoria como seletor.
-          Clicar no chip ativo (✕) limpa; "Todas" no seletor limpa a categoria. */}
-      <div className="flex items-center gap-x-4 gap-y-2 flex-wrap mb-3">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <FiltroChip label="OK" count={okCount} ativo={filtroStatus === "ok"} color="#059669"
-            onClick={() => setFiltroStatus(p => p === "ok" ? null : "ok")} />
-          <FiltroChip label="Sem contagem" count={semContagem} ativo={filtroStatus === "pendente"} color="#6B7280"
-            onClick={() => setFiltroStatus(p => p === "pendente" ? null : "pendente")} />
-          {foraCount > 0 && (
-            <FiltroChip label="Fora do invent." count={foraCount} ativo={filtroStatus === "fora"} color="#7C3AED"
-              onClick={() => setFiltroStatus(p => p === "fora" ? null : "fora")} />
-          )}
-          <button onClick={() => setInfoStatusAberto(v => !v)}
-            className="shrink-0 text-gray-400 hover:text-gray-600 px-1"
-            title="O que significa cada status?">
-            <Info size={16} />
-          </button>
-        </div>
-        {categorias.length > 0 && (
+      {/* 2) Filtros de status que NÃO têm card (OK / Sem contagem / Fora).
+          Clicar no chip ativo (✕) limpa. */}
+      <div className="flex items-center gap-1.5 flex-wrap mb-2">
+        <FiltroChip label="OK" count={okCount} ativo={filtroStatus === "ok"} color="#059669"
+          onClick={() => setFiltroStatus(p => p === "ok" ? null : "ok")} />
+        <FiltroChip label="Sem contagem" count={semContagem} ativo={filtroStatus === "pendente"} color="#6B7280"
+          onClick={() => setFiltroStatus(p => p === "pendente" ? null : "pendente")} />
+        {foraCount > 0 && (
+          <FiltroChip label="Fora do invent." count={foraCount} ativo={filtroStatus === "fora"} color="#7C3AED"
+            onClick={() => setFiltroStatus(p => p === "fora" ? null : "fora")} />
+        )}
+        <button onClick={() => setInfoStatusAberto(v => !v)}
+          className="shrink-0 text-gray-400 hover:text-gray-600 px-1"
+          title="O que significa cada status?">
+          <Info size={16} />
+        </button>
+      </div>
+      {infoStatusAberto && <StatusInfoBox />}
+
+      {/* 3) Categoria (seletor) — linha abaixo dos filtros */}
+      {categorias.length > 0 && (
+        <div className="mb-3">
           <label className="flex items-center gap-1.5">
             <span className="text-xs font-semibold" style={{ color: "#7A5A4A" }}>Categoria</span>
             <select value={filtroCategoria ?? ""} onChange={e => setFiltroCategoria(e.target.value || null)}
-              className="text-sm border rounded-lg pl-2.5 pr-7 py-1.5 outline-none bg-white cursor-pointer max-w-[220px]"
+              className="text-sm border rounded-lg pl-2.5 pr-7 py-1.5 outline-none bg-white cursor-pointer max-w-[260px]"
               style={{ borderColor: "#E8DCC8", color: "#184036" }}>
               <option value="">Todas ({itens.length})</option>
               {categorias.map(cat => <option key={cat} value={cat}>{cat} ({contagemCategoria(cat)})</option>)}
             </select>
           </label>
-        )}
+        </div>
+      )}
+
+      {/* 4) Barra de contagem — abaixo da categoria (fina; total de etiquetas no Diagnóstico) */}
+      <div className="mb-4">
+        <div className="text-xs text-gray-500 mb-1">Contagem: {contados}/{totalEsperado} itens</div>
+        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "#F3F0E8" }}>
+          <div className="h-full rounded-full transition-all"
+            style={{
+              width: totalEsperado ? `${Math.round((contados / totalEsperado) * 100)}%` : "0%",
+              background: contados === totalEsperado ? "#059669" : "#B45309",
+            }} />
+        </div>
       </div>
-      {infoStatusAberto && <StatusInfoBox />}
 
       {/* Placar das pendências: aberta / resolvida / não resolvida.
           CLICÁVEL: filtra a lista pelo tipo (clicar de novo limpa) — é o caminho
