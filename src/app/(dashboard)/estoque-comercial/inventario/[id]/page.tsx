@@ -109,9 +109,15 @@ function fmtDate(d: string) {
   });
 }
 
-// Mostra só o final do EPC (24 dígitos é ilegível) — "…" + últimos 8
-function epcCurto(epc: string) {
-  return epc.length > 8 ? "…" + epc.slice(-8) : epc;
+// Nome legível a partir do e-mail (a auth só guarda o e-mail): "ytalo@..." -> "Ytalo",
+// "maria.silva@..." -> "Maria Silva". Assinatura fica limpa sem expor o e-mail.
+function nomeDoEmail(email: string | null | undefined): string {
+  if (!email) return "?";
+  const base = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+  if (!base) return "?";
+  return base.split(" ").filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 const STATUS_LABEL: Record<StatusItem, string> = {
@@ -266,7 +272,7 @@ function PecasChips({ item, epcs }: { item: ItemInventario; epcs: string[] }) {
           <div key={epc} className="flex items-center gap-2 px-2.5 py-1.5 text-[13px]"
             style={{ borderTop: i === 0 ? "none" : "1px solid #F1ECE1" }}>
             <span className="w-2 h-2 rounded-full shrink-0" style={{ background: "#059669" }} />
-            <span className="flex-1 min-w-0">peça {i + 1} · <span className="font-mono text-gray-500">chip {epcCurto(epc)}</span></span>
+            <span className="flex-1 min-w-0">peça {i + 1} · <span className="font-mono text-gray-500 break-all">chip {epc}</span></span>
             <span className="text-xs px-2 py-0.5 rounded-full shrink-0" style={{ background: "#D1FAE5", color: "#065F46" }}>lida</span>
           </div>
         ))}
@@ -410,7 +416,7 @@ function PendenciaPanel({
         )}
         {item.pendencia_obs && item.pendencia_registrada_em && (
           <p className="text-[11px] text-gray-400 mt-1">
-            Registrada por {item.pendencia_registrada_por_email ?? "?"} em {fmtDate(item.pendencia_registrada_em)}
+            Registrada por {nomeDoEmail(item.pendencia_registrada_por_email)} em {fmtDate(item.pendencia_registrada_em)}
           </p>
         )}
       </div>
@@ -605,7 +611,7 @@ function PendenciaPanel({
               {item.pendencia_resolucao_obs && <p className="mt-0.5">{item.pendencia_resolucao_obs}</p>}
               {item.pendencia_resolvida_em && (
                 <p className="text-[11px] text-gray-400 mt-1">
-                  Respondida por {item.pendencia_resolvida_por_email ?? "?"} em {fmtDate(item.pendencia_resolvida_em)}
+                  Respondida por {nomeDoEmail(item.pendencia_resolvida_por_email)} em {fmtDate(item.pendencia_resolvida_em)}
                 </p>
               )}
               {podeEditar && (
@@ -1060,27 +1066,18 @@ export default function InventarioDetalhePage() {
   //   tamanho real da falta. Tudo derivado do que a API já devolve.
   const esperadoPecas = itens.reduce((s, i) => s + i.quantidade_sistema, 0);
   const contadoPecas  = itens.reduce((s, i) => s + (i.quantidade_contada ?? 0), 0);
-  // Faltando conta SÓ itens contados (diferenca<0 com contagem). Item sem
-  // contagem é categoria própria ("Sem contagem") — não vira "falta", senão
-  // duplicaria (o card Faltando mostraria peças de um conjunto e SKUs de outro).
-  const faltandoPecas = itens.reduce((s, i) => s + (i.quantidade_contada !== null && i.diferenca < 0 ? -i.diferenca : 0), 0);
-  const foraPecas     = excedentesForaInventario.reduce((s, e) => s + e.quantidade, 0);
-  const excessoPecas  = itens.reduce((s, i) => s + (i.diferenca > 0 ? i.diferenca : 0), 0) + foraPecas;
-  const excessoSkusTotal = excessoCount + foraCount;
-
-  // Veredito — resumo em uma linha (o operador entende numa olhada)
-  const veredParts: string[] = [];
-  if (faltandoPecas > 0) veredParts.push(`Falta ${faltandoPecas} peça${faltandoPecas > 1 ? "s" : ""}`);
-  if (excessoPecas > 0) veredParts.push(`${excessoPecas} peça${excessoPecas > 1 ? "s" : ""} a mais`);
-  if (semContagem > 0) veredParts.push(`${semContagem} sem contagem`);
-  if (pendAbertas > 0) veredParts.push(`${pendAbertas} pendência${pendAbertas > 1 ? "s" : ""} aguardando`);
-  const veredTom: "alerta" | "atencao" | "ok" =
-    (faltandoPecas > 0 || semContagem > 0 || pendAbertas > 0) ? "alerta"
-    : excessoPecas > 0 ? "atencao" : "ok";
-  const veredTexto = veredParts.length ? veredParts.join(" · ") : "Inventário sem divergências";
-  const veredStyle = veredTom === "alerta" ? { bg: "#FEF2F2", bd: "#FCA5A5", tx: "#991B1B" }
-    : veredTom === "atencao" ? { bg: "#EFF6FF", bd: "#BFDBFE", tx: "#1E40AF" }
-    : { bg: "#F0FDF4", bd: "#BBF7D0", tx: "#065F46" };
+  // FALTANDO = peças esperadas NÃO encontradas = contadas A MENOS + NUNCA contadas.
+  //   (regra do Jonathan 13/07: item sem contagem = peça não encontrada. Antes o
+  //    card mostrava só as "a menos" e escondia as nunca contadas, subestimando a
+  //    falta.) O "Sem contagem" segue como filtro/seção pra achar o que falta contar.
+  const faltandoContadasPecas = itens.reduce((s, i) => s + (i.quantidade_contada !== null && i.diferenca < 0 ? -i.diferenca : 0), 0);
+  const naoContadasPecas      = itens.reduce((s, i) => s + (i.quantidade_contada === null ? i.quantidade_sistema : 0), 0);
+  const faltandoPecas = faltandoContadasPecas + naoContadasPecas;
+  const faltandoSkus  = itens.filter(i => i.quantidade_sistema > (i.quantidade_contada ?? 0)).length;
+  // EXCESSO = só peças contadas A MAIS de itens DA LISTA. O "fora do inventário"
+  //   (etiqueta de produto que nem está na lista) tem seção/filtro próprios.
+  const excessoPecas  = itens.reduce((s, i) => s + (i.diferenca > 0 ? i.diferenca : 0), 0);
+  const excessoSkus   = excessoCount;
 
   // Categorias existentes NESTE inventário, com a contagem de cada uma —
   // vira o filtro de chips no topo (combinável com status/pendência/busca)
@@ -1106,7 +1103,13 @@ export default function InventarioDetalhePage() {
     return i.pendencia_resolvida === false;
   };
   const matchCategoria = (i: ItemInventario): boolean => !filtroCategoria || i.categoria_produto === filtroCategoria;
-  const matchStatus = (i: ItemInventario): boolean => !filtroStatus || getStatus(i) === filtroStatus;
+  // "Faltando" (card) mostra faltando + sem contagem (ambos = peças não
+  // encontradas). O chip "Sem contagem" filtra só as nunca contadas (subconjunto).
+  const matchStatus = (i: ItemInventario): boolean => {
+    if (!filtroStatus) return true;
+    if (filtroStatus === "faltando") { const st = getStatus(i); return st === "faltando" || st === "pendente"; }
+    return getStatus(i) === filtroStatus;
+  };
   const filtro = busca.trim().toLowerCase();
   const itensFiltrados = itens.filter(i =>
     matchPendencia(i) && matchCategoria(i) && matchStatus(i) &&
@@ -1135,7 +1138,7 @@ export default function InventarioDetalhePage() {
     (!filtroCategoria || e.categoria_produto === filtroCategoria) &&
     (!filtro || e.sku.toLowerCase().includes(filtro) || e.nome_produto.toLowerCase().includes(filtro))
   );
-  const mostraForaInventario = filtroStatus === null || filtroStatus === "excesso" || filtroStatus === "fora";
+  const mostraForaInventario = filtroStatus === null || filtroStatus === "fora";
 
   const statusMap: Record<string, { label: string; bg: string; txt: string }> = {
     aberto:      { label: "Aberto",      bg: "#DBEAFE", txt: "#1E40AF" },
@@ -1177,12 +1180,12 @@ export default function InventarioDetalhePage() {
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {inventario.local_nome} &middot; aberto em {fmtDate(inventario.data_abertura)}
-            {inventario.criado_por_email ? ` por ${inventario.criado_por_email}` : ""}
+            {inventario.criado_por_email ? ` por ${nomeDoEmail(inventario.criado_por_email)}` : ""}
           </p>
           {inventario.status === "concluido" && inventario.data_conclusao && (
             <p className="text-sm text-gray-500">
               Concluído em {fmtDate(inventario.data_conclusao)}
-              {inventario.concluido_por_email ? ` por ${inventario.concluido_por_email}` : ""}
+              {inventario.concluido_por_email ? ` por ${nomeDoEmail(inventario.concluido_por_email)}` : ""}
             </p>
           )}
           <div className="flex gap-1.5 mt-1.5 flex-wrap">
@@ -1229,7 +1232,7 @@ export default function InventarioDetalhePage() {
           style={{ background: "#FEE2E2", color: "#991B1B" }}>
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
           <span>
-            Cancelado{inventario.cancelado_por_email ? ` por ${inventario.cancelado_por_email}` : ""}
+            Cancelado{inventario.cancelado_por_email ? ` por ${nomeDoEmail(inventario.cancelado_por_email)}` : ""}
             {inventario.data_conclusao ? ` em ${fmtDate(inventario.data_conclusao)}` : ""}.
             {inventario.motivo_cancelamento ? ` Motivo: ${inventario.motivo_cancelamento}` : ""}
           </span>
@@ -1246,46 +1249,19 @@ export default function InventarioDetalhePage() {
         </div>
       )}
 
-      {/* VEREDITO: resumo em uma linha (falta / excesso / sem contagem / pendências) */}
-      <div className="flex items-center gap-2 rounded-xl px-4 py-2.5 mb-4"
-        style={{ background: veredStyle.bg, border: `1px solid ${veredStyle.bd}`, color: veredStyle.tx }}>
-        {veredTom === "ok"
-          ? <CheckCircle size={16} className="shrink-0" />
-          : <AlertTriangle size={16} className="shrink-0" />}
-        <span className="text-sm font-medium">{veredTexto}</span>
-      </div>
-
-      {/* Progresso da contagem */}
-      <div className="mb-3">
-        <div className="flex justify-between text-xs text-gray-500 mb-1">
-          <span>Contagem: {contados}/{totalEsperado} itens</span>
-          <span>{totalLeituras} etiqueta(s) lida(s) via app</span>
-        </div>
-        <div className="h-2 rounded-full overflow-hidden" style={{ background: "#F3F0E8" }}>
-          <div className="h-full rounded-full transition-all"
-            style={{
-              width: totalEsperado ? `${Math.round((contados / totalEsperado) * 100)}%` : "0%",
-              background: contados === totalEsperado ? "#059669" : "#B45309",
-            }} />
-        </div>
-      </div>
-
-      {/* 4 cartões de MÉTRICA em contagem dupla peças×SKU. Faltando/Excesso
-          clicáveis = filtram a lista (clicar de novo limpa). */}
+      {/* 1) 4 cartões de MÉTRICA (peças×SKU) no topo. Faltando/Excesso clicáveis = filtram. */}
       <div className="flex gap-2 mb-3">
         <MetricCard label="Esperado" pecas={esperadoPecas} skus={totalEsperado} color="#184036" />
         <MetricCard label="Contado"  pecas={contadoPecas}  skus={contados}      color="#184036" />
-        <MetricCard label="Faltando" pecas={faltandoPecas} skus={faltandoCount} color="#DC2626"
+        <MetricCard label="Faltando" pecas={faltandoPecas} skus={faltandoSkus} color="#DC2626"
           ativo={filtroStatus === "faltando"} onClick={() => setFiltroStatus(p => p === "faltando" ? null : "faltando")} />
-        <MetricCard label="Excesso"  pecas={excessoPecas}  skus={excessoSkusTotal} color="#2563EB"
+        <MetricCard label="Excesso"  pecas={excessoPecas}  skus={excessoSkus} color="#2563EB"
           ativo={filtroStatus === "excesso"} onClick={() => setFiltroStatus(p => p === "excesso" ? null : "excesso")} />
       </div>
 
-      {/* Faixa ÚNICA de filtros: status (OK/Sem contagem/Fora) + categoria +
-          placar de pendências, tudo junto e calmo (era um muro empilhado). */}
+      {/* 2) Filtros de status que NÃO têm card (OK / Sem contagem / Fora).
+          Clicar no chip ativo (✕) limpa. */}
       <div className="flex items-center gap-1.5 flex-wrap mb-2">
-        <span className="text-xs font-semibold shrink-0" style={{ color: "#7A5A4A" }}>Filtrar:</span>
-        <FiltroChip label="Tudo" ativo={filtroStatus === null} onClick={() => setFiltroStatus(null)} />
         <FiltroChip label="OK" count={okCount} ativo={filtroStatus === "ok"} color="#059669"
           onClick={() => setFiltroStatus(p => p === "ok" ? null : "ok")} />
         <FiltroChip label="Sem contagem" count={semContagem} ativo={filtroStatus === "pendente"} color="#6B7280"
@@ -1301,6 +1277,33 @@ export default function InventarioDetalhePage() {
         </button>
       </div>
       {infoStatusAberto && <StatusInfoBox />}
+
+      {/* 3) Categoria (seletor) — linha abaixo dos filtros */}
+      {categorias.length > 0 && (
+        <div className="mb-3">
+          <label className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold" style={{ color: "#7A5A4A" }}>Categoria</span>
+            <select value={filtroCategoria ?? ""} onChange={e => setFiltroCategoria(e.target.value || null)}
+              className="text-sm border rounded-lg pl-2.5 pr-7 py-1.5 outline-none bg-white cursor-pointer max-w-[260px]"
+              style={{ borderColor: "#E8DCC8", color: "#184036" }}>
+              <option value="">Todas ({itens.length})</option>
+              {categorias.map(cat => <option key={cat} value={cat}>{cat} ({contagemCategoria(cat)})</option>)}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {/* 4) Barra de contagem em PEÇAS (unidades, não SKUs) — abaixo da categoria */}
+      <div className="mb-4">
+        <div className="text-xs text-gray-500 mb-1">Contagem: {contadoPecas}/{esperadoPecas} peças</div>
+        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "#F3F0E8" }}>
+          <div className="h-full rounded-full transition-all"
+            style={{
+              width: esperadoPecas ? `${Math.min(100, Math.round((contadoPecas / esperadoPecas) * 100))}%` : "0%",
+              background: contadoPecas >= esperadoPecas ? "#059669" : "#B45309",
+            }} />
+        </div>
+      </div>
 
       {/* Placar das pendências: aberta / resolvida / não resolvida.
           CLICÁVEL: filtra a lista pelo tipo (clicar de novo limpa) — é o caminho
@@ -1337,30 +1340,6 @@ export default function InventarioDetalhePage() {
               {pendNaoResolvidas} não resolvida(s){filtroPendencia === "nao_resolvida" ? " ✕" : ""}
             </button>
           )}
-        </div>
-      )}
-
-      {/* Filtro por categoria: chips com as categorias que EXISTEM neste
-          inventário — clicável, combina com status/pendência/busca */}
-      {categorias.length > 0 && (
-        <div className="mb-2 flex gap-1.5 flex-wrap items-center">
-          <span className="text-xs font-semibold shrink-0" style={{ color: "#7A5A4A" }}>Categoria:</span>
-          <button onClick={() => setFiltroCategoria(null)}
-            className="text-xs px-2.5 py-1 rounded-full font-medium"
-            style={!filtroCategoria
-              ? { background: "#184036", color: "#fff" }
-              : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
-            Todas <span style={{ opacity: 0.65 }}>({itens.length})</span>
-          </button>
-          {categorias.map(cat => (
-            <button key={cat} onClick={() => setFiltroCategoria(prev => prev === cat ? null : cat)}
-              className="text-xs px-2.5 py-1 rounded-full font-medium"
-              style={filtroCategoria === cat
-                ? { background: "#184036", color: "#fff" }
-                : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
-              {cat} <span style={{ opacity: 0.65 }}>({contagemCategoria(cat)})</span>
-            </button>
-          ))}
         </div>
       )}
 

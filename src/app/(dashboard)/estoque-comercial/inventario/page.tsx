@@ -68,7 +68,9 @@ export default function InventarioPage() {
   const [customDe,  setCustomDe]  = useState("");
   const [customAte, setCustomAte] = useState("");
   const [situacao,  setSituacao]  = useState<"aberto" | "concluido" | "cancelado" | null>(null);
-  const POR_PAGINA = 10;
+  const [local,      setLocal]     = useState<number | null>(null);
+  const [locaisDisp, setLocaisDisp] = useState<{ id: number; nome: string }[]>([]);
+  const POR_PAGINA = 5;
   const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));
 
 
@@ -78,6 +80,7 @@ export default function InventarioPage() {
       const params = new URLSearchParams();
       params.set("pagina", String(pagina));
       if (situacao) params.set("situacao", situacao);
+      if (local) params.set("local", String(local));
       // Intervalo de datas (data de abertura) conforme o período escolhido
       const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       const hoje = new Date();
@@ -90,12 +93,13 @@ export default function InventarioPage() {
 
       const r = await fetch(`/api/estoque-comercial/inventario?${params.toString()}`);
       if (r.ok) {
-        const d = await r.json() as { items: Inventario[]; total: number };
+        const d = await r.json() as { items: Inventario[]; total: number; locaisDisponiveis?: { id: number; nome: string }[] };
         setItems(d.items ?? []);
         setTotal(d.total ?? 0);
+        if (d.locaisDisponiveis) setLocaisDisp(d.locaisDisponiveis);
       }
     } finally { setLoading(false); }
-  }, [pagina, situacao, periodo, customDe, customAte]);
+  }, [pagina, situacao, local, periodo, customDe, customAte]);
 
   const fetchLocais = useCallback(async () => {
     try {
@@ -181,7 +185,8 @@ export default function InventarioPage() {
         </div>
       </div>
 
-      {/* Filtro de PERÍODO (pela data de abertura) — muda o filtro volta pra pág. 1 */}
+      {/* PERÍODO em chips (filtro mais usado — 1 clique; padrão de período do ERP).
+          Mudar qualquer filtro volta pra página 1. */}
       <div className="mb-2 flex gap-1.5 flex-wrap items-center">
         <span className="text-xs font-semibold shrink-0 w-16" style={{ color: "#7A5A4A" }}>Período</span>
         {([["todos", "Todos"], ["hoje", "Hoje"], ["ontem", "Ontem"], ["mes", "Este mês"], ["custom", "Personalizado"]] as const).map(([v, label]) => (
@@ -198,24 +203,36 @@ export default function InventarioPage() {
         <div className="mb-2 flex gap-2 items-center flex-wrap" style={{ marginLeft: "4.5rem" }}>
           <span className="text-xs text-gray-400">de</span>
           <input type="date" value={customDe} onChange={e => { setCustomDe(e.target.value); setPagina(1); }}
-            className="text-xs border rounded-lg px-2 py-1 outline-none" style={{ borderColor: "#E8DCC8" }} />
+            className="text-sm border rounded-lg px-2 py-1.5 outline-none" style={{ borderColor: "#E8DCC8" }} />
           <span className="text-xs text-gray-400">até</span>
           <input type="date" value={customAte} onChange={e => { setCustomAte(e.target.value); setPagina(1); }}
-            className="text-xs border rounded-lg px-2 py-1 outline-none" style={{ borderColor: "#E8DCC8" }} />
+            className="text-sm border rounded-lg px-2 py-1.5 outline-none" style={{ borderColor: "#E8DCC8" }} />
         </div>
       )}
-      {/* Filtro de SITUAÇÃO (Aberto inclui "Em contagem") */}
-      <div className="mb-5 flex gap-1.5 flex-wrap items-center">
-        <span className="text-xs font-semibold shrink-0 w-16" style={{ color: "#7A5A4A" }}>Situação</span>
-        {([[null, "Todas"], ["aberto", "Aberto"], ["concluido", "Concluído"], ["cancelado", "Cancelado"]] as const).map(([v, label]) => (
-          <button key={label} onClick={() => { setSituacao(v); setPagina(1); }}
-            className="text-xs px-2.5 py-1 rounded-full font-medium"
-            style={situacao === v
-              ? { background: "#184036", color: "#fff" }
-              : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
-            {label}
-          </button>
-        ))}
+      {/* LOCAL + SITUAÇÃO em seletores compactos, na linha de baixo (secundários) */}
+      <div className="mb-5 flex gap-x-5 gap-y-2 flex-wrap items-center">
+        {locaisDisp.length > 0 && (
+          <label className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold" style={{ color: "#7A5A4A" }}>Local</span>
+            <select value={local ?? ""} onChange={e => { setLocal(e.target.value ? Number(e.target.value) : null); setPagina(1); }}
+              className="text-sm border rounded-lg pl-2.5 pr-7 py-1.5 outline-none bg-white cursor-pointer"
+              style={{ borderColor: "#E8DCC8", color: "#184036" }}>
+              <option value="">Todos</option>
+              {locaisDisp.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+            </select>
+          </label>
+        )}
+        <label className="flex items-center gap-1.5">
+          <span className="text-xs font-semibold" style={{ color: "#7A5A4A" }}>Situação</span>
+          <select value={situacao ?? ""} onChange={e => { setSituacao((e.target.value || null) as typeof situacao); setPagina(1); }}
+            className="text-sm border rounded-lg pl-2.5 pr-7 py-1.5 outline-none bg-white cursor-pointer"
+            style={{ borderColor: "#E8DCC8", color: "#184036" }}>
+            <option value="">Todas</option>
+            <option value="aberto">Aberto</option>
+            <option value="concluido">Concluído</option>
+            <option value="cancelado">Cancelado</option>
+          </select>
+        </label>
       </div>
 
       {loading ? (
