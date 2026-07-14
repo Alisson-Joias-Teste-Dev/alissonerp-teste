@@ -36,6 +36,17 @@ export const ROLES_APROVAR_CREDITO = [...ROLES_FULL_ACCESS, "gerente_loja"] as c
 // Roles que podem abrir/gerenciar devoluções, vale-troca e reembolsos
 export const ROLES_DEVOLUCAO = ["admin", "desenvolvedor", "diretor", "gerente_loja"] as const;
 
+// REGRA DE NEGÓCIO: roles que podem ABRIR/solicitar uma devolução (fase inicial do fluxo).
+// O QUE: além de quem GERENCIA (ROLES_DEVOLUCAO), a consultora pode criar a devolução
+//   da PRÓPRIA venda e mandar pra aprovação — mas NÃO aprova/inspeciona/conclui
+//   (isso gera vale-troca/estorno/reembolso e continua restrito a ROLES_DEVOLUCAO).
+//   Por isso é uma lista SEPARADA: não vaza vale-troca nem autorização de pagamento,
+//   que também usam ROLES_DEVOLUCAO.
+// POR QUE: a vendedora abre a devolução da cliente dela sem depender do gerente estar junto.
+// IMPACTO SE REMOVIDO: consultora perde acesso a abrir/ver devolução (403) e o menu some.
+// OBS: o escopo "só as vendas dela" é garantido nas rotas via ownership (auth-vendas.ts).
+export const ROLES_DEVOLUCAO_ABRIR = [...ROLES_DEVOLUCAO, "consultora"] as const;
+
 // Roles que podem gerenciar o módulo fiscal (emitentes, regras, dados fiscais, emitir notas)
 export const ROLES_FISCAL = [
   ...ROLES_FULL_ACCESS,

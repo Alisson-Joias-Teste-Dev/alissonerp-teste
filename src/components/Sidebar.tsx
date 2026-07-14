@@ -60,7 +60,7 @@ import PerfilDrawer from "./PerfilDrawer";
 import { useAuth } from "@/hooks/useAuth";
 import { createClient } from "@/lib/supabase/client";
 import { getMenuGroupsForRole, getMenuGroupsForModulos, type MenuGroup, type MenuEntry, type MenuItem } from "@/lib/auth/permissions";
-import { ROLES_SERVICE_PANEL, ROLES_METAL } from "@/lib/roles";
+import { ROLES_SERVICE_PANEL, ROLES_METAL, ROLES_DEVOLUCAO_ABRIR, hasRole } from "@/lib/roles";
 import UserAvatar from "@/components/UserAvatar";
 import { useSidebar } from "@/contexts/SidebarContext";
 
@@ -152,6 +152,13 @@ export default function Sidebar() {
   const hasCrediario = role && ROLES_CREDIARIO_SIDEBAR.includes(role);
   const hasEntregasVenda = role && ROLES_ENTREGAS_VENDA.includes(role);
   const hasMovimentacaoInterna = role && ROLES_MOVIMENTACAO_INTERNA.includes(role);
+  // REGRA DE NEGÓCIO: consultora abre devolução da PRÓPRIA venda (ROLES_DEVOLUCAO_ABRIR).
+  // O QUE: injeta o módulo `devolucoes` no menu da consultora (padrão do Metal),
+  //   já que /devolucoes não é gateado pelo proxy nem consta em role_permissoes.
+  // POR QUE: sem isso o menu Devoluções sumiria pra consultora apesar da API já liberar.
+  // IMPACTO SE REMOVIDO: consultora não acha o menu Devoluções.
+  // OBS: NÃO injeta vale_troca — consultora abre devolução mas não mexe em vale-troca.
+  const hasDevolucao = hasRole(role, ROLES_DEVOLUCAO_ABRIR);
   const modulosEfetivos = [...modulos_leitura];
   if (modulosEfetivos.length > 0) {
     if (hasServicePanel && !modulosEfetivos.includes("service_painel")) modulosEfetivos.push("service_painel");
@@ -172,6 +179,7 @@ export default function Sidebar() {
     if (hasMetal && !modulosEfetivos.includes("metal")) modulosEfetivos.push("metal");
     if (hasEntregasVenda && !modulosEfetivos.includes("entregas_venda")) modulosEfetivos.push("entregas_venda");
     if (hasMovimentacaoInterna && !modulosEfetivos.includes("movimentacao_interna")) modulosEfetivos.push("movimentacao_interna");
+    if (hasDevolucao && !modulosEfetivos.includes("devolucoes")) modulosEfetivos.push("devolucoes");
   }
 
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)

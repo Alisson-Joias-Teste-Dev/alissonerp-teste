@@ -10,6 +10,7 @@ import {
 import NotaFiscalStatusBadge from "@/components/fiscal/NotaFiscalStatusBadge";
 import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 import ComentariosOrdem from "@/components/ComentariosOrdem";
+import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
 
 const C = {
   esmeralda:   "#184036",
@@ -153,7 +154,10 @@ interface Props { id: number; role: string; }
 
 export default function DevolucaoDetalheClient({ id, role }: Props) {
   const router = useRouter();
-  void role;
+  // REGRA DE NEGÓCIO: só quem GERENCIA (admin/dev/diretor/gerente_loja) inspeciona,
+  // conclui e emite NF-e da devolução. A consultora abre/solicita e acompanha, mas
+  // NÃO vê esses botões. É só UX — o backend também bloqueia (403) essas ações.
+  const podeGerenciar = hasRole(role, ROLES_DEVOLUCAO);
 
   const [dev, setDev] = useState<Devolucao | null>(null);
   const [loading, setLoading] = useState(true);
@@ -434,7 +438,7 @@ export default function DevolucaoDetalheClient({ id, role }: Props) {
             <tbody>
               {dev.itens.map((it) => {
                 const cc = CONDICAO_COLOR[it.condicao] ?? CONDICAO_COLOR.pendente;
-                const podeInspecionar = dev.status === "aprovado" && it.condicao === "pendente";
+                const podeInspecionar = podeGerenciar && dev.status === "aprovado" && it.condicao === "pendente";
                 return (
                   <tr key={it.id} className="border-t" style={{ borderColor: C.cremeBorder }}>
                     <td className="px-3 py-2.5" style={{ color: "#1A1A1A" }}>
@@ -631,7 +635,7 @@ export default function DevolucaoDetalheClient({ id, role }: Props) {
               </button>
             </>
           )}
-          {dev.status === "aprovado" && todosInspecionados && (
+          {podeGerenciar && dev.status === "aprovado" && todosInspecionados && (
             <button
               onClick={concluir}
               disabled={updating}
@@ -642,7 +646,7 @@ export default function DevolucaoDetalheClient({ id, role }: Props) {
               Enviar p/ Aprovação do Estoque
             </button>
           )}
-          {dev.status === "aprovado" && !todosInspecionados && (
+          {podeGerenciar && dev.status === "aprovado" && !todosInspecionados && (
             <p className="text-xs" style={{ color: "#9CA3AF" }}>
               Inspecione todos os itens antes de enviar ao estoque. <ArrowRight size={12} className="inline" />
             </p>
@@ -677,7 +681,7 @@ export default function DevolucaoDetalheClient({ id, role }: Props) {
                 Ver detalhes
               </button>
             </div>
-          ) : (
+          ) : podeGerenciar ? (
             <div>
               {nfeError && <p className="text-red-600 text-sm mb-2">{nfeError}</p>}
               <button
@@ -690,7 +694,7 @@ export default function DevolucaoDetalheClient({ id, role }: Props) {
                 {emitindoNfe ? "Emitindo..." : "Emitir NF-e"}
               </button>
             </div>
-          )}
+          ) : null}
         </div>
       )}
 
