@@ -185,65 +185,54 @@ export default function InventarioPage() {
         </div>
       </div>
 
-      {/* Filtro de PERÍODO (pela data de abertura) — muda o filtro volta pra pág. 1 */}
-      <div className="mb-2 flex gap-1.5 flex-wrap items-center">
-        <span className="text-xs font-semibold shrink-0 w-16" style={{ color: "#7A5A4A" }}>Período</span>
-        {([["todos", "Todos"], ["hoje", "Hoje"], ["ontem", "Ontem"], ["mes", "Este mês"], ["custom", "Personalizado"]] as const).map(([v, label]) => (
-          <button key={v} onClick={() => { setPeriodo(v); setPagina(1); }}
-            className="text-xs px-2.5 py-1 rounded-full font-medium"
-            style={periodo === v
-              ? { background: "#184036", color: "#fff" }
-              : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
-            {label}
-          </button>
-        ))}
+      {/* Filtros COMPACTOS numa linha só: Período · Local · Situação.
+          Mudar qualquer filtro volta pra página 1. */}
+      <div className={`${periodo === "custom" ? "mb-2" : "mb-5"} flex gap-x-5 gap-y-2 flex-wrap items-center`}>
+        <label className="flex items-center gap-1.5">
+          <span className="text-xs font-semibold" style={{ color: "#7A5A4A" }}>Período</span>
+          <select value={periodo} onChange={e => { setPeriodo(e.target.value as typeof periodo); setPagina(1); }}
+            className="text-sm border rounded-lg pl-2.5 pr-7 py-1.5 outline-none bg-white cursor-pointer"
+            style={{ borderColor: "#E8DCC8", color: "#184036" }}>
+            <option value="todos">Todos</option>
+            <option value="hoje">Hoje</option>
+            <option value="ontem">Ontem</option>
+            <option value="mes">Este mês</option>
+            <option value="custom">Personalizado</option>
+          </select>
+        </label>
+        {locaisDisp.length > 0 && (
+          <label className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold" style={{ color: "#7A5A4A" }}>Local</span>
+            <select value={local ?? ""} onChange={e => { setLocal(e.target.value ? Number(e.target.value) : null); setPagina(1); }}
+              className="text-sm border rounded-lg pl-2.5 pr-7 py-1.5 outline-none bg-white cursor-pointer"
+              style={{ borderColor: "#E8DCC8", color: "#184036" }}>
+              <option value="">Todos</option>
+              {locaisDisp.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+            </select>
+          </label>
+        )}
+        <label className="flex items-center gap-1.5">
+          <span className="text-xs font-semibold" style={{ color: "#7A5A4A" }}>Situação</span>
+          <select value={situacao ?? ""} onChange={e => { setSituacao((e.target.value || null) as typeof situacao); setPagina(1); }}
+            className="text-sm border rounded-lg pl-2.5 pr-7 py-1.5 outline-none bg-white cursor-pointer"
+            style={{ borderColor: "#E8DCC8", color: "#184036" }}>
+            <option value="">Todas</option>
+            <option value="aberto">Aberto</option>
+            <option value="concluido">Concluído</option>
+            <option value="cancelado">Cancelado</option>
+          </select>
+        </label>
       </div>
       {periodo === "custom" && (
-        <div className="mb-2 flex gap-2 items-center flex-wrap" style={{ marginLeft: "4.5rem" }}>
+        <div className="mb-5 flex gap-2 items-center flex-wrap">
           <span className="text-xs text-gray-400">de</span>
           <input type="date" value={customDe} onChange={e => { setCustomDe(e.target.value); setPagina(1); }}
-            className="text-xs border rounded-lg px-2 py-1 outline-none" style={{ borderColor: "#E8DCC8" }} />
+            className="text-sm border rounded-lg px-2 py-1.5 outline-none" style={{ borderColor: "#E8DCC8" }} />
           <span className="text-xs text-gray-400">até</span>
           <input type="date" value={customAte} onChange={e => { setCustomAte(e.target.value); setPagina(1); }}
-            className="text-xs border rounded-lg px-2 py-1 outline-none" style={{ borderColor: "#E8DCC8" }} />
+            className="text-sm border rounded-lg px-2 py-1.5 outline-none" style={{ borderColor: "#E8DCC8" }} />
         </div>
       )}
-      {/* Filtro de LOCAL de estoque (só os locais que têm inventário) */}
-      {locaisDisp.length > 0 && (
-        <div className="mb-2 flex gap-1.5 flex-wrap items-center">
-          <span className="text-xs font-semibold shrink-0 w-16" style={{ color: "#7A5A4A" }}>Local</span>
-          <button onClick={() => { setLocal(null); setPagina(1); }}
-            className="text-xs px-2.5 py-1 rounded-full font-medium"
-            style={local === null
-              ? { background: "#184036", color: "#fff" }
-              : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
-            Todos
-          </button>
-          {locaisDisp.map(l => (
-            <button key={l.id} onClick={() => { setLocal(l.id); setPagina(1); }}
-              className="text-xs px-2.5 py-1 rounded-full font-medium"
-              style={local === l.id
-                ? { background: "#184036", color: "#fff" }
-                : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
-              {l.nome}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Filtro de SITUAÇÃO (Aberto inclui "Em contagem") */}
-      <div className="mb-5 flex gap-1.5 flex-wrap items-center">
-        <span className="text-xs font-semibold shrink-0 w-16" style={{ color: "#7A5A4A" }}>Situação</span>
-        {([[null, "Todas"], ["aberto", "Aberto"], ["concluido", "Concluído"], ["cancelado", "Cancelado"]] as const).map(([v, label]) => (
-          <button key={label} onClick={() => { setSituacao(v); setPagina(1); }}
-            className="text-xs px-2.5 py-1 rounded-full font-medium"
-            style={situacao === v
-              ? { background: "#184036", color: "#fff" }
-              : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
-            {label}
-          </button>
-        ))}
-      </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">

@@ -65,10 +65,10 @@ export async function GET(req: NextRequest) {
       i.created_at, i.categoria,
       uc.email AS criado_por_email,
       uf.email AS concluido_por_email,
-      -- PEÇA = unidades (o que a lista EXIBE); pecas_divergentes = peças que NÃO
-      -- batem = |esperado − contado| por item, INCLUINDO as nunca contadas (mesma
-      -- regra do "Faltando" do detalhe — não conta 'contada' como 0). Sem o filtro
-      -- de "peça pronta" do detalhe (custo alto na lista).
+      -- PEÇA = unidades (o que a lista EXIBE). pecas_divergentes = diferença das
+      -- CONTADAS (a menos + a mais) + as NUNCA contadas SÓ se concluído (em aberto
+      -- não é divergência, é contagem pendente). Sem o filtro de "peça pronta" do
+      -- detalhe (custo alto na lista) — pode diferir um pouco do detalhe.
       agg.total_itens, agg.itens_contados, agg.itens_divergentes,
       agg.pecas_esperadas, agg.pecas_contadas, agg.pecas_divergentes
     FROM (
@@ -88,7 +88,15 @@ export async function GET(req: NextRequest) {
         COUNT(*) FILTER (WHERE ii.quantidade_contada IS NOT NULL AND ii.diferenca != 0)::int AS itens_divergentes,
         COALESCE(SUM(ii.quantidade_sistema), 0)::int                    AS pecas_esperadas,
         COALESCE(SUM(ii.quantidade_contada), 0)::int                    AS pecas_contadas,
-        COALESCE(SUM(ABS(ii.quantidade_sistema - COALESCE(ii.quantidade_contada, 0))), 0)::int AS pecas_divergentes
+        (
+          -- divergência das CONTADAS (a menos + a mais) — vale em qualquer status
+          COALESCE(SUM(ABS(ii.quantidade_sistema - ii.quantidade_contada)) FILTER (WHERE ii.quantidade_contada IS NOT NULL), 0)
+          -- + nunca contadas SÓ quando CONCLUÍDO (em aberto = ainda não contou, não
+          --   é divergência; senão a lista mostrava falso alarme em inventário aberto)
+          + CASE WHEN i.status = 'concluido'
+                 THEN COALESCE(SUM(ii.quantidade_sistema) FILTER (WHERE ii.quantidade_contada IS NULL), 0)
+                 ELSE 0 END
+        )::int AS pecas_divergentes
       FROM alissonerp.itens_inventario_comercial ii
       WHERE ii.inventario_id = i.id
     ) agg ON true
