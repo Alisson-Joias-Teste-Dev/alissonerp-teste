@@ -745,11 +745,13 @@ function ItemRow({
               🔍 há pistas — abra para investigar
             </p>
           ) : null}
-          {/* Valor (RESTRITO): unitário + total da quantidade deste SKU. Total usa
-              a qtd contada (o que está em mãos); sem contagem, cai na do sistema. */}
+          {/* Valor + peso (RESTRITO): unitário e total da quantidade deste SKU. O
+              total usa a qtd contada (o que está em mãos); sem contagem, a do sistema. */}
           {podeVerValores && valorInfo && (
             <p className="text-[11px] truncate mt-0.5" style={{ color: "#7A5A4A" }}>
-              💠 un {fmtBRL(valorInfo.valor_unitario)} · total {fmtBRL(valorInfo.valor_unitario * (item.quantidade_contada ?? item.quantidade_sistema))}
+              💠 un {fmtBRL(valorInfo.valor_unitario)} · {fmtG(valorInfo.peso_unitario)}
+              {" · total "}{fmtBRL(valorInfo.valor_unitario * (item.quantidade_contada ?? item.quantidade_sistema))}
+              {" · "}{fmtG(valorInfo.peso_unitario * (item.quantidade_contada ?? item.quantidade_sistema))}
             </p>
           )}
         </div>
