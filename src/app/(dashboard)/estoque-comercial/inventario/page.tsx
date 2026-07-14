@@ -185,21 +185,32 @@ export default function InventarioPage() {
         </div>
       </div>
 
-      {/* Filtros COMPACTOS numa linha só: Período · Local · Situação.
+      {/* PERÍODO em chips (filtro mais usado — 1 clique; padrão de período do ERP).
           Mudar qualquer filtro volta pra página 1. */}
-      <div className={`${periodo === "custom" ? "mb-2" : "mb-5"} flex gap-x-5 gap-y-2 flex-wrap items-center`}>
-        <label className="flex items-center gap-1.5">
-          <span className="text-xs font-semibold" style={{ color: "#7A5A4A" }}>Período</span>
-          <select value={periodo} onChange={e => { setPeriodo(e.target.value as typeof periodo); setPagina(1); }}
-            className="text-sm border rounded-lg pl-2.5 pr-7 py-1.5 outline-none bg-white cursor-pointer"
-            style={{ borderColor: "#E8DCC8", color: "#184036" }}>
-            <option value="todos">Todos</option>
-            <option value="hoje">Hoje</option>
-            <option value="ontem">Ontem</option>
-            <option value="mes">Este mês</option>
-            <option value="custom">Personalizado</option>
-          </select>
-        </label>
+      <div className="mb-2 flex gap-1.5 flex-wrap items-center">
+        <span className="text-xs font-semibold shrink-0 w-16" style={{ color: "#7A5A4A" }}>Período</span>
+        {([["todos", "Todos"], ["hoje", "Hoje"], ["ontem", "Ontem"], ["mes", "Este mês"], ["custom", "Personalizado"]] as const).map(([v, label]) => (
+          <button key={v} onClick={() => { setPeriodo(v); setPagina(1); }}
+            className="text-xs px-2.5 py-1 rounded-full font-medium"
+            style={periodo === v
+              ? { background: "#184036", color: "#fff" }
+              : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {periodo === "custom" && (
+        <div className="mb-2 flex gap-2 items-center flex-wrap" style={{ marginLeft: "4.5rem" }}>
+          <span className="text-xs text-gray-400">de</span>
+          <input type="date" value={customDe} onChange={e => { setCustomDe(e.target.value); setPagina(1); }}
+            className="text-sm border rounded-lg px-2 py-1.5 outline-none" style={{ borderColor: "#E8DCC8" }} />
+          <span className="text-xs text-gray-400">até</span>
+          <input type="date" value={customAte} onChange={e => { setCustomAte(e.target.value); setPagina(1); }}
+            className="text-sm border rounded-lg px-2 py-1.5 outline-none" style={{ borderColor: "#E8DCC8" }} />
+        </div>
+      )}
+      {/* LOCAL + SITUAÇÃO em seletores compactos, na linha de baixo (secundários) */}
+      <div className="mb-5 flex gap-x-5 gap-y-2 flex-wrap items-center">
         {locaisDisp.length > 0 && (
           <label className="flex items-center gap-1.5">
             <span className="text-xs font-semibold" style={{ color: "#7A5A4A" }}>Local</span>
@@ -223,16 +234,6 @@ export default function InventarioPage() {
           </select>
         </label>
       </div>
-      {periodo === "custom" && (
-        <div className="mb-5 flex gap-2 items-center flex-wrap">
-          <span className="text-xs text-gray-400">de</span>
-          <input type="date" value={customDe} onChange={e => { setCustomDe(e.target.value); setPagina(1); }}
-            className="text-sm border rounded-lg px-2 py-1.5 outline-none" style={{ borderColor: "#E8DCC8" }} />
-          <span className="text-xs text-gray-400">até</span>
-          <input type="date" value={customAte} onChange={e => { setCustomAte(e.target.value); setPagina(1); }}
-            className="text-sm border rounded-lg px-2 py-1.5 outline-none" style={{ borderColor: "#E8DCC8" }} />
-        </div>
-      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
