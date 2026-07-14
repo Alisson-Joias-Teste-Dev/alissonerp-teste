@@ -654,7 +654,7 @@ function PendenciaPanel({
 
 function ItemRow({
   item, invId, status, epcs, conferido, salvando, expandido, onToggleConferido, onToggleExpand, isAberto, podeEditarPendencia,
-  onSalvarPendencia, onResolver, onContar, investigacao,
+  onSalvarPendencia, onResolver, onContar, investigacao, podeVerValores, valorInfo,
 }: {
   item: ItemInventario;
   invId: number;
@@ -671,6 +671,8 @@ function ItemRow({
   onResolver: (payload: { resolvida: boolean | null; resolucao_obs?: string; desfecho_tipo?: string; numero_venda?: string; numero_devolucao?: string; confirmar_baixa?: boolean }) => void;
   onContar: (qtd: number) => void;
   investigacao?: { conclusao: { tipo: string; confianca: "alta" | "media"; resumo: string } | null; temPistas: boolean } | null;
+  podeVerValores: boolean;
+  valorInfo?: ValorItem | null;
 }) {
   const lido = item.quantidade_contada ?? 0;
   // Pendência só existe onde há problema: divergente ou sem contagem
@@ -727,6 +729,13 @@ function ItemRow({
               🔍 há pistas — abra para investigar
             </p>
           ) : null}
+          {/* Valor (RESTRITO): unitário + total da quantidade deste SKU. Total usa
+              a qtd contada (o que está em mãos); sem contagem, cai na do sistema. */}
+          {podeVerValores && valorInfo && (
+            <p className="text-[11px] truncate mt-0.5" style={{ color: "#7A5A4A" }}>
+              💠 un {fmtBRL(valorInfo.valor_unitario)} · total {fmtBRL(valorInfo.valor_unitario * (item.quantidade_contada ?? item.quantidade_sistema))}
+            </p>
+          )}
         </div>
         <PendenciaBadge item={item} />
         <span className="text-sm font-bold shrink-0" style={{ color: "#374151" }}>
@@ -1274,9 +1283,15 @@ export default function InventarioDetalhePage() {
   };
   const s = statusMap[inventario.status] ?? { label: inventario.status, bg: "#F3F4F6", txt: "#6B7280" };
 
+  // Mapa produto_id -> valores (para a linha do item mostrar R$ inline, restrito)
+  const valorPorProduto: Record<number, ValorItem> = {};
+  if (valores) for (const v of valores.itens) valorPorProduto[v.produto_id] = v;
+
   const renderRow = (item: ItemInventario, status: StatusItem) => (
     <ItemRow key={item.id} item={item} invId={invId} status={status}
       epcs={epcsPorProduto[item.produto_id] ?? []}
+      podeVerValores={podeVerValores}
+      valorInfo={valorPorProduto[item.produto_id]}
       investigacao={investigacoes[item.produto_id] ?? null}
       conferido={conferidoIds.has(item.produto_id)}
       salvando={salvandoIds.has(item.produto_id)}
