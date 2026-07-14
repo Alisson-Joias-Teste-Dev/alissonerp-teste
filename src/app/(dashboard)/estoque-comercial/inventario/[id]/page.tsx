@@ -109,11 +109,6 @@ function fmtDate(d: string) {
   });
 }
 
-// Mostra só o final do EPC (24 dígitos é ilegível) — "…" + últimos 8
-function epcCurto(epc: string) {
-  return epc.length > 8 ? "…" + epc.slice(-8) : epc;
-}
-
 // Nome legível a partir do e-mail (a auth só guarda o e-mail): "ytalo@..." -> "Ytalo",
 // "maria.silva@..." -> "Maria Silva". Assinatura fica limpa sem expor o e-mail.
 function nomeDoEmail(email: string | null | undefined): string {
@@ -277,7 +272,7 @@ function PecasChips({ item, epcs }: { item: ItemInventario; epcs: string[] }) {
           <div key={epc} className="flex items-center gap-2 px-2.5 py-1.5 text-[13px]"
             style={{ borderTop: i === 0 ? "none" : "1px solid #F1ECE1" }}>
             <span className="w-2 h-2 rounded-full shrink-0" style={{ background: "#059669" }} />
-            <span className="flex-1 min-w-0">peça {i + 1} · <span className="font-mono text-gray-500">chip {epcCurto(epc)}</span></span>
+            <span className="flex-1 min-w-0">peça {i + 1} · <span className="font-mono text-gray-500 break-all">chip {epc}</span></span>
             <span className="text-xs px-2 py-0.5 rounded-full shrink-0" style={{ background: "#D1FAE5", color: "#065F46" }}>lida</span>
           </div>
         ))}
