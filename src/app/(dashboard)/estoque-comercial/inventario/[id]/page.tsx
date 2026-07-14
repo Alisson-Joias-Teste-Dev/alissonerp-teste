@@ -114,6 +114,17 @@ function epcCurto(epc: string) {
   return epc.length > 8 ? "…" + epc.slice(-8) : epc;
 }
 
+// Nome legível a partir do e-mail (a auth só guarda o e-mail): "ytalo@..." -> "Ytalo",
+// "maria.silva@..." -> "Maria Silva". Assinatura fica limpa sem expor o e-mail.
+function nomeDoEmail(email: string | null | undefined): string {
+  if (!email) return "?";
+  const base = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+  if (!base) return "?";
+  return base.split(" ").filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 const STATUS_LABEL: Record<StatusItem, string> = {
   ok: "OK", faltando: "Faltando", excesso: "Excedente", pendente: "Sem contagem",
 };
@@ -410,7 +421,7 @@ function PendenciaPanel({
         )}
         {item.pendencia_obs && item.pendencia_registrada_em && (
           <p className="text-[11px] text-gray-400 mt-1">
-            Registrada por {item.pendencia_registrada_por_email ?? "?"} em {fmtDate(item.pendencia_registrada_em)}
+            Registrada por {nomeDoEmail(item.pendencia_registrada_por_email)} em {fmtDate(item.pendencia_registrada_em)}
           </p>
         )}
       </div>
@@ -605,7 +616,7 @@ function PendenciaPanel({
               {item.pendencia_resolucao_obs && <p className="mt-0.5">{item.pendencia_resolucao_obs}</p>}
               {item.pendencia_resolvida_em && (
                 <p className="text-[11px] text-gray-400 mt-1">
-                  Respondida por {item.pendencia_resolvida_por_email ?? "?"} em {fmtDate(item.pendencia_resolvida_em)}
+                  Respondida por {nomeDoEmail(item.pendencia_resolvida_por_email)} em {fmtDate(item.pendencia_resolvida_em)}
                 </p>
               )}
               {podeEditar && (
@@ -1193,12 +1204,12 @@ export default function InventarioDetalhePage() {
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {inventario.local_nome} &middot; aberto em {fmtDate(inventario.data_abertura)}
-            {inventario.criado_por_email ? ` por ${inventario.criado_por_email}` : ""}
+            {inventario.criado_por_email ? ` por ${nomeDoEmail(inventario.criado_por_email)}` : ""}
           </p>
           {inventario.status === "concluido" && inventario.data_conclusao && (
             <p className="text-sm text-gray-500">
               Concluído em {fmtDate(inventario.data_conclusao)}
-              {inventario.concluido_por_email ? ` por ${inventario.concluido_por_email}` : ""}
+              {inventario.concluido_por_email ? ` por ${nomeDoEmail(inventario.concluido_por_email)}` : ""}
             </p>
           )}
           <div className="flex gap-1.5 mt-1.5 flex-wrap">
@@ -1245,7 +1256,7 @@ export default function InventarioDetalhePage() {
           style={{ background: "#FEE2E2", color: "#991B1B" }}>
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
           <span>
-            Cancelado{inventario.cancelado_por_email ? ` por ${inventario.cancelado_por_email}` : ""}
+            Cancelado{inventario.cancelado_por_email ? ` por ${nomeDoEmail(inventario.cancelado_por_email)}` : ""}
             {inventario.data_conclusao ? ` em ${fmtDate(inventario.data_conclusao)}` : ""}.
             {inventario.motivo_cancelamento ? ` Motivo: ${inventario.motivo_cancelamento}` : ""}
           </span>
@@ -1271,13 +1282,11 @@ export default function InventarioDetalhePage() {
         <span className="text-sm font-medium">{veredTexto}</span>
       </div>
 
-      {/* Progresso da contagem */}
+      {/* Progresso da contagem — barra fina e discreta (o total de etiquetas
+          lidas via app fica no Diagnóstico, lá embaixo, pra não poluir o topo) */}
       <div className="mb-3">
-        <div className="flex justify-between text-xs text-gray-500 mb-1">
-          <span>Contagem: {contados}/{totalEsperado} itens</span>
-          <span>{totalLeituras} etiqueta(s) lida(s) via app</span>
-        </div>
-        <div className="h-2 rounded-full overflow-hidden" style={{ background: "#F3F0E8" }}>
+        <div className="text-xs text-gray-500 mb-1">Contagem: {contados}/{totalEsperado} itens</div>
+        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "#F3F0E8" }}>
           <div className="h-full rounded-full transition-all"
             style={{
               width: totalEsperado ? `${Math.round((contados / totalEsperado) * 100)}%` : "0%",
@@ -1297,24 +1306,36 @@ export default function InventarioDetalhePage() {
           ativo={filtroStatus === "excesso"} onClick={() => setFiltroStatus(p => p === "excesso" ? null : "excesso")} />
       </div>
 
-      {/* Faixa ÚNICA de filtros: status (OK/Sem contagem/Fora) + categoria +
-          placar de pendências, tudo junto e calmo (era um muro empilhado). */}
-      <div className="flex items-center gap-1.5 flex-wrap mb-2">
-        <span className="text-xs font-semibold shrink-0" style={{ color: "#7A5A4A" }}>Filtrar:</span>
-        <FiltroChip label="Tudo" ativo={filtroStatus === null} onClick={() => setFiltroStatus(null)} />
-        <FiltroChip label="OK" count={okCount} ativo={filtroStatus === "ok"} color="#059669"
-          onClick={() => setFiltroStatus(p => p === "ok" ? null : "ok")} />
-        <FiltroChip label="Sem contagem" count={semContagem} ativo={filtroStatus === "pendente"} color="#6B7280"
-          onClick={() => setFiltroStatus(p => p === "pendente" ? null : "pendente")} />
-        {foraCount > 0 && (
-          <FiltroChip label="Fora do invent." count={foraCount} ativo={filtroStatus === "fora"} color="#7C3AED"
-            onClick={() => setFiltroStatus(p => p === "fora" ? null : "fora")} />
+      {/* Filtros numa linha: status que NÃO tem card (OK / Sem contagem / Fora —
+          Faltando e Excesso já são os cards clicáveis) + Categoria como seletor.
+          Clicar no chip ativo (✕) limpa; "Todas" no seletor limpa a categoria. */}
+      <div className="flex items-center gap-x-4 gap-y-2 flex-wrap mb-3">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <FiltroChip label="OK" count={okCount} ativo={filtroStatus === "ok"} color="#059669"
+            onClick={() => setFiltroStatus(p => p === "ok" ? null : "ok")} />
+          <FiltroChip label="Sem contagem" count={semContagem} ativo={filtroStatus === "pendente"} color="#6B7280"
+            onClick={() => setFiltroStatus(p => p === "pendente" ? null : "pendente")} />
+          {foraCount > 0 && (
+            <FiltroChip label="Fora do invent." count={foraCount} ativo={filtroStatus === "fora"} color="#7C3AED"
+              onClick={() => setFiltroStatus(p => p === "fora" ? null : "fora")} />
+          )}
+          <button onClick={() => setInfoStatusAberto(v => !v)}
+            className="shrink-0 text-gray-400 hover:text-gray-600 px-1"
+            title="O que significa cada status?">
+            <Info size={16} />
+          </button>
+        </div>
+        {categorias.length > 0 && (
+          <label className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold" style={{ color: "#7A5A4A" }}>Categoria</span>
+            <select value={filtroCategoria ?? ""} onChange={e => setFiltroCategoria(e.target.value || null)}
+              className="text-sm border rounded-lg pl-2.5 pr-7 py-1.5 outline-none bg-white cursor-pointer max-w-[220px]"
+              style={{ borderColor: "#E8DCC8", color: "#184036" }}>
+              <option value="">Todas ({itens.length})</option>
+              {categorias.map(cat => <option key={cat} value={cat}>{cat} ({contagemCategoria(cat)})</option>)}
+            </select>
+          </label>
         )}
-        <button onClick={() => setInfoStatusAberto(v => !v)}
-          className="shrink-0 text-gray-400 hover:text-gray-600 px-1"
-          title="O que significa cada status?">
-          <Info size={16} />
-        </button>
       </div>
       {infoStatusAberto && <StatusInfoBox />}
 
@@ -1353,30 +1374,6 @@ export default function InventarioDetalhePage() {
               {pendNaoResolvidas} não resolvida(s){filtroPendencia === "nao_resolvida" ? " ✕" : ""}
             </button>
           )}
-        </div>
-      )}
-
-      {/* Filtro por categoria: chips com as categorias que EXISTEM neste
-          inventário — clicável, combina com status/pendência/busca */}
-      {categorias.length > 0 && (
-        <div className="mb-2 flex gap-1.5 flex-wrap items-center">
-          <span className="text-xs font-semibold shrink-0" style={{ color: "#7A5A4A" }}>Categoria:</span>
-          <button onClick={() => setFiltroCategoria(null)}
-            className="text-xs px-2.5 py-1 rounded-full font-medium"
-            style={!filtroCategoria
-              ? { background: "#184036", color: "#fff" }
-              : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
-            Todas <span style={{ opacity: 0.65 }}>({itens.length})</span>
-          </button>
-          {categorias.map(cat => (
-            <button key={cat} onClick={() => setFiltroCategoria(prev => prev === cat ? null : cat)}
-              className="text-xs px-2.5 py-1 rounded-full font-medium"
-              style={filtroCategoria === cat
-                ? { background: "#184036", color: "#fff" }
-                : { background: "#fff", color: "#6B7280", border: "1px solid #E8DCC8" }}>
-              {cat} <span style={{ opacity: 0.65 }}>({contagemCategoria(cat)})</span>
-            </button>
-          ))}
         </div>
       )}
 
