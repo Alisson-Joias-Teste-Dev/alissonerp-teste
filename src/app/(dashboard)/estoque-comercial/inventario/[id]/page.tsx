@@ -91,6 +91,8 @@ interface ExcedenteForaInventario {
   categoria_produto: string | null;
   quantidade: number;
   epcs: string[];   // números dos chips lidos deste produto (fora da lista)
+  valor_unitario?: number;  // restrito: só vem quando podeVerValores
+  peso_unitario?: number;   // restrito
 }
 
 // Valores do inventário (restrito a desenvolvedor + dono): valor de venda e
@@ -1573,6 +1575,14 @@ export default function InventarioDetalhePage() {
                     <p className="text-xs text-gray-400 truncate">
                       {e.nome_produto}{e.categoria_produto ? ` · ${e.categoria_produto}` : ""}
                     </p>
+                    {/* Valor + peso (RESTRITO): unitário e total da quantidade lida */}
+                    {podeVerValores && e.valor_unitario != null && (
+                      <p className="text-[11px] truncate mt-0.5" style={{ color: "#7A5A4A" }}>
+                        💠 un {fmtBRL(e.valor_unitario)} · {fmtG(e.peso_unitario ?? 0)}
+                        {" · total "}{fmtBRL(e.valor_unitario * e.quantidade)}
+                        {" · "}{fmtG((e.peso_unitario ?? 0) * e.quantidade)}
+                      </p>
+                    )}
                   </div>
                   <span className="text-sm font-bold shrink-0" style={{ color: "#374151" }}>
                     {e.quantidade}/0
