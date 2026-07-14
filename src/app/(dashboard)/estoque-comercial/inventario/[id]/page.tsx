@@ -34,7 +34,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft, Loader2, CheckCircle, XCircle, Search, X, FileDown,
-  ChevronDown, ChevronUp, AlertTriangle, MessageSquareText, Info,
+  ChevronDown, ChevronUp, AlertTriangle, MessageSquareText, Info, Gem,
 } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
@@ -92,6 +92,23 @@ interface ExcedenteForaInventario {
   quantidade: number;
 }
 
+// Valores do inventário (restrito a desenvolvedor + dono): valor de venda e
+// peso da FONTE por SKU, com totais em esperado e contado. Só chega no JSON
+// quando o usuário tem permissão (a API não envia para os demais).
+interface ValorItem {
+  produto_id: number;
+  sku: string | null;
+  nome_produto: string;
+  quantidade_sistema: number;
+  quantidade_contada: number | null;
+  valor_unitario: number;   // preço de venda (R$, inteiro)
+  peso_unitario: number;    // peso da fonte (g)
+}
+interface Valores {
+  itens: ValorItem[];
+  totais: { valor_esperado: number; valor_contado: number; peso_esperado: number; peso_contado: number };
+}
+
 type StatusItem = "ok" | "faltando" | "excesso" | "pendente";
 type Msg = { tipo: "ok" | "erro"; texto: string } | null;
 
@@ -119,6 +136,12 @@ function nomeDoEmail(email: string | null | undefined): string {
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
 }
+
+// R$ sem centavos (o preço de venda já é inteiro) e peso em gramas com 1 casa.
+const fmtBRL = (n: number) =>
+  (n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+const fmtG = (n: number) =>
+  `${(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} g`;
 
 const STATUS_LABEL: Record<StatusItem, string> = {
   ok: "OK", faltando: "Faltando", excesso: "Excedente", pendente: "Sem contagem",
@@ -734,14 +757,113 @@ function ItemRow({
   );
 }
 
+// Caixa de total geral (valor ou peso). `destaque` = borda esmeralda (o número
+// que mais importa: o contado).
+function ValorBox({ label, valor, destaque }: { label: string; valor: string; destaque?: boolean }) {
+  return (
+    <div className="rounded-lg px-3 py-2" style={{ background: "#fff", border: `1px solid ${destaque ? "#184036" : "#E8DCC8"}` }}>
+      <p className="text-[11px]" style={{ color: "#8A857A" }}>{label}</p>
+      <p className="text-base font-bold leading-tight" style={{ color: destaque ? "#184036" : "#374151" }}>{valor}</p>
+    </div>
+  );
+}
+
+/**
+ * Painel RESTRITO de valores (só desenvolvedor + dono; a API nem manda o dado
+ * para os demais). Mostra os TOTAIS gerais (valor/peso, esperado e contado) e,
+ * recolhível, a tabela por SKU com o UNITÁRIO (valor e peso), a quantidade e o
+ * total de cada SKU. Só leitura — nada aqui altera estoque.
+ */
+function ValoresPanel({ valores }: { valores: Valores }) {
+  const [aberto, setAberto] = useState(true);
+  const [tabelaAberta, setTabelaAberta] = useState(false);
+  const t = valores.totais;
+  const itens = [...valores.itens].sort((a, b) => (a.sku ?? "").localeCompare(b.sku ?? ""));
+
+  return (
+    <div className="mb-4 rounded-xl overflow-hidden" style={{ border: "1px solid #E8DCC8", background: "#F9F6F0" }}>
+      <button onClick={() => setAberto(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold"
+        style={{ color: "#184036" }}>
+        <span className="flex items-center gap-2">
+          <Gem size={15} /> Valores do inventário
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "#184036", color: "#F3EADA" }}>RESTRITO</span>
+        </span>
+        <span className="text-xs font-normal" style={{ color: "#6B7280" }}>{aberto ? "▲ ocultar" : "▼ mostrar"}</span>
+      </button>
+
+      {aberto && (
+        <div className="px-4 pb-4">
+          {/* Totais gerais: valor e peso, esperado × contado (o contado em destaque) */}
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <ValorBox label="Valor esperado" valor={fmtBRL(t.valor_esperado)} />
+            <ValorBox label="Valor contado (total geral)" valor={fmtBRL(t.valor_contado)} destaque />
+            <ValorBox label="Peso esperado" valor={fmtG(t.peso_esperado)} />
+            <ValorBox label="Peso contado" valor={fmtG(t.peso_contado)} />
+          </div>
+
+          {/* Detalhe por SKU: unitário (R$/g), quantidade e total de cada SKU */}
+          <button onClick={() => setTabelaAberta(v => !v)}
+            className="text-xs font-medium underline" style={{ color: "#184036" }}>
+            {tabelaAberta ? "▲ ocultar detalhe por SKU" : `▼ ver detalhe por SKU (${itens.length})`}
+          </button>
+          {tabelaAberta && (
+            <div className="mt-2 overflow-x-auto rounded-lg" style={{ border: "1px solid #E8DCC8" }}>
+              <table className="w-full text-xs" style={{ minWidth: 620 }}>
+                <thead style={{ background: "#EFE7D6" }}>
+                  <tr style={{ color: "#7A5A4A" }}>
+                    <th className="text-left px-2.5 py-1.5 font-semibold">SKU</th>
+                    <th className="text-right px-2.5 py-1.5 font-semibold">un. R$</th>
+                    <th className="text-right px-2.5 py-1.5 font-semibold">un. g</th>
+                    <th className="text-right px-2.5 py-1.5 font-semibold">qtd esp→cont</th>
+                    <th className="text-right px-2.5 py-1.5 font-semibold">R$ esp / cont</th>
+                    <th className="text-right px-2.5 py-1.5 font-semibold">g esp / cont</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {itens.map(it => {
+                    const qs = it.quantidade_sistema;
+                    const qc = it.quantidade_contada;
+                    return (
+                      <tr key={it.produto_id} style={{ borderTop: "1px solid #F1ECE1" }}>
+                        <td className="px-2.5 py-1.5 font-mono whitespace-nowrap" style={{ color: "#184036" }}>{it.sku ?? "—"}</td>
+                        <td className="px-2.5 py-1.5 text-right whitespace-nowrap">{fmtBRL(it.valor_unitario)}</td>
+                        <td className="px-2.5 py-1.5 text-right whitespace-nowrap">{it.peso_unitario.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
+                        <td className="px-2.5 py-1.5 text-right whitespace-nowrap">{qs}→{qc ?? "—"}</td>
+                        <td className="px-2.5 py-1.5 text-right whitespace-nowrap">{fmtBRL(qs * it.valor_unitario)} / {qc == null ? "—" : fmtBRL(qc * it.valor_unitario)}</td>
+                        <td className="px-2.5 py-1.5 text-right whitespace-nowrap">{fmtG(qs * it.peso_unitario)} / {qc == null ? "—" : fmtG(qc * it.peso_unitario)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: "2px solid #E8DCC8", background: "#F3EADA" }}>
+                    <td className="px-2.5 py-2 font-bold whitespace-nowrap" style={{ color: "#184036" }}>Total ({itens.length})</td>
+                    <td /><td /><td />
+                    <td className="px-2.5 py-2 text-right font-bold whitespace-nowrap" style={{ color: "#184036" }}>{fmtBRL(t.valor_esperado)} / {fmtBRL(t.valor_contado)}</td>
+                    <td className="px-2.5 py-2 text-right font-bold whitespace-nowrap" style={{ color: "#184036" }}>{fmtG(t.peso_esperado)} / {fmtG(t.peso_contado)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function InventarioDetalhePage() {
   const router = useRouter();
   const params = useParams();
   const invId = Number(params.id);
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   // Operador de inventário: ações viram PEDIDO de aprovação — os textos e
   // rótulos abaixo mudam para deixar isso claro (não conclui/cancela na hora).
   const isOperador = role === "operador_inventario";
+  // Valores (R$/peso) são RESTRITOS: só desenvolvedor e o dono (Alisson). O
+  // back também trava — este flag só decide o que renderizar (não é a barreira).
+  const podeVerValores = role === "desenvolvedor" || user?.email === "alisson@alissonjoias.com.br";
 
   const [inventario, setInventario] = useState<InventarioHeader | null>(null);
   const [itens, setItens] = useState<ItemInventario[]>([]);
@@ -749,6 +871,8 @@ export default function InventarioDetalhePage() {
   const [totalLeituras, setTotalLeituras] = useState(0);
   // Mapa produto_id -> [epc,...] (número do chip de cada peça lida)
   const [epcsPorProduto, setEpcsPorProduto] = useState<Record<number, string[]>>({});
+  // Valores (restrito): null quando o usuário não pode ver (a API não envia)
+  const [valores, setValores] = useState<Valores | null>(null);
   const [loading, setLoading] = useState(true);
   const [concluindo, setConcluindo] = useState(false);
   const [cancelModalAberto, setCancelModalAberto] = useState(false);
@@ -792,12 +916,14 @@ export default function InventarioDetalhePage() {
         total_leituras?: number;
         excedentesForaInventario?: ExcedenteForaInventario[];
         epcsPorProduto?: Record<number, string[]>;
+        valores?: Valores | null;
       };
       setInventario(d.inventario);
       setItens(d.itens);
       setLeituras(d.leituras ?? []);
       setTotalLeituras(d.total_leituras ?? d.leituras?.length ?? 0);
       setEpcsPorProduto(d.epcsPorProduto ?? {});
+      setValores(d.valores ?? null);
       setExcedentesForaInventario(d.excedentesForaInventario ?? []);
       setConferidoIds(new Set(d.itens.filter(i => i.conferido).map(i => i.produto_id)));
 
@@ -1304,6 +1430,10 @@ export default function InventarioDetalhePage() {
             }} />
         </div>
       </div>
+
+      {/* Valores (RESTRITO): só desenvolvedor + dono. `valores` é null para os
+          demais (a API não envia) — dupla trava com podeVerValores. */}
+      {podeVerValores && valores && <ValoresPanel valores={valores} />}
 
       {/* Placar das pendências: aberta / resolvida / não resolvida.
           CLICÁVEL: filtra a lista pelo tipo (clicar de novo limpa) — é o caminho

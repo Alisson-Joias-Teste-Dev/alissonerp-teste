@@ -186,5 +186,65 @@ export async function GET(req: NextRequest, { params }: Params) {
     epcsPorProduto[Number(r.produto_id)] = (r.epcs as string[]) ?? [];
   }
 
-  return NextResponse.json({ inventario, itens, leituras, total_leituras, excedentesForaInventario, epcsPorProduto });
+  // -- VALORES (restrito): valor de venda x peso da FONTE, por SKU + total geral --
+  // POR QUE: cifras do estoque comercial (milhoes) so para desenvolvedor e o dono.
+  //   BLINDAGEM: gate no BACKEND -- para quem nao pode, `valores` nem vai no JSON
+  //   (esconder so no front vazaria pela resposta da API).
+  const EMAIL_DONO = "alisson@alissonjoias.com.br";
+  const podeVerValores = user.role === "desenvolvedor" || user.email === EMAIL_DONO;
+
+  let valores: {
+    itens: {
+      produto_id: number; sku: string | null; nome_produto: string;
+      quantidade_sistema: number; quantidade_contada: number | null;
+      valor_unitario: number; peso_unitario: number;
+    }[];
+    totais: { valor_esperado: number; valor_contado: number; peso_esperado: number; peso_contado: number };
+  } | null = null;
+
+  if (podeVerValores) {
+    // valor_unitario = preco de venda (mesma view da tela de produtos)
+    // peso_unitario  = peso da FONTE (erp_produtos), igual ao usado no preco
+    // Mesmo filtro de PECA PRONTA dos itens: os totais batem com a lista exibida.
+    const linhasValor = await sql`
+      SELECT
+        ii.produto_id,
+        p.sku,
+        p.nome AS nome_produto,
+        ii.quantidade_sistema,
+        ii.quantidade_contada,
+        COALESCE(vpp.preco_venda, 0)::int         AS valor_unitario,
+        COALESCE(ep.peso_precificado, 0)::float8  AS peso_unitario
+      FROM alissonerp.itens_inventario_comercial ii
+      LEFT JOIN alissonerp.produtos_compat p           ON p.id_produto = ii.produto_id
+      LEFT JOIN alissonerp.vw_produtos_geral_preco vpp ON vpp.id_produto = ii.produto_id
+      LEFT JOIN alissonerp.erp_produtos ep             ON ep.produto_id = ii.produto_id
+      WHERE ii.inventario_id = ${invId}
+        AND ${condPecaPronta(sql)}
+      ORDER BY p.sku
+    `;
+    const totais = { valor_esperado: 0, valor_contado: 0, peso_esperado: 0, peso_contado: 0 };
+    const itensValor = linhasValor.map(r => {
+      const vu = Number(r.valor_unitario) || 0;
+      const pu = Number(r.peso_unitario) || 0;
+      const qs = Number(r.quantidade_sistema) || 0;
+      const qc = r.quantidade_contada == null ? 0 : Number(r.quantidade_contada);
+      totais.valor_esperado += qs * vu;
+      totais.valor_contado  += qc * vu;
+      totais.peso_esperado  += qs * pu;
+      totais.peso_contado   += qc * pu;
+      return {
+        produto_id: Number(r.produto_id),
+        sku: (r.sku as string | null) ?? null,
+        nome_produto: (r.nome_produto as string) ?? "",
+        quantidade_sistema: qs,
+        quantidade_contada: r.quantidade_contada == null ? null : qc,
+        valor_unitario: vu,
+        peso_unitario: pu,
+      };
+    });
+    valores = { itens: itensValor, totais };
+  }
+
+  return NextResponse.json({ inventario, itens, leituras, total_leituras, excedentesForaInventario, epcsPorProduto, valores });
 }
