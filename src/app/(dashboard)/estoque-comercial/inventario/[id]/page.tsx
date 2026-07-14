@@ -1293,14 +1293,14 @@ export default function InventarioDetalhePage() {
         </div>
       )}
 
-      {/* 4) Barra de contagem — abaixo da categoria (fina; total de etiquetas no Diagnóstico) */}
+      {/* 4) Barra de contagem em PEÇAS (unidades, não SKUs) — abaixo da categoria */}
       <div className="mb-4">
-        <div className="text-xs text-gray-500 mb-1">Contagem: {contados}/{totalEsperado} itens</div>
+        <div className="text-xs text-gray-500 mb-1">Contagem: {contadoPecas}/{esperadoPecas} peças</div>
         <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "#F3F0E8" }}>
           <div className="h-full rounded-full transition-all"
             style={{
-              width: totalEsperado ? `${Math.round((contados / totalEsperado) * 100)}%` : "0%",
-              background: contados === totalEsperado ? "#059669" : "#B45309",
+              width: esperadoPecas ? `${Math.min(100, Math.round((contadoPecas / esperadoPecas) * 100))}%` : "0%",
+              background: contadoPecas >= esperadoPecas ? "#059669" : "#B45309",
             }} />
         </div>
       </div>
