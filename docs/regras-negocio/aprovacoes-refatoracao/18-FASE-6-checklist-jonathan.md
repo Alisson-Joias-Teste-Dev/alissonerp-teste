@@ -56,20 +56,47 @@
 - [ ] Login como consultora com cadastro → slider limitado ao valor do cadastro dela, igual ao de venda.
 
 ### Crédito (Fase 3g.2 — 2 aprovadores)
-- [ ] Venda com "A Receber" dentro do saldo → cria tarefa `credito_gerente`; só a `aprovadora_credito_gerente`
-  configurada decide (outros, 403).
-- [ ] Acima do saldo → `credito_diretor`; só o `aprovador_credito_diretor` configurado decide.
+
+**`podeDecidir` real conferido (sem mock) contra homolog:**
+- `credito_gerente` → **Germana Valentim** (`aprovadora_credito_gerente`) pode; Rafael QA não.
+- `credito_diretor` → **Rafael QA tester** (`aprovador_credito_diretor`) pode; Germana não.
+
+**Vendas reais com fluxo de crédito ativo** (pra você abrir e ver o estado real na tela):
+| venda_id | numero | situação | tipo |
+|---|---|---|---|
+| 30166 | 15491 | aprovado | diretor |
+| 30162 | 15487 | aprovado | gerente |
+| 30158 | 15483 | aprovado | gerente (tarefa 268) |
+
+- [ ] Venda com "A Receber" dentro do saldo → cria tarefa `credito_gerente`; só a Germana decide (409
+  pra qualquer outro, mesmo admin).
+- [ ] Acima do saldo → `credito_diretor`; só o Rafael decide.
 
 ### Entrega sem pagamento + Alteração de venda (Fase 3g.1)
-- [ ] Entrega sem pagamento → só o `aprovador_entrega_sem_pagamento` configurado decide.
-- [ ] Solicitar alteração de venda → só o `aprovador_alteracao_venda` configurado decide (antes era
-  cargo fixo `[admin,dev,diretor]`). **ACHADO (15/07, corrigido):** essa chave estava VAZIA em
-  homolog — a Fase 3g.1 criou ela só pra testar e não deixou preenchida, ia te dar 409 de cara. Já
-  criei com o mesmo aprovador dos outros fluxos (Alisson) — pode testar direto agora.
+
+**`podeDecidir` real conferido:** `entrega_sem_pagamento` → **Alisson Ranyel** pode; Jonathan (dev) não.
+`alteracao_venda` → **Alisson Ranyel** pode (chave criada agora); Jonathan (dev) não.
+
+**Exceção pendente real** na tabela `vendas_entrega_excecoes_pagamento`: **venda 29859**, status
+`pendente`, solicitada pela Germana, valor em aberto R$100 — dá pra abrir e testar aprovar/rejeitar
+direto (aprovador configurado = Alisson).
+
+- [ ] Entrega sem pagamento → só o Alisson decide.
+- [ ] Solicitar alteração de venda → só o Alisson decide (antes era cargo fixo `[admin,dev,diretor]`).
+  **ACHADO (15/07, corrigido):** a chave `aprovador_alteracao_venda` estava VAZIA em homolog — a Fase
+  3g.1 criou ela só pra testar e não deixou preenchida, ia te dar 409 de cara. Já criei com o mesmo
+  aprovador dos outros fluxos (Alisson) — pode testar direto agora.
 
 ### Devolução (Fase 3e)
-- [ ] Etapa 1 (devolução) → só `aprovador_devolucao` decide. Etapa 2 (estoque) → só
-  `aprovador_devolucao_estoque` decide.
+
+**`podeDecidir` real conferido:** `devolucao` → **Alisson Ranyel** pode; Jonathan (dev) não.
+`devolucao_estoque` → **Jonathan Araújo** (você mesmo) pode; Alisson não.
+
+**Sem devolução pendente em homolog** (as 31 existentes estão todas `concluido`) — pra testar esse
+fluxo você precisa **criar uma devolução nova** a partir de uma venda entregue, pra ver as 2 etapas
+de aprovação ao vivo.
+
+- [ ] Etapa 1 (devolução) → só Alisson decide. Etapa 2 (estoque) → só você (Jonathan) decide.
 
 ### Metal / Conversão / Precificação / Limpeza / Compra comercial (Fases 3a-3f)
 - [ ] Cada um já foi testado end-to-end nas fases individuais (ver `00-README.md`) — só reconfirmar
@@ -113,5 +140,14 @@ Se estiver tudo certo, os próximos passos são (na ordem):
   achado e corrigido nesta sessão — ver seção "Entrega sem pagamento + Alteração de venda" acima).
   Todas as outras (crédito gerente/diretor, desconto, cartão, entrega, devolução×2, compra comercial,
   conversão, precificação, limpeza, metal) já têm aprovador configurado em homolog.
+- `podeDecidir` chamado DIRETO (sem mock) contra homolog pra 6 cenários: `credito_gerente` (Germana
+  sim/Rafael não), `credito_diretor` (Rafael sim/Germana não), `entrega_sem_pagamento` (Alisson
+  sim/Jonathan não), `alteracao_venda` (Alisson sim/Jonathan não — já com a chave corrigida acima),
+  `devolucao` (Alisson sim/Jonathan não), `devolucao_estoque` (Jonathan sim/Alisson não). Todos
+  bateram com o aprovador configurado — confirma que a autoridade config-first está 100% funcional
+  pra esses 5 eventos, sem precisar de login real.
+- Achei exemplos REAIS pra você testar direto: vendas de crédito 30166/30162/30158 (diretor/gerente),
+  exceção de entrega pendente na venda 29859 (status `pendente`, real, pronta pra aprovar/rejeitar).
+  Devolução não tem pendente real em homolog (as 31 estão `concluido`) — precisa criar uma nova.
 - Front carrega sem erro de compilação/console (`/`, `/orcamento`) — validação visual completa fica
   pra você, pelos motivos explicados no topo.
