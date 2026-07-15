@@ -172,6 +172,25 @@ export async function POST(req: NextRequest) {
     // Aprovação — tudo dentro de transação (inclusive a revalidação de peso restante)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await sql.begin(async (tx: any) => {
+      // ── TRAVA ATÔMICA contra aprovação dupla CONCORRENTE (Fable, pente-fino 15/07) ──
+      // REGRA DE NEGÓCIO: o guard "status='pendente'" lá fora não protege dois
+      // aprovadores clicando ao MESMO tempo (ambos leem 'pendente' antes de
+      // qualquer um commitar). Este UPDATE condicional trava a linha; a segunda
+      // transação espera o commit da primeira, reavalia o WHERE, não encontra
+      // linha e cai no 409. Sem isso, o peso sairia 2x do cofre (ouro=dinheiro).
+      const [lock] = await tx`
+        UPDATE alissonerp.conversoes_reversas
+        SET updated_at = NOW()
+        WHERE id = ${conversao.id} AND status_conversao = 'pendente'
+        RETURNING id
+      `;
+      if (!lock) {
+        throw new ConversaoReversaValidacaoError(
+          "Conversão reversa já foi processada por outro aprovador",
+          409,
+        );
+      }
+
       // ── REVALIDAR peso restante DENTRO da transação ──
       // REGRA DE NEGÓCIO: pode ter havido uma sangria do cofre (outra baixa)
       // entre a abertura desta conversão reversa e a aprovação agora — o

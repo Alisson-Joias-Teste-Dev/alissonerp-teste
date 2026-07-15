@@ -97,7 +97,18 @@ export async function POST(req: NextRequest) {
 
   // Transação: tarefa rejeitada + conversão recusada + ordem cancelada
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await sql.begin(async (tx: any) => {
+  const processada = await sql.begin(async (tx: any) => {
+    // TRAVA ATÔMICA contra processamento duplo concorrente (aprovar×recusar ou
+    // recusar×recusar simultâneos) — mesmo padrão do aprovar. A 2ª transação
+    // espera o lock, reavalia o WHERE, não acha 'pendente' e sai sem tocar nada.
+    const [lock] = await tx`
+      UPDATE alissonerp.conversoes_reversas
+      SET updated_at = NOW()
+      WHERE id = ${conversao.id} AND status_conversao = 'pendente'
+      RETURNING id
+    `;
+    if (!lock) return false;
+
     // Atualizar tarefa para 'rejeitada'
     await tx`
       UPDATE alissonerp.tarefas
@@ -130,7 +141,16 @@ export async function POST(req: NextRequest) {
         (tarefa_id, usuario_id, acao, created_at)
       VALUES (${tarefa_id}, ${user.id}::uuid, 'rejeitada', NOW())
     `.catch(() => {});
+
+    return true;
   });
+
+  if (!processada) {
+    return NextResponse.json(
+      { error: "Conversão reversa já foi processada por outro aprovador" },
+      { status: 409 },
+    );
+  }
 
   return NextResponse.json({
     ok: true,
