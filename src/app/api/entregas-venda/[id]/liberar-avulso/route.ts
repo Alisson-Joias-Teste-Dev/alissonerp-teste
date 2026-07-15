@@ -3,8 +3,10 @@
  *
  * Libera um frete avulso SOLICITADO pela consultora ('solicitada' -> 'pendente').
  *
- * REGRA DE NEGÓCIO (migration 346): só o responsável designado na solicitação
- * (liberacao_responsavel_id) ou admin/dev/gerente_loja pode liberar. A
+ * REGRA DE NEGÓCIO (migration 346, modelo POOL): pode liberar qualquer
+ * liberador ativo (tabela alissonerp.frete_avulso_liberadores) ou
+ * admin/dev/diretor (podeGerenciarSolicitacoesAvulso) — não há mais
+ * responsável designado; qualquer um do pool decide qualquer solicitação. A
  * liberação é o momento em que o custo do frete é assumido pela loja — o
  * saldo da gerente é lançado dentro de liberarFreteAvulso() na lib.
  *
@@ -14,10 +16,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
-import { liberarFreteAvulso } from "@/lib/entrega-venda";
-
-// REGRA: mesmos papéis administrativos usados nas demais rotas de avulso.
-const ROLES_ADMIN = ["desenvolvedor", "admin", "gerente_loja"];
+import { liberarFreteAvulso, podeGerenciarSolicitacoesAvulso } from "@/lib/entrega-venda";
 
 export async function POST(
   _req: NextRequest,
@@ -39,28 +38,16 @@ export async function POST(
   `;
   if (!usuario) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const isAdmin = ROLES_ADMIN.includes(usuario.role as string);
-
-  // REGRA DE NEGÓCIO: quem não é admin/gerente só libera se for o
-  // RESPONSÁVEL designado na solicitação (escolhido pela consultora).
+  // REGRA DE NEGÓCIO (modelo POOL): quem não é full-access só libera se
+  // estiver ativo na lista de liberadores — não existe mais responsável
+  // fixo por solicitação, qualquer um do pool decide qualquer uma.
   // IMPACTO SE REMOVIDO: qualquer usuário logado liberaria custo de frete
-  // de qualquer solicitação, sem controle do responsável designado.
-  if (!isAdmin) {
-    const [entrega] = await sql`
-      SELECT liberacao_responsavel_id, is_avulso
-      FROM alissonerp.entregas_venda
-      WHERE id = ${entregaId} LIMIT 1
-    `;
-    if (!entrega) return NextResponse.json({ error: "Entrega não encontrada" }, { status: 404 });
-    if (!entrega.is_avulso) {
-      return NextResponse.json({ error: "Entrega não é avulsa" }, { status: 400 });
-    }
-    if (!entrega.liberacao_responsavel_id || String(entrega.liberacao_responsavel_id) !== user.id) {
-      return NextResponse.json(
-        { error: "Você não é o responsável por liberar esta corrida" },
-        { status: 403 },
-      );
-    }
+  // de qualquer solicitação, sem controle de quem está autorizado.
+  if (!(await podeGerenciarSolicitacoesAvulso(user.id, usuario.role as string))) {
+    return NextResponse.json(
+      { error: "Você não tem permissão para liberar fretes avulsos" },
+      { status: 403 },
+    );
   }
 
   try {

@@ -3,8 +3,10 @@
  *
  * Recusa um frete avulso SOLICITADO pela consultora ('solicitada' -> 'cancelada').
  *
- * REGRA DE NEGÓCIO (migration 346): mesma permissão de liberar-avulso — só o
- * responsável designado na solicitação ou admin/dev/gerente_loja. Exige
+ * REGRA DE NEGÓCIO (migration 346, modelo POOL): mesma permissão de
+ * liberar-avulso — qualquer liberador ativo (tabela
+ * alissonerp.frete_avulso_liberadores) ou admin/dev/diretor
+ * (podeGerenciarSolicitacoesAvulso). Não há mais responsável designado. Exige
  * motivo (mín. 3 caracteres) para dar rastreabilidade à consultora sobre
  * por que a corrida não foi liberada.
  *
@@ -15,11 +17,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
-import { recusarFreteAvulso } from "@/lib/entrega-venda";
+import { recusarFreteAvulso, podeGerenciarSolicitacoesAvulso } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
-
-// REGRA: mesmos papéis administrativos usados nas demais rotas de avulso.
-const ROLES_ADMIN = ["desenvolvedor", "admin", "gerente_loja"];
 
 const RecusarAvulsoSchema = z.object({
   motivo: z.string().min(3, "Motivo deve ter ao menos 3 caracteres").max(500),
@@ -45,26 +44,15 @@ export async function POST(
   `;
   if (!usuario) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const isAdmin = ROLES_ADMIN.includes(usuario.role as string);
-
-  // REGRA DE NEGÓCIO: mesma checagem de ownership de liberar-avulso — quem
-  // não é admin/gerente só recusa se for o RESPONSÁVEL designado.
-  if (!isAdmin) {
-    const [entrega] = await sql`
-      SELECT liberacao_responsavel_id, is_avulso
-      FROM alissonerp.entregas_venda
-      WHERE id = ${entregaId} LIMIT 1
-    `;
-    if (!entrega) return NextResponse.json({ error: "Entrega não encontrada" }, { status: 404 });
-    if (!entrega.is_avulso) {
-      return NextResponse.json({ error: "Entrega não é avulsa" }, { status: 400 });
-    }
-    if (!entrega.liberacao_responsavel_id || String(entrega.liberacao_responsavel_id) !== user.id) {
-      return NextResponse.json(
-        { error: "Você não é o responsável por decidir sobre esta corrida" },
-        { status: 403 },
-      );
-    }
+  // REGRA DE NEGÓCIO (modelo POOL): mesma checagem de liberar-avulso — quem
+  // não é full-access só recusa se estiver ativo na lista de liberadores.
+  // IMPACTO SE REMOVIDO: qualquer usuário logado recusaria (cancelaria) a
+  // corrida solicitada de qualquer venda, sem controle de quem está autorizado.
+  if (!(await podeGerenciarSolicitacoesAvulso(user.id, usuario.role as string))) {
+    return NextResponse.json(
+      { error: "Você não tem permissão para decidir sobre fretes avulsos" },
+      { status: 403 },
+    );
   }
 
   let raw: unknown;

@@ -26,7 +26,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { criarEntrega } from "@/lib/entrega-venda";
+import { criarEntrega, podeGerenciarSolicitacoesAvulso } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
 import { authOr401, ForbiddenError } from "@/lib/auth-server";
 import { isVendasFullAccess, requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
@@ -78,7 +78,16 @@ export async function GET(req: NextRequest) {
     SELECT role, vendedor_id FROM alissonerp.usuarios
     WHERE id = ${user.id}::uuid LIMIT 1
   `;
-  if (!usuario || !ROLES_ENTREGAS.includes(usuario.role as string)) {
+
+  // REGRA DE NEGÓCIO (migration 346, modelo POOL): além dos ROLES_ENTREGAS,
+  // um liberador de frete avulso (tabela frete_avulso_liberadores) também
+  // precisa acessar esta rota — é daqui que ele vê a aba de solicitações
+  // ('situacao=solicitada'), mesmo que a role dele (ex: estoquista) não
+  // esteja na lista padrão de quem vê entregas.
+  // IMPACTO SE REMOVIDO: liberador configurado fica sem acesso à própria
+  // aba de solicitações.
+  const ehGestorSolicitacoes = await podeGerenciarSolicitacoesAvulso(user.id, (usuario?.role as string) ?? null);
+  if (!usuario || (!ROLES_ENTREGAS.includes(usuario.role as string) && !ehGestorSolicitacoes)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -88,7 +97,6 @@ export async function GET(req: NextRequest) {
   const motoboyId = url.searchParams.get("motoboy_id");
   const dataInicio = url.searchParams.get("data_inicio") ?? "";
   const dataFim = url.searchParams.get("data_fim") ?? "";
-  const minhasLiberacoes = url.searchParams.get("minhas_liberacoes") === "true";
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 50));
   const offset = (page - 1) * limit;
@@ -114,26 +122,27 @@ export async function GET(req: NextRequest) {
     : sql``;
 
   // REGRA DE NEGÓCIO: canceladas e solicitadas não aparecem na lista padrão
-  // (auto-cancel do modal sem código; solicitadas ainda não foram liberadas
-  // pelo responsável — aparecem na aba própria de "Solicitações"). Só
-  // reaparecem se o filtro pedir explicitamente situacao=cancelada/solicitada.
+  // (auto-cancel do modal sem código; solicitadas ainda não foram liberadas —
+  // aparecem na aba própria de "Solicitações", visível só ao pool de
+  // liberadores). Só reaparecem se o filtro pedir explicitamente
+  // situacao=cancelada/solicitada.
   // IMPACTO SE REMOVIDO: lixo operacional e solicitações não-liberadas
   // poluiriam a lista de entregas ativas.
   const whereSituacao = situacao
     ? sql`AND ev.situacao = ${situacao}`
     : sql`AND ev.situacao NOT IN ('cancelada', 'solicitada')`;
 
-  // REGRA DE NEGÓCIO (migration 346): ?minhas_liberacoes=true filtra a aba de
-  // solicitações para mostrar apenas as que o usuário logado precisa decidir
-  // (liberar/recusar). Roles full (admin/dev/gerente_loja) veem tudo — não
-  // fazem sentido restringir quem já vê todas as entregas.
-  // IMPACTO SE REMOVIDO: consultora/estoquista veriam solicitações de
-  // responsáveis alheios ao consultar a própria aba.
-  const rolesFullLiberacao = ["desenvolvedor", "admin", "gerente_loja"];
-  const whereMinhasLiberacoes =
-    minhasLiberacoes && !rolesFullLiberacao.includes(usuario.role as string)
-      ? sql`AND ev.liberacao_responsavel_id = ${user.id}::uuid`
-      : sql``;
+  // REGRA DE NEGÓCIO (migration 346, modelo POOL): a aba "Solicitações"
+  // (?situacao=solicitada) mostra TODAS as solicitações pendentes de decisão
+  // para QUALQUER liberador do pool — não filtra por responsável (não existe
+  // mais). Só quem pode gerenciar (podeGerenciarSolicitacoesAvulso) acessa
+  // esse filtro; os demais recebem 403 (evita vazar quem solicitou frete e
+  // o endereço de entrega para quem não decide sobre isso).
+  // IMPACTO SE REMOVIDO: qualquer usuário com acesso à listagem veria todas
+  // as solicitações de frete avulso, mesmo sem poder liberar/recusar.
+  if (situacao === "solicitada" && !ehGestorSolicitacoes) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
 
   const whereMotoboy = motoboyId
     ? sql`AND ev.motoboy_id = ${Number(motoboyId)}`
@@ -180,22 +189,18 @@ export async function GET(req: NextRequest) {
         ev.is_avulso,
         ev.descricao_avulso,
         ev.endereco_entrega,
-        ev.liberacao_responsavel_id,
         ev.liberada_por,
         ev.liberada_em,
-        ev.motivo_recusa,
-        ur.nome AS responsavel_nome
+        ev.motivo_recusa
       FROM alissonerp.entregas_venda ev
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = ev.venda_id
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
       LEFT JOIN public.contatos ca ON ca.id_contato = ev.contato_id
       LEFT JOIN alissonerp.motoboys mb ON mb.user_id = ev.motoboy_id
-      LEFT JOIN alissonerp.usuarios ur ON ur.id = ev.liberacao_responsavel_id
       WHERE 1=1
         ${whereVendedor}
         ${whereVenda}
         ${whereSituacao}
-        ${whereMinhasLiberacoes}
         ${whereMotoboy}
         ${whereDataInicio}
         ${whereDataFim}
@@ -210,7 +215,6 @@ export async function GET(req: NextRequest) {
         ${whereVendedor}
         ${whereVenda}
         ${whereSituacao}
-        ${whereMinhasLiberacoes}
         ${whereMotoboy}
         ${whereDataInicio}
         ${whereDataFim}
@@ -243,15 +247,14 @@ export async function GET(req: NextRequest) {
       aprovacao_frete_necessaria: Boolean(r.aprovacao_frete_necessaria),
       is_avulso: Boolean(r.is_avulso),
       descricao_avulso: r.descricao_avulso ? String(r.descricao_avulso) : null,
-      // REGRA DE NEGÓCIO (migration 346): campos da solicitação/liberação de
-      // frete avulso — usados pela aba "Solicitações" (quem pediu, endereço,
-      // quem precisa liberar/liberou, ou motivo se foi recusada).
+      // REGRA DE NEGÓCIO (migration 346, modelo POOL): campos da solicitação/
+      // liberação de frete avulso — usados pela aba "Solicitações" (endereço
+      // pedido, quem liberou/quando, ou motivo se foi recusada). Não há mais
+      // "responsável" fixo — qualquer liberador do pool decide.
       endereco_entrega: r.endereco_entrega ? String(r.endereco_entrega) : null,
-      liberacao_responsavel_id: r.liberacao_responsavel_id ? String(r.liberacao_responsavel_id) : null,
       liberada_por: r.liberada_por ? String(r.liberada_por) : null,
       liberada_em: r.liberada_em ?? null,
       motivo_recusa: r.motivo_recusa ? String(r.motivo_recusa) : null,
-      responsavel_nome: r.responsavel_nome ?? null,
     })),
     total,
     page,

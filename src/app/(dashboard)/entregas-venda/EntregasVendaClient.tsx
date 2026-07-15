@@ -86,6 +86,17 @@ interface EntregasVendaClientProps {
   dataFimFiltro: string;
   /** Role do usuário logado */
   userRole: string;
+  /**
+   * REGRA DE NEGÓCIO (migration 346, modelo POOL): true quando o usuário
+   * logado pode gerenciar (ver/liberar/recusar) solicitações de frete avulso
+   * — é full-access (admin/dev/diretor) OU liberador ativo cadastrado em
+   * alissonerp.frete_avulso_liberadores (calculado no SSR via
+   * podeGerenciarSolicitacoesAvulso). A aba "Solicitações" em si (UI) é
+   * implementada em outra tarefa — este prop só habilita o acesso.
+   * IMPACTO SE REMOVIDO: o client não tem como saber se deve mostrar a aba
+   * de solicitações para roles fora da lista padrão de entregas.
+   */
+  podeLiberarSolicitacoes: boolean;
 }
 
 /** Formato de resposta da API de listagem de entregas */
@@ -213,6 +224,7 @@ export default function EntregasVendaClient({
   dataInicioFiltro,
   dataFimFiltro,
   userRole: _userRole, // prefixado com _: reservado para ações futuras (ex: permissões)
+  podeLiberarSolicitacoes: _podeLiberarSolicitacoes, // prefixado com _: aba "Solicitações" é de outra tarefa (UI)
 }: EntregasVendaClientProps) {
   const router = useRouter();
 

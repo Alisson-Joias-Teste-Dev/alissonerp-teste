@@ -22,6 +22,7 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
+import { podeGerenciarSolicitacoesAvulso } from "@/lib/entrega-venda";
 import EntregasVendaClient from "./EntregasVendaClient";
 
 export const dynamic = "force-dynamic";
@@ -84,7 +85,15 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     WHERE id = ${user.id}::uuid LIMIT 1
   `;
 
-  if (!usuario || !ROLES_PERMITIDOS.includes(usuario.role as string)) {
+  // REGRA DE NEGÓCIO (migration 346, modelo POOL): além dos ROLES_PERMITIDOS,
+  // um liberador de frete avulso (tabela frete_avulso_liberadores) também
+  // precisa acessar a tela — é aqui que ele vê/decide a aba "Solicitações",
+  // mesmo com role fora da lista padrão (ex: estoquista).
+  // IMPACTO SE REMOVIDO: liberador configurado é redirecionado para "/" e
+  // nunca vê a própria aba de solicitações.
+  const ehGestorSolicitacoes = await podeGerenciarSolicitacoesAvulso(user.id, (usuario?.role as string) ?? null);
+
+  if (!usuario || (!ROLES_PERMITIDOS.includes(usuario.role as string) && !ehGestorSolicitacoes)) {
     redirect("/");
   }
 
@@ -241,6 +250,7 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
       dataInicioFiltro={dataInicio}
       dataFimFiltro={dataFim}
       userRole={usuario.role as string}
+      podeLiberarSolicitacoes={ehGestorSolicitacoes}
     />
   );
 }

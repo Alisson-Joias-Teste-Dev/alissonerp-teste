@@ -30,6 +30,7 @@ import { logAudit } from "@/lib/audit";
 import { vendaEntregaDevendo, vendaTemExcecaoEntregaAprovada } from "@/lib/entrega-sem-pagamento";
 import { enviarCodigoWhatsAppDetalhado, enviarCodigoClienteEmRota, enviarConfirmacaoEntregaConcluida, enviarAvisoDesenvolvedor } from "@/lib/whatsapp";
 import { uploadFile } from "@/lib/storage";
+import { isFullAccess } from "@/lib/roles";
 
 // O client transacional do pacote postgres não expõe call signature adequada
 // para o TypeScript neste projeto; as rotas existentes usam o mesmo padrão.
@@ -1970,6 +1971,36 @@ function montarMovimentacao(r: any): MovimentacaoFrete {
 // ─── 10. Frete Avulso ─────────────────────────────────────────────────────────
 
 /**
+ * Verifica se o usuário pode gerenciar solicitações de frete avulso (liberar/
+ * recusar/ver a aba de solicitações do modelo POOL).
+ *
+ * REGRA DE NEGÓCIO (migration 346, modelo POOL): substitui o "responsável
+ * designado" escolhido pela consultora. Pode gerenciar quem é full-access
+ * (admin/desenvolvedor/diretor) OU quem está cadastrado como liberador ativo
+ * na tabela alissonerp.frete_avulso_liberadores (lista mantida pela tela de
+ * configuração — Ordem B). Qualquer liberador ativo vê e decide TODAS as
+ * solicitações, sem distinção por quem pediu.
+ *
+ * IMPACTO SE REMOVIDO: rotas de liberar/recusar/listar solicitações perdem a
+ * checagem de autorização — ou travam para todos (fail-closed indevido) ou
+ * ficam abertas para qualquer usuário logado (fail-open), dependendo de como
+ * fosse substituída.
+ */
+export async function podeGerenciarSolicitacoesAvulso(
+  userId: string,
+  role: string | null,
+): Promise<boolean> {
+  if (isFullAccess(role)) return true;
+  const [r] = await sql`
+    SELECT 1 AS ok
+    FROM alissonerp.frete_avulso_liberadores
+    WHERE user_id = ${userId}::uuid AND ativo = true
+    LIMIT 1
+  `;
+  return Boolean(r);
+}
+
+/**
  * Parâmetros para criação de frete avulso (corrida sem venda vinculada).
  * REGRA DE NEGÓCIO: avulso não tem venda, itens ou código de verificação.
  * Motoboy e frete_cobrado são obrigatórios. Cliente e descrição são opcionais.
@@ -1983,14 +2014,15 @@ export interface CriarFreteAvulsoParams {
   descricaoAvulso?: string;
   contatoId?: number;
   observacoes?: string;
-  // REGRA DE NEGÓCIO (solicitação da consultora — migration 346): quando
-  // modoSolicitacao=true, o avulso nasce 'solicitada' (sem lançar saldo) e
-  // fica vinculado a uma venda (para herdar cliente/endereço) até que o
-  // responsável designado libere ou recuse. vendaId e liberacaoResponsavelId
-  // são obrigatórios nesse modo — validado em criarFreteAvulso().
+  // REGRA DE NEGÓCIO (solicitação da consultora — migration 346, modelo POOL):
+  // quando modoSolicitacao=true, o avulso nasce 'solicitada' (sem lançar
+  // saldo) e fica vinculado a uma venda (para herdar cliente/endereço) até
+  // que QUALQUER liberador do pool (tabela frete_avulso_liberadores) ou
+  // admin/dev/diretor libere ou recuse — não há mais responsável designado.
+  // vendaId e enderecoEntrega são obrigatórios nesse modo — validado em
+  // criarFreteAvulso().
   vendaId?: number;
   enderecoEntrega?: string;
-  liberacaoResponsavelId?: string; // UUID do usuário que vai liberar/recusar
   modoSolicitacao?: boolean;
 }
 
@@ -2012,7 +2044,6 @@ export interface FreteAvulso {
   motoboyTelefone: string | null;
   vendaId: number | null;
   enderecoEntrega: string | null;
-  liberacaoResponsavelId: string | null;
 }
 
 /**
@@ -2101,18 +2132,15 @@ export async function criarFreteAvulso(
     throw new Error("Valor do frete não pode ser negativo.");
   }
 
-  // REGRA DE NEGÓCIO (solicitação — migration 346): no modo solicitação a
-  // consultora precisa informar DE QUAL VENDA o frete parte (herda cliente/
-  // endereço) e QUEM vai liberar/recusar o pedido. Sem isso a solicitação
-  // fica órfã — ninguém saberia quem deve decidir.
-  // IMPACTO SE REMOVIDO: solicitação sem responsável nunca seria liberada;
-  // sem venda_id perde-se o vínculo que justifica o endereço de entrega.
+  // REGRA DE NEGÓCIO (solicitação — migration 346, modelo POOL): no modo
+  // solicitação a consultora precisa informar DE QUAL VENDA o frete parte
+  // (herda cliente/endereço). NÃO escolhe mais um responsável — a solicitação
+  // cai no pool e qualquer liberador ativo (ou admin/dev/diretor) decide.
+  // IMPACTO SE REMOVIDO: sem venda_id perde-se o vínculo que justifica o
+  // endereço de entrega.
   if (params.modoSolicitacao) {
     if (!params.vendaId) {
       throw new Error("Venda é obrigatória para solicitar frete avulso.");
-    }
-    if (!params.liberacaoResponsavelId) {
-      throw new Error("Responsável pela liberação é obrigatório para solicitar frete avulso.");
     }
     const [venda] = await sql`
       SELECT id FROM alissonerp.vendas_erp WHERE id = ${params.vendaId} LIMIT 1
@@ -2142,7 +2170,7 @@ export async function criarFreteAvulso(
         tipo, forma_entrega, situacao, regiao,
         motoboy_id, frete_cobrado, frete_motoboy,
         aprovacao_frete_necessaria, observacoes,
-        endereco_entrega, liberacao_responsavel_id,
+        endereco_entrega,
         created_by
       ) VALUES (
         true, ${params.vendaId ?? null},
@@ -2151,7 +2179,7 @@ export async function criarFreteAvulso(
         'total', 'motoboy', ${situacaoInicial}, ${params.regiao},
         ${params.motoboyId}::uuid, ${freteCobrado}, ${freteMotoboy},
         false, ${params.observacoes ?? null},
-        ${params.enderecoEntrega ?? null}, ${params.liberacaoResponsavelId ?? null}::uuid,
+        ${params.enderecoEntrega ?? null},
         ${userId}::uuid
       )
       RETURNING *
@@ -2182,7 +2210,6 @@ export async function criarFreteAvulso(
         descricao_avulso: params.descricaoAvulso ?? null,
         situacao: situacaoInicial,
         venda_id: params.vendaId ?? null,
-        liberacao_responsavel_id: params.liberacaoResponsavelId ?? null,
       },
     });
 
@@ -2221,9 +2248,6 @@ export async function criarFreteAvulso(
     motoboyTelefone: motoboy?.telefone ? String(motoboy.telefone) : null,
     vendaId: resultado.venda_id != null ? Number(resultado.venda_id) : null,
     enderecoEntrega: resultado.endereco_entrega ? String(resultado.endereco_entrega) : null,
-    liberacaoResponsavelId: resultado.liberacao_responsavel_id
-      ? String(resultado.liberacao_responsavel_id)
-      : null,
   };
 }
 
@@ -2233,8 +2257,10 @@ export async function criarFreteAvulso(
  * REGRA DE NEGÓCIO: a liberação é o momento em que o custo do frete avulso é
  * de fato assumido pela loja — por isso é AQUI (e não na solicitação) que o
  * saldo da gerente é lançado (lancarSaldoFreteAvulsoNoTx). A checagem de QUEM
- * pode liberar (responsável designado ou admin/dev/gerente_loja) fica na rota;
- * esta função só valida o ESTADO da entrega.
+ * pode liberar (modelo POOL: qualquer liberador ativo — tabela
+ * frete_avulso_liberadores — ou admin/dev/diretor, ver
+ * podeGerenciarSolicitacoesAvulso) fica na rota; esta função só valida o
+ * ESTADO da entrega.
  *
  * O QUE: tranca a linha (FOR UPDATE) dentro da transação para evitar liberar
  * a mesma solicitação duas vezes em cliques concorrentes, atualiza

@@ -18,7 +18,7 @@ import sql from "@/lib/db";
 import { criarFreteAvulso, calcularValorMotoboy } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
-import { ForbiddenError, type AuthUser } from "@/lib/auth-server";
+import { AuthError, ForbiddenError, type AuthUser } from "@/lib/auth-server";
 
 // REGRA DE NEGÓCIO (migration 346): "estoquista" cria avulso já liberado,
 // igual admin/gerente — não passa pelo fluxo de solicitação/liberação.
@@ -32,11 +32,12 @@ const FreteAvulsoSchema = z.object({
   descricaoAvulso: z.string().min(1, "Descrição da corrida é obrigatória").max(500),
   contatoId: z.number().int().positive().optional(),
   observacoes: z.string().max(2000).optional(),
-  // REGRA DE NEGÓCIO (solicitação da consultora — migration 346): campos só
-  // usados quando quem cria é a consultora (vira modoSolicitacao=true na lib).
+  // REGRA DE NEGÓCIO (solicitação da consultora — migration 346, modelo POOL):
+  // campos só usados quando quem cria é a consultora (vira modoSolicitacao=true
+  // na lib). Não existe mais escolha de responsável — a solicitação cai no
+  // pool de liberadores (ver podeGerenciarSolicitacoesAvulso).
   vendaId: z.number().int().positive().optional(),
   enderecoEntrega: z.string().max(1000).optional(),
-  liberacaoResponsavelId: z.string().uuid().optional(),
 });
 
 // REGRA DE NEGÓCIO: o entregador registra a PRÓPRIA corrida pelo app.
@@ -96,17 +97,19 @@ export async function POST(req: NextRequest) {
   const parsed = FreteAvulsoSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
 
-  // REGRA DE NEGÓCIO (migration 346): consultora não libera custo de frete
-  // sozinha — ela apenas SOLICITA, a partir de uma venda própria, e escolhe
-  // quem libera. O avulso nasce 'solicitada' (criarFreteAvulso com
-  // modoSolicitacao=true) e só entra no saldo da gerente quando liberado.
+  // REGRA DE NEGÓCIO (migration 346, modelo POOL): consultora não libera
+  // custo de frete sozinha — ela apenas SOLICITA, a partir de uma venda
+  // própria, com o endereço de entrega. NÃO escolhe mais um responsável: o
+  // avulso nasce 'solicitada' (criarFreteAvulso com modoSolicitacao=true) e
+  // cai no pool de liberadores (qualquer um decide); só entra no saldo da
+  // gerente quando liberado.
   // IMPACTO SE REMOVIDO: consultora criaria avulso já 'pendente' (liberado),
-  // assumindo custo de frete sem controle do responsável designado.
+  // assumindo custo de frete sem controle de nenhum liberador.
   const ehConsultora = role === "consultora";
   if (ehConsultora) {
-    if (!parsed.data.vendaId || !parsed.data.liberacaoResponsavelId) {
+    if (!parsed.data.vendaId || !parsed.data.enderecoEntrega) {
       return NextResponse.json(
-        { error: "Venda e responsável pela liberação são obrigatórios para solicitar frete avulso" },
+        { error: "Venda e endereço de entrega são obrigatórios para solicitar frete avulso" },
         { status: 400 },
       );
     }
@@ -121,6 +124,7 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
       if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+      if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: 401 });
       throw e;
     }
   }
@@ -132,6 +136,7 @@ export async function POST(req: NextRequest) {
     );
     return NextResponse.json({ avulso });
   } catch (err) {
+    if (err instanceof AuthError) return NextResponse.json({ error: err.message }, { status: 401 });
     const message = err instanceof Error ? err.message : "Erro ao criar frete avulso";
     console.error("[frete-avulso] Erro:", err);
     return NextResponse.json({ error: message }, { status: 400 });
