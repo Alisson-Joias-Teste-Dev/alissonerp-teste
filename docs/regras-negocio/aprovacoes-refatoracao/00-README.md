@@ -191,8 +191,24 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   20% do cartao hardcoded em 4 lugares) numa funcao so (calcularTetoDesconto, em
   src/lib/desconto/precificar-item.ts, ja existente desde 23/06) + 2 chaves novas em
   configuracoes_sistema (desconto_fallback_sem_cadastro_pct seed 0, limite_desconto_cartao_pct seed 20)
-  - pacote 17, codado pelo Sonnet (15/07/2026). **CODIGO PRONTO, aguardando Opus revisar e criar as 2
-  chaves em homolog + testar** (cenarios no fim do pacote 17). tsc --noEmit 0 erros; vitest run
+  - pacote 17, codado pelo Sonnet (15/07/2026), **revisado linha a linha pelo Opus (15/07)**: diff
+  bate 100% com o pacote (12 arquivos, nada fora do escopo), tsc e greps de aceite reconferidos de
+  forma independente (0 ocorrencias de `encontrarAprovador`/`pct_desconto > 20` hardcoded). **TESTADO
+  em HOMOLOG (15/07)**: as 2 chaves criadas (`desconto_fallback_sem_cadastro_pct='0'`,
+  `limite_desconto_cartao_pct='20'` - sem `assinar_mudanca_banco`, funcao so existe em PROD, homolog
+  usa so PGAPPNAME); linha corrompida/duplicada de `desconto_acima` (id=1, `condicao_json` string
+  malformada) desativada, so a id=3 (`percentual:20`, hoje so decorativa) fica ativa. Miolo REAL
+  testado sem mock (`getDescontoThreshold` chamado direto contra a venda 30183 - Germana Valentim,
+  gerente_loja, cadastro=30 - retornou 30, confirma que a query nova com subselect de config funciona
+  no schema vivo); `calcularTetoDesconto` pura confirmada (admin/dev=100 sem cadastro, fallback=0 pra
+  role comum, cadastro pessoal sempre vence mesmo != admin). Teste-fantasma apagado depois, `.env.local`
+  copiado pra worktree tambem removido. **Fase 5 FECHADA.** ⚠️ PRA PROD: criar as mesmas 2 chaves via
+  `/dba` assinado + desativar a mesma linha id=1 de `tarefas_regras_aprovacao`, antes do merge/deploy
+  (senao cai no fallback hardcoded do codigo - nao quebra, mas fica sem o valor configuravel).
+  **Nota lateral (nao e bug desta fase, corrigido no processo)**: durante a investigacao de testes, um
+  `git stash pop` acidental do Opus puxou um stash antigo/nao-relacionado (`WIP-autocura-tiny-contatos-
+  18jun`) e gerou conflito em 3 arquivos fora do escopo; revertido na hora com `git reset --hard HEAD`
+  (o stash original nao foi perdido, continua na lista). tsc --noEmit 0 erros; vitest run
   src/lib/aprovacoes 121/121 (camada intocada); suite completa sem regressao (mesma divida tecnica
   pre-existente de 135 testes falhando em 22 arquivos, confirmada via git stash antes/depois - nenhum
   teste passou a falhar por causa desta fase). 9 arquivos tocados: precificar-item.ts (so comentario -
