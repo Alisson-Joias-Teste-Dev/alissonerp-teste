@@ -2,6 +2,35 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(frete-avulso): solicitação, liberação por pool e pool de motoboy (vX.Y.Z (a definir no merge))
+
+**O quê:** frete avulso (corrida de motoboy sem venda vinculada) ganha um passo de **solicitação**: a
+consultora pede a corrida a partir de uma venda própria (herda cliente/endereço), sem escolher
+motoboy nem responsável, e sem lançar custo. Um **liberador do pool** (lista configurável, ou
+admin/dev/diretor) decide: libera (aí sim lança saldo de frete na gerente) ou recusa (com motivo,
+sem custo). Corrida liberada cai num **pool sem dono** (`motoboy_id NULL`) e **qualquer** entregador
+ativo pode aceitar — o aceite é um claim atômico no banco (evita dois motoboys donos da mesma corrida).
+
+**Como:**
+- Novo estado `solicitada` no enum `enum_entrega_situacao` (antes de `pendente`).
+- Colunas novas em `entregas_venda`: `endereco_entrega`, `liberada_por`, `liberada_em`, `motivo_recusa`.
+- `chk_entrega_origem` recriada para aceitar `venda_id` em avulso (antes só entrega normal aceitava).
+- Tabela nova `alissonerp.frete_avulso_liberadores` (lista de quem pode liberar/recusar) — migration 346.
+- Rotas: `POST /api/entregas-venda/[id]/liberar-avulso`, `/recusar-avulso`, `/aceitar-avulso`;
+  `GET/POST/DELETE /api/configuracoes/frete-avulso-liberadores` (config da lista).
+- Tela de entregas ganha aba "Solicitações"; tela de Configurações ganha aba de liberadores.
+- Fix de blindagem junto: a listagem/contagem SSR de `/entregas-venda` (sem filtro) passou a
+  **excluir `cancelada` e `solicitada`** por padrão — antes solicitações pendentes de liberação
+  vazavam para a lista operacional e inflavam o card "Total"; `?situacao=solicitada` agora só é
+  honrado para quem gerencia liberações.
+
+**Débitos técnicos conhecidos (ver `docs/regras-negocio/entregas.md` §8):** pool sem gating de
+região/loja (decisão de produto); cancelar um avulso liberado não estorna o saldo já lançado;
+entregador aceita/registra sem exigir cadastro prévio em `alissonerp.motoboys`.
+
+**Não roda em prod/homolog ainda:** migration 346 nunca foi executada. Ver `docs/regras-negocio/entregas.md`
+para o fluxo completo e a matriz de permissão a testar.
+
 ## feat(estoque-comercial): localização das peças + ferramenta de importação (v2.84.0)
 
 **O quê:** o Estoque Comercial passa a ter a **localização física** de cada peça (prateleira/gaveta).

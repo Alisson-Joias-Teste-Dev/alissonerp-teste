@@ -117,9 +117,20 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     ? sql`AND ve.vendedor_id = ${vendedorId}`
     : sql``;
 
+  // REGRA DE NEGÓCIO (frete avulso, modelo POOL): a lista operacional NÃO
+  // mostra 'cancelada' nem 'solicitada' por padrão — 'solicitada' é a etapa
+  // "aguardando liberação" do avulso e não é uma entrega operável ainda.
+  // O filtro ?situacao=solicitada só é honrado para quem gerencia liberações
+  // (ehGestorSolicitacoes); para os demais, cai no mesmo default (exclui
+  // cancelada/solicitada), senão qualquer usuário via URL veria a fila de
+  // solicitações de outras consultoras.
+  // IMPACTO SE REMOVIDO: solicitações pendentes de liberação vazam para a
+  // lista principal e inflam a contagem "total" para todo mundo.
   const whereSituacao = situacao
-    ? sql`AND ev.situacao = ${situacao}`
-    : sql``;
+    ? (situacao === "solicitada" && !ehGestorSolicitacoes
+        ? sql`AND ev.situacao NOT IN ('cancelada', 'solicitada')`
+        : sql`AND ev.situacao = ${situacao}`)
+    : sql`AND ev.situacao NOT IN ('cancelada', 'solicitada')`;
 
   // Filtro de busca: código de entrega ou número da venda (case-insensitive)
   const whereBusca = busca
