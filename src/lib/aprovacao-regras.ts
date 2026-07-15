@@ -1,6 +1,8 @@
 import sql from "@/lib/db";
 import { getMasterAdminId } from "@/lib/master-admin";
 import { criarNotificacao } from "@/lib/notificacoes";
+import { resolverAprovadores } from "@/lib/aprovacoes";
+import { HttpError } from "@/lib/devolucoes";
 
 export interface RegraAprovacao {
   id: number;
@@ -135,8 +137,16 @@ async function criarTarefaAprovacao(
   contexto: ContextoAprovacao,
   solicitanteId: string,
 ): Promise<number> {
-  // Passa contexto + solicitante pra `encontrarAprovador` aplicar regra master/limites.
-  const aprovadorId = await encontrarAprovador(regra, contexto, solicitanteId);
+  // REGRA DE NEGÓCIO (Fase 3g.3 — política config-first estrita): quem aprova
+  // desconto/cartão passa a ser 100% a config (aprovador_desconto_padrao /
+  // aprovador_cartao_desconto_padrao) — sem cargo, sem master, sem fallback.
+  // Sem aprovador configurado, a tarefa NÃO nasce (409 pro solicitante).
+  const eventoAprovacao = regra.tipo_evento === "cartao_desconto" ? "cartao_desconto" : "desconto";
+  const resol = await resolverAprovadores(eventoAprovacao);
+  if (resol.status === "nao_configurado") {
+    throw new HttpError(409, "Aprovador de desconto não configurado. Defina em Configurações › Aprovadores.");
+  }
+  const aprovadorId = resol.aprovadores[0];
 
   let titulo = "Aprovação — " + regra.nome;
   let descricao = regra.descricao ?? "";

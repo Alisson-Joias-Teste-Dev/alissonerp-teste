@@ -435,6 +435,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (tarefaInfo?.tipo === "cartao_desconto" && tarefaInfo?.venda_id) {
+    // REGRA DE NEGÓCIO (Fase 3g.3): cartão com desconto decidido pela camada
+    // config-first (aprovador_cartao_desconto_padrao) — sem ctx.solicitanteId.
+    const decCartaoDesconto = await podeDecidir(
+      { id: user.id, role: usuarioLogado?.role ?? null },
+      "cartao_desconto",
+    );
+    if (!decCartaoDesconto.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     const logCtx = { tarefa_id: Number(id), venda_id: tarefaInfo.venda_id, decisao: body.decisao, aprovador_id: user.id };
     console.log(`[cartao_desconto] inicio`, logCtx);
     try {
@@ -485,6 +494,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // travava em rascunho mesmo após o diretor aprovar (vendas 15300/15312/15399/
   // 15562/15629 destravadas à mão). Espelha o padrão do bloco cartao_desconto acima.
   if (tarefaInfo?.tipo === "desconto_acima" && tarefaInfo?.venda_id) {
+    // REGRA DE NEGÓCIO (Fase 3g.3): desconto decidido pela camada config-first
+    // (aprovador_desconto_padrao) — sem ctx.solicitanteId.
+    const decDesconto = await podeDecidir(
+      { id: user.id, role: usuarioLogado?.role ?? null },
+      "desconto",
+    );
+    if (!decDesconto.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     const logCtx = { tarefa_id: Number(id), venda_id: tarefaInfo.venda_id, decisao: body.decisao, aprovador_id: user.id };
     console.log(`[desconto] inicio`, logCtx);
     try {

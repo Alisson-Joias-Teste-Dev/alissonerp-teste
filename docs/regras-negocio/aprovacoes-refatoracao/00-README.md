@@ -102,7 +102,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   restaurei o valor original (Jonathan). Prova de que a autoridade é 100% a config. **Fase 3f
   FECHADA.** `aprovador_compra_comercial` já existe (não precisa criar em prod). (Brecha do
   `concluir` void user + R4 duplicação conta a pagar = Fase 4.)
-- [ ] Fase 3g — **venda** (a mais crítica, por último) — mapeada e fatiada em 3 sub-fases (plano `12`). Decisões do Jonathan (12/07): crédito mantém 2 aprovadores (gerente/diretor); desconto migra só a porta oficial (atalhos/comissão = Fase 4).
+- [x] Fase 3g — **venda** (a mais crítica, por último) — mapeada e fatiada em 3 sub-fases (plano `12`). Decisões do Jonathan (12/07): crédito mantém 2 aprovadores (gerente/diretor); desconto migra só a porta oficial (atalhos/comissão = Fase 4). **As 3 sub-fases (3g.1, 3g.2, 3g.3) estão codadas — migração da venda pra config-first FECHADA no código.** Aguardando Opus revisar/criar chaves/testar 3g.3 em homolog (3g.1/3g.2 já testadas).
   - [x] 3g.1 — **entrega sem pagamento + alteração de venda** plugadas na camada config-first
     (15/07/2026, pacote `13`, commit `2d236264`) — **REVISADA e APROVADA pelo Opus** (gates corretos,
     403 idêntico, `approveVenda`/camada intocados) + **TESTADA em HOMOLOG (15/07)**: entrega (=Alisson)
@@ -135,10 +135,105 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
     route.ts` (catch com `instanceof HttpError` antes do `internalError`, pro 409 chegar ao front
     com a mensagem certa — mesmo padrão da Fase 3e). Aguardando Opus revisar e criar cenário de
     teste em homolog.
-  - [ ] 3g.3 — desconto + cartão (porta oficial)
+  - [x] 3g.3 — **desconto + cartão** (porta oficial, via tarefa) plugados na camada config-first
+    (15/07/2026, pacote `15`, commit pendente) — 2 gates `podeDecidir` no despachante (handlers
+    `cartao_desconto` e `desconto_acima`); criação por `resolverAprovadores` em
+    `criarTarefaAprovacao` (`aprovacao-regras.ts`), mapeando `regra.tipo_evento` pro evento
+    (`cartao_desconto`/`desconto`); `nao_configurado` → `HttpError(409, ...)` tratado nos 2 blocos
+    (desconto e cartão) de `solicitar-aprovacao/route.ts`, mesmo padrão da 3g.2. Atalhos
+    (`aprovar-desconto`, `solicitacoes-desconto`), comissão e campos canônicos intocados (Fase 4).
+    `npx tsc --noEmit` 0 erros; `npx vitest run src/lib/aprovacoes` 121/121 (camada intocada).
+    **Fecha a migração da Fase 3g (venda) no código.** Aguardando Opus revisar, criar/preencher
+    `aprovador_desconto_padrao`/`aprovador_cartao_desconto_padrao` (hoje decorativas — precisam de
+    valor ANTES de testar, senão tudo trava em 409/403) e testar em homolog.
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
+
+### Fase 3g.3 (desconto + cartão) — nota pro Opus revisar e testar em homolog
+
+- **Alcance confirmado ANTES de mexer** (pedido pelo pacote): `grep -rn "criarTarefaAprovacao\|encontrarAprovador" src`
+  — as duas só aparecem em `src/lib/aprovacao-regras.ts` (definição + export) e em
+  `src/app/api/vendas/[id]/solicitar-aprovacao/route.ts` (import + as 2 chamadas de
+  `criarTarefaAprovacao`, tipo `desconto`/`cartao_desconto`). Nenhum outro fluxo usa — seguro trocar
+  a resolução do aprovador sem afetar mais nada.
+- **3 arquivos tocados**, escopo fechado exatamente como o pacote pediu:
+  - **Decisão** — despachante `src/app/api/tarefas/[id]/aprovacao/route.ts`: gate `podeDecidir`
+    adicionado na entrada dos 2 blocos, antes de qualquer `UPDATE`/log:
+    - bloco `cartao_desconto` (linha 437 antes da mudança, agora ~444):
+      `podeDecidir({id:user.id, role:usuarioLogado?.role??null}, "cartao_desconto")` → 403 "Sem
+      permissão" se `!pode`.
+    - bloco `desconto_acima` (linha 487 antes da mudança, agora ~501):
+      `podeDecidir(..., "desconto")` → mesmo 403.
+    Sem `ctx.solicitanteId` (como o pacote pediu). Guard genérico do topo do PATCH (~L342, "Somente
+    o aprovador pode responder" + `isAdminOuDev`) **intocado** — o gate config-first é adicional,
+    dentro de cada bloco, igual às fases anteriores.
+  - **Criação** — `src/lib/aprovacao-regras.ts`, função `criarTarefaAprovacao` (~L133): a chamada a
+    `encontrarAprovador` foi substituída por:
+    ```ts
+    const eventoAprovacao = regra.tipo_evento === "cartao_desconto" ? "cartao_desconto" : "desconto";
+    const resol = await resolverAprovadores(eventoAprovacao);
+    if (resol.status === "nao_configurado") {
+      throw new HttpError(409, "Aprovador de desconto não configurado. Defina em Configurações › Aprovadores.");
+    }
+    const aprovadorId = resol.aprovadores[0];
+    ```
+    `HttpError` importada de `@/lib/devolucoes` (reusada, não duplicada — mesmo padrão da 3g.2; sem
+    import circular, `devolucoes.ts` não importa `aprovacao-regras.ts`). O resto de
+    `criarTarefaAprovacao` (template, tags, `INSERT tarefas`/`aprovacoes_tarefa`, notificação)
+    **intocado** — só a origem do `aprovadorId` mudou. `avaliarRegras`/`getDescontoThreshold`
+    **não tocados** (threshold é Fase 5). `encontrarAprovador` ficou **sem uso** dentro do arquivo
+    mas **não foi removida** (continua exportada), como o pacote mandou.
+  - **409 tratado no endpoint** — `src/app/api/vendas/[id]/solicitar-aprovacao/route.ts`: as 2
+    chamadas a `criarTarefaAprovacao` (tipo `desconto` ~L140, tipo `cartao_desconto` ~L213) **não
+    tinham try/catch** (diferente do bloco de crédito, que já tinha). Como `criarTarefaAprovacao`
+    agora pode lançar `HttpError`, adicionei `try/catch` em volta das duas chamadas — `instanceof
+    HttpError` → `NextResponse.json({error: err.message}, {status: err.status})` (409 chega ao
+    front com a mensagem certa); qualquer outro erro cai no `internalError` genérico (contrato
+    idêntico ao que já existia pros demais erros). `HttpError` já estava importada no topo do
+    arquivo (usada pelo crédito, 3g.2) — reusei o mesmo import.
+- **Desvio pequeno, não previsto explicitamente no pacote**: o pacote descrevia o `criarTarefaAprovacao`
+  lançando `HttpError` mas não mencionava que as 2 chamadas no `solicitar-aprovacao/route.ts` não
+  tinham `try/catch` (só o bloco de crédito tinha). Sem adicionar o `try/catch`, o `throw` do 409
+  vazaria como exceção não tratada (Next devolveria 500 genérico, não o 409 com mensagem). Segui o
+  mesmo padrão já usado no crédito (3g.2) — não é um desvio de arquitetura, só um ajuste necessário
+  pro contrato prometido ("409 chega ao front") realmente funcionar.
+- **`npx tsc --noEmit` 0 erros.** `npx vitest run src/lib/aprovacoes` **121/121 passando** (nada da
+  camada mudou, mesma contagem da 3g.1/3g.2). `git status` lista exatamente os 3 arquivos esperados:
+  despachante, `aprovacao-regras.ts`, `solicitar-aprovacao/route.ts`. Não aparecem `aprovar-desconto`,
+  `solicitacoes-desconto`, nem arquivos de comissão.
+- **Sanity check extra** (não pedido pelo pacote, rodado por ter tocado `solicitar-aprovacao/route.ts`
+  e `aprovacao-regras.ts`): `npx vitest run src/__tests__/aprovacao-desconto.test.ts
+  src/__tests__/solicitar-aprovacao-desconto.test.ts src/__tests__/desconto-logica.test.ts` — baseline
+  (via `git stash`) já tinha **10 falhas pré-existentes** nesses 3 arquivos (mocks presos em
+  `encontrarAprovador`/admin fallback, nada a ver com esta fase). Depois da mudança: **11 falhas**.
+  Investiguei a diferença (`diff` teste a teste): é **1 único teste** que muda de status —
+  `solicitar-aprovacao-desconto.test.ts > "retorna 409 quando venda não está em rascunho"` — passava
+  antes, falha depois. **Rodei esse teste sozinho (`-t`) e ele PASSA** — confirma que é **poluição de
+  mock entre testes** (o arquivo usa `mockResolvedValueOnce` em fila; `vi.clearAllMocks()` no
+  `beforeEach` limpa histórico de chamadas mas **não** esvazia a fila de valores "once" não
+  consumidos; o teste anterior, "fluxo completo: cria tarefa de aprovação de desconto", já falhava
+  no baseline e passou a falhar em outro *ponto* da função depois da minha mudança — consumindo um
+  número diferente de mocks da fila — o que empurra valores sobrando pro teste seguinte). **Não é
+  regressão de código**: a rota em si não mudou a ordem/posição do check de `situacao !== "rascunho"`
+  (ele continua ANTES de qualquer código tocado nesta fase) — só o teste tem uma fragilidade
+  pré-existente de isolamento. Reporto porque o pacote pede transparência total, mas não é bloqueante
+  pros critérios de aceite (que são tsc + `vitest run src/lib/aprovacoes`, ambos verdes).
+- **Não toquei**: porta (b) `aprovar-desconto`, porta (c) `solicitacoes-desconto`, o efeito de
+  comissão ao aprovar (recálculo por `faixas_comissao`), `desconto_aprovado_por`/
+  `desconto_cartao_aprovado_por`, `approveVenda`, a trava R3, `getDescontoThreshold`, `avaliarRegras`,
+  o guard genérico L342, a camada `src/lib/aprovacoes/`. Nenhum DDL/DML/migration.
+
+**Cenários pra validar em homolog** (pacote `15`): `aprovador_desconto_padrao` = X → X decide desconto
+(via tarefa); Y → 403; sem a chave → 409 na criação (solicitar aprovação tipo=desconto).
+`aprovador_cartao_desconto_padrao` = X → idem cartão. **As 2 chaves são hoje decorativas — precisam
+ser criadas/preenchidas em homolog ANTES de testar, senão tudo trava em 409 na criação** (igual ao
+aviso do pacote).
+
+**Não subi pra homolog nem testei back/front** — commit pronto, a criação das 2 chaves + validação
+(SQL + tela, com o Jonathan) é do Opus. Esta é a última sub-fase da Fase 3g (venda) — fecha a
+migração fluxo-a-fluxo da Fase 3 inteira (metal → conversão → preço → limpeza → devolução → compra →
+venda), restando só a Fase 4 (brechas/atalhos), Fase 5 (limites/override) e Fase 6 (validação).
 
 ### Fase 3g.2 (crédito) — nota pro Opus revisar e testar em homolog
 

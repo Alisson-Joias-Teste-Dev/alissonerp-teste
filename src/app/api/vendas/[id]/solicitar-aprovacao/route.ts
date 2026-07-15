@@ -137,19 +137,30 @@ export async function POST(
       return `• ${it.sku ?? "?"} — ${it.nome_produto ?? it.sku ?? "Produto"}\n  Tabela: ${sem} | Desconto: ${Number(it.pct_desconto).toFixed(0)}% | Final: ${com}`;
     }).join("\n");
 
-    const tarefaId = await criarTarefaAprovacao(
-      regra,
-      {
-        tipo: "desconto_acima",
-        venda_id: vendaId,
-        percentual_desconto: maiorDesconto,
-        valor_venda: Number(vendaInfo?.total_venda ?? 0),
-        venda_numero: vendaInfo?.numero_venda ?? `#${vendaId}`,
-        venda_total: Number(vendaInfo?.total_venda ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
-        itens_desconto: linhasItens,
-      },
-      user.id,
-    );
+    // REGRA DE NEGÓCIO (Fase 3g.3): sem aprovador de desconto configurado
+    // (política config-first), `criarTarefaAprovacao` lança HttpError(409) —
+    // tratado abaixo pra mensagem chegar ao front, mesmo padrão do crédito (3g.2).
+    let tarefaId: number;
+    try {
+      tarefaId = await criarTarefaAprovacao(
+        regra,
+        {
+          tipo: "desconto_acima",
+          venda_id: vendaId,
+          percentual_desconto: maiorDesconto,
+          valor_venda: Number(vendaInfo?.total_venda ?? 0),
+          venda_numero: vendaInfo?.numero_venda ?? `#${vendaId}`,
+          venda_total: Number(vendaInfo?.total_venda ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+          itens_desconto: linhasItens,
+        },
+        user.id,
+      );
+    } catch (err) {
+      if (err instanceof HttpError) {
+        return NextResponse.json({ error: err.message }, { status: err.status });
+      }
+      return internalError("[POST /api/vendas/[id]/solicitar-aprovacao] desconto", err);
+    }
 
     await sql`
       UPDATE alissonerp.vendas_erp
@@ -210,19 +221,30 @@ export async function POST(
       return `• ${it.sku ?? "?"} — ${it.nome_produto ?? it.sku ?? "Produto"}\n  Tabela: ${sem} | Desconto: ${Number(it.pct_desconto).toFixed(0)}% | Final: ${com}`;
     }).join("\n");
 
-    const tarefaId = await criarTarefaAprovacao(
-      regra,
-      {
-        tipo: "cartao_desconto",
-        venda_id: vendaId,
-        percentual_desconto: maiorDesconto,
-        valor_venda: Number(vendaInfo?.total_venda ?? 0),
-        venda_numero: vendaInfo?.numero_venda ?? `#${vendaId}`,
-        venda_total: Number(vendaInfo?.total_venda ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
-        itens_desconto: linhasItens,
-      },
-      user.id,
-    );
+    // REGRA DE NEGÓCIO (Fase 3g.3): sem aprovador de cartão configurado
+    // (política config-first), `criarTarefaAprovacao` lança HttpError(409) —
+    // tratado abaixo pra mensagem chegar ao front, mesmo padrão do crédito (3g.2).
+    let tarefaId: number;
+    try {
+      tarefaId = await criarTarefaAprovacao(
+        regra,
+        {
+          tipo: "cartao_desconto",
+          venda_id: vendaId,
+          percentual_desconto: maiorDesconto,
+          valor_venda: Number(vendaInfo?.total_venda ?? 0),
+          venda_numero: vendaInfo?.numero_venda ?? `#${vendaId}`,
+          venda_total: Number(vendaInfo?.total_venda ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+          itens_desconto: linhasItens,
+        },
+        user.id,
+      );
+    } catch (err) {
+      if (err instanceof HttpError) {
+        return NextResponse.json({ error: err.message }, { status: err.status });
+      }
+      return internalError("[POST /api/vendas/[id]/solicitar-aprovacao] cartao_desconto", err);
+    }
 
     await sql`
       UPDATE alissonerp.vendas_erp
