@@ -941,7 +941,75 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
                 </div>
               )}
 
-              {tarefa.status === "aguardando_aprovacao" && tarefa.tipo !== "conversao" && tarefa.tipo !== "conversao_sku" && !pendingAprovacao && (
+              {tarefa.tipo === "conversao_reversa" && tarefa.status === "aguardando_aprovacao" && (
+                <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "#FDE68A", backgroundColor: "#FFFBEB" }}>
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={16} style={{ color: "#92400E" }} />
+                    <p className="text-sm font-semibold" style={{ color: "#92400E" }}>Conversão Reversa</p>
+                  </div>
+                  <p className="text-xs" style={{ color: "#6B7280" }}>
+                    Metal já registrado no Caixa de Ouro vira peça pronta: aprovar dá baixa no cofre e entrada no estoque; recusar não mexe em nada.
+                  </p>
+                  <div className="space-y-2">
+                    <textarea rows={2} placeholder="Motivo (obrigatório para rejeitar)"
+                      value={motivoRejeicao} onChange={e => setMotivoRejeicao(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-xl text-xs outline-none resize-none"
+                      style={{ borderColor: "#E8DCC8" }} />
+                    <div className="flex gap-2">
+                      <button onClick={async () => {
+                        setRespondendoAprovacao("aprovar");
+                        try {
+                          await apiFetch("/api/conversao-reversa/aprovar", {
+                            method: "POST",
+                            body: JSON.stringify({ tarefa_id: tarefa.id }),
+                          });
+                          useErrorStore.getState().push("Conversão reversa aprovada! Metal saiu do cofre e a peça entrou no estoque.", { level: "success" });
+                          onUpdated({ ...tarefa, status: "aprovada" });
+                          carregarAprovacoes();
+                        } catch (e: any) {
+                          useErrorStore.getState().push(e?.message ?? "Erro ao aprovar", { level: "critical" });
+                        } finally {
+                          setRespondendoAprovacao(null);
+                        }
+                      }}
+                        disabled={respondendoAprovacao === "aprovar"}
+                        className="flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1"
+                        style={{ backgroundColor: "#059669", color: "#fff" }}>
+                        {respondendoAprovacao === "aprovar" ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                        Aprovar
+                      </button>
+                      <button onClick={async () => {
+                        if (!motivoRejeicao.trim()) {
+                          useErrorStore.getState().push("Motivo obrigatório para rejeitar", { level: "warning" });
+                          return;
+                        }
+                        setRespondendoAprovacao("rejeitar");
+                        try {
+                          await apiFetch("/api/conversao-reversa/recusar", {
+                            method: "POST",
+                            body: JSON.stringify({ tarefa_id: tarefa.id, motivo_recusa: motivoRejeicao.trim() }),
+                          });
+                          useErrorStore.getState().push("Conversão reversa recusada. Nada saiu do cofre.", { level: "success" });
+                          onUpdated({ ...tarefa, status: "rejeitada" });
+                          carregarAprovacoes();
+                        } catch (e: any) {
+                          useErrorStore.getState().push(e?.message ?? "Erro ao recusar", { level: "critical" });
+                        } finally {
+                          setRespondendoAprovacao(null);
+                        }
+                      }}
+                        disabled={respondendoAprovacao === "rejeitar"}
+                        className="flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1"
+                        style={{ backgroundColor: "#EF4444", color: "#fff" }}>
+                        {respondendoAprovacao === "rejeitar" ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
+                        Rejeitar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {tarefa.status === "aguardando_aprovacao" && tarefa.tipo !== "conversao" && tarefa.tipo !== "conversao_sku" && tarefa.tipo !== "conversao_reversa" && !pendingAprovacao && (
                 <p className="text-sm text-center py-4" style={{ color: "#9CA3AF" }}>
                   Aguardando resposta do aprovador...
                 </p>

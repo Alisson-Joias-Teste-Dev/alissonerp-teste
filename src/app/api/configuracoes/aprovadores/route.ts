@@ -36,6 +36,10 @@ const CHAVES = [
   // MULTI (vários UUIDs separados por vírgula): quem aprova a devolução da peça
   // quando a reserva do crediário vira vale-crédito (endpoint reserva/.../devolver-peca).
   "aprovadores_devolver_peca",
+  // MULTI: quem aprova a Conversão Reversa (ouro do cofre vira peça de estoque).
+  // Só as pessoas listadas aqui aprovam (endpoint conversao-reversa/aprovar|recusar).
+  // Vazio = fallback admin/desenvolvedor pra não travar o fluxo.
+  "aprovadores_conversao_reversa",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -125,6 +129,7 @@ export async function GET() {
       aprovador_vale_troca_excecao: configMap.get("aprovador_vale_troca_excecao") ?? "",
       // MULTI: lista de UUIDs separados por vírgula.
       aprovadores_devolver_peca: configMap.get("aprovadores_devolver_peca") ?? "",
+      aprovadores_conversao_reversa: configMap.get("aprovadores_conversao_reversa") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -212,6 +217,13 @@ export async function PUT(req: NextRequest) {
         String(body.aprovadores_devolver_peca).split(",").map((s) => s.trim()).filter(Boolean)
       )).join(",");
       updates.push({ chave: "aprovadores_devolver_peca", valor: lista });
+    }
+    // MULTI: aprovadores da conversão reversa. Vários UUIDs separados por vírgula.
+    if (body.aprovadores_conversao_reversa !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_conversao_reversa).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_conversao_reversa", valor: lista });
     }
 
     for (const u of updates) {
