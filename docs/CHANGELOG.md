@@ -2,6 +2,27 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(produtos): localização física no cadastro e na edição de produtos (v2.85.0)
+
+**O quê:** o campo **Localização** (prateleira/gaveta), já disponível no Estoque Comercial
+(v2.84.0), passa a aparecer também no **cadastro** e na **edição** do produto — mesmo
+padrão do campo Fornecedor (que vive na mesma tabela `erp_produtos`).
+
+**Como (reaproveitando o padrão existente):**
+- `POST /api/produtos` (criação): aceita `localizacao` opcional, grava no pai e replica
+  pras variações (mesmo fluxo do `fornecedor`).
+- `PATCH /api/produtos/[id]` (edição): lê/grava `localizacao` no drawer do produto.
+  A replicação pras variações quando o pai muda é **automática** — o mecanismo já existente
+  (`erpRepl`) copia qualquer campo alterado de `erpUpdate`, sem precisar de código novo.
+- Frontend: campo no `CadastroProdutoModal.tsx` (ao lado do Fornecedor, sempre visível —
+  não dentro da seção colapsável "Ficha Técnica") e no `ProdutoDrawer.tsx` (nas duas
+  variantes de produto: pedra e joia/normal).
+
+**Não mexe em:** banco (coluna já existe — migration 336, v2.84.0), views, triggers.
+
+**Testado:** query exata do PATCH validada no homolog (grava e reverte limpo). `tsc` zero
+erros. Testado no front pelo Jonathan (homolog).
+
 ## feat(estoque-comercial): localização das peças + ferramenta de importação (v2.84.0)
 
 **O quê:** o Estoque Comercial passa a ter a **localização física** de cada peça (prateleira/gaveta).
