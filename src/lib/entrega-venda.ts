@@ -2007,7 +2007,13 @@ export async function podeGerenciarSolicitacoesAvulso(
  * IMPACTO SE ALTERADO: avulso sem motoboy não pode ser confirmado depois.
  */
 export interface CriarFreteAvulsoParams {
-  motoboyId: string; // UUID — obrigatório
+  // REGRA DE NEGÓCIO (pool de motoboy — patch A2): motoboyId é OPCIONAL.
+  // Solicitação da consultora e criação direta SEM motoboy caem no POOL (a
+  // corrida nasce sem dono, motoboy_id NULL, e o 1º motoboy que aceitar
+  // assume — ver aceitarFreteAvulso). Quando informado (criação direta com
+  // motoboy escolhido, ou auto-registro do entregador do PR#75), a corrida já
+  // nasce com dono.
+  motoboyId?: string; // UUID
   regiao: "fortaleza" | "fora_fortaleza" | "longe" | "correios";
   freteCobrado: number;
   freteMotoboyOverride?: number; // usado em longe/correios onde frete=0 e valor é negociado
@@ -2032,7 +2038,9 @@ export interface FreteAvulso {
   codigoEntrega: string;
   situacao: string;
   regiao: string;
-  motoboyId: string;
+  // REGRA DE NEGÓCIO (pool — patch A2): null enquanto a corrida está no pool
+  // sem dono (ver CriarFreteAvulsoParams.motoboyId).
+  motoboyId: string | null;
   freteCobrado: number;
   freteMotoboy: number;
   descricaoAvulso: string | null;
@@ -2125,9 +2133,12 @@ export async function criarFreteAvulso(
   params: CriarFreteAvulsoParams,
   userId: string,
 ): Promise<FreteAvulso> {
-  if (!params.motoboyId) {
-    throw new Error("Motoboy é obrigatório para frete avulso.");
-  }
+  // REGRA DE NEGÓCIO (pool de motoboy — patch A2): motoboy é OPCIONAL aqui.
+  // Solicitação da consultora e criação direta sem motoboy caem no POOL (a
+  // corrida nasce sem dono); quando informado (criação direta com motoboy, ou
+  // auto-registro do entregador PR#75), a corrida já nasce com dono.
+  // IMPACTO SE REMOVIDO: volta a travar toda solicitação/criação sem motoboy
+  // já escolhido, impedindo o modelo de pool.
   if (params.freteCobrado < 0) {
     throw new Error("Valor do frete não pode ser negativo.");
   }
@@ -2177,7 +2188,7 @@ export async function criarFreteAvulso(
         ${params.contatoId ?? null}, ${params.descricaoAvulso ?? null},
         ${codigoEntrega}, NULL, NULL,
         'total', 'motoboy', ${situacaoInicial}, ${params.regiao},
-        ${params.motoboyId}::uuid, ${freteCobrado}, ${freteMotoboy},
+        ${params.motoboyId ?? null}::uuid, ${freteCobrado}, ${freteMotoboy},
         false, ${params.observacoes ?? null},
         ${params.enderecoEntrega ?? null},
         ${userId}::uuid
@@ -2203,7 +2214,7 @@ export async function criarFreteAvulso(
       dados_depois: {
         is_avulso: true,
         codigo_entrega: codigoEntrega,
-        motoboy_id: params.motoboyId,
+        motoboy_id: params.motoboyId ?? null,
         regiao: params.regiao,
         frete_cobrado: freteCobrado,
         frete_motoboy: freteMotoboy,
@@ -2216,11 +2227,18 @@ export async function criarFreteAvulso(
     return row;
   }) as Record<string, unknown>;
 
-  // Buscar nome/telefone do motoboy para retornar na resposta
-  const [motoboy] = await sql`
-    SELECT nome, telefone FROM alissonerp.motoboys
-    WHERE user_id = ${params.motoboyId}::uuid AND ativo = true LIMIT 1
-  `;
+  // Buscar nome/telefone do motoboy para retornar na resposta.
+  // REGRA DE NEGÓCIO (pool — patch A2): corrida de pool nasce SEM motoboy
+  // (params.motoboyId undefined) — pula a consulta e retorna null; o driver
+  // postgres.js lança "Undefined values are not allowed" se um parâmetro
+  // undefined for interpolado na query (${undefined}::uuid), então NÃO dá
+  // pra rodar esta SELECT sem o guard quando não há motoboy.
+  const [motoboy] = params.motoboyId
+    ? await sql`
+        SELECT nome, telefone FROM alissonerp.motoboys
+        WHERE user_id = ${params.motoboyId}::uuid AND ativo = true LIMIT 1
+      `
+    : [];
 
   // Buscar nome do contato se informado
   let clienteNome: string | null = null;
@@ -2236,7 +2254,7 @@ export async function criarFreteAvulso(
     codigoEntrega: String(resultado.codigo_entrega),
     situacao: String(resultado.situacao),
     regiao: String(resultado.regiao),
-    motoboyId: String(resultado.motoboy_id),
+    motoboyId: resultado.motoboy_id ? String(resultado.motoboy_id) : null,
     freteCobrado: money(resultado.frete_cobrado),
     freteMotoboy: money(resultado.frete_motoboy),
     descricaoAvulso: resultado.descricao_avulso ? String(resultado.descricao_avulso) : null,
@@ -2396,18 +2414,34 @@ export async function recusarFreteAvulso(
 }
 
 /**
- * Motoboy ACEITA uma corrida avulsa atribuída por outra pessoa ('pendente' -> 'em_rota').
+ * Motoboy ACEITA uma corrida avulsa do POOL ('pendente' -> 'em_rota').
  *
- * REGRA DE NEGÓCIO: avulso criado pela loja (direto ou liberado de uma
- * solicitação) só é confirmado depois que o motoboy aceita a corrida — o
- * aceite marca a saída física (data_saida) e quem retirou
- * (confirmado_por_motoboy_retirada), igual ao fluxo de retirada das entregas
- * normais. Corrida AUTO-REGISTRADA pelo próprio motoboy (created_by ==
- * motoboy_id) NÃO passa por aqui — ela já aconteceu fisicamente e vai direto
- * para confirmarFreteAvulso.
+ * REGRA DE NEGÓCIO (pool de motoboy — patch A2): a corrida liberada nasce SEM
+ * dono (motoboy_id NULL) e aparece pra TODOS os entregadores ativos. O
+ * PRIMEIRO que aceitar carimba motoboy_id nele — não existe mais "atribuição"
+ * prévia a um motoboy específico. O aceite marca a saída física (data_saida)
+ * e quem retirou (confirmado_por_motoboy_retirada), igual ao fluxo de
+ * retirada das entregas normais. Corrida AUTO-REGISTRADA pelo próprio
+ * motoboy (created_by == motoboy_id) NÃO passa por aqui — ela já aconteceu
+ * fisicamente e vai direto para confirmarFreteAvulso.
  *
- * IMPACTO SE ALTERADO: sem o aceite, o motoboy poderia "confirmar" (finalizar)
- * uma corrida atribuída que ele nunca pegou fisicamente.
+ * O QUE: valida o estado com um SELECT de guarda (mensagens de erro
+ * amigáveis) e então faz o CLAIM em um único UPDATE atômico dentro da
+ * transação — o WHERE reconfirma situacao='pendente' E (sem dono OU já é
+ * deste motoboy) no mesmo comando. Se `res.count === 0`, é porque outro
+ * motoboy venceu a corrida entre o SELECT de guarda e este UPDATE.
+ *
+ * POR QUE: em um pool, vários motoboys podem tocar "aceitar" quase ao mesmo
+ * tempo para a MESMA corrida — um SELECT-depois-UPDATE ingênuo permitiria que
+ * os dois lessem 'pendente' e os dois escrevessem, dando dois donos. O
+ * UPDATE condicional resolve isso no próprio banco: apenas o primeiro comando
+ * a chegar encontra a linha no estado esperado e a modifica; o segundo não
+ * encontra mais nada para atualizar (0 linhas afetadas).
+ *
+ * IMPACTO SE ALTERADO: sem o claim atômico, duas corridas concorrentes podem
+ * carimbar motoboy_id de motoboys diferentes na mesma entrega (a última
+ * escrita vence silenciosamente) — dois entregadores acham que são donos da
+ * mesma corrida, gerando confusão de rota e de acerto financeiro.
  */
 export async function aceitarFreteAvulso(entregaId: number, usuarioId: string): Promise<void> {
   const [entrega] = await sql`
@@ -2428,15 +2462,26 @@ export async function aceitarFreteAvulso(entregaId: number, usuarioId: string): 
   }
 
   await sql.begin(async (tx: DbSql) => {
-    await tx`
+    // CLAIM atômico do pool: só atualiza se ainda está 'pendente' E (sem dono
+    // OU o dono já é este mesmo motoboy — reenvio idempotente). res.count é o
+    // número de linhas afetadas pelo UPDATE (driver postgres.js — mesmo campo
+    // usado em src/lib/importar-localizacao.ts:141, `r.count`).
+    const res = await tx`
       UPDATE alissonerp.entregas_venda
-      SET
-        situacao = 'em_rota',
-        data_saida = now(),
-        confirmado_por_motoboy_retirada = ${usuarioId}::uuid,
-        updated_at = now()
-      WHERE id = ${entregaId} AND situacao = 'pendente'
+      SET motoboy_id = ${usuarioId}::uuid,
+          situacao = 'em_rota',
+          data_saida = now(),
+          confirmado_por_motoboy_retirada = ${usuarioId}::uuid,
+          updated_at = now()
+      WHERE id = ${entregaId}
+        AND is_avulso = true
+        AND situacao = 'pendente'
+        AND (motoboy_id IS NULL OR motoboy_id = ${usuarioId}::uuid)
     `;
+
+    if (res.count === 0) {
+      throw new Error("Corrida já foi aceita por outro motoboy.");
+    }
 
     await logAudit(tx, {
       tabela: "entregas_venda",
@@ -2444,7 +2489,7 @@ export async function aceitarFreteAvulso(entregaId: number, usuarioId: string): 
       registro_id: entregaId,
       usuario_id: usuarioId,
       dados_antes: { situacao: "pendente" },
-      dados_depois: { situacao: "em_rota" },
+      dados_depois: { situacao: "em_rota", motoboy_id: usuarioId },
     });
   });
 }

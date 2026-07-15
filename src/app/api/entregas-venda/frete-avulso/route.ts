@@ -25,7 +25,12 @@ import { AuthError, ForbiddenError, type AuthUser } from "@/lib/auth-server";
 const ROLES_LOJA = ["desenvolvedor", "admin", "gerente_loja", "consultora", "estoquista"];
 
 const FreteAvulsoSchema = z.object({
-  motoboyId: z.string().uuid("motoboyId deve ser um UUID válido"),
+  // REGRA DE NEGÓCIO (pool de motoboy — patch A2): motoboyId é OPCIONAL na
+  // criação pela loja. Consultora solicita SEM escolher motoboy (cai no pool,
+  // ver enderecoEntrega/vendaId abaixo); admin/gerente/estoquista também
+  // podem criar direto sem motoboy (nasce 'pendente' sem dono, pool). Quando
+  // informado, a corrida já nasce com dono.
+  motoboyId: z.string().uuid("motoboyId deve ser um UUID válido").optional(),
   regiao: z.enum(["fortaleza", "fora_fortaleza", "longe", "correios"]),
   freteCobrado: z.number().nonnegative("freteCobrado não pode ser negativo"),
   freteMotoboyOverride: z.number().positive().optional(),
