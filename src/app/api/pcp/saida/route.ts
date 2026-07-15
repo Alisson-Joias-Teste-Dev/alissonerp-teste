@@ -68,19 +68,32 @@ export async function POST(req: NextRequest) {
   }
 
   // 1. Carregar PCP e validar estado
+  //    JOIN com ordens p/ trazer tipo_ordem: ordem de serviço pode dar saída
+  //    a partir de "novas_ordens" (a peça é do cliente, não há apontamento de ouro).
   const [pcp] = await sql`
     SELECT
       p.id, p.etapas::text AS etapas, p.ordem_id, p.deposito_id,
       p.total_metal, p.retorno_metal, p.metal_externo,
-      p.total_geral_outros_pesos, p.dist_ouro_real
+      p.total_geral_outros_pesos, p.dist_ouro_real,
+      o.tipo_ordem::text AS tipo_ordem
     FROM alissonerp.pcp p
+    JOIN alissonerp.ordens o ON o.id = p.ordem_id
     WHERE p.id = ${pcp_id}
     LIMIT 1
   `;
   if (!pcp) {
     return NextResponse.json({ error: "PCP não encontrado" }, { status: 404 });
   }
-  if (pcp.etapas !== "em_andamento") {
+  // Regra: fabricação exige etapa "em_andamento" (garante ouro apontado antes da
+  // saída, senão a quebra sairia zerada em silêncio). Ordem de serviço (peça do
+  // cliente, sem apontamento de entrada) pode sair direto de "novas_ordens".
+  // Impacto se removido: ou trava as ordens de serviço de novo, ou deixa fabricação
+  // dar saída sem ouro apontado. NÃO afrouxar para outros tipos.
+  const TIPOS_SERVICO = ["servico_venda", "garantia", "servico_interno"];
+  const etapaOk =
+    pcp.etapas === "em_andamento" ||
+    (pcp.etapas === "novas_ordens" && TIPOS_SERVICO.includes(pcp.tipo_ordem));
+  if (!etapaOk) {
     return NextResponse.json(
       { error: `PCP está em etapa "${pcp.etapas}" — somente em_andamento pode ter saída` },
       { status: 400 },
