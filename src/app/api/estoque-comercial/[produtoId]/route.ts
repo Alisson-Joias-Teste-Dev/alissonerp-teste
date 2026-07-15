@@ -33,6 +33,11 @@ export async function GET(
       WHERE produto_id = ${id}
     `;
 
+    // Localizacao fisica da peca (carga externa + edicao manual) — vive em erp_produtos.
+    const [prodExtra] = await sql`
+      SELECT localizacao FROM alissonerp.erp_produtos WHERE produto_id = ${id}::bigint
+    `;
+
     const saldoPorLocal = await sql`
       SELECT
         local_estoque_id, local_nome,
@@ -119,6 +124,7 @@ export async function GET(
 
     return NextResponse.json({
       consolidado: consolidado ?? null,
+      localizacao: prodExtra?.localizacao ?? null,
       saldoPorLocal: saldoPorLocal.map(r => ({
         ...r,
         saldo_fisico: Number(r.saldo_fisico ?? 0),
@@ -161,8 +167,14 @@ export async function GET(
     em_transito: 0,
   } : null;
 
+  // Localizacao fisica da peca (vive em erp_produtos), tambem no caminho legado.
+  const [prodExtraLegado] = await sql`
+    SELECT localizacao FROM alissonerp.erp_produtos WHERE produto_id = ${id}::bigint
+  `;
+
   return NextResponse.json({
     consolidado,
+    localizacao: prodExtraLegado?.localizacao ?? null,
     saldoPorLocal: [],
     movimentos: movimentos.map(m => ({
       ...m,

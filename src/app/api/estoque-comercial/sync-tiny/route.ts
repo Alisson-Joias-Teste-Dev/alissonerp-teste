@@ -35,24 +35,24 @@ export async function POST() {
   tinyToken = tinyToken.replace(/"/g, "").trim();
   if (!tinyToken) return NextResponse.json({ error: "Token do Tiny inválido" }, { status: 400 });
 
-  // Buscar produtos ativos com saldo consolidado + id_api_tiny (ID do produto no Tiny)
+  // Buscar produtos ativos com saldo consolidado + id_api_produto (ID do produto no Tiny)
   const produtos = await sql`
     SELECT
       ec.produto_id,
       p.sku,
       p.nome AS nome_produto,
-      p.id_api_tiny,
+      p.id_api_produto,
       COALESCE(s.saldo_fisico, 0) AS saldo
     FROM alissonerp.estoque_comercial_config ec
     JOIN public.produtos p ON p.id_produto = ec.produto_id
     LEFT JOIN alissonerp.vw_saldo_estoque_comercial_consolidado s ON s.produto_id = ec.produto_id
     WHERE ec.ativo = true
-      AND p.id_api_tiny IS NOT NULL
+      AND p.id_api_produto IS NOT NULL
     ORDER BY p.nome
   `;
 
   if (produtos.length === 0) {
-    return NextResponse.json({ error: "Nenhum produto ativo com id_api_tiny encontrado" }, { status: 404 });
+    return NextResponse.json({ error: "Nenhum produto ativo com id_api_produto encontrado" }, { status: 404 });
   }
 
   const resultados: Array<{
@@ -68,10 +68,10 @@ export async function POST() {
     const prod = produtos[idx];
     const sku = prod.sku as string || "";
     const saldo = Number(prod.saldo ?? 0);
-    const tinyProdId = prod.id_api_tiny;
+    const tinyProdId = prod.id_api_produto;
 
     if (!tinyProdId) {
-      resultados.push({ produto_id: prod.produto_id as number, sku, nome: prod.nome_produto as string, saldo, status: "erro", erro: "Sem id_api_tiny" });
+      resultados.push({ produto_id: prod.produto_id as number, sku, nome: prod.nome_produto as string, saldo, status: "erro", erro: "Sem id_api_produto" });
       continue;
     }
 

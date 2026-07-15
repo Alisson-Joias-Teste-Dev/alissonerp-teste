@@ -2,6 +2,32 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(estoque-comercial): localização das peças + ferramenta de importação (v2.84.0)
+
+**O quê:** o Estoque Comercial passa a ter a **localização física** de cada peça (prateleira/gaveta).
+Aparece numa coluna nova na lista e num campo editável no detalhe. Uma ferramenta admin
+(`/estoque-comercial/importar-localizacao`) faz a **carga inicial** a partir do cadastro externo
+das peças (uso único), com **teste de 1 peça** antes da migração completa.
+
+**Como (reaproveitando o que existe):**
+- Coluna `alissonerp.erp_produtos.localizacao` (migration 336 — só `ADD COLUMN IF NOT EXISTS`).
+- `src/lib/importar-localizacao.ts`: a migração lê a localização da **lista paginada** de produtos
+  (mesmo dado do endpoint de estoque, porém ~157 chamadas em vez de ~15,6 mil). Casa por
+  `id_api_produto`. Respeita o limite da fonte (blocos de 10 páginas). O teste de 1 peça usa o
+  endpoint de **estoque** (`/estoque/{id}`).
+- Rotas: `POST .../importar-localizacao` (bloco), `.../importar-localizacao/testar` (1 peça),
+  `PATCH .../[produtoId]/localizacao` (edição manual — o ERP é o dono do dado após a carga).
+- Lista e detalhe ganham a localização via `LEFT JOIN alissonerp.erp_produtos` (sem alterar views).
+- Nome "Tiny" não aparece na tela — só no código (é a fonte).
+
+**Fix junto:** `estoque-comercial/sync-tiny` usava `p.id_api_tiny` (coluna inexistente) →
+corrigido para `id_api_produto` (a rota quebrava em runtime).
+
+**Não mexe em:** saldo de estoque, reservas nem financeiro — a coluna é só informativa.
+
+**Testado (homolog):** 1 peça (AJ4785 → localização composta) via endpoint de estoque grava e confere;
+teste de 1 peça validado no front pelo Jonathan. `tsc` zero erros nos arquivos da feature.
+
 ## fix(conversao): aprovação ia para admin errado (email adivinhado) (v2.83.1)
 
 **Sintoma (conversão C-2567):** a tarefa de aprovação não chegava ao Alisson.
