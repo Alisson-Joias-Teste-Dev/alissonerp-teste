@@ -47,6 +47,16 @@ export async function GET(req: NextRequest) {
   const isAdmin = isFullAccess(usuario?.role);
   const userId = user.id;
 
+  // REGRA DE NEGÓCIO (Fase 5 conversão reversa): a tarefa de aprovação de
+  // conversão reversa deve aparecer pra TODOS os aprovadores configurados em
+  // Configurações → Aprovadores, não só pro responsável. Fragmento reutilizado
+  // nos filtros de visibilidade abaixo.
+  const reversaAprovadorCond = sql`(t.tipo = 'conversao_reversa' AND EXISTS (
+    SELECT 1 FROM alissonerp.configuracoes_sistema cs
+    WHERE cs.chave = 'aprovadores_conversao_reversa'
+      AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+  ))`;
+
   const tagsList = tagsParam ? tagsParam.split(",").map(t => t.trim()).filter(Boolean) : [];
 
   const tarefas = await sql`
@@ -69,12 +79,12 @@ export async function GET(req: NextRequest) {
           : visao === "time"
             ? sql``
             : !isAdmin
-              ? sql`AND (t.responsavel_id = ${userId}::uuid OR t.criado_por = ${userId}::uuid)`
+              ? sql`AND (t.responsavel_id = ${userId}::uuid OR t.criado_por = ${userId}::uuid OR ${reversaAprovadorCond})`
               : sql``}
       ${(visao === "aguardando_aprovacao" || visao === "aguardando")
         ? (isAdmin
             ? sql`AND t.status = 'aguardando_aprovacao'`
-            : sql`AND t.status = 'aguardando_aprovacao' AND t.responsavel_id = ${userId}::uuid`)
+            : sql`AND t.status = 'aguardando_aprovacao' AND (t.responsavel_id = ${userId}::uuid OR ${reversaAprovadorCond})`)
         : sql``}
       ${visao === "concluidas" ? sql`AND t.status IN ('concluida', 'aprovada')` : sql``}
       ${visao === "pendentes" ? sql`AND t.status IN ('pendente', 'em_andamento', 'aguardando_aprovacao')` : sql``}

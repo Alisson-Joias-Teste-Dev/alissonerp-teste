@@ -19,6 +19,7 @@ interface AprovadorConfig {
   aprovador_devolucao_estoque?: string;
   aprovador_vale_troca_excecao?: string;
   aprovadores_devolver_peca?: string; // MULTI: UUIDs separados por vírgula
+  aprovadores_conversao_reversa?: string; // MULTI: UUIDs separados por vírgula
 }
 
 interface Usuario {
@@ -63,6 +64,7 @@ export default function TabAprovadores() {
     aprovador_devolucao_estoque: "",
     aprovador_vale_troca_excecao: "",
     aprovadores_devolver_peca: "",
+    aprovadores_conversao_reversa: "",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
     gerentes: [],
@@ -94,6 +96,7 @@ export default function TabAprovadores() {
           aprovador_devolucao_estoque: d.aprovador_devolucao_estoque ?? "",
           aprovador_vale_troca_excecao: d.aprovador_vale_troca_excecao ?? "",
           aprovadores_devolver_peca: d.aprovadores_devolver_peca ?? "",
+          aprovadores_conversao_reversa: d.aprovadores_conversao_reversa ?? "",
         });
         setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [] });
       })

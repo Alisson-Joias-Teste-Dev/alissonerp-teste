@@ -13,7 +13,9 @@ const ConversaoReversaPostSchema = z.object({
   produto_id: z.coerce.number().int().positive(),
   quantidade: z.coerce.number().int().positive(),
   peso_saida: z.coerce.number().positive(),
-  foto_base64: z.string().optional(),
+  // Foto do peso da joia é OBRIGATÓRIA (requisito Jonathan 15/07) — é a prova
+  // física do que saiu do cofre e virou peça. Sem ela a reversa não abre.
+  foto_base64: z.string().min(1, "Foto do peso é obrigatória"),
   motivo: z.string().optional(),
 }).passthrough();
 
@@ -167,22 +169,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Upload da foto de abertura (se fornecida — falha não bloqueia a abertura)
-  let fotoPath: string | null = null;
-  if (foto_base64) {
-    try {
-      await ensureBucket("conversao-fotos");
-    } catch {
-      console.warn("[conversao-reversa] ensureBucket falhou — continuando sem bucket");
-    }
-    const fp = `reversa/${Date.now()}_${user.id}.jpg`;
-    const r = await uploadFile("conversao-fotos", fp, foto_base64, "image/jpeg");
-    if ("error" in r) {
-      console.warn(`[conversao-reversa] Upload da foto falhou — continuando sem foto: ${r.error}`);
-    } else {
-      fotoPath = r.path;
-    }
+  // Upload da foto de abertura — OBRIGATÓRIA. Diferente das outras conversões,
+  // aqui a falha de upload BLOQUEIA: não abrimos reversa sem a prova do peso.
+  try {
+    await ensureBucket("conversao-fotos");
+  } catch {
+    console.warn("[conversao-reversa] ensureBucket falhou");
   }
+  const fp = `reversa/${Date.now()}_${user.id}.jpg`;
+  const up = await uploadFile("conversao-fotos", fp, foto_base64, "image/jpeg");
+  if ("error" in up) {
+    return NextResponse.json({ error: "Falha ao salvar a foto do peso. Tente novamente." }, { status: 502 });
+  }
+  const fotoPath: string = up.path;
 
   // ── Transação: ordem + conversao_reversa (trigger cria a tarefa de aprovação sozinha) ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

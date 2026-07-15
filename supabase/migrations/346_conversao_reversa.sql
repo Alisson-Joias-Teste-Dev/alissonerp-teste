@@ -192,7 +192,14 @@ BEGIN
     '🔴 **Aprovação necessária para liberar a baixa do cofre e a entrada no estoque.**' || E'\n' ||
     '✅ **Aprovar** → baixa o metal do cofre e dá entrada na peça no estoque' || E'\n' ||
     '❌ **Rejeitar** → nenhuma movimentação é feita',
+    -- REGRA DE NEGÓCIO (Fase 5): responsável = 1º aprovador configurado em
+    -- Configurações → Aprovadores (chave aprovadores_conversao_reversa). Os demais
+    -- da lista também enxergam/aprovam (ver api/tarefas e endpoints). Lista vazia
+    -- = fallback admin do Alisson / qualquer admin, pra não deixar a tarefa órfã.
     COALESCE(
+      (SELECT NULLIF(TRIM((string_to_array(cs.valor, ','))[1]), '')::uuid
+         FROM alissonerp.configuracoes_sistema cs
+         WHERE cs.chave = 'aprovadores_conversao_reversa' AND COALESCE(cs.valor, '') <> ''),
       (SELECT id FROM alissonerp.usuarios WHERE role = 'admin' AND email LIKE '%alisson%' LIMIT 1),
       (SELECT id FROM alissonerp.usuarios WHERE role = 'admin' LIMIT 1)
     ),

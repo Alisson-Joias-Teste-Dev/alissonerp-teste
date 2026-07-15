@@ -35,6 +35,7 @@ import ConversaoReversaModal, { type OrigemReversa } from "@/components/forms/Co
 import { useErrorStore } from "@/stores/errorStore";
 import { STATUS_LABEL, STATUS_COLORS } from "@/lib/cofre-ouro-status";
 import { apiFetch } from "@/lib/apiFetch";
+import { getPublicUrl } from "@/lib/storage-url";
 
 // ─── palette (tema claro/creme consistente com o resto do sistema) ───────────
 const C = {
@@ -1929,6 +1930,27 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOur
     ordem_id: number;
     numero_ordem: string;
   }
+  /**
+   * REGRA DE NEGÓCIO: toda baixa do Caixa de Ouro com destino='estoque' foi
+   * gerada por uma conversão reversa concluída (peça "virando joia" — ver
+   * /api/conversao-reversa/aprovar). Este tipo espelha o retorno de
+   * GET /api/conversao-reversa/detalhe-baixa, usado pra detalhar essa baixa
+   * específica no Histórico de Baixas do Ouro (produto, solicitante,
+   * aprovador, ordem e foto do peso).
+   */
+  interface DetalheReversa {
+    id: number;
+    quantidade: number;
+    peso_saida: number;
+    foto_abertura: string | null;
+    aprovado_em: string | null;
+    created_at: string;
+    numero_ordem: string;
+    produto_nome: string | null;
+    produto_sku: string | null;
+    solicitante_nome: string | null;
+    aprovador_nome: string | null;
+  }
   const [baixasOuro, setBaixasOuro] = useState<BaixaOuro[]>([]);
   const [saldoOuroDisp, setSaldoOuroDisp] = useState<number>(0);
   const [loadingOuro, setLoadingOuro] = useState(false);
@@ -1940,6 +1962,10 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOur
   const [itensByBaixa, setItensByBaixa] = useState<Record<number, BaixaOuroItem[]>>({});
   const [itensLoadingByBaixa, setItensLoadingByBaixa] = useState<Record<number, boolean>>({});
   const [rastreiosByBaixa, setRastreiosByBaixa] = useState<Record<number, RastreioOuroLegado[]>>({});
+  // REQUISITO 3 conversão reversa (15/07): cache por baixa do detalhe da
+  // conversão reversa (quando a baixa for destino='estoque'). null = já
+  // buscou e não é conversão reversa; undefined = ainda não buscou.
+  const [reversaPorBaixa, setReversaPorBaixa] = useState<Record<number, DetalheReversa | null>>({});
   const [ouroSelecionadosIds, setOuroSelecionadosIds] = useState<string[]>([]);
   const [itensBaixadosAtivos, setItensBaixadosAtivos] = useState<BaixaOuroItem[]>([]);
   const [comprasMetal, setComprasMetal] = useState<CompraMetalResumo[]>([]);
@@ -2427,6 +2453,26 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOur
       setRastreiosByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
     } finally {
       setItensLoadingByBaixa((prev) => ({ ...prev, [baixaId]: false }));
+    }
+  }
+
+  /**
+   * REGRA DE NEGÓCIO: só baixas com destino='estoque' vêm de uma conversão
+   * reversa (peça virando joia). Busca sob demanda (ao expandir a baixa) os
+   * dados legíveis — produto, solicitante, aprovador, ordem, foto do peso —
+   * pra detalhar essa baixa específica no Histórico. Cacheia no state pra não
+   * refazer a requisição a cada abrir/fechar do <details>.
+   * IMPACTO SE REMOVIDO: Histórico de Baixas do Ouro volta a mostrar só o
+   * total genérico da baixa, sem dizer qual peça específica saiu do cofre.
+   */
+  async function carregarReversaBaixa(baixaId: number) {
+    if (reversaPorBaixa[baixaId] !== undefined) return;
+    try {
+      const res = await fetch(`/api/conversao-reversa/detalhe-baixa?baixa_id=${baixaId}`);
+      const json = await res.json().catch(() => ({}));
+      setReversaPorBaixa((prev) => ({ ...prev, [baixaId]: res.ok ? (json.conversao_reversa ?? null) : null }));
+    } catch {
+      setReversaPorBaixa((prev) => ({ ...prev, [baixaId]: null }));
     }
   }
 
@@ -3051,6 +3097,9 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOur
               const loadingItens = !!itensLoadingByBaixa[b.id];
               const totalItensG = itens.reduce((s, it) => s + Number(it.gramas ?? 0), 0);
               const totalItensValor = itens.reduce((s, it) => s + Number(it.valor_brl ?? 0), 0);
+              // REQUISITO 3 conversão reversa: baixa destino='estoque' → detalhe
+              // da peça que saiu do cofre (produto, quem pediu/aprovou, foto).
+              const reversa = b.destino === "estoque" ? reversaPorBaixa[b.id] : undefined;
               return (
                 <details
                   key={b.id}
@@ -3058,7 +3107,13 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOur
                   style={{ borderColor: C.cremeBorder }}
                   onToggle={(e) => {
                     const el = e.currentTarget as HTMLDetailsElement;
-                    if (el.open) carregarItensBaixa(b.id);
+                    if (el.open) {
+                      carregarItensBaixa(b.id);
+                      // REGRA DE NEGÓCIO: só baixa destino='estoque' pode ser
+                      // conversão reversa — evita chamada desnecessária pras
+                      // baixas normais (alisson/fabrica/service).
+                      if (b.destino === "estoque") carregarReversaBaixa(b.id);
+                    }
                   }}
                 >
                   <summary className="px-4 py-3 flex items-center justify-between gap-3 cursor-pointer select-none list-none" style={{ backgroundColor: C.cremeBg }}>
@@ -3171,6 +3226,65 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOur
                       <p className="text-xs tabular-nums font-medium" style={{ color: C.verde }}>
                         Total: {fmt(totalItensValor)}
                       </p>
+                    </div>
+                  )}
+                  {/*
+                    REQUISITO 3 conversão reversa (15/07): baixa destino='estoque'
+                    é sempre gerada por uma conversão reversa concluída — detalha
+                    aqui QUAL peça saiu do cofre, quem pediu, quem aprovou e a
+                    foto do peso tirada na abertura (prova física da conversão).
+                    Só renderiza se a busca já achou uma conversão reversa
+                    vinculada a esta baixa (reversa !== null/undefined).
+                  */}
+                  {reversa && (
+                    <div className="px-4 py-3 border-t" style={{ borderColor: C.cremeBorder, backgroundColor: "#FEF3C7" }}>
+                      <p className="text-[11px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color: "#92400E" }}>
+                        <Gem size={12} /> Conversão Reversa
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 text-xs">
+                          <div>
+                            <p style={{ color: C.cinza }}>Produto que virou</p>
+                            <p className="font-medium" style={{ color: "#1A1A1A" }}>
+                              {reversa.produto_nome ?? "—"}{reversa.produto_sku ? ` (${reversa.produto_sku})` : ""}
+                            </p>
+                          </div>
+                          <div>
+                            <p style={{ color: C.cinza }}>Ordem</p>
+                            <p className="font-medium" style={{ color: "#1A1A1A" }}>{reversa.numero_ordem}</p>
+                          </div>
+                          <div>
+                            <p style={{ color: C.cinza }}>Quantidade</p>
+                            <p className="font-medium" style={{ color: "#1A1A1A" }}>{reversa.quantidade} peça(s)</p>
+                          </div>
+                          <div>
+                            <p style={{ color: C.cinza }}>Peso</p>
+                            <p className="font-medium" style={{ color: "#92400E" }}>{Number(reversa.peso_saida).toFixed(3)}g</p>
+                          </div>
+                          <div>
+                            <p style={{ color: C.cinza }}>Solicitado por</p>
+                            <p className="font-medium" style={{ color: "#1A1A1A" }}>{reversa.solicitante_nome ?? "—"}</p>
+                          </div>
+                          <div>
+                            <p style={{ color: C.cinza }}>Aprovado por</p>
+                            <p className="font-medium" style={{ color: "#1A1A1A" }}>{reversa.aprovador_nome ?? "—"}</p>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs mb-1" style={{ color: C.cinza }}>Foto do peso</p>
+                          {reversa.foto_abertura ? (
+                            <a href={getPublicUrl("conversao-fotos", reversa.foto_abertura)} target="_blank" rel="noopener noreferrer">
+                              <img
+                                src={getPublicUrl("conversao-fotos", reversa.foto_abertura)}
+                                alt="Foto do peso na abertura da conversão reversa"
+                                style={{ width: 140, height: 105, objectFit: "cover", borderRadius: 8, border: `1px solid ${C.cremeBorder}`, cursor: "pointer" }}
+                              />
+                            </a>
+                          ) : (
+                            <p className="text-xs italic" style={{ color: C.cinza }}>sem foto</p>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </details>

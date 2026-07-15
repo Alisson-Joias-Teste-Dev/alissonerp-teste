@@ -25,12 +25,21 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  // Verificar se usuário é admin/desenvolvedor (Alisson)
   const [usuario] = await sql`
     SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
   `;
-  if (!usuario || !["admin", "desenvolvedor"].includes(usuario.role)) {
-    return NextResponse.json({ error: "Apenas administradores podem recusar conversões reversas" }, { status: 403 });
+  if (!usuario) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
+  // Mesma regra da aprovação: só quem está na lista configurada recusa (fallback
+  // admin/dev se a lista estiver vazia). Ver conversao-reversa/aprovar/route.ts.
+  const [cfgAprov] = await sql`
+    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadores_conversao_reversa' LIMIT 1
+  `;
+  const aprovadoresCfg = String(cfgAprov?.valor ?? "").split(",").map((s: string) => s.trim()).filter(Boolean);
+  const autorizado = aprovadoresCfg.length > 0
+    ? aprovadoresCfg.includes(user.id)
+    : ["admin", "desenvolvedor"].includes(usuario.role);
+  if (!autorizado) {
+    return NextResponse.json({ error: "Você não está na lista de aprovadores da conversão reversa." }, { status: 403 });
   }
 
   const raw = await req.json().catch(() => ({}));

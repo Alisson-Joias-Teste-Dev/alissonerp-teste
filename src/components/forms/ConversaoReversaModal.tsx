@@ -122,6 +122,8 @@ export default function ConversaoReversaModal({ isOpen, onClose, origem: origemP
       setError(`Peso da joia não pode ultrapassar o restante disponível: máx ${origem.restante.toFixed(3)}g`);
       return;
     }
+    // REGRA DE NEGÓCIO: foto do peso é obrigatória (prova do que virou joia).
+    if (!fotoFile) { setError("Anexe a foto do peso da joia."); return; }
 
     setLoading(true);
     try {
@@ -261,7 +263,7 @@ export default function ConversaoReversaModal({ isOpen, onClose, origem: origemP
           {/* Foto (opcional) */}
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#9CA3AF" }}>
-              Foto (opcional)
+              Foto do peso <span style={{ color: "#DC2626" }}>*</span>
             </p>
             {fotoPreview ? (
               <div className="relative rounded-xl overflow-hidden">
@@ -332,7 +334,7 @@ export default function ConversaoReversaModal({ isOpen, onClose, origem: origemP
             </button>
             <button
               onClick={handleSubmit}
-              disabled={loading || success || !produto}
+              disabled={loading || success || !produto || !fotoFile}
               className="flex items-center justify-center gap-2 px-5 py-3 md:py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50 w-full md:w-auto"
               style={{ backgroundColor: C.ambar, color: "white", minHeight: 44 }}
             >
