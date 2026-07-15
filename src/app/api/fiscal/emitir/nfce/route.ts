@@ -3,6 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_FISCAL } from "@/lib/roles";
+import { assertVendaForaDeRascunho, VendaGuardError } from "@/lib/venda-guards";
 import { focusRequest } from "@/lib/fiscal/focus-client";
 import {
   buildNfcePayload,
@@ -66,6 +67,21 @@ export async function POST(req: NextRequest) {
   const venda_id = parsed.data.venda_id;
   const pagamentos = parsed.data.pagamentos as unknown as ItemPagamento[];
   const cliente_id = parsed.data.cliente_id;
+
+  // Trava de rascunho: NFC-e só pode ser emitida de venda firmada (fora de
+  // 'rascunho'). Reutiliza a guarda central (venda-guards.ts) — não duplica a
+  // checagem. IMPACTO: se removido, rascunho volta a emitir nota fiscal real.
+  try {
+    await assertVendaForaDeRascunho(sql, venda_id, "emitir NFC-e");
+  } catch (err) {
+    if (err instanceof VendaGuardError) {
+      return NextResponse.json(
+        { error: err.message },
+        { status: err.motivo === "rascunho" ? 422 : 404 },
+      );
+    }
+    throw err;
+  }
 
   // ── 3. Buscar venda ───────────────────────────────────────────────────────
   interface VendaRow {

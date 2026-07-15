@@ -20,6 +20,10 @@ export async function GET(
   const id = Number(clienteId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
+  // Trava de rascunho: este endpoint alimenta os 3 modais de nova ordem
+  // (seleção de venda do cliente). Rascunho é orçamento não confirmado —
+  // se aparecer aqui, a consultora consegue abrir ordem a partir de um
+  // orçamento que nunca foi firmado. Filtra em ambas as queries abaixo.
   const vendas = isVendasFullAccess(user.role)
     ? await sql`
         SELECT
@@ -31,7 +35,7 @@ export async function GET(
           COALESCE(v.qtd_itens, 0)   AS qtd_itens,
           COALESCE(v.total_pago, 0)  AS total_pago
         FROM alissonerp.vw_vendas_erp_completa v
-        WHERE v.cliente_id = ${id}
+        WHERE v.cliente_id = ${id} AND v.situacao <> 'rascunho'
         ORDER BY v.data_venda DESC
         LIMIT 50
       `
@@ -47,7 +51,7 @@ export async function GET(
             COALESCE(v.qtd_itens, 0)   AS qtd_itens,
             COALESCE(v.total_pago, 0)  AS total_pago
           FROM alissonerp.vw_vendas_erp_completa v
-          WHERE v.cliente_id = ${id} AND v.vendedor_id = ${vid}
+          WHERE v.cliente_id = ${id} AND v.vendedor_id = ${vid} AND v.situacao <> 'rascunho'
           ORDER BY v.data_venda DESC
           LIMIT 50
         `;
