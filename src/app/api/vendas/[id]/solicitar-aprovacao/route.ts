@@ -15,6 +15,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { submeterVendaParaAprovacaoCredito } from "@/lib/vendas-credito-aprovar";
+import { HttpError } from "@/lib/devolucoes";
 import { approveVenda } from "@/lib/vendas-aprovar";
 import { avaliarRegras, criarTarefaAprovacao, getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { ForbiddenError } from "@/lib/auth-server";
@@ -266,6 +267,13 @@ export async function POST(
         message: result.message,
       });
     } catch (err) {
+      // REGRA DE NEGÓCIO (Fase 3g.2): "aprovador de crédito não configurado" tem
+      // status/mensagem próprios (política config-first) — as demais mensagens
+      // de erro continuam genéricas via internalError, contrato idêntico ao de
+      // antes (mesmo padrão da Fase 3e em devolucoes/[id]/solicitar-aprovacao).
+      if (err instanceof HttpError) {
+        return NextResponse.json({ error: err.message }, { status: err.status });
+      }
       return internalError("[POST /api/vendas/[id]/solicitar-aprovacao]", err);
     }
   }

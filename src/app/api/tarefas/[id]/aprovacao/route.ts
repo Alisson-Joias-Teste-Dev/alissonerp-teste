@@ -573,6 +573,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       tarefaInfo?.tipo !== "desconto_acima" &&
       !tags.includes("aprovacao_venda") &&
       tarefaInfo?.tipo !== "cartao_desconto") {
+    // REGRA DE NEGÓCIO (Fase 3g.2): crédito decidido pela camada config-first —
+    // 2 aprovadores (aprovadora_credito_gerente / aprovador_credito_diretor),
+    // escolhidos pelo evento conforme aprovacao_credito_tipo (gravado na venda
+    // por submeterVendaParaAprovacaoCredito, roteado pela regra de saldo — isso
+    // não muda). Não mais pela checagem genérica do topo do PATCH. Sem
+    // ctx.solicitanteId: crédito não exclui quem solicitou.
+    const eventoCredito = tarefaInfo?.aprovacao_credito_tipo === "diretor" ? "credito_diretor" : "credito_gerente";
+    const decCredito = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, eventoCredito);
+    if (!decCredito.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const { processarAprovacaoCredito } = await import("@/lib/vendas-credito-aprovar");
       const resultado = await processarAprovacaoCredito(

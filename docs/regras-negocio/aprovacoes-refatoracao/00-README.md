@@ -117,11 +117,85 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
     lista `diretores_admins` — mesmo conjunto de cargos do antigo `ROLES_FINANCEIRO`). Escopo
     fechado: `approveVenda`/`estornarVenda`, efeitos das solicitações, guard genérico do despachante
     (L342) e `src/lib/aprovacoes/` intocados. Aguardando Opus criar a chave em homolog e testar.
-  - [ ] 3g.2 — crédito (gerente + diretor)
+  - [x] 3g.2 — **crédito** (gerente + diretor) plugado na camada config-first
+    (15/07/2026, pacote `14`, commit pendente de hash — ver nota abaixo) — submissão e decisão
+    migradas juntas. Chaves `aprovadora_credito_gerente`/`aprovador_credito_diretor` **já existiam**
+    (nenhuma chave nova). `npx tsc --noEmit` 0 erros; `npx vitest run src/lib/aprovacoes` 121/121
+    (camada intocada). 3 arquivos: `vendas-credito-aprovar.ts` (submissão — os 2 blocos de fallback
+    por cargo viraram `resolverAprovadores(tipo==="diretor"?"credito_diretor":"credito_gerente")`;
+    `nao_configurado` → `HttpError(409, ...)`, reusando a classe já exportada por `devolucoes.ts`);
+    despachante `tarefas/[id]/aprovacao/route.ts` (gate `podeDecidir` no bloco `isCreditoReal`,
+    mapeando o evento por `tarefaInfo.aprovacao_credito_tipo`); `vendas/[id]/solicitar-aprovacao/
+    route.ts` (catch com `instanceof HttpError` antes do `internalError`, pro 409 chegar ao front
+    com a mensagem certa — mesmo padrão da Fase 3e). Aguardando Opus revisar e criar cenário de
+    teste em homolog.
   - [ ] 3g.3 — desconto + cartão (porta oficial)
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
+
+### Fase 3g.2 (crédito) — nota pro Opus revisar e testar em homolog
+
+- 3 arquivos tocados, escopo fechado (submissão + gate no despachante + o catch do endpoint que
+  precisou do `HttpError`) — **nem a camada `src/lib/aprovacoes/`, nem `processarAprovacaoCredito`
+  (efeito), nem `approveVenda`/`estornarVenda`, nem a coluna `aprovacao_credito_tipo`** foram
+  tocados, como pedido:
+  - **Submissão** (`src/lib/vendas-credito-aprovar.ts`, `submeterVendaParaAprovacaoCredito`):
+    **mantida** a regra de saldo que decide o `tipo` (`getSaldoDisponivel`, ~L101-102) — é
+    roteamento puro, não muda. **Trocados** os 2 blocos de resolução do aprovador (config + fallback
+    por cargo, um pra gerente outro pra diretor) por uma chamada só:
+    `resolverAprovadores(tipo === "diretor" ? "credito_diretor" : "credito_gerente")`. Sem
+    `ctx.solicitanteId` (crédito não exclui quem solicitou, igual ao pacote pediu).
+    `nao_configurado` → `throw new HttpError(409, "Aprovador de crédito (<tipo>) não configurado.
+    Defina em Configurações › Aprovadores.")`. **Mantido** intocado o resto: gravação de
+    `aprovacao_credito_tipo`/`aprovacao_credito_tarefa_id` na venda, criação de `tarefas`
+    (tags `['credito_loja', tipo]`) e `aprovacoes_tarefa` — só o `aprovadorId` passa a vir de
+    `resolverAprovadores` (grava o 1º da lista, igual ao padrão dos outros fluxos multi-aprovador).
+  - **`HttpError` reusada, não duplicada**: a classe já estava exportada por `devolucoes.ts` desde a
+    Fase 3e (comentário no código já dizia "mesmo padrão usado em outras rotas") — importei de lá em
+    vez de criar uma equivalente nova, como o pacote autorizou ("reuse a de devolucoes.ts se já
+    exportada"). Não há import circular (`devolucoes.ts` não importa `vendas-credito-aprovar.ts`).
+  - **Decisão** (despachante `src/app/api/tarefas/[id]/aprovacao/route.ts`, bloco `isCreditoReal`,
+    ~L570-591 após a mudança): antes de chamar `processarAprovacaoCredito`, adicionado
+    `const eventoCredito = tarefaInfo?.aprovacao_credito_tipo === "diretor" ? "credito_diretor" :
+    "credito_gerente"; const decCredito = await podeDecidir({id:user.id, role:usuarioLogado?.role ??
+    null}, eventoCredito); if (!decCredito.pode) return 403 "Sem permissão";` — espelha exatamente o
+    padrão dos gates de `devolucao`/`devolucao_estoque`/`compra_comercial`/`recebimento_metal` já
+    plugados nas fases anteriores. **Guard genérico do topo do PATCH (~L342, "Somente o aprovador
+    pode responder" + `isAdminOuDev`) intocado** — o gate config-first é adicional, roda depois,
+    dentro do bloco específico de crédito, igual às fases anteriores.
+  - **Contrato do 409 preservado**: `vendas/[id]/solicitar-aprovacao/route.ts` usava
+    `internalError(...)` no catch de `submeterVendaParaAprovacaoCredito` — que **nunca** expõe
+    `err.message` (é o padrão do projeto pra não vazar erro interno). Sem tratar o `HttpError`
+    antes, a mensagem "Aprovador de crédito (...) não configurado..." nunca chegaria ao front — só
+    um "Erro interno" genérico 500. Resolvido com `if (err instanceof HttpError) return
+    NextResponse.json({error: err.message}, {status: err.status})` **antes** do `internalError`,
+    exatamente o mesmo padrão que a Fase 3e usou em `devolucoes/[id]/solicitar-aprovacao/route.ts`.
+  - **Nenhum desvio do pacote.** As 2 chaves de config (`aprovadora_credito_gerente`,
+    `aprovador_credito_diretor`) e as entradas `credito_gerente`/`credito_diretor` no catálogo **já
+    existiam** desde a Fase 1b — não precisou criar chave nova nem mexer no banco/config-UI.
+  - `npx tsc --noEmit` zero erros. `npx vitest run src/lib/aprovacoes` **121/121 passando** (nada da
+    camada mudou, mesma contagem da Fase 3f/3g.1). `git status` lista exatamente os 3 arquivos
+    esperados: `vendas-credito-aprovar.ts`, despachante, `vendas/[id]/solicitar-aprovacao/route.ts`.
+  - **Sanity check extra** (não pedido pelo pacote, rodado por precaução por ter tocado
+    `solicitar-aprovacao/route.ts`): `npx vitest run src/__tests__/submeter-credito-celular.test.ts
+    src/__tests__/solicitar-aprovacao-desconto.test.ts` — o primeiro passa 100% (só cobre o gate de
+    celular, não chega na resolução de aprovador). O segundo tem **3 falhas pré-existentes**
+    (`tipo='desconto'`, dependem de `getMasterAdminId`/`MASTER_ADMIN_USER_ID` não configurado no
+    ambiente de teste) — confirmado com `git stash` que as mesmas 3 falhas já existiam **antes**
+    desta mudança (fluxo de desconto, código que não toquei). Não é regressão desta fase.
+- **Não toquei**: `processarAprovacaoCredito` (efeito diretor que zera comissão com guard de data
+  `2026-07-01`, débito de saldo, `approveVenda` disparado ao fim), a coluna `aprovacao_credito_tipo`,
+  o sub-ramo `cartao_desconto` que a mesma função também trata (é da Fase 3g.3), `approveVenda`/
+  `estornarVenda`, a trava R3, o guard genérico L342, `src/lib/aprovacoes/`. Nenhum DDL/DML/migration.
+
+**Cenários pra validar em homolog** (pacote `14`): `aprovadora_credito_gerente` = X → X decide
+crédito-gerente, Y (≠X) → 403; `aprovador_credito_diretor` = Z → Z decide crédito-diretor, outro →
+403; sem a chave correspondente → solicitar aprovação de crédito → 409 "Aprovador de crédito (<tipo>)
+não configurado" chegando ao front com a mensagem certa.
+
+**Não subi pra homolog nem testei back/front** — commit pronto, a validação (SQL + tela, com o
+Jonathan) é do Opus antes de avançar pra Fase 3g.3 (desconto + cartão, a sub-fase mais crítica).
 
 ### Fase 3f (compra comercial) — nota pro Opus revisar e testar em homolog
 
