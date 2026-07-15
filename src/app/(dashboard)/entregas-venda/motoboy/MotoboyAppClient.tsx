@@ -51,6 +51,11 @@ interface EntregaMotoboy {
   is_avulso: boolean;
   descricao_avulso: string | null;
   auto_criado: boolean;
+  /** REGRA DE NEGÓCIO (modelo POOL — migration 346): endereço de entrega da
+   * solicitação de frete avulso (herdado da venda no momento da solicitação).
+   * Exibido no card pro motoboy saber pra onde ir. */
+  endereco_entrega: string | null;
+  observacoes: string | null;
 }
 
 // REGRA DE NEGÓCIO: valor da corrida avulsa é FIXO pela região (espelha
@@ -96,8 +101,12 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
   // Drawer de detalhe
   const [selectedEntregaId, setSelectedEntregaId] = useState<number | null>(null);
 
-  // Confirmação de avulso
+  // Confirmação de avulso (finalizar entrega — POST /confirmar-avulso)
   const [confirmandoAvulso, setConfirmandoAvulso] = useState<number | null>(null);
+  // REGRA DE NEGÓCIO (modelo POOL — migration 346): "Aceitar corrida" é o
+  // passo novo entre a liberação (situacao='pendente') e a finalização —
+  // espelha confirmandoAvulso, mas chama /aceitar-avulso (pendente → em_rota).
+  const [aceitandoAvulso, setAceitandoAvulso] = useState<number | null>(null);
 
   // Nova corrida avulsa (registrada pelo próprio motoboy → nasce pendente p/ loja)
   const [novaOpen, setNovaOpen] = useState(false);
@@ -412,7 +421,16 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                     </span>
                   </div>
 
-                  {/* Corrida que o próprio motoboy registrou: aguarda a loja confirmar */}
+                  {/* Endereço/observações da corrida avulsa (herdados da venda
+                      quando a solicitação veio da consultora — modelo POOL) */}
+                  {item.is_avulso && (item.endereco_entrega || item.observacoes) && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: C.cinza }}>
+                      {item.endereco_entrega && <div>📍 {item.endereco_entrega}</div>}
+                      {item.observacoes && <div>{item.observacoes}</div>}
+                    </div>
+                  )}
+
+                  {/* Caso 1: corrida que o próprio motoboy registrou — aguarda a loja confirmar (inalterado) */}
                   {item.is_avulso && item.situacao === "pendente" && item.auto_criado && (
                     <div style={{
                       marginTop: 10, padding: "8px 10px", borderRadius: 8,
@@ -423,8 +441,46 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                     </div>
                   )}
 
-                  {/* Botão confirmar avulso (corrida atribuída pela loja, não a que ele criou) */}
+                  {/* Caso 2: corrida atribuída (não auto-criada) parada em 'pendente'
+                      — o motoboy precisa ACEITAR antes de sair para rota
+                      (POST /aceitar-avulso: 'pendente' -> 'em_rota'). */}
                   {item.is_avulso && item.situacao === "pendente" && !item.auto_criado && (
+                    <div style={{ marginTop: 10 }} onClick={e => e.stopPropagation()}>
+                      <button
+                        disabled={aceitandoAvulso === item.id}
+                        onClick={async () => {
+                          setAceitandoAvulso(item.id);
+                          try {
+                            const { apiFetch } = await import("@/lib/apiFetch");
+                            await apiFetch(`/api/entregas-venda/${item.id}/aceitar-avulso`, { method: "POST" });
+                            await carregar();
+                          } catch (e) {
+                            alert(e instanceof Error ? e.message : "Erro ao aceitar corrida");
+                          } finally {
+                            setAceitandoAvulso(null);
+                          }
+                        }}
+                        style={{
+                          width: "100%", padding: "8px 0",
+                          background: C.esmeralda, color: "#fff",
+                          border: "none", borderRadius: 8,
+                          fontSize: 13, fontWeight: 700, cursor: "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                          opacity: aceitandoAvulso === item.id ? 0.6 : 1,
+                        }}
+                      >
+                        {aceitandoAvulso === item.id
+                          ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+                          : <Bike size={14} />
+                        }
+                        Aceitar corrida
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Caso 3: corrida já em rota (motoboy aceitou) — finalizar
+                      a entrega (POST /confirmar-avulso: 'em_rota' -> 'confirmada'). */}
+                  {item.is_avulso && item.situacao === "em_rota" && (
                     <div style={{ marginTop: 10 }} onClick={e => e.stopPropagation()}>
                       <button
                         disabled={confirmandoAvulso === item.id}
@@ -453,7 +509,7 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                           ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
                           : <CheckCircle size={14} />
                         }
-                        Confirmar Entrega
+                        Finalizar entrega
                       </button>
                     </div>
                   )}

@@ -35,8 +35,10 @@ import {
   Store,
   ExternalLink,
   DollarSign,
+  MapPin,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
+import { useErrorStore } from "@/stores/errorStore";
 import Paginacao from "@/components/ui/Paginacao";
 import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
 import MotoboyDrawer from "@/components/entregas/MotoboyDrawer";
@@ -106,6 +108,25 @@ interface EntregasListResponse {
   page: number;
   limit: number;
   totalPages: number;
+}
+
+/**
+ * Item de solicitação de frete avulso pendente de decisão (aba "Solicitações",
+ * modelo POOL — migration 346). Vem de GET /api/entregas-venda?situacao=solicitada,
+ * que devolve a linha crua da tabela (spread) + os campos calculados usados
+ * aqui. É um subconjunto do que a rota retorna — só o necessário pra este painel.
+ */
+interface SolicitacaoAvulso {
+  id: number;
+  venda_id: number | null;
+  numero_venda: string | null;
+  cliente_nome: string | null;
+  descricao_avulso: string | null;
+  endereco_entrega: string | null;
+  regiao: string | null;
+  frete_cobrado: number;
+  frete_motoboy: number;
+  created_at: string;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
@@ -223,8 +244,8 @@ export default function EntregasVendaClient({
   buscaFiltro,
   dataInicioFiltro,
   dataFimFiltro,
-  userRole: _userRole, // prefixado com _: reservado para ações futuras (ex: permissões)
-  podeLiberarSolicitacoes: _podeLiberarSolicitacoes, // prefixado com _: aba "Solicitações" é de outra tarefa (UI)
+  userRole,
+  podeLiberarSolicitacoes,
 }: EntregasVendaClientProps) {
   const router = useRouter();
 
@@ -270,6 +291,85 @@ export default function EntregasVendaClient({
       .then((d) => setSaldoFrete(d.saldo))
       .catch(() => setSaldoFrete(null));
   }, []);
+
+  // ── Aba "Solicitações" (frete avulso — modelo POOL, migration 346) ─────────
+  // REGRA DE NEGÓCIO: só quem pode gerenciar solicitações (liberador ativo ou
+  // full-access) vê esta aba. A aba lê da API (não do SSR) porque a lista
+  // muda com frequência (liberar/recusar) e não deve poluir a paginação
+  // principal — mostra TODAS as solicitações pendentes, sem filtro por
+  // responsável (não existe mais responsável designado no modelo POOL).
+  const [abaSolicitacoes, setAbaSolicitacoes] = useState(false);
+  const [solicitacoes, setSolicitacoes] = useState<SolicitacaoAvulso[]>([]);
+  const [carregandoSolic, setCarregandoSolic] = useState(false);
+  // Ação em andamento (liberar/recusar) por id — desabilita os botões da linha
+  const [acaoSolicId, setAcaoSolicId] = useState<number | null>(null);
+  // Linha em modo "recusar" (mostrando textarea de motivo)
+  const [recusandoId, setRecusandoId] = useState<number | null>(null);
+  const [motivoRecusa, setMotivoRecusa] = useState("");
+
+  const carregarSolicitacoes = useCallback(async () => {
+    if (!podeLiberarSolicitacoes) return;
+    setCarregandoSolic(true);
+    try {
+      const data = await apiFetch<{ items: SolicitacaoAvulso[] }>(
+        "/api/entregas-venda?situacao=solicitada&limit=200",
+      );
+      setSolicitacoes(Array.isArray(data.items) ? data.items : []);
+    } catch (err) {
+      console.error("Erro ao carregar solicitações de frete avulso:", err);
+    } finally {
+      setCarregandoSolic(false);
+    }
+  }, [podeLiberarSolicitacoes]);
+
+  // Carrega assim que a tela monta (para o contador do chip já nascer certo),
+  // não só quando a aba é aberta.
+  useEffect(() => { void carregarSolicitacoes(); }, [carregarSolicitacoes]);
+
+  /** Libera a solicitação — o custo do frete passa a valer para a loja. */
+  async function handleLiberarSolicitacao(id: number) {
+    setAcaoSolicId(id);
+    try {
+      await apiFetch(`/api/entregas-venda/${id}/liberar-avulso`, { method: "POST" });
+      setSolicitacoes((prev) => prev.filter((s) => s.id !== id));
+      void recarregar();
+    } catch (err) {
+      useErrorStore.getState().push(
+        err instanceof Error ? err.message : "Erro ao liberar frete avulso",
+      );
+    } finally {
+      setAcaoSolicId(null);
+    }
+  }
+
+  function abrirRecusa(id: number) {
+    setRecusandoId(id);
+    setMotivoRecusa("");
+  }
+
+  /** Recusa a solicitação — exige motivo (mín. 3 caracteres) para dar retorno à consultora. */
+  async function handleRecusarSolicitacao(id: number) {
+    if (motivoRecusa.trim().length < 3) {
+      useErrorStore.getState().push("Informe um motivo com ao menos 3 caracteres.", { level: "warning" });
+      return;
+    }
+    setAcaoSolicId(id);
+    try {
+      await apiFetch(`/api/entregas-venda/${id}/recusar-avulso`, {
+        method: "POST",
+        body: JSON.stringify({ motivo: motivoRecusa.trim() }),
+      });
+      setSolicitacoes((prev) => prev.filter((s) => s.id !== id));
+      setRecusandoId(null);
+      void recarregar();
+    } catch (err) {
+      useErrorStore.getState().push(
+        err instanceof Error ? err.message : "Erro ao recusar frete avulso",
+      );
+    } finally {
+      setAcaoSolicId(null);
+    }
+  }
 
   // ── Recarregar dados via API (client-side) ──────────────────────────────────
   // REGRA DE NEGÓCIO: função usada para refresh após ações no drawer
@@ -613,6 +713,36 @@ export default function EntregasVendaClient({
               {s.label}
             </button>
           ))}
+
+          {/* ── Chip "Solicitações" (modelo POOL) ─────────────────────────────
+              REGRA DE NEGÓCIO: só aparece para quem pode liberar/recusar
+              (liberador ativo ou full-access). Alterna o painel de
+              solicitações no lugar da tabela padrão. */}
+          {podeLiberarSolicitacoes && (
+            <button
+              onClick={() => setAbaSolicitacoes(v => !v)}
+              style={{
+                padding: "6px 14px", borderRadius: 20, border: "none",
+                cursor: "pointer", fontSize: 13, fontWeight: 600,
+                background: abaSolicitacoes ? C.esmeralda : "#fff",
+                color:      abaSolicitacoes ? "#fff" : C.cinza,
+                boxShadow:  abaSolicitacoes ? "none" : `0 0 0 1px ${C.cremeBorder}`,
+                display: "flex", alignItems: "center", gap: 6,
+              }}
+            >
+              Solicitações
+              {solicitacoes.length > 0 && (
+                <span style={{
+                  background: abaSolicitacoes ? "#fff" : C.vermelho,
+                  color:      abaSolicitacoes ? C.esmeralda : "#fff",
+                  borderRadius: 10, fontSize: 11, fontWeight: 700,
+                  padding: "1px 7px", lineHeight: 1.5,
+                }}>
+                  {solicitacoes.length}
+                </span>
+              )}
+            </button>
+          )}
         </div>
 
         {/* ── Filtros de período ───────────────────────────────────────────── */}
@@ -748,8 +878,159 @@ export default function EntregasVendaClient({
           </button>
         </div>
 
-        {/* ── Tabela / Loading / Empty State ─────────────────────────────────── */}
-        {loading ? (
+        {/* ── Painel "Solicitações" (modelo POOL) — substitui a tabela ────────── */}
+        {/* REGRA DE NEGÓCIO: lista TODAS as solicitações pendentes de decisão
+            (situacao='solicitada'), sem filtro por responsável — qualquer
+            liberador do pool decide qualquer uma. Liberar/Recusar removem o
+            item da lista local e recarregam a listagem principal (ela pode
+            ganhar uma entrega 'pendente' nova ao liberar). */}
+        {abaSolicitacoes ? (
+          carregandoSolic ? (
+            <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
+              <Loader2 size={24} color={C.esmeralda} style={{ animation: "spin 1s linear infinite" }} />
+            </div>
+          ) : solicitacoes.length === 0 ? (
+            <div style={{
+              textAlign: "center", padding: 64, color: C.cinza,
+              background: "#fff", borderRadius: 12,
+              border: `1px solid ${C.cremeBorder}`,
+            }}>
+              <Package size={40} style={{ opacity: 0.25, marginBottom: 12 }} />
+              <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: C.cinza }}>
+                Nenhuma solicitação pendente
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {solicitacoes.map((s) => {
+                const emAndamento = acaoSolicId === s.id;
+                return (
+                  <div key={s.id} style={{
+                    background: "#fff", border: `1px solid ${C.cremeBorder}`,
+                    borderRadius: 10, padding: 16,
+                  }}>
+                    <div style={{
+                      display: "flex", justifyContent: "space-between",
+                      alignItems: "flex-start", gap: 10, marginBottom: 8, flexWrap: "wrap",
+                    }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: C.esmeralda }}>
+                          {s.numero_venda ? `Venda ${s.numero_venda}` : `#${s.venda_id ?? s.id}`}
+                          {" — "}
+                          {s.cliente_nome ?? "Cliente não identificado"}
+                        </div>
+                        <div style={{ fontSize: 12, color: C.cinza, marginTop: 2 }}>
+                          {s.descricao_avulso ?? "—"}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>
+                          {fmtBRL(s.frete_cobrado)}
+                        </div>
+                        {s.frete_motoboy > 0 && (
+                          <div style={{ fontSize: 10, color: C.cinza }}>
+                            Motoboy: {fmtBRL(s.frete_motoboy)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{
+                      display: "flex", alignItems: "flex-start", gap: 6,
+                      fontSize: 12, color: "#1f2937", background: C.cremeBg,
+                      borderRadius: 8, padding: "8px 10px", marginBottom: 10,
+                    }}>
+                      <MapPin size={13} color={C.cinza} style={{ marginTop: 1, flexShrink: 0 }} />
+                      <span>{s.endereco_entrega ?? "Endereço não informado"}</span>
+                    </div>
+
+                    {recusandoId === s.id ? (
+                      <div>
+                        <textarea
+                          rows={2}
+                          value={motivoRecusa}
+                          onChange={(e) => setMotivoRecusa(e.target.value)}
+                          placeholder="Motivo da recusa (mín. 3 caracteres)..."
+                          style={{
+                            width: "100%", padding: "8px 10px", borderRadius: 8,
+                            border: `1px solid ${C.cremeBorder}`, fontSize: 12,
+                            resize: "vertical", boxSizing: "border-box", marginBottom: 8,
+                          }}
+                        />
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button
+                            type="button"
+                            onClick={() => setRecusandoId(null)}
+                            disabled={emAndamento}
+                            style={{
+                              flex: 1, padding: "8px 0", borderRadius: 8,
+                              border: `1px solid ${C.cremeBorder}`, background: "#fff",
+                              color: C.cinza, fontSize: 12, fontWeight: 600,
+                              cursor: emAndamento ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRecusarSolicitacao(s.id)}
+                            disabled={emAndamento}
+                            style={{
+                              flex: 1, padding: "8px 0", borderRadius: 8, border: "none",
+                              background: C.vermelho, color: "#fff", fontSize: 12, fontWeight: 700,
+                              cursor: emAndamento ? "not-allowed" : "pointer",
+                              opacity: emAndamento ? 0.6 : 1,
+                              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                            }}
+                          >
+                            {emAndamento && <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />}
+                            Confirmar recusa
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => abrirRecusa(s.id)}
+                          disabled={emAndamento}
+                          style={{
+                            flex: 1, padding: "8px 0", borderRadius: 8,
+                            border: `1px solid ${C.vermelho}`, background: "#fff",
+                            color: C.vermelho, fontSize: 12, fontWeight: 700,
+                            cursor: emAndamento ? "not-allowed" : "pointer",
+                            opacity: emAndamento ? 0.6 : 1,
+                          }}
+                        >
+                          Recusar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleLiberarSolicitacao(s.id)}
+                          disabled={emAndamento}
+                          style={{
+                            flex: 1, padding: "8px 0", borderRadius: 8, border: "none",
+                            background: C.esmeralda, color: "#fff", fontSize: 12, fontWeight: 700,
+                            cursor: emAndamento ? "not-allowed" : "pointer",
+                            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                            opacity: emAndamento ? 0.6 : 1,
+                          }}
+                        >
+                          {emAndamento
+                            ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />
+                            : <CheckCircle size={12} />}
+                          Liberar
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : (
+        /* ── Tabela / Loading / Empty State ─────────────────────────────────── */
+        loading ? (
           <div style={{
             display: "flex", justifyContent: "center", padding: 40,
           }}>
@@ -972,13 +1253,15 @@ export default function EntregasVendaClient({
               </table>
             </div>
           </>
+        )
         )}
 
         {/* ── Paginação ──────────────────────────────────────────────────────── */}
         {/* REGRA DE NEGÓCIO: Paginacao usa Link do Next.js para navegação
             server-side. Os parâmetros de filtro são preservados via extraParams.
-            Só exibe se houver mais de uma página. */}
-        {totalPages > 1 && (
+            Só exibe se houver mais de uma página. Não se aplica à aba
+            "Solicitações" (lista única, sem paginação — limit=200). */}
+        {!abaSolicitacoes && totalPages > 1 && (
           <Paginacao
             currentPage={currentPage}
             totalPages={totalPages}
@@ -990,7 +1273,7 @@ export default function EntregasVendaClient({
         )}
 
         {/* ── Footer com resumo ─────────────────────────────────────────────── */}
-        {items.length > 0 && (
+        {!abaSolicitacoes && items.length > 0 && (
           <p style={{
             textAlign: "center", fontSize: 12, color: C.cinza, marginTop: 12,
           }}>
@@ -1014,7 +1297,7 @@ export default function EntregasVendaClient({
           entregaId={selectedEntregaId}
           isOpen={selectedEntregaId !== null}
           onClose={handleDrawerClose}
-          userRole={_userRole}
+          userRole={userRole}
         />
       )}
 
@@ -1036,6 +1319,7 @@ export default function EntregasVendaClient({
         isOpen={freteAvulsoOpen}
         onClose={() => setFreteAvulsoOpen(false)}
         onCriado={() => { setFreteAvulsoOpen(false); router.refresh(); }}
+        userRole={userRole}
       />
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
