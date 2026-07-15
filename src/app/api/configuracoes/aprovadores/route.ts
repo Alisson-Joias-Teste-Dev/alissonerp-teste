@@ -12,7 +12,8 @@
 //   - solicitar-aprovacao/route.ts
 //   - entrega-sem-pagamento.ts (Automacao de Estoque 2.0)
 //   - src/lib/aprovacoes/catalogo.ts (camada config-first, Fase 3 — metal já usa
-//     metal_aprovador_id; conversão/conversão-SKU usam aprovador_conversao)
+//     metal_aprovador_id; conversão/conversão-SKU usam aprovador_conversao;
+//     alteração de venda usa aprovador_alteracao_venda, Fase 3g.1)
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from "next/server";
@@ -46,6 +47,9 @@ const CHAVES = [
   // Fase 3e (centralização de aprovações, 12/07): aprova a devolução (etapa 1) — 1
   // aprovador só, decisão do Jonathan (não depende mais de dentro/fora do prazo).
   "aprovador_devolucao",
+  // Fase 3g.1 (centralização de aprovações, 15/07): aprova solicitação de alteração
+  // de venda (campo restrito/pagamento após fechar) — antes era ROLES_FINANCEIRO fixo.
+  "aprovador_alteracao_venda",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -154,6 +158,7 @@ export async function GET() {
       aprovador_conversao: configMap.get("aprovador_conversao") ?? "",
       aprovador_precificacao: configMap.get("aprovador_precificacao") ?? "",
       aprovador_devolucao: configMap.get("aprovador_devolucao") ?? "",
+      aprovador_alteracao_venda: configMap.get("aprovador_alteracao_venda") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -259,6 +264,10 @@ export async function PUT(req: NextRequest) {
     // Fase 3e: aprovador da devolução (etapa 1) — 1 aprovador só, sem distinção de prazo.
     if (body.aprovador_devolucao !== undefined) {
       updates.push({ chave: "aprovador_devolucao", valor: body.aprovador_devolucao });
+    }
+    // Fase 3g.1: aprovador de alteração de venda (antes ROLES_FINANCEIRO fixo).
+    if (body.aprovador_alteracao_venda !== undefined) {
+      updates.push({ chave: "aprovador_alteracao_venda", valor: body.aprovador_alteracao_venda });
     }
 
     for (const u of updates) {

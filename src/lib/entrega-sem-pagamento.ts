@@ -1,5 +1,6 @@
 import sql from "@/lib/db";
 import { criarNotificacao } from "@/lib/notificacoes";
+import { resolverAprovadores } from "@/lib/aprovacoes";
 
 export const ENTREGA_SEM_PAGAMENTO_TIPO = "entrega_sem_pagamento_total";
 
@@ -114,15 +115,15 @@ export async function solicitarAprovacaoEntregaSemPagamento(
     throw new Error("Venda ja esta totalmente paga; nao precisa de aprovacao de entrega excepcional");
   }
 
-  const [config] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_sistema
-    WHERE chave = 'aprovador_entrega_sem_pagamento'
-    LIMIT 1
-  `;
-  const aprovadorId = String(config?.valor ?? "").trim();
-  if (!aprovadorId) {
+  // REGRA DE NEGÓCIO: aprovador resolvido pela camada config-first
+  // (aprovador_entrega_sem_pagamento) — mesma chave de antes, mesma mensagem de
+  // erro quando não configurado; grava o 1º de aprovadores[] na coluna UUID única
+  // (responsavel_id / aprovacoes_tarefa.aprovador_id), igual ao padrão do metal.
+  const resolucao = await resolverAprovadores("entrega_sem_pagamento");
+  if (resolucao.status === "nao_configurado") {
     throw new Error("Aprovador de entrega sem pagamento total nao configurado");
   }
+  const aprovadorId = resolucao.aprovadores[0];
 
   const [existente] = await sql`
     SELECT tarefa_id

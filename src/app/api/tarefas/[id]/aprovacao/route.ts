@@ -382,6 +382,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
    * gerar o saldo aberto no crediario.
    */
   if (tarefaInfo?.tipo === ENTREGA_SEM_PAGAMENTO_TIPO || tags.includes("aprov_entrega_sem_pagamento")) {
+    // REGRA DE NEGÓCIO: entrega sem pagamento decidida pela camada config-first
+    // (aprovador_entrega_sem_pagamento) — não mais pela checagem genérica do topo
+    // do PATCH. Sem ctx.solicitanteId: entrega sem pagamento não exclui quem solicitou.
+    const decEntregaSemPagamento = await podeDecidir(
+      { id: user.id, role: usuarioLogado?.role ?? null },
+      "entrega_sem_pagamento",
+    );
+    if (!decEntregaSemPagamento.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const resultado = await processarAprovacaoEntregaSemPagamento(
         Number(id),

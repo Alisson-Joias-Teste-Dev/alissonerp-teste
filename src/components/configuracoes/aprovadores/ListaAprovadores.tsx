@@ -164,6 +164,13 @@ const CONFIG_ITENS: ConfigItem[] = [
     usuariosKey: "precificacao_aprovadores",
     icone: "🏷️",
   },
+  {
+    chave: "aprovador_alteracao_venda",
+    titulo: "Alteração de venda",
+    descricao: "Aprova solicitação de alteração de campo restrito ou pagamento em venda já fechada",
+    usuariosKey: "diretores_admins",
+    icone: "✏️",
+  },
 ];
 
 // ─── Componente ───────────────────────────────────────────────────────────────

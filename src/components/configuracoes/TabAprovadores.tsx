@@ -22,6 +22,7 @@ interface AprovadorConfig {
   aprovador_conversao?: string; // Fase 3b: conversão de estoque + SKU (mesmo aprovador)
   aprovador_precificacao?: string; // Fase 3c: alteração de markup
   aprovador_devolucao?: string; // Fase 3e: devolução etapa 1 (1 aprovador, sem distinção de prazo)
+  aprovador_alteracao_venda?: string; // Fase 3g.1: alteração de venda (era ROLES_FINANCEIRO fixo)
 }
 
 interface Usuario {
@@ -72,6 +73,7 @@ export default function TabAprovadores() {
     aprovador_conversao: "",
     aprovador_precificacao: "",
     aprovador_devolucao: "",
+    aprovador_alteracao_venda: "",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
     gerentes: [],
@@ -109,6 +111,7 @@ export default function TabAprovadores() {
           aprovador_conversao: d.aprovador_conversao ?? "",
           aprovador_precificacao: d.aprovador_precificacao ?? "",
           aprovador_devolucao: d.aprovador_devolucao ?? "",
+          aprovador_alteracao_venda: d.aprovador_alteracao_venda ?? "",
         });
         setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [], conversao_aprovadores: [], precificacao_aprovadores: [], devolucao_aprovadores: [] });
       })
