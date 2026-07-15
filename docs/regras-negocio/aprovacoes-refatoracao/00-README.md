@@ -101,7 +101,17 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   FECHADA.** `aprovador_compra_comercial` já existe (não precisa criar em prod). (Brecha do
   `concluir` void user + R4 duplicação conta a pagar = Fase 4.)
 - [ ] Fase 3g — **venda** (a mais crítica, por último) — mapeada e fatiada em 3 sub-fases (plano `12`). Decisões do Jonathan (12/07): crédito mantém 2 aprovadores (gerente/diretor); desconto migra só a porta oficial (atalhos/comissão = Fase 4).
-  - [ ] 3g.1 — entrega sem pagamento + alteração de venda (pacote `13` pronto; chave nova `aprovador_alteracao_venda`). Aguardando Sonnet plugar + Opus testar.
+  - [x] 3g.1 — **entrega sem pagamento + alteração de venda** plugadas na camada config-first
+    (15/07/2026, pacote `13`, commit `2d236264`) — tsc 0, 121/121 testes (camada intocada, nenhum
+    teste mudou). 6 arquivos: gate `podeDecidir` no bloco `entrega_sem_pagamento` do despachante
+    (`tarefas/[id]/aprovacao/route.ts`, antes do `try`) + submissão trocada por `resolverAprovadores`
+    em `entrega-sem-pagamento.ts` (mesma mensagem de erro); gate `podeDecidir('alteracao_venda')` no
+    topo do PATCH `vendas/solicitacoes-alteracao/[id]/route.ts` (no lugar de `ROLES_FINANCEIRO`,
+    removido — sem outro uso no arquivo); chave nova `aprovador_alteracao_venda` exposta em
+    `configuracoes/aprovadores/route.ts` (CHAVES+GET+PUT) e na UI (`ListaAprovadores.tsx`, reusa a
+    lista `diretores_admins` — mesmo conjunto de cargos do antigo `ROLES_FINANCEIRO`). Escopo
+    fechado: `approveVenda`/`estornarVenda`, efeitos das solicitações, guard genérico do despachante
+    (L342) e `src/lib/aprovacoes/` intocados. Aguardando Opus criar a chave em homolog e testar.
   - [ ] 3g.2 — crédito (gerente + diretor)
   - [ ] 3g.3 — desconto + cartão (porta oficial)
 - [ ] Fase 4 — brechas/atalhos
