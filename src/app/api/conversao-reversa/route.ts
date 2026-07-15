@@ -11,7 +11,7 @@ const ConversaoReversaPostSchema = z.object({
   origem_tipo: z.enum(["conversao", "compra_metal"]),
   origem_id: z.coerce.number().int().positive(),
   produto_id: z.coerce.number().int().positive(),
-  quantidade: z.coerce.number().positive(),
+  quantidade: z.coerce.number().int().positive(),
   peso_saida: z.coerce.number().positive(),
   foto_base64: z.string().optional(),
   motivo: z.string().optional(),

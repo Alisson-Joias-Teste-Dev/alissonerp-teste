@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS alissonerp.conversoes_reversas (
                         CHECK (origem_tipo IN ('conversao','compra_metal')),
   origem_id             INTEGER NOT NULL,
   produto_id            BIGINT NOT NULL REFERENCES public.produtos(id_produto),
-  quantidade            NUMERIC(10,3) NOT NULL CHECK (quantidade > 0),
+  quantidade            INTEGER NOT NULL CHECK (quantidade > 0),  -- peças (joia é contável); estoque comercial também é INTEGER
   peso_saida            NUMERIC(10,3) NOT NULL CHECK (peso_saida > 0),
   foto_abertura         TEXT,
   foto_recusa           TEXT,
