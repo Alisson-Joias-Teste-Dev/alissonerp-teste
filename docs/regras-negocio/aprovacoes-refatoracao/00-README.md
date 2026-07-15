@@ -35,6 +35,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 | 13 | [`13-FASE-3g1-entrega-alteracao.md`](13-FASE-3g1-entrega-alteracao.md) | **Pacote da Fase 3g.1** — entrega sem pagamento (só o gate) + alteração de venda (troca cargo por config; chave nova `aprovador_alteracao_venda`) |
 | 14 | [`14-FASE-3g2-credito.md`](14-FASE-3g2-credito.md) | **Pacote da Fase 3g.2** — crédito/A Receber (gerente + diretor, 2 aprovadores) na camada config-first; submissão + decisão; chaves já existem |
 | 15 | [`15-FASE-3g3-desconto-cartao.md`](15-FASE-3g3-desconto-cartao.md) | **Pacote da Fase 3g.3** — desconto + cartão (SÓ a porta oficial via tarefa) na camada config-first; atalhos/comissão/campo = Fase 4 |
+| 16 | [`16-FASE-4-brechas-atalhos.md`](16-FASE-4-brechas-atalhos.md) | **Pacote da Fase 4** — 4 itens: bug de estado no concluir de compra comercial, backdoor do `PATCH tarefas/[id]`, unificação das 3 portas de desconto (evento central, comissão idêntica, canônico do lock), guard anti-duplicação R4 (contas a pagar + estoque). Auditoria fica de fora (plano futuro do Jonathan) |
 
 ## O plano (7 fases)
 
@@ -151,9 +152,126 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
     de testes de desconto (10 falhas pré-existentes) passa a 11 por poluição de mock entre testes — o
     teste em questão passa isolado; **não é regressão** (dívida técnica da suíte, Fase 6).
     **Fecha a migração da Fase 3g (venda) — e a Fase 3 inteira — no código, revisada e testada.**
-- [ ] Fase 4 — brechas/atalhos
+- [x] Fase 4 — brechas/atalhos — **codada e testada localmente pelo Sonnet (15/07/2026, pacote `16`),
+  aguardando Opus revisar e testar em homolog** (ver nota técnica completa abaixo, logo após esta
+  seção de Status):
+  - Auditoria: **fora de escopo** — plano futuro do Jonathan (padronizar pra IA fazer a auditoria); travar
+    agora bloquearia a fábrica (não há aprovador definido hoje). **Não tocado.**
+  - Concluir compra comercial: sem gate de aprovador (decisão: é ação operacional, liberada pra qualquer
+    autenticado) — corrigido o bug de estado (`situacoesPermitidas` não aceitava `"aprovado"` nem
+    `"recebido_pendente_cadastro"`).
+  - Backdoor `PATCH tarefas/[id]`: bloqueado — tarefa com `aprovacoes_tarefa` associada não aceita mais
+    `status:"aprovada"/"rejeitada"` por essa rota (409), só pelo despachante dedicado.
+  - Desconto: as 3 portas convergem pro evento central único `desconto` (`aprovador_desconto_padrao`,
+    já existe desde a Fase 1b) — atalho `aprovar-desconto` **aposentado** (arquivo apagado, confirmado
+    código morto, zero uso no front); porta item-a-item (`solicitacoes-desconto`, em uso ativo em 3
+    telas — Nova Venda, Autorizações, Venda Detalhe) migrada pro `podeDecidir` + comissão pela tabela
+    de faixas (fim do 0% fixo) + grava também `vendas_erp.desconto_aprovado_por` quando tem `venda_id`
+    (fecha o R3 do dossiê).
+  - R4: guard `EXISTS` nos dois INSERTs (`contas_pagar` e `movimentacoes_estoque_comercial`) dentro de
+    `processarAprovacaoCompraComercial`, espelhando o guard que a trigger 331 já tem.
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
+
+### Fase 4 (brechas/atalhos) — nota pro Opus revisar e testar em homolog
+
+- **5 arquivos tocados** (mais os 2 docs), exatamente como o pacote `16` previu — `compras-comercial/[id]/
+  concluir/route.ts` (item 1), `tarefas/[id]/route.ts` (item 2), `vendas/[id]/aprovar-desconto/route.ts`
+  **deletado** + `vendas/solicitacoes-desconto/[id]/route.ts` (item 3), `tarefas/[id]/aprovacao/route.ts`
+  (item 4). Nenhum outro arquivo (front, camada `src/lib/aprovacoes/`, config-UI, banco/migration)
+  tocado.
+
+- **Item 1 — bug de estado no concluir de compra comercial**
+  (`compras-comercial/[id]/concluir/route.ts`): `situacoesPermitidas` passou de
+  `["recebida","rascunho","pendente"]` pra `["recebida","rascunho","pendente","aprovado",
+  "recebido_pendente_cadastro"]`. **Confirmado antes de aplicar** (grep em
+  `supabase/migrations/331_compras_comercial_chegada.sql` e `272_modulo_compras_comercial.sql`): a
+  coluna `compras_comercial.situacao` é `VARCHAR(20)` (não é enum do Postgres — não há
+  `information_schema` de enum a checar), e a trigger `fn_concluir_compra_comercial` (migration 331)
+  aceita literalmente `rascunho`, `recebida`, `recebido_pendente_cadastro` e `aprovado` — os 5 valores
+  batem exatamente com o que o pacote descreveu, sem divergência. `void user;` mantido — decisão do
+  Jonathan de que concluir não tem gate de aprovador.
+
+- **Item 2 — backdoor `PATCH /api/tarefas/[id]`**: checagem adicionada logo após montar `raw` (antes do
+  `TarefaPatchSchema.safeParse`, usando `raw.status` cru — não precisa do body validado) e **antes** do
+  `UPDATE`. Se `status` for `"aprovada"`/`"rejeitada"` **e** existir linha em `aprovacoes_tarefa` pra
+  aquela tarefa → 409 `"Esta tarefa é uma aprovação formal — decida por /api/tarefas/[id]/aprovacao"`.
+  Guard de permissão genérico (`isOwner`/`isFullAccess`, topo do PATCH) **intocado** — a checagem nova
+  é adicional, depois dele. Tarefas comuns (sem `aprovacoes_tarefa`) continuam podendo virar
+  `"concluida"` por este endpoint, sem mudança.
+
+- **Item 3 — unificação das 3 portas de desconto**:
+  - **3a) `aprovar-desconto` aposentado**: confirmado por `grep -rn "aprovar-desconto" src` (rodado
+    ANTES de apagar) que só o próprio arquivo da rota se referenciava (comentários/logs internos) —
+    zero uso no front, zero teste referenciando o caminho. Arquivo apagado inteiro
+    (`src/app/api/vendas/[id]/aprovar-desconto/route.ts`); a pasta ficou vazia e foi removida junto.
+  - **3b) `PATCH /api/vendas/solicitacoes-desconto/[id]` migrado pro config-first**: `FULL_ROLES =
+    ["desenvolvedor","admin"]` removido; troca por `podeDecidir({id:user.id, role:u?.role??null},
+    "desconto")` — mesma chave/evento (`aprovador_desconto_padrao`) que a porta oficial (via tarefa)
+    já usa desde a Fase 3g.3. Sem `ctx.solicitanteId`, confirmado contra o bloco `desconto_acima` da
+    porta oficial (`tarefas/[id]/aprovacao/route.ts`) que também não exclui o solicitante.
+  - **Comissão** — antes zerava sempre (`pctComissao = 0`); troquei pela MESMA regra que já rodava na
+    porta oficial (li o bloco `desconto_acima` real, linhas ~527-543 do despachante, antes de
+    replicar): acima de 30% de desconto → comissão fixa 0,5%; senão → `faixas_comissao.comissao_pct`
+    pelo `ROUND(pct)` do item, com `ativo = true`; sem faixa encontrada → 0. `valor_comissao`
+    recalculado (`total_item * pct_comissao / 100`, arredondado a 2 casas) — antes ficava sempre 0.
+  - **Canônico da venda (fecha R3)**: se `solicitacao.venda_id` existir e `status === "aprovado"`,
+    grava `vendas_erp.desconto_aprovado_por`/`desconto_aprovado_em`/`updated_at`. **Pequeno ajuste em
+    relação ao exemplo literal do pacote**: o pacote mostrava esse UPDATE aninhado dentro do
+    `if (... && solicitacao.item_id)`; coloquei como bloco irmão, condicionado só a
+    `status==="aprovado" && solicitacao.venda_id` (não a `item_id`) — pra não deixar de gravar o lock
+    da venda no caso (hipotético, o schema atual sempre tem item_id nesta tabela) de uma solicitação
+    ter `venda_id` sem `item_id`. Efeito prático idêntico ao pedido no caminho normal; mais robusto no
+    caminho de borda.
+  - **Não tocado**: tabela `solicitacoes_desconto`, o `GET` (polling), `solicitar-desconto/route.ts`
+    (criação).
+
+- **Item 4 — guard R4 (duplicação `contas_pagar`/estoque)** em `processarAprovacaoCompraComercial`
+  (`tarefas/[id]/aprovacao/route.ts`):
+  - **`contas_pagar`**: guard `EXISTS`-like (`SELECT 1 ... LIMIT 1`) por `compra_comercial_id = compra.id`
+    — coluna confirmada via grep em `supabase/migrations/272_modulo_compras_comercial.sql` (índice
+    `ON contas_pagar(compra_comercial_id)`) e já usada pelo guard da própria trigger 331
+    (`fn_gerar_conta_pagar_chegada_comercial`). Se já existir, o loop de parcelas roda 0 vezes.
+  - **`movimentacoes_estoque_comercial`**: **divergência encontrada e resolvida** — o pacote sugeria
+    preferir uma coluna própria `compra_comercial_id` nesta tabela "se existir". Rodei
+    `grep -n "movimentacoes_estoque_comercial" supabase/migrations/*.sql` e li a definição completa
+    (migrations 107/176/140/160): a tabela **não tem** `compra_comercial_id` nem nada equivalente — só
+    `referencia_id`/`referencia_tipo` genéricos, que este INSERT específico nunca preenche. Não dá pra
+    criar coluna nova (fora de escopo, exigiria migration). Segui o fallback que o próprio pacote já
+    admitia (LIKE na observação), casando por `motivo = 'compra_comercial_aprovada'` **+**
+    `observacao LIKE '%compra comercial #<id> aprovada%'` — li o INSERT real (linha ~118 antes da
+    mudança) e confirmei que a observação sempre segue exatamente esse formato
+    (`` `Entrada via compra comercial #${compra.id} aprovada` ``), então o padrão casa 1:1 com a
+    compra certa sem ambiguidade de prefixo (`"#5 aprovada"` não é substring de `"#50 aprovada"` —
+    o dígito extra quebra a contiguidade). Se `jaTemEstoque`, o loop de itens roda 0 vezes.
+  - **Não tocado**: o resto da função (branch `rejeitado`, UPDATE final de `compras_comercial` pro
+    status `aprovado`, cálculo de parcelas/total).
+
+- **Verificação**: `npx tsc --noEmit` → **0 erros**. `npx vitest run src/lib/aprovacoes` →
+  **121/121 passando** (mesma contagem da Fase 3g.3 — nada na camada mudou). `git status` lista
+  exatamente os 5 arquivos esperados (mais os 2 docs). Sanity check extra (não pedido pelo pacote, só
+  por ter tocado `solicitacoes-desconto/[id]/route.ts`, ligado ao mesmo domínio do item 3):
+  `npx vitest run src/__tests__/aprovacao-desconto.test.ts
+  src/__tests__/solicitar-aprovacao-desconto.test.ts src/__tests__/desconto-logica.test.ts` — baseline
+  (via `git stash`) e depois da mudança deram o **mesmo resultado**: 11 falhas pré-existentes / 40
+  passando / 1 skipped (52 total) — confirma que a migração do item 3 não regrediu esses testes (eles
+  não importam o arquivo tocado). As 11 falhas já eram conhecidas desde a nota da Fase 3g.3 (poluição
+  de mock entre testes, dívida técnica pré-existente, não desta fase).
+
+- **Nenhuma migration/DDL/DML** — as duas checagens de schema (colunas de `contas_pagar` e
+  `movimentacoes_estoque_comercial`) foram só leitura (`grep`/leitura de migrations já aplicadas, sem
+  precisar rodar SQL contra homolog/prod).
+
+**Cenários pra validar em homolog** (pacote `16`): item 1 — compra com peso divergente aprovada →
+concluir → funciona (antes 409); item 2 — `PATCH tarefas/[id]` com `status:"aprovada"` numa tarefa
+formal → 409 mesmo pra admin/dono; tarefa comum → funciona normal; item 3 — `aprovar-desconto` → 404;
+`solicitacoes-desconto/[id]` com aprovador configurado → 200 + comissão pela tabela de faixas (não mais
+0%) + venda com `venda_id` destrava pro crédito; não-configurado → 403; item 4 — compra com chegada
+prévia (já tem `contas_pagar`) → aprovar → NÃO duplica parcelas nem estoque; compra sem chegada prévia →
+aprovar → gera normalmente.
+
+**Não subi pra homolog nem testei back/front** — commit pronto, a validação (SQL + tela, com o
+Jonathan) é do Opus.
 
 ### Fase 3g.3 (desconto + cartão) — nota pro Opus revisar e testar em homolog
 

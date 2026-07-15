@@ -93,7 +93,25 @@ async function processarAprovacaoCompraComercial(
     `;
     const totalCompra = Number(tot?.total ?? 0);
 
-    for (const item of itens) {
+    // REGRA DE NEGOCIO (Fase 4, item 4 — guard R4 anti-duplicação de estoque):
+    // - O que faz: pula o loop de INSERT em movimentacoes_estoque_comercial se esta compra já
+    //   gerou a entrada (mesmo motivo + mesma observação, que carrega o "#<id> aprovada" único).
+    // - Por que: não existe coluna própria compra_comercial_id em
+    //   movimentacoes_estoque_comercial (confirmado via information_schema.columns — só há
+    //   referencia_id/referencia_tipo genéricos, não usados por este insert) — o casamento
+    //   possível é por motivo+observação, que já é único por compra (o texto sempre termina em
+    //   "#<id> aprovada", sem colisão com outro id: "#5 aprovada" não é substring de "#50
+    //   aprovada"). Se a compra for reprocessada (ex.: reaprovação após erro parcial) o estoque
+    //   duplicaria a entrada.
+    // - Impacto se alterado/removido: reprocessar a aprovação duplica a entrada de estoque.
+    const [jaTemEstoque] = await tx`
+      SELECT 1 FROM alissonerp.movimentacoes_estoque_comercial
+      WHERE motivo = 'compra_comercial_aprovada'
+        AND observacao LIKE ${`%compra comercial #${compra.id} aprovada%`}
+      LIMIT 1
+    `;
+
+    for (const item of jaTemEstoque ? [] : itens) {
       // REGRA DE NEGOCIO:
       // - O que faz: normaliza qtd para inteiro antes do insert no estoque.
       // - Por que: a coluna quantidade e INTEGER no banco e compras comerciais usam pecas inteiras.
@@ -131,7 +149,19 @@ async function processarAprovacaoCompraComercial(
     `;
     const fornecedorNome = String(forn?.nome ?? "Fornecedor");
 
-    for (let i = 1; i <= parcelas; i++) {
+    // REGRA DE NEGOCIO (Fase 4, item 4 — guard R4 anti-duplicação financeira):
+    // - O que faz: pula o loop de INSERT em contas_pagar se esta compra já tem parcela gerada
+    //   (coluna própria compra_comercial_id, confirmada via information_schema.columns e já usada
+    //   pelo guard EXISTS da trigger 331 fn_gerar_conta_pagar_chegada_comercial).
+    // - Por que: a "chegada" (trigger 331) já pode ter gerado as parcelas antes desta aprovação
+    //   rodar — sem o guard, reprocessar a aprovação duplicaria as contas a pagar.
+    // - Impacto se alterado/removido: compra que já teve chegada processada ganha parcelas
+    //   duplicadas ao ser aprovada.
+    const [jaTemContaPagar] = await tx`
+      SELECT 1 FROM alissonerp.contas_pagar WHERE compra_comercial_id = ${compra.id} LIMIT 1
+    `;
+
+    for (let i = 1; i <= (jaTemContaPagar ? 0 : parcelas); i++) {
       const valorParcela = i === parcelas ? Math.round((base + diff) * 100) / 100 : base;
       await tx`
         INSERT INTO alissonerp.contas_pagar

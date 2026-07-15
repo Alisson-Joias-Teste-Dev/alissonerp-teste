@@ -24,7 +24,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
   if (compra.bloqueado) return NextResponse.json({ error: "Compra já bloqueada" }, { status: 409 });
   if (compra.situacao === "concluido") return NextResponse.json({ error: "Compra já concluída" }, { status: 409 });
 
-  const situacoesPermitidas = ["recebida", "rascunho", "pendente"];
+  // REGRA DE NEGOCIO (Fase 4, item 1):
+  // - O que faz: aceita concluir a partir de "aprovado" e "recebido_pendente_cadastro" alem dos estados
+  //   ja aceitos ("recebida", "rascunho", "pendente") — confirmado em supabase/migrations/331 que a
+  //   trigger fn_concluir_compra_comercial permite concluir a partir de rascunho/recebida/
+  //   recebido_pendente_cadastro/aprovado.
+  // - Por que: sem "aprovado", uma compra com peso divergente que foi aprovada formalmente travava
+  //   aqui com 409 mesmo estando num estado que o banco aceita.
+  // - Impacto se alterado/removido: compra aprovada por peso divergente fica presa, sem conseguir
+  //   dar entrada em estoque/contas a pagar.
+  const situacoesPermitidas = ["recebida", "rascunho", "pendente", "aprovado", "recebido_pendente_cadastro"];
   if (!situacoesPermitidas.includes(compra.situacao as string)) {
     return NextResponse.json(
       { error: `Compra está em situação "${compra.situacao}" — não pode ser concluída` },
