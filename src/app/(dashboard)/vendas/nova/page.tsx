@@ -1,6 +1,8 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
 import NovaVendaClientV2 from "./NovaVendaClientV2";
+import { calcularTetoDesconto, FULL_ACCESS_ROLES_DESCONTO } from "@/lib/desconto/precificar-item";
+import { buscarFallbackDescontoSemCadastro } from "@/lib/aprovacao-regras";
 
 const PODE_SELECIONAR_VENDEDOR = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "financeiro"];
 
@@ -10,7 +12,7 @@ export default async function NovaVendaPage() {
 
   let role              = "consultora";
   let vendedorId: number | null = null;
-  let maxDesconto       = 15;
+  let maxDesconto       = 0; // fallback antes de ler o usuário (Fase 5 — alinhado ao novo default)
   let vendedorNome      = "";
   let vendedores: { id: number; nome: string }[] = [];
   const userId            = user?.id ?? "";
@@ -28,17 +30,20 @@ export default async function NovaVendaPage() {
       vendedorId = u.vendedor_id ? Number(u.vendedor_id) : null;
       userName   = (u.nome as string) || user.email || "";
 
-      const SUPER = ["desenvolvedor", "admin"];
-      if (SUPER.includes(role)) {
-        maxDesconto = 100;
-      } else if (u.mx_desconto_permitido != null && Number(u.mx_desconto_permitido) > 0) {
-        maxDesconto = Number(u.mx_desconto_permitido);
-      } else {
-        const FULL = ["gerente_fabrica", "financeiro"];
-        if (FULL.includes(role)) maxDesconto = 30;
-        else if (role === "gerente_loja") maxDesconto = 50;
-        else maxDesconto = 15;
-      }
+      // REGRA DE NEGÓCIO (Fase 5, 15/07): FONTE ÚNICA — antes esta CASE (15/30/50
+      // por cargo) duplicava a lógica hardcoded do gate real (getDescontoThreshold
+      // em aprovacao-regras.ts) e divergia dele. Agora os dois chamam
+      // calcularTetoDesconto (src/lib/desconto/precificar-item.ts), com o mesmo
+      // fallback vindo de configuracoes_sistema.desconto_fallback_sem_cadastro_pct.
+      // IMPACTO SE REMOVIDO: a tela volta a mostrar um teto diferente do que o
+      // servidor realmente aceita sem pedir aprovação.
+      const fallbackDesconto = await buscarFallbackDescontoSemCadastro();
+      maxDesconto = calcularTetoDesconto(
+        u.mx_desconto_permitido != null ? Number(u.mx_desconto_permitido) : null,
+        role,
+        FULL_ACCESS_ROLES_DESCONTO,
+        fallbackDesconto,
+      );
     }
   }
 

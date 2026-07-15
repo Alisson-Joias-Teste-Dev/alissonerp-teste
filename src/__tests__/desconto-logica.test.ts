@@ -54,13 +54,16 @@ function updatePctDesconto(item: ItemVenda, raw: string): ItemVenda {
   return { ...item, pct_desconto: pct, preco_unitario: precoUnit, total_item: totalItem };
 }
 
-/** maxDesconto para cada role — replicado de page.tsx */
-function getMaxDesconto(role: string, mxPermitido?: number | null): number {
+/** maxDesconto para cada role — replicado de calcularTetoDesconto
+ *  (src/lib/desconto/precificar-item.ts), FONTE ÚNICA desde a Fase 5 (15/07).
+ *  fallbackPct default 0 = decisão Jonathan 23/06/15/07: sem cadastro, nada de
+ *  desconto sem aprovação (configurável via configuracoes_sistema.
+ *  desconto_fallback_sem_cadastro_pct — aqui simulado pelo parâmetro). */
+function getMaxDesconto(role: string, mxPermitido?: number | null, fallbackPct = 0): number {
   const SUPER = ["desenvolvedor", "admin"];
   if (SUPER.includes(role)) return 100;
   if (mxPermitido != null && mxPermitido > 0) return mxPermitido;
-  // FULL e consultora recebem 30 (era 15 para consultora antes do fix)
-  return 30;
+  return fallbackPct;
 }
 
 // ── Testes ────────────────────────────────────────────────────────────────────
@@ -190,25 +193,30 @@ describe("updateItem — campo pct_desconto (sem cap)", () => {
 });
 
 describe("maxDesconto por role", () => {
-  it("admin e desenvolvedor têm maxDesconto = 100", () => {
+  it("admin e desenvolvedor têm maxDesconto = 100 (full-access, ignora fallback)", () => {
     expect(getMaxDesconto("admin")).toBe(100);
     expect(getMaxDesconto("desenvolvedor")).toBe(100);
   });
 
-  it("consultora tem maxDesconto = 30 (era 15 antes do fix)", () => {
-    expect(getMaxDesconto("consultora")).toBe(30);
+  it("consultora sem cadastro tem maxDesconto = 0 (Fase 5, 15/07 — fallback sem cadastro, não mais 15/30/50 por cargo)", () => {
+    expect(getMaxDesconto("consultora")).toBe(0);
   });
 
-  it("gerente_loja tem maxDesconto = 30", () => {
-    expect(getMaxDesconto("gerente_loja")).toBe(30);
+  it("gerente_loja sem cadastro tem maxDesconto = 0 (Fase 5 — não existe mais exceção de cargo pro fallback)", () => {
+    expect(getMaxDesconto("gerente_loja")).toBe(0);
   });
 
-  it("respeitia mx_desconto_permitido quando definido pelo DB", () => {
+  it("respeita mx_desconto_permitido quando definido pelo DB", () => {
     expect(getMaxDesconto("consultora", 45)).toBe(45);
   });
 
-  it("ignora mx_desconto_permitido = 0 (usa padrão de role)", () => {
-    expect(getMaxDesconto("consultora", 0)).toBe(30);
+  it("ignora mx_desconto_permitido = 0 (usa o fallback, não um padrão de role)", () => {
+    expect(getMaxDesconto("consultora", 0)).toBe(0);
+  });
+
+  it("fallback é configurável (Fase 5 — configuracoes_sistema.desconto_fallback_sem_cadastro_pct)", () => {
+    expect(getMaxDesconto("consultora", null, 10)).toBe(10);
+    expect(getMaxDesconto("gerente_loja", 0, 10)).toBe(10);
   });
 });
 

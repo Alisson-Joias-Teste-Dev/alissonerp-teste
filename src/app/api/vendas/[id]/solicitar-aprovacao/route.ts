@@ -17,7 +17,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { submeterVendaParaAprovacaoCredito } from "@/lib/vendas-credito-aprovar";
 import { HttpError } from "@/lib/devolucoes";
 import { approveVenda } from "@/lib/vendas-aprovar";
-import { avaliarRegras, criarTarefaAprovacao, getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { avaliarRegras, criarTarefaAprovacao, getDescontoThreshold, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
@@ -112,6 +112,16 @@ export async function POST(
       SELECT numero_venda, total_venda FROM alissonerp.vendas_erp WHERE id = ${vendaId}
     `;
 
+    // REGRA DE NEGÓCIO (Fase 5, 15/07): o gate de "desconto passou do limite?"
+    // agora é EXPLÍCITO aqui — avaliarRegras não filtra mais por percentual
+    // (condicao_json.percentual deixou de ser lido pra desconto_acima). O
+    // threshold é 100% o pessoal do vendedor (descontoThreshold, já calculado
+    // no topo da função). IMPACTO SE REMOVIDO: toda venda com QUALQUER desconto
+    // > 0 criaria tarefa de aprovação, mesmo dentro do limite do vendedor.
+    if (maiorDesconto <= descontoThreshold) {
+      return NextResponse.json({ ok: true, aguardando_aprovacao_desconto: false, message: "Nenhuma regra de aprovação aplicável" });
+    }
+
     const regras = await avaliarRegras({
       tipo: "desconto_acima",
       venda_id: vendaId,
@@ -181,13 +191,18 @@ export async function POST(
       return NextResponse.json({ ok: true, aguardando_aprovacao_cartao: true, message: "Já existe aprovação pendente para cartão de crédito." });
     }
 
+    // REGRA DE NEGÓCIO (Fase 5, 15/07): limite do cartão vem de
+    // configuracoes_sistema.limite_desconto_cartao_pct (fallback 20% no código
+    // se a chave ainda não existir) — antes era o literal 20 hardcoded aqui.
+    const limiteCartao = await buscarLimiteDescontoCartao();
+
     const itensDesconto = await sql`
       SELECT pct_desconto FROM alissonerp.itens_venda_erp
-      WHERE venda_id = ${vendaId} AND pct_desconto > 20
+      WHERE venda_id = ${vendaId} AND pct_desconto > ${limiteCartao}
       ORDER BY pct_desconto DESC
     `;
     if (itensDesconto.length === 0) {
-      return NextResponse.json({ ok: true, message: "Nenhum item com desconto acima de 20%." });
+      return NextResponse.json({ ok: true, message: `Nenhum item com desconto acima de ${limiteCartao}%.` });
     }
 
     const maiorDesconto = Math.max(...itensDesconto.map(i => Number(i.pct_desconto)));
@@ -212,7 +227,7 @@ export async function POST(
     const itensDetalhe = await sql`
       SELECT sku, nome_produto, preco_lista, pct_desconto, preco_unitario, quantidade
       FROM alissonerp.itens_venda_erp
-      WHERE venda_id = ${vendaId} AND pct_desconto > 20
+      WHERE venda_id = ${vendaId} AND pct_desconto > ${limiteCartao}
       ORDER BY id
     `;
     const linhasItens = itensDetalhe.map((it) => {

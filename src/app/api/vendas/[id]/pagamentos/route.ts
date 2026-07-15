@@ -6,7 +6,7 @@ import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
-import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { getDescontoThreshold, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
 import { confirmarCodigoVale } from "@/lib/vale-troca-codigo";
 import { logAudit } from "@/lib/audit";
 import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
@@ -170,17 +170,21 @@ export async function POST(
   if (body.forma !== "Ouro" && (!body.valor || body.valor <= 0))
     return NextResponse.json({ error: "valor inválido" }, { status: 400 });
 
-  // ── Guard: Cartão de Crédito com desconto >20% sem aprovação ────────────
+  // ── Guard: Cartão de Crédito com desconto acima do limite sem aprovação ──
+  // REGRA DE NEGÓCIO (Fase 5, 15/07): limite do cartão vem de
+  // configuracoes_sistema.limite_desconto_cartao_pct (fallback 20% no código
+  // se a chave ainda não existir) — antes era o literal 20 hardcoded aqui.
   if (body.forma === "Cartão de Crédito") {
+    const limiteCartao = await buscarLimiteDescontoCartao();
     const [temDescontoCartao] = await sql`
       SELECT EXISTS(
         SELECT 1 FROM alissonerp.itens_venda_erp
-        WHERE venda_id = ${vendaId} AND pct_desconto > 20
+        WHERE venda_id = ${vendaId} AND pct_desconto > ${limiteCartao}
       ) AS tem
     `;
     if (temDescontoCartao?.tem && !venda.desconto_cartao_aprovado_por) {
       return NextResponse.json(
-        { error: "Esta venda tem itens com desconto acima de 20%. Para pagar no cartão de crédito, solicite aprovação." },
+        { error: `Esta venda tem itens com desconto acima de ${limiteCartao}%. Para pagar no cartão de crédito, solicite aprovação.` },
         { status: 409 }
       );
     }

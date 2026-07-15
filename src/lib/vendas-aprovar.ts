@@ -27,7 +27,7 @@
 
 import sql from "@/lib/db";
 import { verificarReposicaoAutomatica } from "@/lib/reposicao-automatica";
-import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { getDescontoThreshold, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
 import { reverterAplicacaoVale } from "@/lib/vale-troca";
 import { orcamentoFichaToDados, nomeItemOrdem } from "@/lib/orcamento-ficha-to-dados";
 
@@ -547,10 +547,14 @@ export async function approveVenda(
   }
 
   // ── Bloquear aprovação se cartão foi liberado mas sem pagamento ainda ────
+  // REGRA DE NEGÓCIO (Fase 5, 15/07): limite do cartão vem de
+  // configuracoes_sistema.limite_desconto_cartao_pct (fallback 20% no código
+  // se a chave ainda não existir) — antes era o literal 20 hardcoded aqui.
+  const limiteCartaoApprove = await buscarLimiteDescontoCartao();
   const [cartaoBlock] = await sql`
     SELECT
       (SELECT desconto_cartao_aprovado_por FROM alissonerp.vendas_erp WHERE id = ${vendaId}) IS NOT NULL AS cartao_ja_liberado,
-      EXISTS(SELECT 1 FROM alissonerp.itens_venda_erp WHERE venda_id = ${vendaId} AND pct_desconto > 20) AS tem_desconto_cartao,
+      EXISTS(SELECT 1 FROM alissonerp.itens_venda_erp WHERE venda_id = ${vendaId} AND pct_desconto > ${limiteCartaoApprove}) AS tem_desconto_cartao,
       EXISTS(SELECT 1 FROM alissonerp.pagamentos_venda WHERE venda_id = ${vendaId} AND status = 'confirmado') AS tem_pagamento_confirmado
   `;
   if (cartaoBlock?.cartao_ja_liberado && cartaoBlock?.tem_desconto_cartao && !cartaoBlock?.tem_pagamento_confirmado) {

@@ -36,6 +36,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 | 14 | [`14-FASE-3g2-credito.md`](14-FASE-3g2-credito.md) | **Pacote da Fase 3g.2** — crédito/A Receber (gerente + diretor, 2 aprovadores) na camada config-first; submissão + decisão; chaves já existem |
 | 15 | [`15-FASE-3g3-desconto-cartao.md`](15-FASE-3g3-desconto-cartao.md) | **Pacote da Fase 3g.3** — desconto + cartão (SÓ a porta oficial via tarefa) na camada config-first; atalhos/comissão/campo = Fase 4 |
 | 16 | [`16-FASE-4-brechas-atalhos.md`](16-FASE-4-brechas-atalhos.md) | **Pacote da Fase 4** — 4 itens: bug de estado no concluir de compra comercial, backdoor do `PATCH tarefas/[id]`, unificação das 3 portas de desconto (evento central, comissão idêntica, canônico do lock), guard anti-duplicação R4 (contas a pagar + estoque). Auditoria fica de fora (plano futuro do Jonathan) |
+| 17 | [`17-FASE-5-limites.md`](17-FASE-5-limites.md) | **Pacote da Fase 5** — unificar os ~4 tetos de desconto divergentes (mx_desconto_permitido por vendedora, fallback por cargo, condicao_json.percentual, maxDesconto do front, 20% do cartao) numa funcao so (calcularTetoDesconto) + 2 chaves novas em configuracoes_sistema (fallback sem cadastro, limite do cartao); decisoes do Jonathan 15/07 |
 
 ## O plano (7 fases)
 
@@ -185,7 +186,34 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
     (fecha o R3 do dossiê).
   - R4: guard `EXISTS` nos dois INSERTs (`contas_pagar` e `movimentacoes_estoque_comercial`) dentro de
     `processarAprovacaoCompraComercial`, espelhando o guard que a trigger 331 já tem.
-- [ ] Fase 5 — limites/override
+- [x] Fase 5 - **limites** - unificado o teto de desconto (mx_desconto_permitido por vendedora,
+  fallback por cargo 15/30/50 divergente, condicao_json.percentual, maxDesconto duplicado em 4 fronts,
+  20% do cartao hardcoded em 4 lugares) numa funcao so (calcularTetoDesconto, em
+  src/lib/desconto/precificar-item.ts, ja existente desde 23/06) + 2 chaves novas em
+  configuracoes_sistema (desconto_fallback_sem_cadastro_pct seed 0, limite_desconto_cartao_pct seed 20)
+  - pacote 17, codado pelo Sonnet (15/07/2026). **CODIGO PRONTO, aguardando Opus revisar e criar as 2
+  chaves em homolog + testar** (cenarios no fim do pacote 17). tsc --noEmit 0 erros; vitest run
+  src/lib/aprovacoes 121/121 (camada intocada); suite completa sem regressao (mesma divida tecnica
+  pre-existente de 135 testes falhando em 22 arquivos, confirmada via git stash antes/depois - nenhum
+  teste passou a falhar por causa desta fase). 9 arquivos tocados: precificar-item.ts (so comentario -
+  a logica pura ja estava correta), aprovacao-regras.ts (getDescontoThreshold reescrito pra chamar
+  calcularTetoDesconto com fallback vindo de config via 1 query com subselect - nao muda o shape de
+  chamada; avaliarRegras nao le mais condicao_json.percentual pra desconto_acima/cartao_desconto,
+  sempre true, igual devolucao; encontrarAprovador deletado - morto desde a Fase 3g.3, confirmado por
+  grep; 2 helpers novos exportados buscarFallbackDescontoSemCadastro/buscarLimiteDescontoCartao),
+  solicitar-aprovacao/route.ts (checagem explicita maiorDesconto <= descontoThreshold ANTES de
+  avaliarRegras no bloco desconto; limite do cartao lido 1x no bloco cartao_desconto, literal 20 vira
+  variavel), vendas-aprovar.ts e pagamentos/route.ts (mesma troca do literal 20 por
+  buscarLimiteDescontoCartao()). confirmar/route.ts CONFERIDO e NAO precisou de mudanca - ja usa
+  getDescontoThreshold, nao tinha o literal 20 (divergencia do pacote 17, que previa possivel
+  ocorrencia la - nao havia). 4 fronts (vendas/nova, vendas/[id], orcamento, orcamento/detalhe/[id])
+  trocaram a CASE hardcoded (e o let maxDesconto = 15 inicial, alinhado a 0) por calcularTetoDesconto
+  com o mesmo fallback de config - corrige o bug real: admin sem cadastro via 0% no slider do
+  orcamento, agora ve 100%. desconto-logica.test.ts ajustado (replica local do fallback: 30 vira 0,
+  exceto admin/dev=100) - testes que dependiam de mx_desconto_permitido explicito (nao do fallback)
+  nao mudaram. NAO tocado: src/lib/aprovacoes/, roles.ts, permissoes.ts, src/components/, nenhuma
+  migration/DDL/DML. Limpeza da linha duplicada/corrompida desconto_acima em
+  tarefas_regras_aprovacao fica para o Opus via /dba, junto da criacao das 2 chaves.
 - [ ] Fase 6 — validação
 
 ### Fase 4 (brechas/atalhos) — nota pro Opus revisar e testar em homolog

@@ -1,8 +1,13 @@
 import sql from "@/lib/db";
-import { getMasterAdminId } from "@/lib/master-admin";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { resolverAprovadores } from "@/lib/aprovacoes";
 import { HttpError } from "@/lib/devolucoes";
+import {
+  calcularTetoDesconto,
+  FULL_ACCESS_ROLES_DESCONTO,
+  FALLBACK_TETO_DESCONTO_PCT,
+  LIMITE_DESCONTO_CARTAO_PADRAO,
+} from "@/lib/desconto/precificar-item";
 
 export interface RegraAprovacao {
   id: number;
@@ -42,8 +47,14 @@ async function avaliarRegras(contexto: ContextoAprovacao): Promise<RegraAprovaca
     const cond = regra.condicao_json as Record<string, number>;
 
     switch (regra.tipo_evento) {
+      // FASE 5 (15/07, decisao Jonathan): o gate de "precisa aprovacao" para
+      // desconto/cartao deixa de ser o condicao_json.percentual desta tabela
+      // (havia 2 copias divergentes e 1 corrompida no banco) — passa a ser
+      // 100% o threshold pessoal do vendedor (getDescontoThreshold), checado
+      // EXPLICITAMENTE pelo caller ANTES de chamar avaliarRegras/criarTarefaAprovacao.
+      // Aqui so respondemos "existe regra ativa pra esse evento", igual devolucao.
       case "desconto_acima":
-        return (contexto.percentual_desconto ?? 0) > (cond.percentual ?? 30);
+        return true;
       case "valor_venda_acima":
         return (contexto.valor_venda ?? 0) > (cond.valor ?? 1000);
       case "credito_loja":
@@ -53,83 +64,11 @@ async function avaliarRegras(contexto: ContextoAprovacao): Promise<RegraAprovaca
       case "orcamento_acima":
         return (contexto.orcamento_total ?? 0) > (cond.valor ?? 1000);
       case "cartao_desconto":
-        return (contexto.percentual_desconto ?? 0) > (cond.percentual ?? 20);
+        return true;
       default:
         return true;
     }
   });
-}
-
-/**
- * Encontra o aprovador para uma regra.
- *
- * BLINDAGEM (migration 269): solicitante NUNCA aparece como aprovador
- * (exceto master, que aprova proprias solicitacoes — dono).
- *
- * Sem hardcode de limites — as regras vem de alissonerp.tarefas_regras_aprovacao
- * (consulta em avaliarRegras). A unica logica aqui eh "quem responde a essa
- * regra, garantido != solicitante".
- *
- * Fallback final eh sempre o master (parametros_sistema.MASTER_ADMIN_USER_ID).
- */
-async function encontrarAprovador(
-  regra: RegraAprovacao,
-  _contexto?: ContextoAprovacao,
-  solicitanteId?: string,
-): Promise<string> {
-  // 1) aprovador_id explicito (ex: regra "Desconto >30%" aponta direto pro Alisson)
-  //    Aceita mesmo igual ao solicitante apenas se for o master.
-  if (regra.aprovador_id) {
-    const masterId = await getMasterAdminId();
-    const ehMasterNaRegra = regra.aprovador_id === masterId;
-    if (regra.aprovador_id !== solicitanteId || ehMasterNaRegra) {
-      const [u] = await sql`
-        SELECT id FROM alissonerp.usuarios WHERE id = ${regra.aprovador_id}::uuid AND ativo = true LIMIT 1
-      `;
-      if (u) return u.id;
-    }
-  }
-
-  // 2) aprovador_role — busca usuario com role, EXCLUINDO o solicitante.
-  if (regra.aprovador_role) {
-    const orderMap: Record<string, string> = {
-      admin: "CASE WHEN role = 'admin' THEN 1 WHEN role = 'desenvolvedor' THEN 2 ELSE 3 END",
-      gerente_loja: "CASE WHEN role = 'gerente_loja' THEN 1 ELSE 2 END",
-      gerente_fabrica: "CASE WHEN role = 'gerente_fabrica' THEN 1 ELSE 2 END",
-      desenvolvedor: "CASE WHEN role = 'desenvolvedor' THEN 1 WHEN role = 'admin' THEN 2 ELSE 3 END",
-    };
-
-    const orderExpr = orderMap[regra.aprovador_role] ??
-      `CASE WHEN role = ${`'${regra.aprovador_role}'`} THEN 1 ELSE 2 END`;
-
-    const roles = [regra.aprovador_role];
-    if (regra.aprovador_role === "admin") roles.push("desenvolvedor");
-    if (regra.aprovador_role === "desenvolvedor") roles.push("admin");
-
-    const [aprovador] = await sql`
-      SELECT id FROM alissonerp.usuarios
-      WHERE role = ANY(${roles})
-        AND ativo = true
-        AND ${solicitanteId ? sql`id != ${solicitanteId}::uuid` : sql`true`}
-      ORDER BY ${orderExpr}
-      LIMIT 1
-    `;
-    if (aprovador) return aprovador.id;
-  }
-
-  // 3) Fallback: admin/desenvolvedor != solicitante.
-  const [admin] = await sql`
-    SELECT id FROM alissonerp.usuarios
-    WHERE role IN ('admin', 'desenvolvedor')
-      AND ativo = true
-      AND ${solicitanteId ? sql`id != ${solicitanteId}::uuid` : sql`true`}
-    ORDER BY CASE WHEN role = 'admin' THEN 1 ELSE 2 END
-    LIMIT 1
-  `;
-  if (admin) return admin.id;
-
-  // 4) Ultimo recurso: master (autoaprovacao consciente do dono).
-  return await getMasterAdminId();
 }
 
 async function criarTarefaAprovacao(
@@ -225,31 +164,75 @@ async function processarDecisao(
 }
 
 /**
- * Retorna o threshold de desconto (mx_desconto_permitido) da vendedora
- * que criou a venda. Usa fallback por role se mx_desconto_permitido for NULL/0.
+ * Lê uma chave NUMÉRICA de alissonerp.configuracoes_sistema, com fallback
+ * seguro se a chave não existir/não for número válido.
  *
- * Ordem de precedência (mesma lógica de page.tsx):
- *   1. mx_desconto_permitido > 0 → esse valor
- *   2. gerente_fabrica/financeiro → 30
- *   3. gerente_loja → 50
- *   4. consultora (default) → 15
+ * FASE 5 (15/07): as chaves `desconto_fallback_sem_cadastro_pct` e
+ * `limite_desconto_cartao_pct` ainda NÃO existem no banco — serão criadas
+ * via skill /dba (homolog primeiro). Até lá, todo caller cai no fallback do
+ * código (FALLBACK_TETO_DESCONTO_PCT / LIMITE_DESCONTO_CARTAO_PADRAO) — nunca
+ * quebra (isto é só um número com default seguro, não é autoridade/Fase 1b).
+ */
+async function buscarConfigNumerica(chave: string, fallback: number): Promise<number> {
+  const [row] = await sql`
+    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = ${chave} LIMIT 1
+  `;
+  const n = Number(row?.valor);
+  return row && Number.isFinite(n) ? n : fallback;
+}
+
+/** Fallback de desconto sem cadastro (config `desconto_fallback_sem_cadastro_pct`,
+ *  seed 0 — decisão Jonathan 23/06/15/07). Ver buscarConfigNumerica. */
+async function buscarFallbackDescontoSemCadastro(): Promise<number> {
+  return buscarConfigNumerica("desconto_fallback_sem_cadastro_pct", FALLBACK_TETO_DESCONTO_PCT);
+}
+
+/** Limite de desconto no CARTÃO (config `limite_desconto_cartao_pct`, seed 20 —
+ *  decisão Jonathan 23/06/15/07). Reusar nos 4 gates (não duplicar a leitura). */
+async function buscarLimiteDescontoCartao(): Promise<number> {
+  return buscarConfigNumerica("limite_desconto_cartao_pct", LIMITE_DESCONTO_CARTAO_PADRAO);
+}
+
+/**
+ * Retorna o threshold de desconto (SEM aprovação) do vendedor que criou a
+ * venda — FONTE ÚNICA via calcularTetoDesconto (src/lib/desconto/precificar-item.ts).
+ *
+ * REGRA DE NEGÓCIO (Fase 5, 15/07 — decisão Jonathan): acaba a CASE hardcoded
+ * de fallback por cargo (30/50/15), que também deixava admin/desenvolvedor de
+ * fora (bug: caiam no "resto=15"). Ordem agora:
+ *   1. full-access (admin/desenvolvedor) → 100
+ *   2. mx_desconto_permitido do cadastro > 0 → esse valor
+ *   3. sem cadastro → fallback configurável (configuracoes_sistema.
+ *      desconto_fallback_sem_cadastro_pct, seed 0)
+ * Usa LEFT JOIN (1 query só) em vez de query separada, para não mudar o
+ * shape de chamada aos callers/mocks existentes.
+ * IMPACTO SE ALTERADO: volta a divergência entre o gate real (aqui) e o
+ * que os 4 fronts mostram na tela (calcularTetoDesconto).
  */
 async function getDescontoThreshold(vendaId: number): Promise<number> {
   const [row] = await sql`
-    SELECT
-      COALESCE(
-        NULLIF(u.mx_desconto_permitido, 0),
-        CASE
-          WHEN u.role IN ('gerente_fabrica','financeiro') THEN 30
-          WHEN u.role = 'gerente_loja' THEN 50
-          ELSE 15
-        END
-      )::numeric AS threshold
+    SELECT u.mx_desconto_permitido, u.role,
+           (SELECT valor FROM alissonerp.configuracoes_sistema
+            WHERE chave = 'desconto_fallback_sem_cadastro_pct' LIMIT 1) AS fallback_config
     FROM alissonerp.vendas_erp ve
     JOIN alissonerp.usuarios u ON u.vendedor_id = ve.vendedor_id
     WHERE ve.id = ${vendaId}
   `;
-  return Number(row?.threshold ?? 15);
+  const fallbackConfigNum = Number(row?.fallback_config);
+  const fallback = row && Number.isFinite(fallbackConfigNum) ? fallbackConfigNum : FALLBACK_TETO_DESCONTO_PCT;
+  return calcularTetoDesconto(
+    row?.mx_desconto_permitido != null ? Number(row.mx_desconto_permitido) : null,
+    row?.role ?? null,
+    FULL_ACCESS_ROLES_DESCONTO,
+    fallback,
+  );
 }
 
-export { avaliarRegras, encontrarAprovador, criarTarefaAprovacao, processarDecisao, getDescontoThreshold };
+export {
+  avaliarRegras,
+  criarTarefaAprovacao,
+  processarDecisao,
+  getDescontoThreshold,
+  buscarFallbackDescontoSemCadastro,
+  buscarLimiteDescontoCartao,
+};
