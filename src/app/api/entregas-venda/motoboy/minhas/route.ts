@@ -110,7 +110,10 @@ export async function GET(req: NextRequest) {
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
       LEFT JOIN public.contatos ca ON ca.id_contato = ev.contato_id
       WHERE ev.motoboy_id = ${motoboyUserId}::uuid
-        AND ev.situacao <> 'cancelada'
+        -- REGRA DE NEGÓCIO (migration 346): 'solicitada' ainda não foi liberada
+        -- pelo responsável — o motoboy não deve ver/contar corrida que nem
+        -- entrou no fluxo de aceite ainda (some da lista dele até liberar).
+        AND ev.situacao NOT IN ('cancelada', 'solicitada')
         ${whereSituacao}
         ${whereDataInicio}
         ${whereDataFim}
@@ -121,7 +124,10 @@ export async function GET(req: NextRequest) {
       SELECT COUNT(*)::integer AS total
       FROM alissonerp.entregas_venda ev
       WHERE ev.motoboy_id = ${motoboyUserId}::uuid
-        AND ev.situacao <> 'cancelada'
+        -- REGRA DE NEGÓCIO (migration 346): 'solicitada' ainda não foi liberada
+        -- pelo responsável — o motoboy não deve ver/contar corrida que nem
+        -- entrou no fluxo de aceite ainda (some da lista dele até liberar).
+        AND ev.situacao NOT IN ('cancelada', 'solicitada')
         ${whereSituacao}
         ${whereDataInicio}
         ${whereDataFim}
@@ -142,7 +148,10 @@ export async function GET(req: NextRequest) {
         ), 0)::numeric AS ja_recebido
       FROM alissonerp.entregas_venda ev
       WHERE ev.motoboy_id = ${motoboyUserId}::uuid
-        AND ev.situacao <> 'cancelada'
+        -- REGRA DE NEGÓCIO (migration 346): 'solicitada' ainda não foi liberada
+        -- pelo responsável — o motoboy não deve ver/contar corrida que nem
+        -- entrou no fluxo de aceite ainda (some da lista dele até liberar).
+        AND ev.situacao NOT IN ('cancelada', 'solicitada')
         ${dataInicio
           ? sql`AND ev.created_at >= ${dataInicio}::date`
           : sql`AND ev.created_at >= date_trunc('month', now())`}
