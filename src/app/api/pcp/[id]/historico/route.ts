@@ -57,12 +57,14 @@ export async function GET(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  // 1. Buscar PCP
+  // 1. Buscar PCP + foto da saída (se existir)
   const [pcp] = await sql`
-    SELECT id, ordem_id, etapas::text AS etapas,
-           peso_final, pmc, quebra, data_conclusao
-    FROM alissonerp.pcp
-    WHERE id = ${pcpId}
+    SELECT p.id, p.ordem_id, p.etapas::text AS etapas,
+           p.peso_final, p.pmc, p.quebra, p.data_conclusao,
+           so.foto_balanca
+    FROM alissonerp.pcp p
+    LEFT JOIN alissonerp.saidas_ordem so ON so.id = p.saida_ordem_id
+    WHERE p.id = ${pcpId}
     LIMIT 1
   `;
   if (!pcp) {
@@ -193,11 +195,12 @@ export async function GET(
   // 7. Saída PCP (se concluído)
   if (pcp.etapas === "concluido" && pcp.data_conclusao) {
     eventos.push({
-      tipo:       "saida_pcp",
-      data:       pcp.data_conclusao as string,
-      peso_final: pcp.peso_final ? Number(pcp.peso_final) : undefined,
-      pmc:        pcp.pmc        ? Number(pcp.pmc)        : undefined,
-      quebra:     pcp.quebra !== null ? Number(pcp.quebra) : undefined,
+      tipo:         "saida_pcp",
+      data:         pcp.data_conclusao as string,
+      peso_final:   pcp.peso_final ? Number(pcp.peso_final) : undefined,
+      pmc:          pcp.pmc        ? Number(pcp.pmc)        : undefined,
+      quebra:       pcp.quebra !== null ? Number(pcp.quebra) : undefined,
+      foto_balanca: pcp.foto_balanca as string | null,
     });
   }
 

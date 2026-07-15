@@ -236,8 +236,8 @@ export async function POST(req: NextRequest) {
   // 4. Inserir saida_ordem com peso=0 para SUPRIMIR o trigger
   //    (trigger guard: IF NEW.peso IS NULL OR NEW.peso <= 0 → RETURN NEW)
   const [saida] = await sql`
-    INSERT INTO alissonerp.saidas_ordem (ordem_id, deposito_id, peso, metal_externo, obs, created_by)
-    VALUES (${ordemId}, ${depositoId}, 0, ${metal_externo}, 'Saída via PCP — gerenciado pelo ERP', ${user.id}::uuid)
+    INSERT INTO alissonerp.saidas_ordem (ordem_id, deposito_id, peso, metal_externo, obs, created_by, foto_balanca)
+    VALUES (${ordemId}, ${depositoId}, 0, ${metal_externo}, 'Saída via PCP — gerenciado pelo ERP', ${user.id}::uuid, ${foto_balanca ?? null})
     RETURNING id
   `;
   const saidaId = saida.id as number;
