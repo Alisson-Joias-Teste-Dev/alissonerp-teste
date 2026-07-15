@@ -120,6 +120,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
+  // REGRA DE NEGÓCIO (Fase 5, Jonathan 15/07): a conversão reversa EXIGE pelo
+  // menos um aprovador configurado em Configurações → Aprovadores. Sem isso a
+  // solicitação NÃO abre — retorna erro pedindo pra configurar (antes caía num
+  // fallback silencioso que atribuía ao admin; o Jonathan não quer isso).
+  const [cfgAprov] = await sql`
+    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadores_conversao_reversa' LIMIT 1
+  `;
+  const aprovadoresCfg = String(cfgAprov?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (aprovadoresCfg.length === 0) {
+    return NextResponse.json(
+      { error: "Nenhum aprovador de Conversão Reversa configurado. Vá em Configurações → Aprovadores → \"Conversão Reversa\" e defina ao menos um antes de abrir a solicitação." },
+      { status: 400 },
+    );
+  }
+
   const raw = await req.json().catch(() => ({}));
   const parsed = ConversaoReversaPostSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
