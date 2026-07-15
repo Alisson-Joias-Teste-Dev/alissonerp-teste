@@ -50,6 +50,11 @@ const CHAVES = [
   // Fase 3g.1 (centralização de aprovações, 15/07): aprova solicitação de alteração
   // de venda (campo restrito/pagamento após fechar) — antes era ROLES_FINANCEIRO fixo.
   "aprovador_alteracao_venda",
+  // MULTI (vários UUIDs separados por vírgula): quem aprova a Conversão Reversa (ouro
+  // do cofre vira peça de estoque) — endpoint conversao-reversa/aprovar|recusar.
+  // Plugada na camada config-first nesta mesma sessão (15/07) — config vazia ->
+  // nao_configurado (ninguém decide, nem admin), sem fallback de cargo.
+  "aprovadores_conversao_reversa",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -159,6 +164,7 @@ export async function GET() {
       aprovador_precificacao: configMap.get("aprovador_precificacao") ?? "",
       aprovador_devolucao: configMap.get("aprovador_devolucao") ?? "",
       aprovador_alteracao_venda: configMap.get("aprovador_alteracao_venda") ?? "",
+      aprovadores_conversao_reversa: configMap.get("aprovadores_conversao_reversa") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -268,6 +274,13 @@ export async function PUT(req: NextRequest) {
     // Fase 3g.1: aprovador de alteração de venda (antes ROLES_FINANCEIRO fixo).
     if (body.aprovador_alteracao_venda !== undefined) {
       updates.push({ chave: "aprovador_alteracao_venda", valor: body.aprovador_alteracao_venda });
+    }
+    // MULTI: aprovadores da conversão reversa. Vários UUIDs separados por vírgula.
+    if (body.aprovadores_conversao_reversa !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_conversao_reversa).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_conversao_reversa", valor: lista });
     }
 
     for (const u of updates) {

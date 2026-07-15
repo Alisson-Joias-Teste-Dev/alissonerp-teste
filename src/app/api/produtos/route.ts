@@ -55,6 +55,7 @@ const ProdutosPostSchema = z.object({
   categoria_geral: z.string().max(200).nullable().optional(),
   tem_pedra_preciosa: z.boolean().optional(),
   fornecedor: z.string().max(200).nullable().optional(),
+  localizacao: z.string().max(200).nullable().optional(),
   medidas: z.record(z.string(), z.unknown()).optional(),
   ficha_tecnica_ia: z.record(z.string(), z.unknown()).nullable().optional(),
   composicao: z.array(z.record(z.string(), z.unknown())).max(200).optional(),
@@ -271,7 +272,11 @@ export async function GET(req: NextRequest) {
           p.nome,
           p.sku,
           p.tipo_metal,
-          p.peso_precificado,
+          -- Peso da FONTE (alissonerp.erp_produtos) — mesma origem usada no calculo
+          -- do preco (vw_produtos_geral_preco). O espelho public.produtos so replica
+          -- INSERT, nao UPDATE, entao ao editar o peso o public ficava com o valor
+          -- antigo e a tela exibia peso diferente do preco. Fallback p.* so se nao houver erp.
+          COALESCE(ep.peso_precificado, p.peso_precificado) AS peso_precificado,
           -- Pedras: peso fiel em ct vem de produto_pedra_extras (peso_precificado
           -- é arredondado pelo trigger arredondar_peso_para_cima).
           (SELECT peso_ct FROM alissonerp.produto_pedra_extras
@@ -557,7 +562,7 @@ export async function POST(req: NextRequest) {
   const body = parsedBody.data as any;
 
   const { nome, tipo_metal, cor_metal, peso_precificado, markup, fator,
-          categoria_precificacao, categoria_geral, tem_pedra_preciosa, fornecedor,
+          categoria_precificacao, categoria_geral, tem_pedra_preciosa, fornecedor, localizacao,
           medidas, ficha_tecnica_ia, composicao, variacoes, quantidades, foto_base64 } = body;
 
   try {
@@ -622,7 +627,7 @@ export async function POST(req: NextRequest) {
                peso_precificado, markup, fator,
                categoria_precificacao, categoria, tem_pedra_preciosa,
                eh_pai, eh_variacao,
-               cor_metal, largura_aro, altura_aro, base, fornecedor)
+               cor_metal, largura_aro, altura_aro, base, fornecedor, localizacao)
             VALUES
               (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
                ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
@@ -632,7 +637,8 @@ export async function POST(req: NextRequest) {
                ${medidas?.largura_aro ?? null},
                ${medidas?.altura_aro  ?? null},
                ${medidas?.base        ?? null},
-               ${fornecedor ?? null})
+               ${fornecedor ?? null},
+               ${localizacao ?? null})
             RETURNING id, produto_id AS id_produto, sku, nome, preco_sync
           `
         : await tx<{ id: number; id_produto: number; sku: string; nome: string; preco_sync: string | null }[]>`
@@ -641,7 +647,7 @@ export async function POST(req: NextRequest) {
                peso_precificado, markup, fator,
                categoria_precificacao, categoria, tem_pedra_preciosa,
                eh_pai, eh_variacao,
-               cor_metal, largura_aro, altura_aro, base)
+               cor_metal, largura_aro, altura_aro, base, localizacao)
             VALUES
               (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
                ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
@@ -650,7 +656,8 @@ export async function POST(req: NextRequest) {
                ${cor_metal ?? null},
                ${medidas?.largura_aro ?? null},
                ${medidas?.altura_aro  ?? null},
-               ${medidas?.base        ?? null})
+               ${medidas?.base        ?? null},
+               ${localizacao ?? null})
             RETURNING id, produto_id AS id_produto, sku, nome, preco_sync
           `;
 
@@ -750,7 +757,7 @@ export async function POST(req: NextRequest) {
                parent_sku, parent_id,
                eh_variacao, eh_pai,
                sufixo_variacao, numeracao, cor_metal, comprimento,
-               largura_aro, altura_aro, base, fornecedor)
+               largura_aro, altura_aro, base, fornecedor, localizacao)
             VALUES
               (${varId}, ${skuVar}, ${nomeVar},
                ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
@@ -765,7 +772,8 @@ export async function POST(req: NextRequest) {
                ${medidas?.largura_aro ?? null},
                ${medidas?.altura_aro  ?? null},
                ${medidas?.base        ?? null},
-               ${fornecedor ?? null})
+               ${fornecedor ?? null},
+               ${localizacao ?? null})
           `;
         } else {
           await tx`
@@ -776,7 +784,7 @@ export async function POST(req: NextRequest) {
                parent_sku, parent_id,
                eh_variacao, eh_pai,
                sufixo_variacao, numeracao, cor_metal, comprimento,
-               largura_aro, altura_aro, base)
+               largura_aro, altura_aro, base, localizacao)
             VALUES
               (${varId}, ${skuVar}, ${nomeVar},
                ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
@@ -790,7 +798,8 @@ export async function POST(req: NextRequest) {
                ${combo.comprimento ?? null},
                ${medidas?.largura_aro ?? null},
                ${medidas?.altura_aro  ?? null},
-               ${medidas?.base        ?? null})
+               ${medidas?.base        ?? null},
+               ${localizacao ?? null})
           `;
         }
 

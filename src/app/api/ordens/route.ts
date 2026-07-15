@@ -10,6 +10,7 @@ import {
 } from "@/lib/personalizacao-validacao";
 import { zodError, IdSchema, DateSchema } from "@/lib/schemas/common";
 import { LIMITS } from "@/lib/payload-limits";
+import { assertVendaForaDeRascunho, VendaGuardError } from "@/lib/venda-guards";
 
 const FULL_ACCESS_ROLES = ["desenvolvedor", "admin"];
 const ALL_TIPOS = [
@@ -233,7 +234,17 @@ export async function POST(req: NextRequest) {
 
   // ── Transação: ordem + itens + auditoria loja ───────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const novaOrdem = await sql.begin(async (tx: any) => {
+  let novaOrdem;
+  try {
+    novaOrdem = await sql.begin(async (tx: any) => {
+    // 0-a. Trava de rascunho: ordem vinculada a uma venda_id só pode ser
+    // criada se a venda já saiu do estado 'rascunho' (pagamento confirmado).
+    // Ver src/lib/venda-guards.ts para o motivo/impacto — checagem dentro
+    // da mesma transação do INSERT para evitar race condition (TOCTOU).
+    if (venda_id) {
+      await assertVendaForaDeRascunho(tx, venda_id, "abrir ordem");
+    }
+
     // 0. Gerar numero_ordem dentro da transação (evita race condition)
     const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
     const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
@@ -390,7 +401,19 @@ export async function POST(req: NextRequest) {
     }
 
     return ordem;
-  });
+    });
+  } catch (err) {
+    // Trava de rascunho (venda-guards.ts): mapeia o erro tipado para HTTP.
+    // Qualquer outro erro é relançado — não altera o comportamento atual
+    // de nenhuma outra falha da transação (constraint, upload, etc).
+    if (err instanceof VendaGuardError && err.motivo === "rascunho") {
+      return NextResponse.json({ error: err.message }, { status: 422 });
+    }
+    if (err instanceof VendaGuardError && err.motivo === "nao_encontrada") {
+      return NextResponse.json({ error: err.message }, { status: 404 });
+    }
+    throw err;
+  }
 
   return NextResponse.json(
     { id: novaOrdem.id, numero_ordem: novaOrdem.numero_ordem },

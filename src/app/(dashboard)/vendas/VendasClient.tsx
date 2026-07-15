@@ -608,7 +608,8 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
                             <span title="NFC-e emitida" className="p-1 inline-flex">
                               <FileCheck size={14} className="text-emerald-600" />
                             </span>
-                          ) : v.empresa_emitente_id ? (
+                          ) : v.empresa_emitente_id && v.situacao !== "rascunho" ? (
+                            // Emitir NFC-e escondido em rascunho: nota fiscal só pode ser emitida de venda firmada
                             <button
                               title="Emitir NFC-e"
                               onClick={e => { e.stopPropagation(); setVendaNfce(v); }}

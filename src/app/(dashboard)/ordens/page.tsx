@@ -57,25 +57,23 @@ export default async function OrdensPage({
     }
 
     /**
-     * REGRA DE NEGÓCIO: o botão de conclusão forçada é exclusivo do dono.
+     * REGRA DE NEGÓCIO: quem vê o botão "Concluir via Sistema" (conclusão forçada).
      *
-     * O QUE: calcula no server se o usuário logado é master admin e envia ao
-     * client para renderização condicional do botão.
-     * POR QUE: evita exposição visual da ação para outros perfis.
-     * IMPACTO SE REMOVIDO: usuários comuns verão a ação, gerando tentativa de
-     * uso indevido e ruído operacional.
+     * O QUE: libera o botão para (a) master admin — o dono, sempre; (b) role
+     * "desenvolvedor" — fallback técnico para contingência de permissão; e
+     * (c) role "admin" — administradores da loja (decisão do dono em 13/07/2026,
+     * "todos os admins"). O cálculo é no server e vai ao client só como flag.
+     * POR QUE: distribui a contingência de destravar ordens presas para os
+     * administradores, sem depender exclusivamente do dono/responsável técnico.
+     * IMPACTO SE REMOVIDO: só dono/dev destravam ordens, virando gargalo quando
+     * ausentes; se afrouxado, perfis comuns veriam a ação (uso indevido).
+     * ATENÇÃO: a MESMA regra é reforçada no back (route concluir-sistema) — o
+     * front só esconde o botão; manter as duas em sincronia.
      */
-    /**
-     * REGRA DE NEGÓCIO: fallback operacional para ambiente interno.
-     *
-     * O QUE: mantém exclusividade no master admin, mas libera também para
-     * desenvolvedor quando o cadastro do master estiver divergente.
-     * POR QUE: em homologação/ajuste de permissões, evita bloquear a ação de
-     * contingência no front para o responsável técnico.
-     * IMPACTO SE REMOVIDO: o botão pode sumir para o responsável mesmo com
-     * necessidade urgente de desentupir fluxo.
-     */
-    podeConcluirSistema = await isMasterAdmin(user.id) || usuario?.role === "desenvolvedor";
+    podeConcluirSistema =
+      (await isMasterAdmin(user.id)) ||
+      usuario?.role === "desenvolvedor" ||
+      usuario?.role === "admin";
   }
 
   // Fragmentos SQL dinâmicos — evita "could not determine data type of parameter $N"

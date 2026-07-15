@@ -52,13 +52,15 @@ import {
   Banknote,
   Landmark,
   CreditCard,
+  GraduationCap,
+  HelpCircle,
 } from "lucide-react";
 import { NotificacoesDrawer } from "./NotificacoesDrawer";
 import PerfilDrawer from "./PerfilDrawer";
 import { useAuth } from "@/hooks/useAuth";
 import { createClient } from "@/lib/supabase/client";
 import { getMenuGroupsForRole, getMenuGroupsForModulos, type MenuGroup, type MenuEntry, type MenuItem } from "@/lib/auth/permissions";
-import { ROLES_SERVICE_PANEL, ROLES_METAL } from "@/lib/roles";
+import { ROLES_SERVICE_PANEL, ROLES_METAL, ROLES_DEVOLUCAO_ABRIR, hasRole } from "@/lib/roles";
 import UserAvatar from "@/components/UserAvatar";
 import { useSidebar } from "@/contexts/SidebarContext";
 
@@ -107,6 +109,8 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; strokeWidth?
   Banknote,
   Landmark,
   CreditCard,
+  GraduationCap,
+  HelpCircle,
 };
 
 function isGroup(entry: MenuEntry): entry is MenuGroup {
@@ -148,6 +152,13 @@ export default function Sidebar() {
   const hasCrediario = role && ROLES_CREDIARIO_SIDEBAR.includes(role);
   const hasEntregasVenda = role && ROLES_ENTREGAS_VENDA.includes(role);
   const hasMovimentacaoInterna = role && ROLES_MOVIMENTACAO_INTERNA.includes(role);
+  // REGRA DE NEGÓCIO: consultora abre devolução da PRÓPRIA venda (ROLES_DEVOLUCAO_ABRIR).
+  // O QUE: injeta o módulo `devolucoes` no menu da consultora (padrão do Metal),
+  //   já que /devolucoes não é gateado pelo proxy nem consta em role_permissoes.
+  // POR QUE: sem isso o menu Devoluções sumiria pra consultora apesar da API já liberar.
+  // IMPACTO SE REMOVIDO: consultora não acha o menu Devoluções.
+  // OBS: NÃO injeta vale_troca — consultora abre devolução mas não mexe em vale-troca.
+  const hasDevolucao = hasRole(role, ROLES_DEVOLUCAO_ABRIR);
   const modulosEfetivos = [...modulos_leitura];
   if (modulosEfetivos.length > 0) {
     if (hasServicePanel && !modulosEfetivos.includes("service_painel")) modulosEfetivos.push("service_painel");
@@ -168,6 +179,7 @@ export default function Sidebar() {
     if (hasMetal && !modulosEfetivos.includes("metal")) modulosEfetivos.push("metal");
     if (hasEntregasVenda && !modulosEfetivos.includes("entregas_venda")) modulosEfetivos.push("entregas_venda");
     if (hasMovimentacaoInterna && !modulosEfetivos.includes("movimentacao_interna")) modulosEfetivos.push("movimentacao_interna");
+    if (hasDevolucao && !modulosEfetivos.includes("devolucoes")) modulosEfetivos.push("devolucoes");
   }
 
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)
@@ -176,8 +188,14 @@ export default function Sidebar() {
     : getMenuGroupsForRole(role);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const configEntry = allEntries.find(e => !isGroup(e) && (e as any).href === "/configuracoes") as (MenuEntry & { href: string; icon: string }) | undefined;
+  // Grupo Ajuda › Treinamentos — sempre visível pra qualquer usuário logado
+  // (a rota /treinamentos não é gateada por módulo no proxy).
+  const AJUDA_GROUP: MenuGroup = {
+    type: "group", label: "Ajuda", icon: "HelpCircle",
+    items: [{ label: "Treinamentos", href: "/treinamentos", icon: "GraduationCap" }],
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const entries     = allEntries.filter(e => isGroup(e) || (e as any).href !== "/configuracoes");
+  const entries     = [...allEntries.filter(e => isGroup(e) || (e as any).href !== "/configuracoes"), AJUDA_GROUP];
 
   // Item extra: Service (flag isOperadorService) — Painel Service é tratado pelo grupo Produção
   const serviceExtras: MenuItem[] = [];

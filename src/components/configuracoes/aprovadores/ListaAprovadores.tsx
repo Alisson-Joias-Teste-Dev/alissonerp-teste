@@ -171,6 +171,14 @@ const CONFIG_ITENS: ConfigItem[] = [
     usuariosKey: "diretores_admins",
     icone: "✏️",
   },
+  {
+    chave: "aprovadores_conversao_reversa",
+    titulo: "Conversão Reversa (ouro do cofre virou joia)",
+    descricao: "Quem aprova quando um ouro pendente no cofre é convertido em peça de estoque. Só quem estiver marcado aqui aprova. Pode marcar vários.",
+    usuariosKey: "metal_aprovadores",
+    icone: "💎",
+    multi: true,
+  },
 ];
 
 // ─── Componente ───────────────────────────────────────────────────────────────
