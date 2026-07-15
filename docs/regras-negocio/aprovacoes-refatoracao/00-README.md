@@ -33,6 +33,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 | 11 | [`11-FASE-3f-compra-comercial.md`](11-FASE-3f-compra-comercial.md) | **Pacote da Fase 3f** — compra comercial na camada config-first (2 arquivos: gate no despachante + criação); chave `aprovador_compra_comercial` já existe. Brecha do concluir + R4 (duplicação conta a pagar) = Fase 4 |
 | 12 | [`12-FASE-3g-venda-plano.md`](12-FASE-3g-venda-plano.md) | **PLANO da Fase 3g (venda)** — mapa dos 6 eventos + fatiamento em 3 sub-fases + decisões (crédito = 2; desconto só porta oficial) + fronteira 3g/4/5 |
 | 13 | [`13-FASE-3g1-entrega-alteracao.md`](13-FASE-3g1-entrega-alteracao.md) | **Pacote da Fase 3g.1** — entrega sem pagamento (só o gate) + alteração de venda (troca cargo por config; chave nova `aprovador_alteracao_venda`) |
+| 14 | [`14-FASE-3g2-credito.md`](14-FASE-3g2-credito.md) | **Pacote da Fase 3g.2** — crédito/A Receber (gerente + diretor, 2 aprovadores) na camada config-first; submissão + decisão; chaves já existem |
 
 ## O plano (7 fases)
 
@@ -102,7 +103,11 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   `concluir` void user + R4 duplicação conta a pagar = Fase 4.)
 - [ ] Fase 3g — **venda** (a mais crítica, por último) — mapeada e fatiada em 3 sub-fases (plano `12`). Decisões do Jonathan (12/07): crédito mantém 2 aprovadores (gerente/diretor); desconto migra só a porta oficial (atalhos/comissão = Fase 4).
   - [x] 3g.1 — **entrega sem pagamento + alteração de venda** plugadas na camada config-first
-    (15/07/2026, pacote `13`, commit `2d236264`) — tsc 0, 121/121 testes (camada intocada, nenhum
+    (15/07/2026, pacote `13`, commit `2d236264`) — **REVISADA e APROVADA pelo Opus** (gates corretos,
+    403 idêntico, `approveVenda`/camada intocados) + **TESTADA em HOMOLOG (15/07)**: entrega (=Alisson)
+    só o configurado decide; `alteracao_venda` sem a chave → todos 403, com a chave `aprovador_alteracao_venda`
+    (=Alisson) → Alisson pode / Jonathan (dev) não. **3g.1 FECHADA.** ⚠️ PRA PROD: criar
+    `aprovador_alteracao_venda` via `/dba`. — tsc 0, 121/121 testes (camada intocada, nenhum
     teste mudou). 6 arquivos: gate `podeDecidir` no bloco `entrega_sem_pagamento` do despachante
     (`tarefas/[id]/aprovacao/route.ts`, antes do `try`) + submissão trocada por `resolverAprovadores`
     em `entrega-sem-pagamento.ts` (mesma mensagem de erro); gate `podeDecidir('alteracao_venda')` no
