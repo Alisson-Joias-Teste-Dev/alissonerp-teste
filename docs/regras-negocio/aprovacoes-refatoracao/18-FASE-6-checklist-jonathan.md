@@ -17,19 +17,32 @@
 ## O que testar — por fluxo (Fases 3-5, tudo que mudou)
 
 ### Desconto (o mais crítico — Fase 3g.3 + Fase 4 + Fase 5)
-- [ ] Login como uma **consultora com `mx_desconto_permitido` cadastrado** (ex.: 20% ou 30% — hoje só
-  2 consultoras têm cadastro no homolog). Aplicar desconto DENTRO do limite → não deve pedir aprovação.
-- [ ] Mesma consultora, desconto ACIMA do limite dela → botão "Solicitar Aprovação de Desconto" deve
-  aparecer; ao clicar, cria a tarefa (chave `aprovador_desconto_padrao` = Alisson em homolog).
+
+**Vendas REAIS já conferidas por mim (`getDescontoThreshold` chamado direto, sem mock, contra homolog
+— use estas pra não precisar adivinhar o número esperado):**
+
+| venda_id | vendedora | cargo | cadastro | threshold confirmado | situação |
+|---|---|---|---|---|---|
+| 29913 | Cristiane Bezerra | consultora | 20% | **20** | rascunho |
+| 29846 | Cristiane Bezerra | consultora | 20% | **20** | rascunho |
+| 30144 | Germana Valentim | gerente_loja | 30% | **30** | rascunho |
+| 30183 | Germana Valentim | gerente_loja | 30% | **30** | aprovado |
+
+- [ ] Abrir a venda **29913** ou **29846** (Cristiane, 20%) → aplicar desconto ≤20% → NÃO deve pedir
+  aprovação. Aplicar >20% → botão "Solicitar Aprovação de Desconto" deve aparecer.
+- [ ] Ao solicitar, cria a tarefa (chave `aprovador_desconto_padrao` = Alisson em homolog).
 - [ ] Login como **Alisson** (o aprovador configurado) → aprova a tarefa → checar que
   `desconto_aprovado_por` grava e a comissão bate com a tabela de faixas (ou 0,5% se >30%).
 - [ ] Login como **admin/dev** (Jonathan) → tentar aprovar a MESMA tarefa → deve dar 403 (só o
   configurado decide, nem admin passa).
-- [ ] **Teste específico da Fase 5**: uma consultora SEM `mx_desconto_permitido` cadastrado → qualquer
-  desconto > 0% deve pedir aprovação (fallback = 0% agora, antes era 15%). Confirme que o slider da
-  tela já mostra 0% pra ela (antes mostrava 15/30/50 conforme o cargo).
+- [ ] **Teste específico da Fase 5 (fallback=0)**: não achei nenhuma venda REAL de consultora sem
+  cadastro no homolog (as únicas 3 sem `mx_desconto_permitido` não têm vendas vinculadas) — pra ver
+  isso ao vivo, crie uma venda nova com uma consultora sem cadastro (ou zere o cadastro de uma de
+  teste temporariamente) e confirme: o slider já nasce em 0% (antes mostrava 15/30/50 pelo cargo), e
+  qualquer desconto > 0% pede aprovação.
 - [ ] **Teste do bug corrigido**: se você (admin/dev) for a "vendedora" de uma venda de teste, o slider
-  deve ir a 100% E a aprovação não deve travar em desconto alto (antes travava em 15% por bug).
+  deve ir a 100% E a aprovação não deve travar em desconto alto (antes travava em 15% por bug —
+  confirmado por código, não achei venda real com vendedora admin/dev pra provar ao vivo).
 
 ### Cartão (Fase 5 — limite virou config)
 - [ ] Item com desconto > 20% (o valor seedado da chave `limite_desconto_cartao_pct`), forma de
@@ -88,8 +101,10 @@ Se estiver tudo certo, os próximos passos são (na ordem):
 
 - `npx tsc --noEmit` → 0 erros (Fase 5, todas as fases).
 - `npx vitest run src/lib/aprovacoes` → 121/121 (camada de autoridade intocada desde a Fase 1b).
-- `getDescontoThreshold` chamado DIRETO (sem mock) contra a venda 30183 em homolog → retornou o valor
-  certo (30, do cadastro da Germana), confirma que a query nova funciona no schema vivo.
+- `getDescontoThreshold` chamado DIRETO (sem mock) contra 4 vendas reais de homolog (tabela acima) →
+  todos os valores bateram com o cadastro esperado, confirma que a query nova funciona no schema vivo.
+- `buscarLimiteDescontoCartao()` → 20 (lê a chave nova). `buscarFallbackDescontoSemCadastro()` → 0
+  (lê a chave nova). Ambos chamados direto, sem mock.
 - As 2 chaves de config da Fase 5 já existem em homolog (`0` e `20`).
 - Linha corrompida de `desconto_acima` desativada em homolog.
 - Front carrega sem erro de compilação/console (`/`, `/orcamento`) — validação visual completa fica
