@@ -152,9 +152,24 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
     de testes de desconto (10 falhas pré-existentes) passa a 11 por poluição de mock entre testes — o
     teste em questão passa isolado; **não é regressão** (dívida técnica da suíte, Fase 6).
     **Fecha a migração da Fase 3g (venda) — e a Fase 3 inteira — no código, revisada e testada.**
-- [x] Fase 4 — brechas/atalhos — **codada e testada localmente pelo Sonnet (15/07/2026, pacote `16`),
-  aguardando Opus revisar e testar em homolog** (ver nota técnica completa abaixo, logo após esta
-  seção de Status):
+- [x] Fase 4 — brechas/atalhos — **codada pelo Sonnet (commit `7aa4db69`, pacote `16`) + REVISADA e
+  TESTADA em homolog pelo Opus (15/07/2026) → FECHADA.** Revisão: diff dos 5 arquivos ok (comissão do
+  item 3 comparada linha a linha com a porta oficial `desconto_acima` — fiel; guards do item 4 casam o
+  INSERT real), tsc 0. **Achado do Opus (só visível no banco vivo, não nas migrations que o Sonnet leu):
+  a migration 331 (fluxo de chegada) NÃO estava aplicada em homolog** — a `fn_concluir_compra_comercial`
+  viva era a versão antiga 272 (só `rascunho`/`recebida`), e as funções de chegada não existiam. Os itens
+  1 e 4 dependem da 331. **Decisão do Jonathan: aplicar a 331 em homolog** (deixar fiel a prod) e testar
+  lá — feito (migration idempotente, aplicada em transação assinada `claude_aplica_331_homolog`, RC=0;
+  pré-requisitos conferidos antes). Testes end-to-end (tudo em `BEGIN/ROLLBACK`, homolog não sujo):
+  **item 1** — compra #13 `aprovado` → concluir → `concluido` (com a 272 dava exception); **item 2** —
+  query do guard distingue tarefa formal (t→409) de comum; **item 3** — autoridade já provada na 3g.3
+  (mesma chave `aprovador_desconto_padrao`), comissão fiel; **item 4a** — guard `contas_pagar` por
+  `compra_comercial_id` detecta/libera certo; **item 4b** — guard estoque casa `#13` e a não-colisão de
+  prefixo (`#1` não pega `#13/#12/#11`) confere. ⚠️ PRA PROD: a 331 já está em prod (compra comercial
+  chegada); **nenhuma chave de config nova** na Fase 4 (item 3 reusa `aprovador_desconto_padrao`).
+  ⚠️ NOTA DE AMBIENTE: homolog estava atrás de prod (faltava a 331) — os testes das fases 3x não foram
+  afetados (eram da camada de aprovações, independente da 331), mas vale conferir defasagem em fases
+  futuras. Detalhe técnico de cada item na nota abaixo:
   - Auditoria: **fora de escopo** — plano futuro do Jonathan (padronizar pra IA fazer a auditoria); travar
     agora bloquearia a fábrica (não há aprovador definido hoje). **Não tocado.**
   - Concluir compra comercial: sem gate de aprovador (decisão: é ação operacional, liberada pra qualquer
