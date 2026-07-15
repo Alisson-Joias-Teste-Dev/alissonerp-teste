@@ -102,7 +102,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
   restaurei o valor original (Jonathan). Prova de que a autoridade é 100% a config. **Fase 3f
   FECHADA.** `aprovador_compra_comercial` já existe (não precisa criar em prod). (Brecha do
   `concluir` void user + R4 duplicação conta a pagar = Fase 4.)
-- [x] Fase 3g — **venda** (a mais crítica, por último) — mapeada e fatiada em 3 sub-fases (plano `12`). Decisões do Jonathan (12/07): crédito mantém 2 aprovadores (gerente/diretor); desconto migra só a porta oficial (atalhos/comissão = Fase 4). **As 3 sub-fases (3g.1, 3g.2, 3g.3) estão codadas — migração da venda pra config-first FECHADA no código.** Aguardando Opus revisar/criar chaves/testar 3g.3 em homolog (3g.1/3g.2 já testadas).
+- [x] Fase 3g — **venda** (a mais crítica, por último) — mapeada e fatiada em 3 sub-fases (plano `12`). Decisões do Jonathan (12/07): crédito mantém 2 aprovadores (gerente/diretor); desconto migra só a porta oficial (atalhos/comissão = Fase 4). **As 3 sub-fases (3g.1, 3g.2, 3g.3) codadas, revisadas e TESTADAS em homolog — Fase 3g FECHADA. Com isso, a migração fluxo-a-fluxo da Fase 3 INTEIRA está concluída** (metal → conversão → preço → limpeza → devolução → compra → venda[entrega/alteração/crédito/desconto/cartão]). Falta só o passo de produção (criar as chaves novas via `/dba` assinado) + Jonathan testar no front + merge — que é a Fase 6.
   - [x] 3g.1 — **entrega sem pagamento + alteração de venda** plugadas na camada config-first
     (15/07/2026, pacote `13`, commit `2d236264`) — **REVISADA e APROVADA pelo Opus** (gates corretos,
     403 idêntico, `approveVenda`/camada intocados) + **TESTADA em HOMOLOG (15/07)**: entrega (=Alisson)
@@ -136,16 +136,21 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
     com a mensagem certa — mesmo padrão da Fase 3e). Aguardando Opus revisar e criar cenário de
     teste em homolog.
   - [x] 3g.3 — **desconto + cartão** (porta oficial, via tarefa) plugados na camada config-first
-    (15/07/2026, pacote `15`, commit pendente) — 2 gates `podeDecidir` no despachante (handlers
-    `cartao_desconto` e `desconto_acima`); criação por `resolverAprovadores` em
-    `criarTarefaAprovacao` (`aprovacao-regras.ts`), mapeando `regra.tipo_evento` pro evento
-    (`cartao_desconto`/`desconto`); `nao_configurado` → `HttpError(409, ...)` tratado nos 2 blocos
-    (desconto e cartão) de `solicitar-aprovacao/route.ts`, mesmo padrão da 3g.2. Atalhos
-    (`aprovar-desconto`, `solicitacoes-desconto`), comissão e campos canônicos intocados (Fase 4).
-    `npx tsc --noEmit` 0 erros; `npx vitest run src/lib/aprovacoes` 121/121 (camada intocada).
-    **Fecha a migração da Fase 3g (venda) no código.** Aguardando Opus revisar, criar/preencher
-    `aprovador_desconto_padrao`/`aprovador_cartao_desconto_padrao` (hoje decorativas — precisam de
-    valor ANTES de testar, senão tudo trava em 409/403) e testar em homolog.
+    (15/07/2026, pacote `15`, commit `ff5335fb`) — **REVISADA e APROVADA pelo Opus** (2 gates
+    corretos, criação migrada, comissão/atalhos/campos intocados; tsc 0; 121/121 camada) + **TESTADA
+    em HOMOLOG (15/07)**: chaves = Alisson → só Alisson decide (desconto e cartão), Jonathan (dev)
+    403 (`nao_e_aprovador_configurado`); chaves VAZIAS → `nao_configurado` e NINGUÉM decide, nem o
+    admin Alisson (`aprovador_nao_configurado`) → 409 na criação / 403 na decisão; restaurei =Alisson.
+    **3g.3 FECHADA.** ⚠️ PRA PROD: `aprovador_desconto_padrao`/`aprovador_cartao_desconto_padrao` já
+    existem na tela mas eram DECORATIVAS — agora são lidas; garantir que têm valor em prod antes do
+    deploy. — 2 gates `podeDecidir` no despachante (handlers `cartao_desconto` e `desconto_acima`);
+    criação por `resolverAprovadores` em `criarTarefaAprovacao` (`aprovacao-regras.ts`), mapeando
+    `regra.tipo_evento` pro evento; `nao_configurado` → `HttpError(409, ...)` tratado nos 2 blocos de
+    `solicitar-aprovacao/route.ts`, mesmo padrão da 3g.2. Atalhos (`aprovar-desconto`,
+    `solicitacoes-desconto`), comissão e campos canônicos intocados (Fase 4). A/B confirmou: a suíte
+    de testes de desconto (10 falhas pré-existentes) passa a 11 por poluição de mock entre testes — o
+    teste em questão passa isolado; **não é regressão** (dívida técnica da suíte, Fase 6).
+    **Fecha a migração da Fase 3g (venda) — e a Fase 3 inteira — no código, revisada e testada.**
 - [ ] Fase 4 — brechas/atalhos
 - [ ] Fase 5 — limites/override
 - [ ] Fase 6 — validação
