@@ -2271,7 +2271,8 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               title="Ver NFC-e emitida">
               <FileText size={13} /> NFC-e
             </button>
-          ) : venda ? (
+          ) : venda && venda.situacao !== "rascunho" ? (
+            // Emitir NFC-e escondido em rascunho: nota fiscal só pode ser emitida de venda firmada
             <button onClick={() => setAbrirNfce(true)}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
               style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
