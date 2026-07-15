@@ -206,3 +206,35 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(result, { status: 201 });
 }
+
+// GET /api/conversao-reversa?status=pendente
+// Lista as conversões reversas (default: só as PENDENTES). O front da aba Ouro
+// usa isto para marcar os itens que já têm uma reversa aguardando aprovação
+// (selo "Reversa aguardando aprovação" + botão desabilitado) — evita o usuário
+// abrir uma segunda solicitação para a mesma origem (que a rota POST barra com 409).
+export async function GET(req: NextRequest) {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
+  const status = req.nextUrl.searchParams.get("status") ?? "pendente";
+
+  const rows = status === "todos"
+    ? await sql`
+        SELECT cr.id, cr.origem_tipo, cr.origem_id, cr.produto_id, cr.quantidade,
+               cr.peso_saida, cr.status_conversao, cr.ordem_id, o.numero_ordem
+        FROM alissonerp.conversoes_reversas cr
+        JOIN alissonerp.ordens o ON o.id = cr.ordem_id
+        ORDER BY cr.created_at DESC
+      `
+    : await sql`
+        SELECT cr.id, cr.origem_tipo, cr.origem_id, cr.produto_id, cr.quantidade,
+               cr.peso_saida, cr.status_conversao, cr.ordem_id, o.numero_ordem
+        FROM alissonerp.conversoes_reversas cr
+        JOIN alissonerp.ordens o ON o.id = cr.ordem_id
+        WHERE cr.status_conversao = ${status}
+        ORDER BY cr.created_at DESC
+      `;
+
+  return NextResponse.json({ conversoes: rows });
+}

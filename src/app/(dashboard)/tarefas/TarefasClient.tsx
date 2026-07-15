@@ -573,6 +573,13 @@ export default function TarefasClient() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tarefa_id: tarefaId }),
         });
+      } else if (tipo === "conversao_reversa") {
+        // Conversão reversa (metal do cofre → peça no estoque) tem endpoint próprio
+        await apiFetch(`/api/conversao-reversa/aprovar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tarefa_id: tarefaId }),
+        });
       } else {
         // Fluxo genérico (aprovacoes_tarefa)
         const aprovacoes = await apiFetch<{ id: number; status: string }[]>(`/api/tarefas/${tarefaId}/aprovacao`);
@@ -610,6 +617,13 @@ export default function TarefasClient() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tarefa_id: tarefaId, motivo: motivoRejeicao }),
+        });
+      } else if (tipo === "conversao_reversa") {
+        // Conversão reversa recusa por endpoint próprio — campo motivo_recusa (não "motivo")
+        await apiFetch(`/api/conversao-reversa/recusar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tarefa_id: tarefaId, motivo_recusa: motivoRejeicao }),
         });
       } else {
         const aprovacoes = await apiFetch<{ id: number; status: string }[]>(`/api/tarefas/${tarefaId}/aprovacao`);

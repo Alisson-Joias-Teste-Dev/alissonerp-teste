@@ -27,9 +27,11 @@ import {
   Ban,
   Search,
   DollarSign,
+  Gem,
 } from "lucide-react";
 import { dispararWebhook } from "@/lib/webhooks";
 import PeriodoFiltro, { type Periodo, calcPeriodo } from "@/components/ui/PeriodoFiltro";
+import ConversaoReversaModal, { type OrigemReversa } from "@/components/forms/ConversaoReversaModal";
 import { useErrorStore } from "@/stores/errorStore";
 import { STATUS_LABEL, STATUS_COLORS } from "@/lib/cofre-ouro-status";
 import { apiFetch } from "@/lib/apiFetch";
@@ -1820,10 +1822,16 @@ const D = {
   dourado: "#DB9864",
 };
 
-function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
+function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOuroTrigger }: {
   caixa: CaixaDinheiro[];
   baixas: CaixaBaixa[];
   podeBaixar: boolean;
+  // REGRA DE NEGÓCIO: quem pode ABRIR conversão reversa ("Virou joia") é um
+  // conjunto de roles DIFERENTE de quem dá baixa no cofre — bate exatamente com
+  // ROLES_PERMITIDOS do POST /api/conversao-reversa (estoquista_loja, gerente_loja,
+  // admin, desenvolvedor). Sem essa distinção o botão apareceria pra gerente_fabrica
+  // (que toma 403) e sumiria pro estoquista_loja (que tem permissão).
+  podeReversa: boolean;
   caixaOuroTrigger: number;
 }) {
   const [baixas, setBaixas] = useState(baixasInit);
@@ -1900,6 +1908,27 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
     created_at: string;
     data_venda: string | null;
   }
+  /**
+   * REGRA DE NEGÓCIO: conversão reversa (peça "virando joia" e saindo do cofre)
+   * fica PENDENTE até aprovação — enquanto pendente, a origem trava (a rota POST
+   * /api/conversao-reversa barra 2ª solicitação pra mesma origem com 409).
+   * O QUE: tipa o resumo vindo de GET /api/conversao-reversa?status=pendente.
+   * POR QUE: o front usa isso pra mostrar o selo "aguardando aprovação" e
+   * esconder o botão "Virou joia" nos itens do cofre já travados por uma reversa.
+   * IMPACTO SE REMOVIDO: usuário tenta abrir 2ª reversa pra mesma origem sem
+   * saber que já existe uma pendente (só descobre no erro 409 ao enviar).
+   */
+  interface ReversaPendenteResumo {
+    id: number;
+    origem_tipo: "conversao" | "compra_metal";
+    origem_id: number;
+    produto_id: number;
+    quantidade: number;
+    peso_saida: number;
+    status_conversao: string;
+    ordem_id: number;
+    numero_ordem: string;
+  }
   const [baixasOuro, setBaixasOuro] = useState<BaixaOuro[]>([]);
   const [saldoOuroDisp, setSaldoOuroDisp] = useState<number>(0);
   const [loadingOuro, setLoadingOuro] = useState(false);
@@ -1916,6 +1945,8 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   const [comprasMetal, setComprasMetal] = useState<CompraMetalResumo[]>([]);
   const [conversoesData, setConversoesData] = useState<ConversaoCofreResumo[]>([]);
   const [upgradesData, setUpgradesData] = useState<UpgradeCofreResumo[]>([]);
+  const [reversasPendentes, setReversasPendentes] = useState<ReversaPendenteResumo[]>([]);
+  const [reversaTarget, setReversaTarget] = useState<{ origem_tipo: "conversao" | "compra_metal"; origem_id: number; referencia: string; restante: number } | null>(null);
 
   // ── Etapa 2 (13/06): pagamentos do MOTOBOY aguardando conferência ──────────
   // REGRA DE NEGÓCIO: Dinheiro/Ouro que o motoboy recebeu na rua entram em
@@ -2034,6 +2065,19 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
       .catch(() => useErrorStore.getState().push("Erro ao carregar gateways de pagamento", { level: "warning" }));
   }, []);
 
+  /**
+   * REGRA DE NEGÓCIO: carrega junto as conversões reversas PENDENTES — usadas
+   * pra travar (selo "aguardando aprovação") o item do cofre que já tem uma
+   * reversa em aberto, evitando abrir uma 2ª solicitação pra mesma origem.
+   */
+  const carregarReversasPendentes = useCallback(async () => {
+    try {
+      const r = await fetch("/api/conversao-reversa?status=pendente");
+      const json = r.ok ? await r.json().catch(() => null) : null;
+      if (json && Array.isArray(json.conversoes)) setReversasPendentes(json.conversoes as ReversaPendenteResumo[]);
+    } catch { /* silencioso — não trava a aba Ouro */ }
+  }, []);
+
   // ─── Carregar dados do cofre de ouro ────────────────────────────────────────
   useEffect(() => {
     setLoadingOuro(true);
@@ -2044,8 +2088,9 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
       fetch("/api/financeiro/cofre-ouro/baixas-itens").then(r => r.ok ? r.json() : []),
       fetch("/api/financeiro/cofre-ouro/conversoes").then(r => r.ok ? r.json() : []),
       fetch("/api/financeiro/cofre-ouro/upgrades").then(r => r.ok ? r.json() : []),
+      fetch("/api/conversao-reversa?status=pendente").then(r => r.ok ? r.json() : null),
     ])
-      .then(([disp, bx, comprasResp, itensAtivos, convResp, upgradesResp]) => {
+      .then(([disp, bx, comprasResp, itensAtivos, convResp, upgradesResp, reversasResp]) => {
         if (disp) setSaldoOuroDisp(Number(disp.disponivel_gramas ?? 0));
         if (Array.isArray(bx)) setBaixasOuro(bx);
         if (comprasResp && Array.isArray(comprasResp.data)) {
@@ -2059,6 +2104,9 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
         }
         if (Array.isArray(upgradesResp)) {
           setUpgradesData(upgradesResp as UpgradeCofreResumo[]);
+        }
+        if (reversasResp && Array.isArray(reversasResp.conversoes)) {
+          setReversasPendentes(reversasResp.conversoes as ReversaPendenteResumo[]);
         }
       })
       .catch(() => useErrorStore.getState().push("Erro ao carregar baixas de ouro", { level: "warning" }))
@@ -2199,10 +2247,41 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
     const bt = b.data ? new Date(b.data).getTime() : 0;
     return bt - at;
   });
-  const baixadoKeys = new Set(itensBaixadosAtivos.map((it) => `${it.origem_tipo}:${it.origem_id}`));
-  const ouroMovimentosPendentes = ouroMovimentos.filter((m) => !baixadoKeys.has(`${m.origem_tipo}:${m.origem_id}`));
+  /**
+   * REGRA DE NEGÓCIO (15/07 — aprovado Jonathan): um lote de ouro no cofre pode
+   * ter VÁRIAS baixas parciais (sangria normal + conversão reversa). O pendente
+   * deve mostrar o que AINDA RESTA daquela origem, não sumir da lista inteira
+   * na 1ª baixa (comportamento antigo: qualquer baixa, mesmo parcial, escondia
+   * o item por completo).
+   * O QUE: soma as gramas já baixadas (baixas ATIVAS) por origem_tipo:origem_id
+   * e calcula `restante = ouro_gramas - já_baixado` por item. Só entra nos
+   * pendentes quem ainda tem restante > 0 (epsilon pra evitar ruído de float).
+   * IMPACTO SE ALTERADO/REMOVIDO: opera baixa/reversa sobre o peso CHEIO já
+   * parcialmente baixado — duplica saída do cofre (saldo negativo) ou some da
+   * lista um restante que ainda podia ser baixado/convertido.
+   * ⚠️ Isso também muda a sangria normal de vendas/upgrade: antes mandava o
+   * peso cheio do item, agora manda o restante — pra elas o restante é sempre
+   * igual ao peso cheio até a 1ª baixa (não têm baixa parcial), então o
+   * comportamento observado não muda; só passa a ser calculado do mesmo jeito.
+   */
+  const EPSILON_GRAMAS_RESTANTE = 0.0005;
+  const baixadoPorOrigem = new Map<string, number>();
+  itensBaixadosAtivos.forEach((it) => {
+    const chave = `${it.origem_tipo}:${it.origem_id}`;
+    baixadoPorOrigem.set(chave, (baixadoPorOrigem.get(chave) ?? 0) + Number(it.gramas));
+  });
+  type OuroMovPendente = OuroMov & { restante: number };
+  const ouroMovimentosPendentes: OuroMovPendente[] = ouroMovimentos
+    .map((m): OuroMovPendente => {
+      const chave = `${m.origem_tipo}:${m.origem_id}`;
+      const restante = Number(m.ouro_gramas) - (baixadoPorOrigem.get(chave) ?? 0);
+      return { ...m, restante };
+    })
+    .filter((m) => m.restante > EPSILON_GRAMAS_RESTANTE);
+  const reversaPendenteKeys = new Set(reversasPendentes.map((r) => `${r.origem_tipo}:${r.origem_id}`));
   const ouroSelecionados = ouroMovimentosPendentes.filter((m) => ouroSelecionadosIds.includes(m.id));
-  const ouroSelecionadoTotalG = ouroSelecionados.reduce((s, m) => s + Number(m.ouro_gramas), 0);
+  // REGRA DE NEGÓCIO: a seleção pra baixa soma o RESTANTE (não o peso cheio) — ver comentário acima.
+  const ouroSelecionadoTotalG = ouroSelecionados.reduce((s, m) => s + Number(m.restante), 0);
   const ouroSelecionadoTotalValor = ouroSelecionados.reduce((s, m) => s + Number(m.valor), 0);
   const podeAbrirBaixaOuro = podeBaixar && saldoOuroDisp > 0 && ouroSelecionadosIds.length > 0;
   const baixaOuroResumoSelecao = ouroSelecionadosIds.length > 0
@@ -2285,7 +2364,10 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
             referencia: m.referencia,
             pessoa_nome: m.pessoa,
             data_origem: m.data,
-            gramas: Number(m.ouro_gramas),
+            // REGRA DE NEGÓCIO: manda o RESTANTE da origem, não o peso cheio —
+            // permite baixas parciais múltiplas pra mesma origem (ver comentário
+            // em `ouroMovimentosPendentes`).
+            gramas: Number(m.restante),
             valor_brl: Number(m.valor),
           })),
         }),
@@ -2630,6 +2712,26 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
         </div>
       )}
 
+      {/* Modal "Virou joia" (Conversão Reversa) */}
+      <ConversaoReversaModal
+        isOpen={!!reversaTarget}
+        origem={reversaTarget as OrigemReversa | null}
+        onClose={() => setReversaTarget(null)}
+        onSuccess={() => {
+          // REGRA DE NEGÓCIO: após enviar p/ aprovação, o item some do CTA "Virou
+          // joia" (vira selo "aguardando aprovação") — recarrega reversas +
+          // itens/saldo do cofre pra refletir na hora.
+          carregarReversasPendentes();
+          Promise.all([
+            fetch("/api/financeiro/cofre-ouro/baixas-itens").then((r) => r.ok ? r.json() : []),
+            fetch("/api/financeiro/cofre-ouro/disponivel").then((r) => r.ok ? r.json() : null),
+          ]).then(([itensResp, dispResp]) => {
+            if (Array.isArray(itensResp)) setItensBaixadosAtivos(itensResp as BaixaOuroItem[]);
+            if (dispResp) setSaldoOuroDisp(Number(dispResp.disponivel_gramas ?? 0));
+          });
+        }}
+      />
+
       {/* Baixa de Ouro */}
       {formaFiltro === "Ouro" && (
         <div className="space-y-4">
@@ -2826,7 +2928,15 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                     <td colSpan={8} className="px-4 py-8 text-center text-sm" style={{ color: C.cinza }}>Nenhum registro.</td>
                   </tr>
                 )}
-                {ouroMovimentosPendentes.map((r) => (
+                {ouroMovimentosPendentes.map((r) => {
+                  // REGRA DE NEGÓCIO: "Virou joia" (conversão reversa) só faz sentido pra
+                  // origem que já é metal registrado no cofre (Conversão / Compra Metal).
+                  // Venda em Ouro e Upgrade não têm essa opção — não são metal "solto".
+                  const podeVirarJoia = podeReversa && (r.origem_tipo === "conversao" || r.origem_tipo === "compra_metal");
+                  const chaveOrigem = `${r.origem_tipo}:${r.origem_id}`;
+                  const temReversaPendente = reversaPendenteKeys.has(chaveOrigem);
+                  const parcial = r.restante < r.ouro_gramas - EPSILON_GRAMAS_RESTANTE;
+                  return (
                   <tr key={r.id} className="border-t hover:bg-gray-50 transition-colors" style={{ borderColor: C.cremeBorder }}>
                     <td className="px-4 py-3">
                       <input
@@ -2859,23 +2969,54 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                     </td>
                     <td className="px-4 py-3 text-sm" style={{ color: "#374151" }}>{r.pessoa}</td>
                     <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{fmtDatetime(r.data)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: "#92400E" }}>{r.ouro_gramas.toFixed(3)}g</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: C.verde }}>{fmt(r.valor)}</td>
-                    <td className="px-4 py-3 text-right">
-                      {r.venda && podeBaixar ? (
-                        <button
-                          onClick={() => { setEstornoErro(null); setEstornoTarget(r.venda!); }}
-                          className="text-xs px-2.5 py-1 rounded-lg border font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-1"
-                          style={{ borderColor: C.vermelho, color: C.vermelho, backgroundColor: "white" }}
-                        >
-                          <RefreshCw size={11} /> Estornar
-                        </button>
+                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: "#92400E" }}>
+                      {parcial ? (
+                        <>
+                          <div>{r.restante.toFixed(3)}g restantes</div>
+                          <div className="text-[10px] font-normal" style={{ color: C.cinza }}>(de {r.ouro_gramas.toFixed(3)}g)</div>
+                        </>
                       ) : (
-                        <span className="text-xs" style={{ color: C.cinza }}>—</span>
+                        `${r.restante.toFixed(3)}g`
                       )}
                     </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: C.verde }}>{fmt(r.valor)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                        {r.venda && podeBaixar && (
+                          <button
+                            onClick={() => { setEstornoErro(null); setEstornoTarget(r.venda!); }}
+                            className="text-xs px-2.5 py-1 rounded-lg border font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-1"
+                            style={{ borderColor: C.vermelho, color: C.vermelho, backgroundColor: "white" }}
+                          >
+                            <RefreshCw size={11} /> Estornar
+                          </button>
+                        )}
+                        {podeVirarJoia && (
+                          temReversaPendente ? (
+                            <span
+                              className="text-[11px] px-2 py-1 rounded-lg font-medium inline-flex items-center gap-1"
+                              style={{ backgroundColor: "#E0F2FE", color: "#0369A1" }}
+                            >
+                              <Clock size={11} /> Reversa aguardando aprovação
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setReversaTarget({ origem_tipo: r.origem_tipo as "conversao" | "compra_metal", origem_id: r.origem_id, referencia: r.referencia, restante: r.restante })}
+                              className="text-xs px-2.5 py-1 rounded-lg border font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-1"
+                              style={{ borderColor: "#B45309", color: "#92400E", backgroundColor: "#FEF3C7" }}
+                            >
+                              <Gem size={11} /> Virou joia
+                            </button>
+                          )
+                        )}
+                        {!r.venda && !podeVirarJoia && (
+                          <span className="text-xs" style={{ color: C.cinza }}>—</span>
+                        )}
+                      </div>
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -3660,7 +3801,7 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
       {/* Content */}
       {tab === "pagar"                && <TabPagar pagar={pagar} />}
       {tab === "receber"              && <TabReceber receber={receber} saldoLiquido={totalReceber} />}
-      {tab === "caixa"                && <TabCaixa caixa={caixaPagamentos} baixas={caixaBaixas} podeBaixar={["admin","desenvolvedor","gerente_loja","gerente_fabrica"].includes(userRole ?? "")} caixaOuroTrigger={caixaOuroTrigger} />}
+      {tab === "caixa"                && <TabCaixa caixa={caixaPagamentos} baixas={caixaBaixas} podeBaixar={["admin","desenvolvedor","gerente_loja","gerente_fabrica"].includes(userRole ?? "")} podeReversa={["admin","desenvolvedor","gerente_loja","estoquista_loja"].includes(userRole ?? "")} caixaOuroTrigger={caixaOuroTrigger} />}
       {tab === "bancario"             && <TabConciliacao extratos={extratos} lancamentos={lancamentos} />}
       {tab === "conciliacao_pendente" && <TabConciliacaoPendente />}
       {tab === "comissoes"            && <TabComissoes fechamentos={comissoes ?? []} vendedores={vendedores} />}
