@@ -11,7 +11,7 @@ import {
 } from "@/lib/devolucoes";
 // Ownership (escopo "só as vendas dela"): consultora só lista/cria devolução das
 // próprias vendas. Reusa os helpers já usados no módulo de vendas (auth-vendas).
-import { ownershipWhereVendas, requireVendaOwnership } from "@/lib/auth-vendas";
+import { getUserVendedorId, isVendasFullAccess, requireVendaOwnership } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
 import { zodError, IdSchema, PercentSchema } from "@/lib/schemas/common";
 
@@ -63,15 +63,20 @@ export async function GET(req: NextRequest) {
   // por nome do cliente, numero da devolucao e numero da venda.
   const busca = (searchParams.get("busca") ?? "").trim() || null;
 
-  // ESCOPO (só as vendas dela): pra consultora, injeta `AND v.vendedor_id = <id dela>`;
-  // pra roles full (admin/dev/diretor/gerentes) o fragmento é vazio (vê todas).
-  // Falha clara (401/403) se a consultora não tiver vendedor vinculado.
-  let ownership;
-  try {
-    ownership = await ownershipWhereVendas({ id: user.id, role: role ?? "", email: "" }, "v");
-  } catch (e) {
-    const st = (e as { status?: number }).status ?? 403;
-    return NextResponse.json({ error: (e as Error).message }, { status: st });
+  // ESCOPO (só as vendas dela): consultora vê só as devoluções das próprias vendas;
+  // roles full (admin/dev/diretor/gerente_loja) veem todas (meuVendedorId = null).
+  // INLINE de propósito (NÃO usar ownershipWhereVendas): postgres@3 perde a inferência
+  // de fragmento quando o `sql` vem de outro módulo async — dava "syntax error at or
+  // near AND" e quebrava a listagem. Usamos o mesmo padrão parametrizado das outras
+  // condições do WHERE. Falha clara (401/403) se a consultora não tiver vendedor vinculado.
+  let meuVendedorId: number | null = null;
+  if (!isVendasFullAccess(role)) {
+    try {
+      meuVendedorId = await getUserVendedorId(user.id);
+    } catch (e) {
+      const st = (e as { status?: number }).status ?? 403;
+      return NextResponse.json({ error: (e as Error).message }, { status: st });
+    }
   }
 
   const rows = await sql`
@@ -91,7 +96,7 @@ export async function GET(req: NextRequest) {
            OR d.numero ILIKE '%' || ${busca} || '%'
            OR v.numero_venda ILIKE '%' || ${busca} || '%'
            OR c.nome ILIKE '%' || ${busca} || '%')
-      ${ownership}
+      AND (${meuVendedorId}::int IS NULL OR v.vendedor_id = ${meuVendedorId})
     ORDER BY d.created_at DESC
     LIMIT ${limit} OFFSET ${offset}
   `;
@@ -108,7 +113,7 @@ export async function GET(req: NextRequest) {
            OR d.numero ILIKE '%' || ${busca} || '%'
            OR v.numero_venda ILIKE '%' || ${busca} || '%'
            OR c.nome ILIKE '%' || ${busca} || '%')
-      ${ownership}
+      AND (${meuVendedorId}::int IS NULL OR v.vendedor_id = ${meuVendedorId})
   `;
 
   return NextResponse.json({
