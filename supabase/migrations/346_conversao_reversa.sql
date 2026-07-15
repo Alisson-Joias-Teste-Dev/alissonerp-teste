@@ -104,8 +104,11 @@ ALTER TABLE alissonerp.cofre_ouro_baixas
 CREATE TABLE IF NOT EXISTS alissonerp.conversoes_reversas (
   id                    SERIAL PRIMARY KEY,
   ordem_id              INTEGER NOT NULL REFERENCES alissonerp.ordens(id),
+  -- origem_tipo: QUALQUER ouro pendente de baixa no cofre pode "virar joia"
+  -- (venda em ouro, upgrade, compra de metal ou conversão). Bate com os valores
+  -- aceitos por cofre_ouro_baixa_itens.origem_tipo (a baixa referencia a origem).
   origem_tipo           VARCHAR(20) NOT NULL
-                        CHECK (origem_tipo IN ('conversao','compra_metal')),
+                        CHECK (origem_tipo IN ('venda_ouro','upgrade','compra_metal','conversao')),
   origem_id             INTEGER NOT NULL,
   produto_id            BIGINT NOT NULL REFERENCES public.produtos(id_produto),
   quantidade            INTEGER NOT NULL CHECK (quantidade > 0),  -- peças (joia é contável); estoque comercial também é INTEGER

@@ -8,7 +8,7 @@ import { zodError } from "@/lib/schemas/common";
 const ROLES_PERMITIDOS = ["estoquista_loja", "gerente_loja", "admin", "desenvolvedor"];
 
 const ConversaoReversaPostSchema = z.object({
-  origem_tipo: z.enum(["conversao", "compra_metal"]),
+  origem_tipo: z.enum(["venda_ouro", "upgrade", "compra_metal", "conversao"]),
   origem_id: z.coerce.number().int().positive(),
   produto_id: z.coerce.number().int().positive(),
   quantidade: z.coerce.number().int().positive(),
@@ -36,28 +36,53 @@ const ConversaoReversaPostSchema = z.object({
  * mudança aqui deve ser replicada lá (e vice-versa).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function buscarPesoRestanteOrigem(db: any, origemTipo: "conversao" | "compra_metal", origemId: number) {
-  const [origem] = origemTipo === "conversao"
-    ? await db`
-        SELECT ce.peso_total AS peso_origem, ce.status_conversao AS status_origem,
-               ce.cofre_registrado, o.numero_ordem AS origem_referencia
-        FROM alissonerp.conversoes_estoque ce
-        JOIN alissonerp.ordens o ON o.id = ce.ordem_id
-        WHERE ce.id = ${origemId}
-        LIMIT 1
-      `
-    : await db`
-        SELECT peso_gramas AS peso_origem, status AS status_origem,
-               cofre_registrado, numero AS origem_referencia
-        FROM alissonerp.compras_metal
-        WHERE id = ${origemId}
-        LIMIT 1
-      `;
+async function buscarPesoRestanteOrigem(db: any, origemTipo: "venda_ouro" | "upgrade" | "compra_metal" | "conversao", origemId: number) {
+  // REGRA DE NEGÓCIO: cada tipo de origem guarda o peso bruto que entrou no cofre
+  // num lugar diferente. status_ok = origem confirmada/registrada no cofre.
+  let origem: { peso_origem: number; status_ok: boolean; origem_referencia: string | null } | undefined;
+  if (origemTipo === "conversao") {
+    [origem] = await db`
+      SELECT ce.peso_total AS peso_origem,
+             (ce.status_conversao = 'concluido' AND ce.cofre_registrado = true) AS status_ok,
+             o.numero_ordem AS origem_referencia
+      FROM alissonerp.conversoes_estoque ce
+      JOIN alissonerp.ordens o ON o.id = ce.ordem_id
+      WHERE ce.id = ${origemId} LIMIT 1
+    `;
+  } else if (origemTipo === "compra_metal") {
+    [origem] = await db`
+      SELECT peso_gramas AS peso_origem,
+             (status = 'confirmado' AND cofre_registrado = true) AS status_ok,
+             numero AS origem_referencia
+      FROM alissonerp.compras_metal
+      WHERE id = ${origemId} LIMIT 1
+    `;
+  } else if (origemTipo === "venda_ouro") {
+    // Pagamento de venda em ouro: o peso em gramas fica em pagamentos_venda.OURO_PESO
+    // (a coluna ouro_gramas fica nula nesses pagamentos — o front expõe ouro_peso AS
+    // ouro_gramas). origem_id = pagamentos_venda.id.
+    [origem] = await db`
+      SELECT pv.ouro_peso AS peso_origem,
+             (pv.ouro_peso IS NOT NULL AND pv.ouro_peso > 0) AS status_ok,
+             ('Venda #' || COALESCE(ve.numero_venda::text, pv.venda_id::text)) AS origem_referencia
+      FROM alissonerp.pagamentos_venda pv
+      LEFT JOIN alissonerp.vw_vendas_erp_completa ve ON ve.id = pv.venda_id
+      WHERE pv.id = ${origemId} LIMIT 1
+    `;
+  } else {
+    // upgrade: peso = peso_gramas do item de upgrade (origem_id = item_venda_id)
+    [origem] = await db`
+      SELECT iuv.peso_gramas AS peso_origem,
+             (iuv.cofre_registrado = true) AS status_ok,
+             ('Venda #' || COALESCE(ve.numero_venda::text, ive.venda_id::text)) AS origem_referencia
+      FROM alissonerp.itens_venda_upgrade iuv
+      JOIN alissonerp.itens_venda_erp ive ON ive.id = iuv.item_venda_id
+      LEFT JOIN alissonerp.vw_vendas_erp_completa ve ON ve.id = ive.venda_id
+      WHERE iuv.item_venda_id = ${origemId} LIMIT 1
+    `;
+  }
 
   if (!origem) return null;
-
-  const statusEsperado = origemTipo === "conversao" ? "concluido" : "confirmado";
-  const statusOk = origem.status_origem === statusEsperado && origem.cofre_registrado === true;
 
   const [{ gramas_baixadas }] = await db`
     SELECT COALESCE(SUM(boi.gramas), 0) AS gramas_baixadas
@@ -68,7 +93,7 @@ async function buscarPesoRestanteOrigem(db: any, origemTipo: "conversao" | "comp
   `;
 
   return {
-    statusOk,
+    statusOk: origem.status_ok === true,
     restante: Number(origem.peso_origem) - Number(gramas_baixadas),
     origemReferencia: String(origem.origem_referencia ?? ""),
   };

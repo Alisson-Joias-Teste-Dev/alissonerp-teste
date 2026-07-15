@@ -1920,7 +1920,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOur
    */
   interface ReversaPendenteResumo {
     id: number;
-    origem_tipo: "conversao" | "compra_metal";
+    origem_tipo: "venda_ouro" | "upgrade" | "compra_metal" | "conversao";
     origem_id: number;
     produto_id: number;
     quantidade: number;
@@ -1946,7 +1946,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOur
   const [conversoesData, setConversoesData] = useState<ConversaoCofreResumo[]>([]);
   const [upgradesData, setUpgradesData] = useState<UpgradeCofreResumo[]>([]);
   const [reversasPendentes, setReversasPendentes] = useState<ReversaPendenteResumo[]>([]);
-  const [reversaTarget, setReversaTarget] = useState<{ origem_tipo: "conversao" | "compra_metal"; origem_id: number; referencia: string; restante: number } | null>(null);
+  const [reversaTarget, setReversaTarget] = useState<{ origem_tipo: "venda_ouro" | "upgrade" | "compra_metal" | "conversao"; origem_id: number; referencia: string; restante: number } | null>(null);
 
   // ── Etapa 2 (13/06): pagamentos do MOTOBOY aguardando conferência ──────────
   // REGRA DE NEGÓCIO: Dinheiro/Ouro que o motoboy recebeu na rua entram em
@@ -2929,10 +2929,11 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOur
                   </tr>
                 )}
                 {ouroMovimentosPendentes.map((r) => {
-                  // REGRA DE NEGÓCIO: "Virou joia" (conversão reversa) só faz sentido pra
-                  // origem que já é metal registrado no cofre (Conversão / Compra Metal).
-                  // Venda em Ouro e Upgrade não têm essa opção — não são metal "solto".
-                  const podeVirarJoia = podeReversa && (r.origem_tipo === "conversao" || r.origem_tipo === "compra_metal");
+                  // REGRA DE NEGÓCIO (15/07 — Jonathan): QUALQUER ouro pendente de baixa
+                  // no cofre pode "virar joia" — venda em ouro, upgrade, compra de metal
+                  // ou conversão. Todos representam metal físico que pode conter/virar
+                  // uma peça vendável. Gate só por papel (podeReversa).
+                  const podeVirarJoia = podeReversa;
                   const chaveOrigem = `${r.origem_tipo}:${r.origem_id}`;
                   const temReversaPendente = reversaPendenteKeys.has(chaveOrigem);
                   const parcial = r.restante < r.ouro_gramas - EPSILON_GRAMAS_RESTANTE;
@@ -3001,7 +3002,7 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOur
                             </span>
                           ) : (
                             <button
-                              onClick={() => setReversaTarget({ origem_tipo: r.origem_tipo as "conversao" | "compra_metal", origem_id: r.origem_id, referencia: r.referencia, restante: r.restante })}
+                              onClick={() => setReversaTarget({ origem_tipo: r.origem_tipo, origem_id: r.origem_id, referencia: r.referencia, restante: r.restante })}
                               className="text-xs px-2.5 py-1 rounded-lg border font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-1"
                               style={{ borderColor: "#B45309", color: "#92400E", backgroundColor: "#FEF3C7" }}
                             >

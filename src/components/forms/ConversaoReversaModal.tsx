@@ -12,11 +12,18 @@ interface SearchResult {
 }
 
 export interface OrigemReversa {
-  origem_tipo: "conversao" | "compra_metal";
+  origem_tipo: "venda_ouro" | "upgrade" | "compra_metal" | "conversao";
   origem_id: number;
   referencia: string;
   restante: number;
 }
+
+const ORIGEM_LABEL: Record<OrigemReversa["origem_tipo"], string> = {
+  venda_ouro: "Venda em Ouro",
+  upgrade: "Upgrade",
+  compra_metal: "Compra Metal",
+  conversao: "Conversão",
+};
 
 interface Props {
   isOpen: boolean;
@@ -153,7 +160,7 @@ export default function ConversaoReversaModal({ isOpen, onClose, origem: origemP
     }
   }
 
-  const origemLabel = origem.origem_tipo === "conversao" ? "Conversão" : "Compra Metal";
+  const origemLabel = ORIGEM_LABEL[origem.origem_tipo] ?? origem.origem_tipo;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={handleClose}>
