@@ -74,6 +74,12 @@ export async function GET(req: NextRequest) {
     LEFT JOIN alissonerp.usuarios uc ON uc.id = t.criado_por
     LEFT JOIN alissonerp.ordens o ON o.id = t.ordem_id
     WHERE 1=1
+      -- REGRA DE NEGÓCIO (Fase 5, Jonathan 15/07): a tarefa de conversão reversa
+      -- SÓ é visível pros aprovadores configurados em Configurações → Aprovadores —
+      -- NEM admin vê se não estiver na lista, e o solicitante também não a vê na
+      -- fila (ele acompanha pelo selo "aguardando aprovação" na aba Ouro). Vale pra
+      -- QUALQUER visão (por isso é global, fora dos filtros de visao/isAdmin abaixo).
+      ${sql`AND (t.tipo <> 'conversao_reversa' OR ${reversaAprovadorCond})`}
       ${visao === "minhas"
           ? sql`AND (t.responsavel_id = ${userId}::uuid)`
           : visao === "time"
