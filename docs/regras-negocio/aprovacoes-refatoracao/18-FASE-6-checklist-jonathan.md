@@ -63,7 +63,9 @@
 ### Entrega sem pagamento + Alteração de venda (Fase 3g.1)
 - [ ] Entrega sem pagamento → só o `aprovador_entrega_sem_pagamento` configurado decide.
 - [ ] Solicitar alteração de venda → só o `aprovador_alteracao_venda` configurado decide (antes era
-  cargo fixo `[admin,dev,diretor]`).
+  cargo fixo `[admin,dev,diretor]`). **ACHADO (15/07, corrigido):** essa chave estava VAZIA em
+  homolog — a Fase 3g.1 criou ela só pra testar e não deixou preenchida, ia te dar 409 de cara. Já
+  criei com o mesmo aprovador dos outros fluxos (Alisson) — pode testar direto agora.
 
 ### Devolução (Fase 3e)
 - [ ] Etapa 1 (devolução) → só `aprovador_devolucao` decide. Etapa 2 (estoque) → só
@@ -107,5 +109,9 @@ Se estiver tudo certo, os próximos passos são (na ordem):
   (lê a chave nova). Ambos chamados direto, sem mock.
 - As 2 chaves de config da Fase 5 já existem em homolog (`0` e `20`).
 - Linha corrompida de `desconto_acima` desativada em homolog.
+- **Conferi as 15 chaves de aprovador em homolog** — 14 preenchidas, 1 vazia (`aprovador_alteracao_venda`,
+  achado e corrigido nesta sessão — ver seção "Entrega sem pagamento + Alteração de venda" acima).
+  Todas as outras (crédito gerente/diretor, desconto, cartão, entrega, devolução×2, compra comercial,
+  conversão, precificação, limpeza, metal) já têm aprovador configurado em homolog.
 - Front carrega sem erro de compilação/console (`/`, `/orcamento`) — validação visual completa fica
   pra você, pelos motivos explicados no topo.
