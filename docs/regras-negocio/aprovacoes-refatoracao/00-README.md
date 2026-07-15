@@ -34,6 +34,7 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
 | 12 | [`12-FASE-3g-venda-plano.md`](12-FASE-3g-venda-plano.md) | **PLANO da Fase 3g (venda)** — mapa dos 6 eventos + fatiamento em 3 sub-fases + decisões (crédito = 2; desconto só porta oficial) + fronteira 3g/4/5 |
 | 13 | [`13-FASE-3g1-entrega-alteracao.md`](13-FASE-3g1-entrega-alteracao.md) | **Pacote da Fase 3g.1** — entrega sem pagamento (só o gate) + alteração de venda (troca cargo por config; chave nova `aprovador_alteracao_venda`) |
 | 14 | [`14-FASE-3g2-credito.md`](14-FASE-3g2-credito.md) | **Pacote da Fase 3g.2** — crédito/A Receber (gerente + diretor, 2 aprovadores) na camada config-first; submissão + decisão; chaves já existem |
+| 15 | [`15-FASE-3g3-desconto-cartao.md`](15-FASE-3g3-desconto-cartao.md) | **Pacote da Fase 3g.3** — desconto + cartão (SÓ a porta oficial via tarefa) na camada config-first; atalhos/comissão/campo = Fase 4 |
 
 ## O plano (7 fases)
 
@@ -118,8 +119,13 @@ Detalhe em [`02-mapa-esbarros.md`](02-mapa-esbarros.md).
     fechado: `approveVenda`/`estornarVenda`, efeitos das solicitações, guard genérico do despachante
     (L342) e `src/lib/aprovacoes/` intocados. Aguardando Opus criar a chave em homolog e testar.
   - [x] 3g.2 — **crédito** (gerente + diretor) plugado na camada config-first
-    (15/07/2026, pacote `14`, commit pendente de hash — ver nota abaixo) — submissão e decisão
-    migradas juntas. Chaves `aprovadora_credito_gerente`/`aprovador_credito_diretor` **já existiam**
+    (15/07/2026, pacote `14`, commit `e319078c`) — **REVISADA e APROVADA pelo Opus** (submissão troca
+    os 2 fallbacks por `resolverAprovadores`, regra de saldo mantida como roteamento; decisão mapeia o
+    evento pelo `aprovacao_credito_tipo`; 409 tratado no endpoint; efeitos/`approveVenda`/camada intocados;
+    tsc 0, 121 testes). **TESTADA em HOMOLOG (15/07)**: as 2 chaves têm aprovadores DIFERENTES
+    (gerente=d1f11f68, diretor=01ab44ed) → só o configurado de cada uma decide; Alisson e Jonathan (dev)
+    403 nos dois; setei ambas=Alisson → passou; restaurei os originais. **3g.2 FECHADA.** — submissão e
+    decisão migradas juntas. Chaves `aprovadora_credito_gerente`/`aprovador_credito_diretor` **já existiam**
     (nenhuma chave nova). `npx tsc --noEmit` 0 erros; `npx vitest run src/lib/aprovacoes` 121/121
     (camada intocada). 3 arquivos: `vendas-credito-aprovar.ts` (submissão — os 2 blocos de fallback
     por cargo viraram `resolverAprovadores(tipo==="diretor"?"credito_diretor":"credito_gerente")`;
