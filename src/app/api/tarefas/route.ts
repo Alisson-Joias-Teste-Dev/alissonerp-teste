@@ -153,10 +153,18 @@ export async function GET(req: NextRequest) {
             : !isAdmin
               ? sql`AND (t.responsavel_id = ${userId}::uuid OR t.criado_por = ${userId}::uuid OR ${multiAprovadorCond})`
               : sql``}
+      -- BUGFIX (16/07 — achado pelo Jonathan testando o front): "Aprovações
+      -- pendentes" mostrava a tarefa pra QUALQUER admin/desenvolvedor, mesmo
+      -- fora da lista configurada — clicar em Aprovar já dava 403 corretamente
+      -- (podeDecidir nunca teve esse furo), mas a tarefa NÃO devia nem
+      -- aparecer pra eles (mesma regra já valia pra conversao_reversa desde a
+      -- Fase 5 — "nem admin vê se não estiver configurado"). Removido o bypass
+      -- de isAdmin aqui: a fila de aprovação agora respeita SEMPRE
+      -- responsavel_id/multiAprovadorCond, admin incluso. "Tarefas do time"
+      -- (visao=time, acima) continua sem restrição — é a visão de supervisão
+      -- geral, não a fila de aprovação.
       ${(visao === "aguardando_aprovacao" || visao === "aguardando")
-        ? (isAdmin
-            ? sql`AND t.status = 'aguardando_aprovacao'`
-            : sql`AND t.status = 'aguardando_aprovacao' AND (t.responsavel_id = ${userId}::uuid OR ${multiAprovadorCond})`)
+        ? sql`AND t.status = 'aguardando_aprovacao' AND (t.responsavel_id = ${userId}::uuid OR ${multiAprovadorCond})`
         : sql``}
       ${visao === "concluidas" ? sql`AND t.status IN ('concluida', 'aprovada')` : sql``}
       ${visao === "pendentes" ? sql`AND t.status IN ('pendente', 'em_andamento', 'aguardando_aprovacao')` : sql``}
