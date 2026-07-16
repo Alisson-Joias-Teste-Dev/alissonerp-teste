@@ -98,6 +98,28 @@ export async function PATCH(
   }
 
   const raw = await req.json().catch(() => ({}));
+
+  // REGRA DE NEGOCIO (Fase 4, item 2):
+  // - O que faz: bloqueia marcar "aprovada"/"rejeitada" por este PATCH genérico quando a tarefa é uma
+  //   aprovação formal (tem linha em aprovacoes_tarefa) — obriga a decisão a passar pelo despachante
+  //   dedicado (POST /api/tarefas/[id]/aprovacao).
+  // - Por que: este endpoint só atualiza a tarefa, sem rodar os efeitos colaterais (comissão, estoque,
+  //   crédito, contas a pagar) que o despachante roda — decidir por aqui deixava a tarefa marcada como
+  //   decidida sem nenhum efeito ter acontecido.
+  // - Impacto se alterado/removido: reabre o backdoor — qualquer dono/full-access pode "aprovar" uma
+  //   aprovação formal sem os efeitos de negócio associados rodarem.
+  if (raw?.status === "aprovada" || raw?.status === "rejeitada") {
+    const [temAprovacaoFormal] = await sql`
+      SELECT 1 FROM alissonerp.aprovacoes_tarefa WHERE tarefa_id = ${tarefaId} LIMIT 1
+    `;
+    if (temAprovacaoFormal) {
+      return NextResponse.json(
+        { error: "Esta tarefa é uma aprovação formal — decida por /api/tarefas/[id]/aprovacao" },
+        { status: 409 },
+      );
+    }
+  }
+
   const parsed = TarefaPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;

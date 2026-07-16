@@ -3,6 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { zodError } from "@/lib/schemas/common";
+import { podeDecidir } from "@/lib/aprovacoes";
 
 const ConversaoReversaAprovarSchema = z.object({
   tarefa_id: z.coerce.number().int().positive(),
@@ -104,17 +105,16 @@ export async function POST(req: NextRequest) {
     SELECT role, nome FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
   `;
   if (!usuario) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
-  // REGRA DE NEGÓCIO (Fase 5, Jonathan 15/07): SÓ quem está na lista configurada
-  // em Configurações → Aprovadores → "Conversão Reversa" pode aprovar. Lista vazia
-  // = fallback admin/desenvolvedor (pra não travar). Basta UM da lista aprovar.
-  const [cfgAprov] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadores_conversao_reversa' LIMIT 1
-  `;
-  const aprovadoresCfg = String(cfgAprov?.valor ?? "").split(",").map((s: string) => s.trim()).filter(Boolean);
-  const autorizado = aprovadoresCfg.length > 0
-    ? aprovadoresCfg.includes(user.id)
-    : ["admin", "desenvolvedor"].includes(usuario.role);
-  if (!autorizado) {
+  // REGRA DE NEGÓCIO (alinhado à política config-first, 15/07 — ver
+  // docs/regras-negocio/aprovacoes-refatoracao/03b-config-first-estrito.md):
+  // SÓ quem está na lista configurada em Configurações → Aprovadores →
+  // "Conversão Reversa" pode decidir. Config vazia = ninguém decide, NEM
+  // admin/desenvolvedor (a rota de criação já bloqueia esse caso antes — aqui
+  // é defesa em profundidade). Antes desta correção havia um fallback pra
+  // admin/desenvolvedor quando a config estava vazia, que violava a mesma
+  // regra já aplicada aos outros ~15 fluxos de aprovação do sistema.
+  const decisao = await podeDecidir({ id: user.id, role: usuario.role }, "conversao_reversa");
+  if (!decisao.pode) {
     return NextResponse.json({ error: "Você não está na lista de aprovadores da conversão reversa." }, { status: 403 });
   }
 

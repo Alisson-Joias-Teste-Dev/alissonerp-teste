@@ -25,6 +25,7 @@ import { zodError } from "@/lib/schemas/common";
 import { processarAprovacaoQuebraLimpeza } from "@/lib/limpeza-ouro-aprovacao";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } from "@/lib/entrega-sem-pagamento";
+import { podeDecidir } from "@/lib/aprovacoes";
 
 const AprovacaoTarefaPostSchema = z.object({
   aprovador_id: z.string().min(1, "obrigatório"),
@@ -92,7 +93,25 @@ async function processarAprovacaoCompraComercial(
     `;
     const totalCompra = Number(tot?.total ?? 0);
 
-    for (const item of itens) {
+    // REGRA DE NEGOCIO (Fase 4, item 4 — guard R4 anti-duplicação de estoque):
+    // - O que faz: pula o loop de INSERT em movimentacoes_estoque_comercial se esta compra já
+    //   gerou a entrada (mesmo motivo + mesma observação, que carrega o "#<id> aprovada" único).
+    // - Por que: não existe coluna própria compra_comercial_id em
+    //   movimentacoes_estoque_comercial (confirmado via information_schema.columns — só há
+    //   referencia_id/referencia_tipo genéricos, não usados por este insert) — o casamento
+    //   possível é por motivo+observação, que já é único por compra (o texto sempre termina em
+    //   "#<id> aprovada", sem colisão com outro id: "#5 aprovada" não é substring de "#50
+    //   aprovada"). Se a compra for reprocessada (ex.: reaprovação após erro parcial) o estoque
+    //   duplicaria a entrada.
+    // - Impacto se alterado/removido: reprocessar a aprovação duplica a entrada de estoque.
+    const [jaTemEstoque] = await tx`
+      SELECT 1 FROM alissonerp.movimentacoes_estoque_comercial
+      WHERE motivo = 'compra_comercial_aprovada'
+        AND observacao LIKE ${`%compra comercial #${compra.id} aprovada%`}
+      LIMIT 1
+    `;
+
+    for (const item of jaTemEstoque ? [] : itens) {
       // REGRA DE NEGOCIO:
       // - O que faz: normaliza qtd para inteiro antes do insert no estoque.
       // - Por que: a coluna quantidade e INTEGER no banco e compras comerciais usam pecas inteiras.
@@ -130,7 +149,19 @@ async function processarAprovacaoCompraComercial(
     `;
     const fornecedorNome = String(forn?.nome ?? "Fornecedor");
 
-    for (let i = 1; i <= parcelas; i++) {
+    // REGRA DE NEGOCIO (Fase 4, item 4 — guard R4 anti-duplicação financeira):
+    // - O que faz: pula o loop de INSERT em contas_pagar se esta compra já tem parcela gerada
+    //   (coluna própria compra_comercial_id, confirmada via information_schema.columns e já usada
+    //   pelo guard EXISTS da trigger 331 fn_gerar_conta_pagar_chegada_comercial).
+    // - Por que: a "chegada" (trigger 331) já pode ter gerado as parcelas antes desta aprovação
+    //   rodar — sem o guard, reprocessar a aprovação duplicaria as contas a pagar.
+    // - Impacto se alterado/removido: compra que já teve chegada processada ganha parcelas
+    //   duplicadas ao ser aprovada.
+    const [jaTemContaPagar] = await tx`
+      SELECT 1 FROM alissonerp.contas_pagar WHERE compra_comercial_id = ${compra.id} LIMIT 1
+    `;
+
+    for (let i = 1; i <= (jaTemContaPagar ? 0 : parcelas); i++) {
       const valorParcela = i === parcelas ? Math.round((base + diff) * 100) / 100 : base;
       await tx`
         INSERT INTO alissonerp.contas_pagar
@@ -196,9 +227,19 @@ async function processarAprovacaoRecebimentoMetal(
 async function processarAprovacaoCompraMetal(
   tarefaId: number,
   decisao: "aprovado" | "rejeitado",
-  aprovadorId: string,
+  user: { id: string; role: string | null },
   motivo?: string,
 ) {
+  // REGRA DE NEGÓCIO: este é um caminho LATENTE (o front usa os endpoints
+  // dedicados /api/metal/aprovacoes/[id]/{aprovar,rejeitar}) — mas se for
+  // acionado, tem que respeitar a MESMA autoridade config-first, não a checagem
+  // genérica do topo do PATCH (L326-333, que serve os outros fluxos e não muda).
+  const decisaoAutorizada = await podeDecidir(user, "compra_metal");
+  if (!decisaoAutorizada.pode) {
+    return { ok: false, motivo: "sem_permissao" };
+  }
+  const aprovadorId = user.id;
+
   const [compra] = await sql`
     SELECT * FROM alissonerp.compras_metal
     WHERE tarefa_aprovacao_id = ${tarefaId}
@@ -371,6 +412,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
    * gerar o saldo aberto no crediario.
    */
   if (tarefaInfo?.tipo === ENTREGA_SEM_PAGAMENTO_TIPO || tags.includes("aprov_entrega_sem_pagamento")) {
+    // REGRA DE NEGÓCIO: entrega sem pagamento decidida pela camada config-first
+    // (aprovador_entrega_sem_pagamento) — não mais pela checagem genérica do topo
+    // do PATCH. Sem ctx.solicitanteId: entrega sem pagamento não exclui quem solicitou.
+    const decEntregaSemPagamento = await podeDecidir(
+      { id: user.id, role: usuarioLogado?.role ?? null },
+      "entrega_sem_pagamento",
+    );
+    if (!decEntregaSemPagamento.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const resultado = await processarAprovacaoEntregaSemPagamento(
         Number(id),
@@ -414,6 +465,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (tarefaInfo?.tipo === "cartao_desconto" && tarefaInfo?.venda_id) {
+    // REGRA DE NEGÓCIO (Fase 3g.3): cartão com desconto decidido pela camada
+    // config-first (aprovador_cartao_desconto_padrao) — sem ctx.solicitanteId.
+    const decCartaoDesconto = await podeDecidir(
+      { id: user.id, role: usuarioLogado?.role ?? null },
+      "cartao_desconto",
+    );
+    if (!decCartaoDesconto.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     const logCtx = { tarefa_id: Number(id), venda_id: tarefaInfo.venda_id, decisao: body.decisao, aprovador_id: user.id };
     console.log(`[cartao_desconto] inicio`, logCtx);
     try {
@@ -464,6 +524,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // travava em rascunho mesmo após o diretor aprovar (vendas 15300/15312/15399/
   // 15562/15629 destravadas à mão). Espelha o padrão do bloco cartao_desconto acima.
   if (tarefaInfo?.tipo === "desconto_acima" && tarefaInfo?.venda_id) {
+    // REGRA DE NEGÓCIO (Fase 3g.3): desconto decidido pela camada config-first
+    // (aprovador_desconto_padrao) — sem ctx.solicitanteId.
+    const decDesconto = await podeDecidir(
+      { id: user.id, role: usuarioLogado?.role ?? null },
+      "desconto",
+    );
+    if (!decDesconto.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     const logCtx = { tarefa_id: Number(id), venda_id: tarefaInfo.venda_id, decisao: body.decisao, aprovador_id: user.id };
     console.log(`[desconto] inicio`, logCtx);
     try {
@@ -511,6 +580,49 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           WHERE id = ${tarefaInfo.venda_id}
         `;
         console.log(`[desconto] vendas_erp: lock removido (rejeição)`);
+
+        /**
+         * REGRA DE NEGÓCIO (16/07, decisão do Jonathan): REPROVAR o desconto
+         * reprova, em cascata, a aprovação de CARTÃO da mesma venda.
+         *
+         * O QUÊ: se existir tarefa de cartão pendente nesta venda, ela é
+         *   marcada rejeitada junto e o lock da venda é limpo.
+         * O PORQUÊ: as duas passaram a poder ser pedidas juntas (ver
+         *   solicitar-aprovacao/route.ts, mesma data). Sem a cascata, reprovar
+         *   o desconto deixaria órfã uma tarefa de "cartão com desconto de X%"
+         *   cujo X foi recusado — o aprovador decidiria sobre um desconto que
+         *   não existe mais. Aprovar o desconto NÃO aprova o cartão: cada uma
+         *   tem sua decisão (só a reprovação cascateia).
+         * O IMPACTO SE REMOVIDO: volta a tarefa órfã de cartão, e a consultora
+         *   veria "aguardando aprovação de cartão" numa venda cujo desconto foi
+         *   recusado (o banner some só quando a tarefa é decidida).
+         */
+        const [vendaCartao] = await sql`
+          SELECT aprovacao_cartao_desconto_tarefa_id AS tid
+          FROM alissonerp.vendas_erp WHERE id = ${tarefaInfo.venda_id}
+        `;
+        const cartaoTarefaId = vendaCartao?.tid ? Number(vendaCartao.tid) : null;
+        if (cartaoTarefaId) {
+          const motivoCascata = `Reprovado automaticamente: o desconto desta venda foi reprovado${body.motivo ? ` (${body.motivo})` : ""}.`;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await sql.begin(async (tx: any) => {
+            await tx`
+              UPDATE alissonerp.aprovacoes_tarefa
+              SET status = 'rejeitado', motivo = ${motivoCascata}, respondido_em = now()
+              WHERE tarefa_id = ${cartaoTarefaId} AND status = 'pendente'
+            `;
+            await tx`
+              UPDATE alissonerp.tarefas SET status = 'rejeitada', updated_at = now()
+              WHERE id = ${cartaoTarefaId} AND status = 'aguardando_aprovacao'
+            `;
+            await tx`
+              UPDATE alissonerp.vendas_erp
+              SET aprovacao_cartao_desconto_tarefa_id = NULL, updated_at = NOW()
+              WHERE id = ${tarefaInfo.venda_id}
+            `;
+          });
+          console.log(`[desconto] cascata: tarefa de cartão ${cartaoTarefaId} reprovada junto`);
+        }
       }
       const [aprov] = await sql`SELECT solicitante_id FROM alissonerp.aprovacoes_tarefa WHERE tarefa_id = ${Number(id)} LIMIT 1`;
       if (aprov?.solicitante_id) {
@@ -552,6 +664,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       tarefaInfo?.tipo !== "desconto_acima" &&
       !tags.includes("aprovacao_venda") &&
       tarefaInfo?.tipo !== "cartao_desconto") {
+    // REGRA DE NEGÓCIO (Fase 3g.2): crédito decidido pela camada config-first —
+    // 2 aprovadores (aprovadora_credito_gerente / aprovador_credito_diretor),
+    // escolhidos pelo evento conforme aprovacao_credito_tipo (gravado na venda
+    // por submeterVendaParaAprovacaoCredito, roteado pela regra de saldo — isso
+    // não muda). Não mais pela checagem genérica do topo do PATCH. Sem
+    // ctx.solicitanteId: crédito não exclui quem solicitou.
+    const eventoCredito = tarefaInfo?.aprovacao_credito_tipo === "diretor" ? "credito_diretor" : "credito_gerente";
+    const decCredito = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, eventoCredito);
+    if (!decCredito.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const { processarAprovacaoCredito } = await import("@/lib/vendas-credito-aprovar");
       const resultado = await processarAprovacaoCredito(
@@ -567,6 +690,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // sobre a aprovacao normal — ambas as tarefas apontam pra mesma devolucao via
   // tarefa_id, entao desambiguamos pela tag. Ao aprovar, conclui e gera o vale.
   if (tags.includes("devolucao_estoque")) {
+    // REGRA DE NEGÓCIO: etapa 2 (estoque) decidida pela camada config-first
+    // (aprovador_devolucao_estoque) — não mais pela checagem genérica do topo do
+    // PATCH. Sem ctx.solicitanteId: devolução não exclui quem solicitou.
+    const decEstoque = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "devolucao_estoque");
+    if (!decEstoque.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const { processarAprovacaoEstoqueDevolucao } = await import("@/lib/devolucoes");
       const resultado = await processarAprovacaoEstoqueDevolucao(
@@ -582,6 +712,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     SELECT id FROM alissonerp.devolucoes_venda WHERE tarefa_id = ${Number(id)} LIMIT 1
   `;
   if (devLink || tags.includes("devolucao")) {
+    // REGRA DE NEGÓCIO: etapa 1 (devolução) decidida pela camada config-first
+    // (aprovador_devolucao) — 1 aprovador só, sem distinção de prazo (decisão do
+    // Jonathan, 12/07). Sem ctx.solicitanteId: devolução não exclui quem solicitou.
+    const decDevolucao = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "devolucao");
+    if (!decDevolucao.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const { processarAprovacaoDevolucao } = await import("@/lib/devolucoes");
       const resultado = await processarAprovacaoDevolucao(
@@ -610,6 +747,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (tarefaInfo?.tipo === "compra_comercial" || tags.includes("aprovacao_compra_comercial")) {
+    // REGRA DE NEGÓCIO: compra comercial decidida pela camada config-first
+    // (aprovador_compra_comercial) — não mais pela checagem genérica do topo do
+    // PATCH. Sem ctx.solicitanteId: compra comercial não exclui quem solicitou.
+    const dec = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "compra_comercial");
+    if (!dec.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const resultado = await processarAprovacaoCompraComercial(Number(id), body.decisao, user.id, body.motivo);
       return NextResponse.json({ ok: true, compra_comercial: resultado });
@@ -619,6 +763,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (tarefaInfo?.tipo === "recebimento_metal" || tags.includes("aprovacao_recebimento_metal")) {
+    // REGRA DE NEGÓCIO: recebimento de metal decidido pela camada config-first
+    // (metal_aprovador_id) — não mais pela checagem genérica do topo do PATCH.
+    // Sem ctx.solicitanteId: metal não exclui quem cadastrou o recebimento.
+    const decisaoAutorizada = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "recebimento_metal");
+    if (!decisaoAutorizada.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const resultado = await processarAprovacaoRecebimentoMetal(Number(id), body.decisao, user.id, body.motivo);
       return NextResponse.json({ ok: true, recebimento_metal: resultado });
@@ -629,7 +780,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (tarefaInfo?.tipo === "compra_metal" || tags.includes("aprovacao_compra_metal")) {
     try {
-      const resultado = await processarAprovacaoCompraMetal(Number(id), body.decisao, user.id, body.motivo);
+      const resultado = await processarAprovacaoCompraMetal(
+        Number(id), body.decisao, { id: user.id, role: usuarioLogado?.role ?? null }, body.motivo,
+      );
       return NextResponse.json({ ok: true, compra_metal: resultado });
     } catch (err) {
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] compra_metal`, err);

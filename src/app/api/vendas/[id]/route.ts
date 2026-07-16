@@ -9,7 +9,7 @@ import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payloa
 import { zodError, IdSchema } from "@/lib/schemas/common";
 import { internalError } from "@/lib/api-error";
 import { traduzErroOperacional } from "@/lib/erros-operacionais";
-import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { getDescontoThreshold, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
 import { approveVenda } from "@/lib/vendas-aprovar";
 import { isMasterAdmin } from "@/lib/master-admin";
 import { solicitarAprovacaoEntregaSemPagamento, vendaTemExcecaoEntregaAprovada } from "@/lib/entrega-sem-pagamento";
@@ -256,6 +256,13 @@ export async function GET(
     venda.situacao === "entregue" && !!excecaoEntrega && saldoFinanceiroAberto > 0.01;
 
   const descontoThreshold = await getDescontoThreshold(vendaId);
+  // REGRA DE NEGÓCIO (Fase 5, fix 16/07): o limite do cartão vem da config
+  // (limite_desconto_cartao_pct, editável em Configurações › Aprovadores) —
+  // o front tinha `const LIMITE_DESCONTO_CARTAO = 20` cravado e ignorava a
+  // config, mostrando "acima de 20%" mesmo com a chave em 30.
+  // IMPACTO SE REMOVIDO: tela e servidor voltam a divergir (banner some/aparece
+  // no % errado; o gate real do POST /pagamentos já lê a config).
+  const limiteDescontoCartao = await buscarLimiteDescontoCartao();
 
   return NextResponse.json({
     ...venda,
@@ -292,6 +299,7 @@ export async function GET(
     saldo_financeiro_aberto: Number(saldoFinanceiroAberto.toFixed(2)),
     entregue_com_pendencia_financeira: entregueComPendenciaFinanceira,
     descontoThreshold,
+    limiteDescontoCartao,
     itens: itens.map((i) => ({
       ...i,
       quantidade:      Number(i.quantidade),

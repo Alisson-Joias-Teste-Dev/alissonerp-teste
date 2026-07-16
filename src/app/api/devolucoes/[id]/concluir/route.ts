@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
-import { solicitarAprovacaoEstoqueDevolucao } from "@/lib/devolucoes";
+import { solicitarAprovacaoEstoqueDevolucao, HttpError } from "@/lib/devolucoes";
 import { internalError } from "@/lib/api-error";
 
 async function getUserRole(userId: string): Promise<string | null> {
@@ -34,6 +34,12 @@ export async function POST(
     const res = await solicitarAprovacaoEstoqueDevolucao(devId, user.id);
     return NextResponse.json({ ok: true, aguardando_aprovacao_estoque: true, ...res });
   } catch (err) {
+    // REGRA DE NEGÓCIO (Fase 3e): "aprovador não configurado" tem status próprio
+    // (política config-first) — checado ANTES do fallback genérico abaixo, que
+    // continua tratando os demais erros exatamente como antes.
+    if (err instanceof HttpError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     // Postgres errors (code/severity) viram 500 generico — nao vazam schema.
     // Errors de dominio (throw new Error com mensagem amigavel) continuam expostos como 400.
     const isPgError = !!err && typeof err === "object" && ("code" in err || "severity" in err);

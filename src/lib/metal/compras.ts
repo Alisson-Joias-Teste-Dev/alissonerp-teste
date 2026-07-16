@@ -18,6 +18,7 @@ import sql from "@/lib/db";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 import { uploadFile } from "@/lib/storage";
 import { getModuloConfig, getCotacaoOuro } from "./config";
+import { resolverAprovadores } from "@/lib/aprovacoes";
 import type { CompraInput, CompraRecord, CompraAprovacaoRecord } from "./types";
 
 /**
@@ -66,12 +67,19 @@ export async function criarCompraMetal(
   // status 'pendente_aprovacao' e aguarda aprovação do aprovador configurado
   const acimaTeto = input.acima_teto && input.valor_pago_grama > maxLimit;
   const statusInicial = acimaTeto ? "pendente_aprovacao" : "pendente_pagamento";
-  const aprovadorMetalId = (config.metal_aprovador_id ?? "").trim();
 
   // REGRA DE NEGÓCIO: compra acima do teto só pode existir se houver
-  // aprovador configurado, para não deixar solicitação sem responsável.
-  if (acimaTeto && !aprovadorMetalId) {
-    throw new Error("Aprovador de compra de metal acima do teto não configurado.");
+  // aprovador configurado (política config-first — 03b-config-first-estrito.md),
+  // para não deixar solicitação sem responsável. Sem ctx.solicitanteId: metal
+  // não exclui quem está cadastrando a compra (regra 3 do pacote 3a).
+  let aprovadorMetalId: string | null = null;
+  if (acimaTeto) {
+    const resolucao = await resolverAprovadores("compra_metal");
+    if (resolucao.status === "nao_configurado") {
+      throw new Error("Aprovador de compra de metal acima do teto não configurado.");
+    }
+    // Coluna compras_metal_aprovacoes.aprovador_id é UUID único — usa o 1º da lista.
+    aprovadorMetalId = resolucao.aprovadores[0];
   }
 
   // REGRA DE NEGÓCIO: Spread = diferença entre teto e valor pago.

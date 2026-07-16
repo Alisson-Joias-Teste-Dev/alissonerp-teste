@@ -3,8 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { zodError } from "@/lib/schemas/common";
-
-const FULL_ROLES = ["desenvolvedor", "admin"];
+import { podeDecidir } from "@/lib/aprovacoes";
 
 const SolicitacaoDescontoPatchSchema = z.object({
   status: z.enum(["aprovado", "rejeitado"]),
@@ -31,7 +30,10 @@ export async function GET(
   return NextResponse.json(row);
 }
 
-// PATCH — somente direção (admin/desenvolvedor) pode aprovar ou rejeitar
+// PATCH — decisão pela camada config-first (Fase 4, item 3): só quem está configurado em
+// Configurações › Aprovadores (chave aprovador_desconto_padrao, evento "desconto") decide — a
+// MESMA autoridade da porta oficial (tarefa, tarefas/[id]/aprovacao). Antes era hardcoded
+// admin/desenvolvedor, divergindo da porta oficial (que já usava podeDecidir desde a Fase 3g.3).
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -41,7 +43,13 @@ export async function PATCH(
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const [u] = await sql`SELECT nome, role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
-  if (!u || !FULL_ROLES.includes(u.role as string)) {
+  if (!u) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+
+  // REGRA DE NEGÓCIO (Fase 4, item 3): mesma chave/evento que a porta oficial (via tarefa) usa —
+  // "desconto" / aprovador_desconto_padrao. Sem ctx.solicitanteId (desconto não exclui quem
+  // solicitou, igual à porta oficial). Config vazia/inativa → ninguém decide (nem admin).
+  const dec = await podeDecidir({ id: user.id, role: u.role ?? null }, "desconto");
+  if (!dec.pode) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -84,19 +92,44 @@ export async function PATCH(
       SELECT quantidade FROM alissonerp.itens_venda_erp WHERE id = ${solicitacao.item_id}
     `;
     if (item) {
-      const totalItem    = precoUnit * Number(item.quantidade);
-      const pctComissao  = 0; // acima de 30% não gera comissão
+      const totalItem = precoUnit * Number(item.quantidade);
+
+      // REGRA DE NEGÓCIO (Fase 4, item 3 — fim do 0% fixo): comissão pela MESMA regra da porta
+      // oficial (tarefas/[id]/aprovacao/route.ts, bloco "desconto_acima"): acima de 30% de
+      // desconto, comissão fixa em 0,5%; senão, pela tabela de faixas (faixas_comissao) pelo
+      // desconto real do item. Antes esta porta zerava a comissão sempre — divergia da oficial.
+      const [faixa] = pct > 30 ? [] : await sql`
+        SELECT comissao_pct FROM alissonerp.faixas_comissao
+        WHERE desconto_pct = ${Math.round(pct)} AND ativo = true
+      `;
+      const pctComissao = pct > 30 ? 0.5 : Number(faixa?.comissao_pct ?? 0);
+      const valorComissao = Math.round((totalItem * pctComissao / 100) * 100) / 100;
+
       await sql`
         UPDATE alissonerp.itens_venda_erp
         SET pct_desconto          = ${pct},
             preco_unitario        = ${precoUnit},
             total_item            = ${totalItem},
             pct_comissao          = ${pctComissao},
-            valor_comissao        = 0,
+            valor_comissao        = ${valorComissao},
             desconto_autorizado_por = ${user.id}::uuid
         WHERE id = ${solicitacao.item_id}
       `;
     }
+  }
+
+  // REGRA DE NEGÓCIO (Fase 4, item 3 — fecha o R3 do dossiê): grava o lock canônico da venda
+  // (vendas_erp.desconto_aprovado_por/_em) quando a solicitação tem venda_id — independente de
+  // ter item_id — sem isso, o portão do crédito (vendas-aprovar.ts, baixa-credito.ts) continuava
+  // vendo a venda travada mesmo depois do desconto ter sido aprovado por esta porta (item-a-item).
+  if (body.status === "aprovado" && solicitacao.venda_id) {
+    await sql`
+      UPDATE alissonerp.vendas_erp
+      SET desconto_aprovado_por = ${user.id}::uuid,
+          desconto_aprovado_em  = NOW(),
+          updated_at = NOW()
+      WHERE id = ${solicitacao.venda_id}
+    `;
   }
 
   return NextResponse.json({ ok: true, status: body.status });
