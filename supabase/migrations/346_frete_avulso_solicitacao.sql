@@ -1,17 +1,22 @@
--- Migration 346: frete avulso com solicitação e liberação (modelo POOL)
+-- Migration 346: frete avulso com solicitação e liberação (modelo TAREFA/POOL)
 -- REGRA DE NEGÓCIO:
 --   O que faz: adiciona o passo "solicitada" ao frete avulso. A consultora
 --     solicita a corrida a partir de uma VENDA (para puxar cliente+endereço)
---     e o frete NASCE 'solicitada' (SEM lançar saldo de frete). QUALQUER
---     usuário configurado como "liberador" (tabela frete_avulso_liberadores)
---     — ou admin/dev/diretor — enxerga TODAS as solicitações numa aba comum
---     (modelo POOL, sem responsável designado) e pode LIBERAR
---     ('solicitada'->'pendente', aí sim lança saldo) ou RECUSAR ('cancelada').
---     Estoquista/admin/gerente continuam criando o avulso já 'pendente'.
+--     e o frete NASCE 'solicitada' (SEM lançar saldo de frete). A solicitação
+--     vira uma TAREFA DE APROVAÇÃO (mesma engrenagem de compra comercial e
+--     inventário) para os usuários configurados na chave MULTI de config
+--     `aprovadores_frete_avulso` (Config › Aprovadores). QUALQUER um desses
+--     aprovadores — ou admin/dev/diretor — pode decidir a MESMA tarefa (pool:
+--     ver as 3 extensões aditivas do módulo Tarefas, escopadas por
+--     tipo='frete_avulso') e LIBERAR ('solicitada'->'pendente', aí sim lança
+--     saldo) ou RECUSAR ('cancelada'). Estoquista/admin/gerente continuam
+--     criando o avulso já 'pendente' (sem passar por solicitação/tarefa).
 --   Por que: dar à consultora autonomia para pedir a corrida sem poder liberar
 --     custo de frete sozinha — a liberação (e o lançamento no saldo da gerente)
---     fica com qualquer liberador do pool, não com um único responsável fixo
---     (evita gargalo quando o responsável escolhido está ausente).
+--     fica com qualquer aprovador da lista, não com um único responsável fixo
+--     (evita gargalo quando o responsável escolhido está ausente). Reusa a
+--     infraestrutura de Tarefas/aprovações já existente em vez de duplicar
+--     tabela e tela próprias (modelo anterior, revertido nesta migration).
 --   Impacto se removido: consultora não consegue solicitar; o avulso volta a
 --     nascer sempre liberado.
 --   Impacto nas entregas normais e no avulso já existente: ZERO — colunas são
@@ -57,25 +62,24 @@ ALTER TABLE alissonerp.entregas_venda
       (is_avulso = true)
     );
 
--- 4. Lista configurável de liberadores do frete avulso (modelo POOL).
--- REGRA DE NEGÓCIO: substitui o "responsável designado" por um POOL de
--- usuários — a consultora NÃO escolhe quem libera; qualquer usuário ativo
--- nesta tabela (ou admin/dev/diretor, via isFullAccess) enxerga TODAS as
--- solicitações 'solicitada' e pode liberar/recusar qualquer uma. A lista é
--- gerida por uma tela de configuração (fora desta migration).
--- IMPACTO SE REMOVIDO: só dev/admin/diretor conseguiriam liberar/recusar
--- frete avulso solicitado — ninguém mais veria a aba de solicitações.
-CREATE TABLE IF NOT EXISTS alissonerp.frete_avulso_liberadores (
-  user_id     UUID PRIMARY KEY REFERENCES auth.users(id),
-  ativo       BOOLEAN NOT NULL DEFAULT true,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_by  UUID REFERENCES auth.users(id)
-);
+-- 4. Vínculo da solicitação com a tarefa de aprovação (modelo TAREFA).
+-- REGRA DE NEGÓCIO:
+--   O que faz: guarda em qual tarefa (alissonerp.tarefas) está a decisão desta
+--     solicitação de frete avulso — mesmo padrão de
+--     compras_comercial.tarefa_aprovacao_id e solicitacoes_inventario.tarefa_id.
+--     O handler da decisão (PATCH /api/tarefas/[id]/aprovacao, tipo
+--     'frete_avulso') busca a entrega por este campo para chamar
+--     liberarFreteAvulso/recusarFreteAvulso.
+--   Por que: substitui a lista própria de liberadores (frete_avulso_liberadores,
+--     removida acima) — quem pode decidir é configurado na chave MULTI
+--     `aprovadores_frete_avulso` (Config › Aprovadores), e a decisão em si
+--     acontece na TAREFA (aprovacoes_tarefa), não numa aba própria de entregas.
+--   Impacto se removido: a solicitação criaria a tarefa mas o dispatcher de
+--     aprovação não saberia qual entrega liberar/recusar.
+ALTER TABLE alissonerp.entregas_venda
+  ADD COLUMN IF NOT EXISTS tarefa_aprovacao_id INTEGER REFERENCES alissonerp.tarefas(id);
 
--- Índice para a checagem "sou liberador ativo?" (WHERE user_id = X AND ativo).
--- IMPACTO SE REMOVIDO: a query de permissão (rodada em toda ação de
--- liberar/recusar/listar solicitações) faz seq scan conforme a lista cresce.
-CREATE INDEX IF NOT EXISTS idx_frete_liberadores_ativo
-  ON alissonerp.frete_avulso_liberadores(user_id) WHERE ativo = true;
+CREATE INDEX IF NOT EXISTS idx_entregas_tarefa_aprovacao
+  ON alissonerp.entregas_venda(tarefa_aprovacao_id) WHERE tarefa_aprovacao_id IS NOT NULL;
 
 COMMIT;
