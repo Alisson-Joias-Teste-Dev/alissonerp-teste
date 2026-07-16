@@ -1,4 +1,4 @@
-import { PackageOpen, type LucideIcon } from "lucide-react";
+import { PackageOpen, Gem, type LucideIcon } from "lucide-react";
 
 /**
  * REGISTRO DOS TREINAMENTOS — fonte única da Central de Treinamentos.
@@ -36,11 +36,18 @@ export const TREINAMENTOS: TreinamentoMeta[] = [
     publico: "Consultoras e estoque",
     Icon: PackageOpen,
   },
+  {
+    key: "conversao-reversa",
+    href: "/treinamentos/conversao-reversa",
+    titulo: "Conversão Reversa",
+    desc: "Como transformar um ouro que está no cofre em uma joia no estoque da Loja — com foto do peso e aprovação.",
+    publico: "Estoque, gerência e aprovadores",
+    Icon: Gem,
+  },
 ];
 
 /** Módulos que ainda não têm treinamento — aparecem como "Em breve". */
 export const EM_BREVE = [
-  "Conversão Reversa (ouro vira joia)",
   "Crediário",
   "Vendas / PDV",
   "Protocolo (Loja ↔ Fábrica)",
