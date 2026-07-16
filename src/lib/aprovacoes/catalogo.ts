@@ -155,6 +155,19 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
       "MESMA chave 'aprovador_conversao' (a antiga 'aprovador_conversao_sku' não existe mais). " +
       "Dossiê R6: mesmo risco de handler ausente na via genérica.",
   },
+  conversao_reversa: {
+    evento: "conversao_reversa",
+    rotulo: "Conversão Reversa (ouro do cofre vira joia)",
+    configKeys: ["aprovadores_conversao_reversa"],
+    configMulti: true,
+    camposLock: ["conversoes_reversas.status_conversao", "tarefas.status"],
+    observacao:
+      "Feature independente (PR#94, 15/07) que nasceu FORA da camada config-first — tinha " +
+      "fallback pra admin/desenvolvedor quando a config estava vazia (violava a política 03b). " +
+      "Plugada nesta camada em 15/07/2026 pra alinhar com o padrão: config vazia = " +
+      "'nao_configurado', ninguém decide (nem admin). Chave própria 'aprovadores_conversao_reversa' " +
+      "(MULTI, já existia antes desta migração — só passou a ser lida por aqui).",
+  },
   precificacao: {
     evento: "precificacao",
     rotulo: "Alteração de markup (precificação)",

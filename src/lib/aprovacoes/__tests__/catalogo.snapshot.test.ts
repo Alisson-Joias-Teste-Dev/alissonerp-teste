@@ -32,6 +32,9 @@ const SNAPSHOT_ESPERADO: Record<
   conversao: { configKeys: ["aprovador_conversao"], configMulti: true },
   // Fase 3b (12/07): conversao_sku passa a usar a MESMA chave de conversao (decisão do Jonathan).
   conversao_sku: { configKeys: ["aprovador_conversao"], configMulti: true },
+  // Feature independente (PR#94, 15/07) plugada nesta camada — tinha fallback pra
+  // admin/dev quando a config estava vazia, corrigido pra seguir a mesma política.
+  conversao_reversa: { configKeys: ["aprovadores_conversao_reversa"], configMulti: true },
   precificacao: { configKeys: ["aprovador_precificacao"], configMulti: true },
   limpeza_ouro: { configKeys: ["aprovador_limpeza"], configMulti: true },
   devolver_peca: { configKeys: ["aprovadores_devolver_peca"], configMulti: true },
@@ -57,7 +60,7 @@ describe("snapshot do CATALOGO — trava a política; qualquer mudança quebra e
     },
   );
 
-  it("cobre exatamente os 18 eventos do catálogo, sem sobra nem falta", () => {
+  it("cobre exatamente os 19 eventos do catálogo, sem sobra nem falta", () => {
     expect(Object.keys(CATALOGO).sort()).toEqual(Object.keys(SNAPSHOT_ESPERADO).sort());
   });
 

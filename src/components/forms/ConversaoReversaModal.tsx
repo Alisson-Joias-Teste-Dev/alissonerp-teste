@@ -37,7 +37,9 @@ interface Props {
  * O QUE: modal que abre a solicitação de "virou joia" — metal já registrado no
  *   Caixa de Ouro (de uma conversão de estoque concluída ou compra de metal
  *   confirmada) sai do cofre e vira peça pronta no estoque comercial. Fica
- *   PENDENTE até aprovação de admin/desenvolvedor (ver POST /api/conversao-reversa).
+ *   PENDENTE até aprovação de quem estiver configurado em Configurações →
+ *   Aprovadores → "Conversão Reversa" (config-first, sem fallback de cargo —
+ *   ver POST /api/conversao-reversa/aprovar).
  * POR QUE: precisa de produto (ativo — validado no servidor), quantidade de
  *   peças e peso da joia. O peso NUNCA pode passar do restante daquela origem
  *   (mesmo lote de ouro pode ter várias baixas — sangria + conversão reversa).

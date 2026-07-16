@@ -18,6 +18,7 @@ const TODOS_EVENTOS: EventoAprovacao[] = [
   "recebimento_metal",
   "conversao",
   "conversao_sku",
+  "conversao_reversa",
   "precificacao",
   "limpeza_ouro",
   "devolver_peca",

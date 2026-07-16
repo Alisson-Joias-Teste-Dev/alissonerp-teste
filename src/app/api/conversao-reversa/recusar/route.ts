@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { zodError } from "@/lib/schemas/common";
+import { podeDecidir } from "@/lib/aprovacoes";
 
 const ConversaoReversaRecusarSchema = z.object({
   tarefa_id: z.coerce.number().int().positive(),
@@ -29,16 +30,11 @@ export async function POST(req: NextRequest) {
     SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
   `;
   if (!usuario) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 403 });
-  // Mesma regra da aprovação: só quem está na lista configurada recusa (fallback
-  // admin/dev se a lista estiver vazia). Ver conversao-reversa/aprovar/route.ts.
-  const [cfgAprov] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadores_conversao_reversa' LIMIT 1
-  `;
-  const aprovadoresCfg = String(cfgAprov?.valor ?? "").split(",").map((s: string) => s.trim()).filter(Boolean);
-  const autorizado = aprovadoresCfg.length > 0
-    ? aprovadoresCfg.includes(user.id)
-    : ["admin", "desenvolvedor"].includes(usuario.role);
-  if (!autorizado) {
+  // Mesma regra da aprovação: só quem está na lista configurada decide (config
+  // vazia = ninguém, nem admin/dev). Ver conversao-reversa/aprovar/route.ts e
+  // docs/regras-negocio/aprovacoes-refatoracao/03b-config-first-estrito.md.
+  const decisao = await podeDecidir({ id: user.id, role: usuario.role }, "conversao_reversa");
+  if (!decisao.pode) {
     return NextResponse.json({ error: "Você não está na lista de aprovadores da conversão reversa." }, { status: 403 });
   }
 
