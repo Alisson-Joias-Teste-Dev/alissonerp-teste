@@ -2,34 +2,51 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
-## feat(frete-avulso): solicitação, liberação por pool e pool de motoboy (vX.Y.Z (a definir no merge))
+## feat(frete-avulso): solicitação da venda vira tarefa, pool de aprovadores e pool de motoboy (vX.Y.Z (a definir no merge))
 
-**O quê:** frete avulso (corrida de motoboy sem venda vinculada) ganha um passo de **solicitação**: a
-consultora pede a corrida a partir de uma venda própria (herda cliente/endereço), sem escolher
-motoboy nem responsável, e sem lançar custo. Um **liberador do pool** (lista configurável, ou
-admin/dev/diretor) decide: libera (aí sim lança saldo de frete na gerente) ou recusa (com motivo,
-sem custo). Corrida liberada cai num **pool sem dono** (`motoboy_id NULL`) e **qualquer** entregador
+**O quê:** frete avulso (corrida de motoboy sem itens vinculados) ganha um passo de **solicitação**: a
+consultora pede a corrida **de dentro da própria venda** (`VendaDetalheClient`, visível só com a venda em
+`aprovado`/`em_rota`/`entregue`), herdando cliente/endereço, sem escolher motoboy nem responsável, e sem
+lançar custo. A solicitação vira uma **tarefa de aprovação** (tipo `frete_avulso`) para o **pool** configurado
+em Configurações › Aprovadores (chave `aprovadores_frete_avulso`) — **qualquer** um da lista decide pela
+tela de Tarefas: aprova (libera a corrida e só aí lança o saldo de frete na gerente) ou rejeita (exige
+motivo, sem custo). Corrida liberada cai num **pool sem dono** (`motoboy_id NULL`) e **qualquer** entregador
 ativo pode aceitar — o aceite é um claim atômico no banco (evita dois motoboys donos da mesma corrida).
 
 **Como:**
 - Novo estado `solicitada` no enum `enum_entrega_situacao` (antes de `pendente`).
-- Colunas novas em `entregas_venda`: `endereco_entrega`, `liberada_por`, `liberada_em`, `motivo_recusa`.
+- Colunas novas em `entregas_venda`: `endereco_entrega`, `liberada_por`, `liberada_em`, `motivo_recusa`,
+  `tarefa_aprovacao_id` (vínculo com a tarefa criada na solicitação).
 - `chk_entrega_origem` recriada para aceitar `venda_id` em avulso (antes só entrega normal aceitava).
-- Tabela nova `alissonerp.frete_avulso_liberadores` (lista de quem pode liberar/recusar) — migration 346.
-- Rotas: `POST /api/entregas-venda/[id]/liberar-avulso`, `/recusar-avulso`, `/aceitar-avulso`;
-  `GET/POST/DELETE /api/configuracoes/frete-avulso-liberadores` (config da lista).
-- Tela de entregas ganha aba "Solicitações"; tela de Configurações ganha aba de liberadores.
-- Fix de blindagem junto: a listagem/contagem SSR de `/entregas-venda` (sem filtro) passou a
-  **excluir `cancelada` e `solicitada`** por padrão — antes solicitações pendentes de liberação
-  vazavam para a lista operacional e inflavam o card "Total"; `?situacao=solicitada` agora só é
-  honrado para quem gerencia liberações.
+- **Sem tabela própria de liberadores** — reusa a engrenagem existente do módulo Tarefas
+  (`tarefas` + `aprovacoes_tarefa`) e a chave de config MULTI `aprovadores_frete_avulso`
+  (`GET/PATCH /api/configuracoes/aprovadores`), mesmo padrão de `aprovadores_devolver_peca`.
+  Pool lido por uma fonte única (`listarAprovadoresFreteAvulso`) em 4 pontos aditivos, escopados por
+  `tipo='frete_avulso'`: `GET /api/tarefas`, `GET /api/tarefas/[id]`, `PATCH /api/tarefas/[id]/aprovacao`
+  e o flag `pode_decidir_pool` do `TarefaDrawer` — nenhum outro tipo de tarefa muda de comportamento.
+- Rotas: `POST /api/entregas-venda/frete-avulso` (criação/solicitação), `/[id]/aceitar-avulso`,
+  `/[id]/confirmar-avulso`. Decisão (aprovar/rejeitar) passa por `PATCH /api/tarefas/[id]/aprovacao`,
+  não por rota própria.
+- Tela de entregas **não ganha aba própria** — a decisão acontece em `/tarefas`, como qualquer outra
+  aprovação do sistema.
+- Blindagem: a listagem/contagem SSR de `/entregas-venda` (sem filtro), `GET /api/entregas-venda` e o
+  app do motoboy (`GET /motoboy/minhas`) **excluem `cancelada` e `solicitada`** por padrão — solicitações
+  pendentes de decisão não vazam para a lista operacional nem inflam o card "Total". O pagamento em lote
+  do motoboy (`motoboy/pagar`) só seleciona `situacao='confirmada'`, e uma corrida de pool (`motoboy_id
+  NULL`) nunca chega em `confirmada` sem antes passar pelo claim atômico do aceite (que sempre grava o
+  dono) — estrutural, não depende de filtro.
+- Blindagem (janela de entrega): o gate do botão "Solicitar frete avulso" existia só no client
+  (`aprovado`/`em_rota`/`entregue`); `criarFreteAvulso` passou a **revalidar a mesma janela no servidor**
+  quando é solicitação, fechando o bypass de chamar a API direto com a venda fora da janela.
 
 **Débitos técnicos conhecidos (ver `docs/regras-negocio/entregas.md` §8):** pool sem gating de
-região/loja (decisão de produto); cancelar um avulso liberado não estorna o saldo já lançado;
-entregador aceita/registra sem exigir cadastro prévio em `alissonerp.motoboys`.
+região/loja (decisão de produto); card "Pendentes" não conta o pool separadamente; cancelar um avulso
+liberado não estorna o saldo já lançado; entregador aceita/registra sem exigir cadastro prévio em
+`alissonerp.motoboys`; diretor fora da lista de config não decide a tarefa (limitação pré-existente de
+todos os tipos de aprovação no dispatcher, não específica de frete avulso).
 
-**Não roda em prod/homolog ainda:** migration 346 nunca foi executada. Ver `docs/regras-negocio/entregas.md`
-para o fluxo completo e a matriz de permissão a testar.
+**Status:** migration 346 **já aplicada em homolog**. Produção ainda pendente. Ver
+`docs/regras-negocio/entregas.md` para o fluxo completo e a matriz de permissão a testar.
 
 ## feat(estoque-comercial): localização das peças + ferramenta de importação (v2.84.0)
 

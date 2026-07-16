@@ -116,11 +116,12 @@ export async function GET(req: NextRequest) {
     ? sql`AND ev.venda_id = ${Number(vendaId)}`
     : sql``;
 
-  // REGRA DE NEGÓCIO: canceladas e solicitadas não aparecem na lista padrão
-  // (auto-cancel do modal sem código; solicitadas ainda não foram liberadas —
-  // aparecem na aba própria de "Solicitações", visível só ao pool de
-  // liberadores). Só reaparecem se o filtro pedir explicitamente
-  // situacao=cancelada/solicitada.
+  // REGRA DE NEGÓCIO (blindagem V4 — comentário corrigido: não existe mais
+  // aba "Solicitações", removida na virada V2): canceladas e solicitadas não
+  // aparecem na lista padrão (auto-cancel do modal sem código; solicitadas
+  // ainda não foram liberadas — a decisão do pool acontece via tarefa, tipo
+  // 'frete_avulso', em /tarefas, não numa aba própria desta tela). Só
+  // reaparecem se o filtro pedir explicitamente situacao=cancelada/solicitada.
   // IMPACTO SE REMOVIDO: lixo operacional e solicitações não-liberadas
   // poluiriam a lista de entregas ativas.
   const whereSituacao = situacao

@@ -2149,12 +2149,28 @@ export async function criarFreteAvulso(
       throw new Error("Venda é obrigatória para solicitar frete avulso.");
     }
     const [venda] = await sql`
-      SELECT id, numero_venda FROM alissonerp.vendas_erp WHERE id = ${params.vendaId} LIMIT 1
+      SELECT id, numero_venda, situacao FROM alissonerp.vendas_erp WHERE id = ${params.vendaId} LIMIT 1
     `;
     if (!venda) {
       throw new Error(`Venda ${params.vendaId} não encontrada.`);
     }
     numeroVendaSolicitacao = venda.numero_venda ? String(venda.numero_venda) : null;
+
+    // REGRA DE NEGÓCIO (blindagem V4 — janela de entrega, decisão Jonathan no
+    // commit 291b029a): o front só mostra o botão "Solicitar frete avulso"
+    // com a venda em aprovado/em_rota/entregue, mas essa checagem existia SÓ
+    // no client (VendaDetalheClient) — quem chamasse a API direto (curl, bug
+    // de outro client) driblava a janela e solicitava frete de uma venda
+    // rascunho/cancelada/virou_credito. Espelha a MESMA lista aqui, no server,
+    // que é a autoridade real.
+    // IMPACTO SE REMOVIDO: reabre o bypass — solicitação de frete avulso para
+    // venda fora da janela de entrega (ex.: ainda rascunho, já cancelada).
+    const JANELA_SOLICITACAO_FRETE_AVULSO = ["aprovado", "em_rota", "entregue"];
+    if (!JANELA_SOLICITACAO_FRETE_AVULSO.includes(String(venda.situacao))) {
+      throw new Error(
+        `Venda ${numeroVendaSolicitacao ?? params.vendaId} não está numa situação que permite solicitar frete avulso (situação atual: ${venda.situacao}).`,
+      );
+    }
 
     // REGRA DE NEGÓCIO (guard de solicitação duplicada — V3): espelha o guard
     // de src/lib/inventario-solicitacoes.ts (criarSolicitacaoInventario) — não
