@@ -226,19 +226,25 @@ export default function ListaAprovadores({
         )}
       </div>
 
-      {CONFIG_ITENS.map((item) => (
-        <FormularioAprovador
-          key={item.chave}
-          item={item}
-          config={config}
-          usuarios={usuarios}
-          podeEditar={podeEditar}
-          onChange={onChange}
-          toggleMulti={toggleMulti}
-          getMultiNames={getMultiNames}
-          getUserName={getUserName}
-        />
-      ))}
+      {/* REGRA DE NEGÓCIO (16/07 — pedido do Jonathan): grade de 2 colunas em vez
+          de 1 card por linha — com 16 tipos de aprovação, a tela empilhada
+          exigia rolar ~8 telas. Card compacto (FormularioAprovador) + descrição
+          virou tooltip no ícone de info — cabe em ~3 telas. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {CONFIG_ITENS.map((item) => (
+          <FormularioAprovador
+            key={item.chave}
+            item={item}
+            config={config}
+            usuarios={usuarios}
+            podeEditar={podeEditar}
+            onChange={onChange}
+            toggleMulti={toggleMulti}
+            getMultiNames={getMultiNames}
+            getUserName={getUserName}
+          />
+        ))}
+      </div>
 
       <p className="text-[10px] mt-2" style={{ color: "#9ca3af" }}>
         {podeEditar ? "As alterações são aplicadas imediatamente." : "Só administradores podem alterar essas configurações."}

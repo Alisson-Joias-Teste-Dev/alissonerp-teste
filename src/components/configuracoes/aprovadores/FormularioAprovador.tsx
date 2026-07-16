@@ -82,19 +82,21 @@ export default function FormularioAprovador({
 
   return (
     <div
-      className="rounded-xl border p-4 space-y-3"
+      className="rounded-lg border p-2.5 space-y-2"
       style={{ backgroundColor: P.card, borderColor: P.border }}
     >
-      <div className="flex items-start gap-3">
-        <span className="text-lg mt-0.5">{item.icone}</span>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold" style={{ color: P.texto }}>
-            {item.titulo}
-          </p>
-          <p className="text-xs mt-0.5" style={{ color: P.secundario }}>
-            {item.descricao}
-          </p>
-        </div>
+      {/* REGRA DE NEGÓCIO (16/07): descrição saiu de parágrafo sempre visível
+          pra tooltip nativo (title=) no ícone de info — card ficou com metade
+          da altura, pra caber a grade de 2 colunas sem estourar a tela de
+          rolagem (pedido do Jonathan, 16 tipos de aprovação numa tela só). */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm shrink-0">{item.icone}</span>
+        <p className="text-xs font-semibold flex-1 min-w-0 truncate" style={{ color: P.texto }} title={item.titulo}>
+          {item.titulo}
+        </p>
+        <span title={item.descricao} style={{ color: P.secundario, cursor: "help", flexShrink: 0, fontSize: 13, lineHeight: 1 }}>
+          ⓘ
+        </span>
       </div>
 
       {item.multi ? (
@@ -103,13 +105,13 @@ export default function FormularioAprovador({
             <button
               type="button"
               onClick={() => setAberto((v) => !v)}
-              className="w-full flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm text-left"
+              className="w-full flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs text-left"
               style={{ borderColor: P.border, color: P.texto, backgroundColor: "#fff" }}
             >
               <span className="truncate" style={{ color: getMultiNames(item.chave) ? P.texto : P.secundario }}>
-                {getMultiNames(item.chave) || "— Selecione um ou mais aprovadores —"}
+                {getMultiNames(item.chave) || "— Selecione —"}
               </span>
-              <span style={{ color: P.secundario, fontSize: 11, flexShrink: 0 }}>
+              <span style={{ color: P.secundario, fontSize: 10, flexShrink: 0 }}>
                 {aberto ? "▲" : "▼"}
               </span>
             </button>
@@ -141,20 +143,20 @@ export default function FormularioAprovador({
           </div>
         ) : (
           <div
-            className="w-full rounded-lg border px-3 py-2 text-sm"
+            className="w-full rounded-lg border px-2.5 py-1.5 text-xs truncate"
             style={{ borderColor: P.border, backgroundColor: "#f9fafb", color: P.texto }}
           >
-            {getMultiNames(item.chave) || "— Nenhum aprovador configurado —"}
+            {getMultiNames(item.chave) || "— Nenhum —"}
           </div>
         )
       ) : podeEditar ? (
         <select
           value={valorAtual}
           onChange={(e) => onChange(item.chave, e.target.value)}
-          className="w-full rounded-lg border px-3 py-2 text-sm"
+          className="w-full rounded-lg border px-2.5 py-1.5 text-xs"
           style={{ borderColor: P.border, color: P.texto, backgroundColor: "#fff" }}
         >
-          <option value="">— Selecione um aprovador —</option>
+          <option value="">— Selecione —</option>
           {lista.map((u) => (
             <option key={u.id} value={u.id}>
               {u.nome}{u.role ? ` (${u.role})` : ""}
@@ -163,10 +165,10 @@ export default function FormularioAprovador({
         </select>
       ) : (
         <div
-          className="w-full rounded-lg border px-3 py-2 text-sm"
+          className="w-full rounded-lg border px-2.5 py-1.5 text-xs truncate"
           style={{ borderColor: P.border, backgroundColor: "#f9fafb", color: P.texto }}
         >
-          {getUserName(item.chave) || "— Nenhum aprovador configurado —"}
+          {getUserName(item.chave) || "— Nenhum —"}
         </div>
       )}
     </div>
