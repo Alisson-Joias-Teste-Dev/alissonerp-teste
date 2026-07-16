@@ -165,6 +165,9 @@ interface Venda {
   empresa_emitente_id?: number | null;
   nota_fiscal_id?: number | null;
   descontoThreshold?: number | null;
+  /** Limite (%) de desconto acima do qual o Cartão de Crédito exige aprovação.
+   *  Vem da config `limite_desconto_cartao_pct` (Configurações › Aprovadores). */
+  limiteDescontoCartao?: number | null;
   devolucoes?: Array<{
     id: number;
     numero: string;
@@ -2154,7 +2157,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const temDescontoAlto = venda.itens.some(i => Number(i.pct_desconto) > descontoThreshold);
   // REGRA DE NEGÓCIO #1: verifica campo próprio de desconto, não de crédito
   const precisaSolicitarDesconto = temDescontoAlto && !venda.desconto_aprovado_por_nome && !venda.aprovacao_desconto_tarefa_id && venda.situacao === "rascunho";
-  const LIMITE_DESCONTO_CARTAO = 20;
+  // REGRA DE NEGÓCIO (Fase 5, fix 16/07): limite do cartão vem da config
+  // (limite_desconto_cartao_pct), não mais `const = 20` cravado aqui — a tela
+  // ficava dizendo "acima de 20%" mesmo com a config em 30, divergindo do gate
+  // real do servidor. Fallback 20 = mesmo default do backend (LIMITE_DESCONTO_CARTAO_PADRAO).
+  const LIMITE_DESCONTO_CARTAO = venda.limiteDescontoCartao ?? 20;
   const temDescontoCartao = venda.itens.some(i => Number(i.pct_desconto) > LIMITE_DESCONTO_CARTAO);
   const descontoCartaoAprovado = !!venda.desconto_cartao_aprovado_por_nome;
   const cartaoBloqueado = temDescontoCartao && !descontoCartaoAprovado;
@@ -2423,7 +2430,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-3"
           style={{ backgroundColor: "#FFF7ED", borderColor: "#FED7AA", color: "#9A3412" }}>
           <p className="text-sm font-medium">
-            Esta venda tem itens com desconto acima de 20%. Para pagar no cartão de crédito, solicite aprovação.
+            Esta venda tem itens com desconto acima de {LIMITE_DESCONTO_CARTAO}%. Para pagar no cartão de crédito, solicite aprovação.
           </p>
           <button onClick={solicitarAprovacaoCartao} disabled={updating}
             className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 whitespace-nowrap"
@@ -3750,7 +3757,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                             <AlertCircle size={14} className="shrink-0 mt-0.5" style={{ color: "#9A3412" }} />
                             <div className="text-xs" style={{ color: "#9A3412" }}>
                               <p className="font-medium">Cartão de crédito bloqueado</p>
-                              <p>Este pedido possui itens com desconto acima de 20%. Aguarde aprovação para pagar no cartão.</p>
+                              <p>Este pedido possui itens com desconto acima de {LIMITE_DESCONTO_CARTAO}%. Aguarde aprovação para pagar no cartão.</p>
                             </div>
                           </div>
                         ) : (
@@ -4042,6 +4049,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                   onAplicarVale={aplicarValeSingleComCodigo}
                   onPaymentSaved={load}
                   cartaoBloqueado={cartaoBloqueado}
+                  limiteDescontoCartao={LIMITE_DESCONTO_CARTAO}
                   onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}
                   solicitandoAprovacaoCartao={updating}
                 />
@@ -4149,6 +4157,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       onAplicarVale={aplicarValeSingleComCodigo}
                       onPaymentSaved={() => { load(); setAddingPag(false); }}
                       cartaoBloqueado={cartaoBloqueado}
+                      limiteDescontoCartao={LIMITE_DESCONTO_CARTAO}
                       onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}
                       solicitandoAprovacaoCartao={updating}
                     />

@@ -84,8 +84,8 @@ const CONFIG_ITENS: ConfigItem[] = [
   },
   {
     chave: "aprovador_cartao_desconto_padrao",
-    titulo: "Cartão de crédito com desconto >20%",
-    descricao: "Aprova pagamento no cartão de crédito quando há itens com desconto acima de 20%. Pode marcar vários.",
+    titulo: "Cartão de crédito com desconto",
+    descricao: "Aprova pagamento no cartão de crédito quando há itens com desconto acima do limite configurado acima (\"Limite de desconto no cartão\"). Pode marcar vários.",
     usuariosKey: "admins_devs",
     icone: "💳",
     multi: true,

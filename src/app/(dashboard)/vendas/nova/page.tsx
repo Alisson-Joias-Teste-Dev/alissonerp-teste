@@ -2,7 +2,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
 import NovaVendaClientV2 from "./NovaVendaClientV2";
 import { calcularTetoDesconto, FULL_ACCESS_ROLES_DESCONTO } from "@/lib/desconto/precificar-item";
-import { buscarFallbackDescontoSemCadastro } from "@/lib/aprovacao-regras";
+import { buscarFallbackDescontoSemCadastro, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
 
 const PODE_SELECIONAR_VENDEDOR = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "financeiro"];
 
@@ -65,6 +65,9 @@ export default async function NovaVendaPage() {
   }
 
   const descontoAuthThreshold = maxDesconto;
+  // REGRA DE NEGÓCIO (Fase 5, fix 16/07): limite do cartão vem da config
+  // (limite_desconto_cartao_pct) — o client tinha `const = 20` cravado.
+  const limiteDescontoCartao = await buscarLimiteDescontoCartao();
 
   return (
     <NovaVendaClientV2
@@ -73,6 +76,7 @@ export default async function NovaVendaPage() {
       vendedorNome={vendedorNome}
       maxDesconto={maxDesconto}
       descontoAuthThreshold={descontoAuthThreshold}
+      limiteDescontoCartao={limiteDescontoCartao}
       vendedores={vendedores}
       userId={userId}
       userName={userName}

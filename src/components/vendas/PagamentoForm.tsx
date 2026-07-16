@@ -176,8 +176,11 @@ export interface PagamentoFormProps {
   // Extra
   showAReceberWarning?: boolean;
 
-  // Bloqueio de cartão por desconto >20%
+  // Bloqueio de cartão por desconto acima do limite configurado
   cartaoBloqueado?: boolean;
+  /** Limite (%) do cartão, pra mostrar na mensagem. Vem da config
+   *  `limite_desconto_cartao_pct` via o caller. Default 20 = default do backend. */
+  limiteDescontoCartao?: number;
   onSolicitarAprovacaoCartao?: () => void;
   solicitandoAprovacaoCartao?: boolean;
 
@@ -292,6 +295,7 @@ export default function PagamentoForm({
   onPaymentSaved: _onPaymentSaved,
   showAReceberWarning,
   cartaoBloqueado,
+  limiteDescontoCartao,
   onSolicitarAprovacaoCartao,
   solicitandoAprovacaoCartao,
   maxParcelasPromo,
@@ -538,7 +542,7 @@ export default function PagamentoForm({
                 <AlertCircle size={16} className="shrink-0 mt-0.5" style={{ color: "#9A3412" }} />
                 <div className="text-xs flex-1" style={{ color: "#9A3412" }}>
                   <p className="font-medium">Cartão de crédito bloqueado</p>
-                  <p className="mt-1">Este pedido possui itens com desconto acima de 20%. Para pagar no cartão de crédito, solicite aprovação.</p>
+                  <p className="mt-1">Este pedido possui itens com desconto acima de {limiteDescontoCartao ?? 20}%. Para pagar no cartão de crédito, solicite aprovação.</p>
                 </div>
               </div>
               {onSolicitarAprovacaoCartao && (
