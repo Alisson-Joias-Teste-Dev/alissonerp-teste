@@ -732,7 +732,20 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
                         {a.motivo && <p className="text-xs mt-1 italic" style={{ color: "#6B7280" }}>&ldquo;{a.motivo}&rdquo;</p>}
                         {a.respondido_em && <p className="text-[10px] mt-1" style={{ color: "#9CA3AF" }}>Respondido em {fmtHora(a.respondido_em)}</p>}
 
-                        {isPending && a.aprovador_id === currentUserId && (
+                        {/*
+                          REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL —
+                          ADITIVO, escopado SÓ para tipo='frete_avulso'): além do
+                          aprovador_id fixo da linha, mostra os botões também para
+                          quem o backend marcou como pode_decidir_pool (pool de
+                          aprovadores_frete_avulso ou admin/dev/diretor). O
+                          dispatcher (PATCH .../aprovacao) é quem valida de
+                          verdade — este flag só decide a EXIBIÇÃO do botão.
+                          IMPACTO SE REMOVIDO: só o 1º aprovador da lista
+                          (gravado como aprovador_id/responsavel_id na criação)
+                          veria o botão de decisão — os demais do pool
+                          decidiriam certo no backend mas sem botão na tela.
+                        */}
+                        {isPending && (a.aprovador_id === currentUserId || (tarefa.tipo === "frete_avulso" && tarefa.pode_decidir_pool)) && (
                           <div className="mt-3 space-y-2">
                             <textarea rows={2} placeholder="Motivo (obrigatório para rejeitar)"
                               value={motivoRejeicao} onChange={e => setMotivoRejeicao(e.target.value)}

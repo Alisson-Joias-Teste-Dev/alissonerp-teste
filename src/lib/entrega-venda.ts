@@ -31,6 +31,7 @@ import { vendaEntregaDevendo, vendaTemExcecaoEntregaAprovada } from "@/lib/entre
 import { enviarCodigoWhatsAppDetalhado, enviarCodigoClienteEmRota, enviarConfirmacaoEntregaConcluida, enviarAvisoDesenvolvedor } from "@/lib/whatsapp";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 // O client transacional do pacote postgres não expõe call signature adequada
 // para o TypeScript neste projeto; as rotas existentes usam o mesmo padrão.
@@ -1972,14 +1973,20 @@ function montarMovimentacao(r: any): MovimentacaoFrete {
 
 /**
  * Verifica se o usuário pode gerenciar solicitações de frete avulso (liberar/
- * recusar/ver a aba de solicitações do modelo POOL).
+ * recusar/ver a aba de solicitações do modelo TAREFA/POOL).
  *
- * REGRA DE NEGÓCIO (migration 346, modelo POOL): substitui o "responsável
- * designado" escolhido pela consultora. Pode gerenciar quem é full-access
- * (admin/desenvolvedor/diretor) OU quem está cadastrado como liberador ativo
- * na tabela alissonerp.frete_avulso_liberadores (lista mantida pela tela de
- * configuração — Ordem B). Qualquer liberador ativo vê e decide TODAS as
- * solicitações, sem distinção por quem pediu.
+ * REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL — virada de config):
+ * substitui o "responsável designado" escolhido pela consultora. Pode
+ * gerenciar quem é full-access (admin/desenvolvedor/diretor) OU quem está na
+ * chave MULTI `aprovadores_frete_avulso` (Config › Aprovadores, UUIDs
+ * separados por vírgula) — espelha exatamente o padrão de
+ * `aprovadores_devolver_peca` (ver src/app/api/crediario/reserva/[vendaId]/
+ * devolver-peca/route.ts). Substitui a antiga tabela
+ * alissonerp.frete_avulso_liberadores (removida na migration 346): a lista
+ * agora vive em configuracoes_sistema, não numa tabela própria.
+ *
+ * Mantém nome/assinatura para não quebrar as chamadas existentes (page.tsx,
+ * /api/entregas-venda, /liberar-avulso, /recusar-avulso).
  *
  * IMPACTO SE REMOVIDO: rotas de liberar/recusar/listar solicitações perdem a
  * checagem de autorização — ou travam para todos (fail-closed indevido) ou
@@ -1991,13 +1998,12 @@ export async function podeGerenciarSolicitacoesAvulso(
   role: string | null,
 ): Promise<boolean> {
   if (isFullAccess(role)) return true;
-  const [r] = await sql`
-    SELECT 1 AS ok
-    FROM alissonerp.frete_avulso_liberadores
-    WHERE user_id = ${userId}::uuid AND ativo = true
-    LIMIT 1
+  const [cfg] = await sql`
+    SELECT valor FROM alissonerp.configuracoes_sistema
+    WHERE chave = 'aprovadores_frete_avulso'
   `;
-  return Boolean(r);
+  const lista = String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return lista.includes(userId);
 }
 
 /**
@@ -2023,7 +2029,7 @@ export interface CriarFreteAvulsoParams {
   // REGRA DE NEGÓCIO (solicitação da consultora — migration 346, modelo POOL):
   // quando modoSolicitacao=true, o avulso nasce 'solicitada' (sem lançar
   // saldo) e fica vinculado a uma venda (para herdar cliente/endereço) até
-  // que QUALQUER liberador do pool (tabela frete_avulso_liberadores) ou
+  // que QUALQUER aprovador do pool (chave de config aprovadores_frete_avulso) ou
   // admin/dev/diretor libere ou recuse — não há mais responsável designado.
   // vendaId e enderecoEntrega são obrigatórios nesse modo — validado em
   // criarFreteAvulso().
@@ -2143,27 +2149,56 @@ export async function criarFreteAvulso(
     throw new Error("Valor do frete não pode ser negativo.");
   }
 
-  // REGRA DE NEGÓCIO (solicitação — migration 346, modelo POOL): no modo
+  // REGRA DE NEGÓCIO (solicitação — migration 346, modelo TAREFA/POOL): no modo
   // solicitação a consultora precisa informar DE QUAL VENDA o frete parte
   // (herda cliente/endereço). NÃO escolhe mais um responsável — a solicitação
-  // cai no pool e qualquer liberador ativo (ou admin/dev/diretor) decide.
+  // vira uma tarefa de aprovação para o pool configurado (ver abaixo) e
+  // qualquer um decide.
   // IMPACTO SE REMOVIDO: sem venda_id perde-se o vínculo que justifica o
   // endereço de entrega.
+  let numeroVendaSolicitacao: string | null = null;
   if (params.modoSolicitacao) {
     if (!params.vendaId) {
       throw new Error("Venda é obrigatória para solicitar frete avulso.");
     }
     const [venda] = await sql`
-      SELECT id FROM alissonerp.vendas_erp WHERE id = ${params.vendaId} LIMIT 1
+      SELECT id, numero_venda FROM alissonerp.vendas_erp WHERE id = ${params.vendaId} LIMIT 1
     `;
     if (!venda) {
       throw new Error(`Venda ${params.vendaId} não encontrada.`);
+    }
+    numeroVendaSolicitacao = venda.numero_venda ? String(venda.numero_venda) : null;
+  }
+
+  // REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL): a solicitação vira
+  // TAREFA DE APROVAÇÃO para a lista configurada em `aprovadores_frete_avulso`
+  // (Config › Aprovadores) — mesma engrenagem de compra comercial e
+  // solicitações de inventário (ver src/lib/inventario-solicitacoes.ts).
+  // Lê a config e falha cedo (ANTES de abrir a transação) se ninguém estiver
+  // configurado — igual ao padrão de criarSolicitacaoInventario.
+  // IMPACTO SE REMOVIDO: a solicitação ficaria 'solicitada' para sempre, sem
+  // tarefa e sem ninguém no pool para decidir.
+  let listaAprovadoresFrete: string[] = [];
+  if (params.modoSolicitacao) {
+    const [cfg] = await sql`
+      SELECT valor FROM alissonerp.configuracoes_sistema
+      WHERE chave = 'aprovadores_frete_avulso'
+    `;
+    listaAprovadoresFrete = String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (listaAprovadoresFrete.length === 0) {
+      throw new Error(
+        "Nenhum aprovador de frete avulso configurado (Config › Aprovadores — chave aprovadores_frete_avulso).",
+      );
     }
   }
 
   const freteBase = calcularValorMotoboy(params.regiao);
   const freteMotoboy = freteBase > 0 ? freteBase : money(params.freteMotoboyOverride ?? 0);
   const freteCobrado = money(params.freteCobrado);
+
+  // Capturada dentro da transação (modoSolicitacao) para notificar o pool
+  // depois que a tarefa/aprovação forem gravadas com sucesso.
+  let tarefaCriadaId: number | null = null;
 
   const resultado = await sql.begin(async (tx: DbSql) => {
     const codigoEntrega = await gerarCodigoEntrega(tx);
@@ -2198,6 +2233,57 @@ export async function criarFreteAvulso(
 
     const entregaId = Number(row.id);
 
+    // REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL): grava a solicitação
+    // como tarefa de aprovação, na MESMA transação da entrega — espelha
+    // criarSolicitacaoInventario (src/lib/inventario-solicitacoes.ts):
+    // INSERT tarefas -> INSERT aprovacoes_tarefa -> UPDATE do domínio com o
+    // tarefa_aprovacao_id. responsavel_id leva o PRIMEIRO da lista só para
+    // preencher a coluna (não-nula por convenção do módulo Tarefas); QUALQUER
+    // um da lista pode decidir — ver extensão de pool no dispatcher/listagem.
+    // IMPACTO SE ALTERADO: sem isto a entrega nasceria 'solicitada' órfã, sem
+    // tarefa e sem ninguém notificado para decidir.
+    if (params.modoSolicitacao) {
+      const responsavelPrincipal = listaAprovadoresFrete[0];
+      const tituloTarefa = numeroVendaSolicitacao
+        ? `Frete avulso solicitado — venda ${numeroVendaSolicitacao}`
+        : `Frete avulso solicitado — entrega ${codigoEntrega}`;
+      const descricaoTarefa = [
+        `Corrida ${codigoEntrega} (${params.regiao}).`,
+        params.enderecoEntrega ? `Endereço: ${params.enderecoEntrega}.` : null,
+        params.descricaoAvulso ? `Obs: ${params.descricaoAvulso}.` : null,
+      ].filter(Boolean).join(" ");
+
+      const [tarefa] = await tx`
+        INSERT INTO alissonerp.tarefas
+          (titulo, descricao, responsavel_id, criado_por, prioridade, status, tipo, venda_id, tags)
+        VALUES (
+          ${tituloTarefa},
+          ${descricaoTarefa},
+          ${responsavelPrincipal}::uuid,
+          ${userId}::uuid,
+          'alta',
+          'aguardando_aprovacao',
+          'frete_avulso',
+          ${params.vendaId ?? null},
+          ${tx.array(["aprovacao_frete_avulso", `frete_avulso:${entregaId}`])}
+        )
+        RETURNING id
+      `;
+      const tarefaId = Number(tarefa.id);
+      tarefaCriadaId = tarefaId;
+
+      await tx`
+        INSERT INTO alissonerp.aprovacoes_tarefa (tarefa_id, solicitante_id, aprovador_id, status)
+        VALUES (${tarefaId}, ${userId}::uuid, ${responsavelPrincipal}::uuid, 'pendente')
+      `;
+
+      await tx`
+        UPDATE alissonerp.entregas_venda
+        SET tarefa_aprovacao_id = ${tarefaId}
+        WHERE id = ${entregaId}
+      `;
+    }
+
     // REGRA DE NEGÓCIO: solicitação (consultora) NÃO lança saldo na criação —
     // o custo só é assumido quando o responsável LIBERA a corrida (ver
     // liberarFreteAvulso). Avulso direto (não-solicitação) continua lançando
@@ -2226,6 +2312,27 @@ export async function criarFreteAvulso(
 
     return row;
   }) as Record<string, unknown>;
+
+  // REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL): notifica TODOS os
+  // aprovadores da lista (não só o responsavel_id da tarefa) — qualquer um
+  // pode decidir, então todos precisam saber que há uma solicitação nova.
+  // Espelha criarSolicitacaoInventario; roda FORA da transação (best-effort —
+  // falha de notificação não desfaz a solicitação já gravada).
+  if (params.modoSolicitacao && tarefaCriadaId) {
+    const tarefaIdNotif = tarefaCriadaId;
+    await Promise.all(listaAprovadoresFrete.map((aprovadorId) =>
+      criarNotificacao({
+        usuarioId: aprovadorId,
+        tipo: "aprovacao",
+        titulo: "Frete avulso solicitado",
+        mensagem: numeroVendaSolicitacao
+          ? `Solicitação de frete avulso da venda ${numeroVendaSolicitacao} aguardando decisão.`
+          : "Solicitação de frete avulso aguardando decisão.",
+        remetenteId: userId,
+        link: `/tarefas?abrir=${tarefaIdNotif}`,
+      }).catch(() => {})
+    ));
+  }
 
   // Buscar nome/telefone do motoboy para retornar na resposta.
   // REGRA DE NEGÓCIO (pool — patch A2): corrida de pool nasce SEM motoboy
@@ -2275,9 +2382,9 @@ export async function criarFreteAvulso(
  * REGRA DE NEGÓCIO: a liberação é o momento em que o custo do frete avulso é
  * de fato assumido pela loja — por isso é AQUI (e não na solicitação) que o
  * saldo da gerente é lançado (lancarSaldoFreteAvulsoNoTx). A checagem de QUEM
- * pode liberar (modelo POOL: qualquer liberador ativo — tabela
- * frete_avulso_liberadores — ou admin/dev/diretor, ver
- * podeGerenciarSolicitacoesAvulso) fica na rota; esta função só valida o
+ * pode liberar (modelo TAREFA/POOL: qualquer aprovador da chave de config
+ * aprovadores_frete_avulso — ou admin/dev/diretor, ver
+ * podeGerenciarSolicitacoesAvulso) fica na rota/dispatcher; esta função só valida o
  * ESTADO da entrega.
  *
  * O QUE: tranca a linha (FOR UPDATE) dentro da transação para evitar liberar

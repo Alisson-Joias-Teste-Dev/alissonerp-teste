@@ -44,6 +44,10 @@ export interface Tarefa {
   created_at: string;
   updated_at: string;
   concluida_em: string | null;
+  // ADITIVO (migration 346, modelo TAREFA/POOL) — só relevante quando
+  // tipo==='frete_avulso'. Calculado no servidor (GET /api/tarefas); NÃO é a
+  // autoridade final de permissão (o dispatcher revalida sempre).
+  pode_decidir_pool?: boolean;
 }
 
 export interface Usuario { id: string; nome: string; }

@@ -3,9 +3,9 @@
  *
  * Recusa um frete avulso SOLICITADO pela consultora ('solicitada' -> 'cancelada').
  *
- * REGRA DE NEGÓCIO (migration 346, modelo POOL): mesma permissão de
- * liberar-avulso — qualquer liberador ativo (tabela
- * alissonerp.frete_avulso_liberadores) ou admin/dev/diretor
+ * REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL): mesma permissão de
+ * liberar-avulso — qualquer aprovador da chave de config
+ * `aprovadores_frete_avulso` ou admin/dev/diretor
  * (podeGerenciarSolicitacoesAvulso). Não há mais responsável designado. Exige
  * motivo (mín. 3 caracteres) para dar rastreabilidade à consultora sobre
  * por que a corrida não foi liberada.

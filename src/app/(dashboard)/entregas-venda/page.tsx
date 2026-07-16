@@ -22,7 +22,6 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
-import { podeGerenciarSolicitacoesAvulso } from "@/lib/entrega-venda";
 import EntregasVendaClient from "./EntregasVendaClient";
 
 export const dynamic = "force-dynamic";
@@ -85,15 +84,11 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     WHERE id = ${user.id}::uuid LIMIT 1
   `;
 
-  // REGRA DE NEGÓCIO (migration 346, modelo POOL): além dos ROLES_PERMITIDOS,
-  // um liberador de frete avulso (tabela frete_avulso_liberadores) também
-  // precisa acessar a tela — é aqui que ele vê/decide a aba "Solicitações",
-  // mesmo com role fora da lista padrão (ex: estoquista).
-  // IMPACTO SE REMOVIDO: liberador configurado é redirecionado para "/" e
-  // nunca vê a própria aba de solicitações.
-  const ehGestorSolicitacoes = await podeGerenciarSolicitacoesAvulso(user.id, (usuario?.role as string) ?? null);
-
-  if (!usuario || (!ROLES_PERMITIDOS.includes(usuario.role as string) && !ehGestorSolicitacoes)) {
+  // REGRA DE NEGÓCIO (migration 346 — REVERTIDO na virada V2): o portão
+  // especial para o liberador de frete avulso (aba "Solicitações") foi
+  // removido junto com a aba — volta a ser role-only. A V3 recria o acesso
+  // à solicitação/decisão de outra forma (tarefa, não uma aba própria aqui).
+  if (!usuario || !ROLES_PERMITIDOS.includes(usuario.role as string)) {
     redirect("/");
   }
 
@@ -117,19 +112,15 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     ? sql`AND ve.vendedor_id = ${vendedorId}`
     : sql``;
 
-  // REGRA DE NEGÓCIO (frete avulso, modelo POOL): a lista operacional NÃO
-  // mostra 'cancelada' nem 'solicitada' por padrão — 'solicitada' é a etapa
-  // "aguardando liberação" do avulso e não é uma entrega operável ainda.
-  // O filtro ?situacao=solicitada só é honrado para quem gerencia liberações
-  // (ehGestorSolicitacoes); para os demais, cai no mesmo default (exclui
-  // cancelada/solicitada), senão qualquer usuário via URL veria a fila de
-  // solicitações de outras consultoras.
+  // REGRA DE NEGÓCIO (frete avulso): a lista operacional NÃO mostra
+  // 'cancelada' nem 'solicitada' por padrão — 'solicitada' é a etapa
+  // "aguardando liberação" do avulso e não é uma entrega operável ainda
+  // (fix do vazamento SSR mantido da virada V2 — mesmo sem a aba própria de
+  // solicitações, o default continua excluindo os dois).
   // IMPACTO SE REMOVIDO: solicitações pendentes de liberação vazam para a
   // lista principal e inflam a contagem "total" para todo mundo.
   const whereSituacao = situacao
-    ? (situacao === "solicitada" && !ehGestorSolicitacoes
-        ? sql`AND ev.situacao NOT IN ('cancelada', 'solicitada')`
-        : sql`AND ev.situacao = ${situacao}`)
+    ? sql`AND ev.situacao = ${situacao}`
     : sql`AND ev.situacao NOT IN ('cancelada', 'solicitada')`;
 
   // Filtro de busca: código de entrega ou número da venda (case-insensitive)
@@ -261,7 +252,11 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
       dataInicioFiltro={dataInicio}
       dataFimFiltro={dataFim}
       userRole={usuario.role as string}
-      podeLiberarSolicitacoes={ehGestorSolicitacoes}
+      // ADITIVO REVERTIDO (V2): a aba "Solicitações" e o cálculo de
+      // ehGestorSolicitacoes saem nesta virada (V3 recria via tarefa, não
+      // aba própria). Prop mantida (obrigatória em EntregasVendaClient) só
+      // para não quebrar o tsc — sempre false até a V3 decidir o que entra aqui.
+      podeLiberarSolicitacoes={false}
     />
   );
 }

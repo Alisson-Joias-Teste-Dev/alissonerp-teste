@@ -25,6 +25,7 @@ import { zodError } from "@/lib/schemas/common";
 import { processarAprovacaoQuebraLimpeza } from "@/lib/limpeza-ouro-aprovacao";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } from "@/lib/entrega-sem-pagamento";
+import { liberarFreteAvulso, recusarFreteAvulso } from "@/lib/entrega-venda";
 
 const AprovacaoTarefaPostSchema = z.object({
   aprovador_id: z.string().min(1, "obrigatório"),
@@ -328,13 +329,40 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   `;
   const isAdminOuDev = ["admin", "desenvolvedor"].includes(usuarioLogado?.role ?? "");
 
+  /**
+   * REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL — ADITIVO, escopado
+   * SÓ para tipo='frete_avulso'): além do aprovador_id fixo da linha (gravado
+   * na criação com o 1º da lista) e do admin/dev, QUALQUER usuário da chave de
+   * config `aprovadores_frete_avulso` pode decidir a MESMA tarefa — não existe
+   * responsável único no pool. Só entra nesse caminho quando o usuário logado
+   * não é nem o aprovador_id da linha nem admin/dev, e só consulta a tarefa/
+   * config quando necessário (não roda para os demais tipos de aprovação).
+   * IMPACTO SE REMOVIDO: só o aprovador_id fixo conseguiria decidir — os
+   * demais do pool ficariam sem acesso, voltando ao "responsável designado"
+   * que este modelo veio substituir.
+   */
+  let isPoolFreteAvulso = false;
   if (String(aprovacao.aprovador_id) !== user.id && !isAdminOuDev) {
+    const [tarefaTipoCheck] = await sql`
+      SELECT tipo FROM alissonerp.tarefas WHERE id = ${Number(id)} LIMIT 1
+    `;
+    if (tarefaTipoCheck?.tipo === "frete_avulso") {
+      const [cfgPool] = await sql`
+        SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadores_frete_avulso'
+      `;
+      const listaPool = String(cfgPool?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      isPoolFreteAvulso = listaPool.includes(user.id);
+    }
+  }
+
+  if (String(aprovacao.aprovador_id) !== user.id && !isAdminOuDev && !isPoolFreteAvulso) {
     return NextResponse.json({ error: "Somente o aprovador pode responder" }, { status: 403 });
   }
 
   await sql`
     UPDATE alissonerp.aprovacoes_tarefa
     SET status = ${body.decisao}, motivo = ${body.motivo ?? null}, respondido_em = now()
+      ${isPoolFreteAvulso ? sql`, aprovador_id = ${user.id}::uuid` : sql``}
     WHERE id = ${body.aprovacao_id}
   `;
 
@@ -633,6 +661,43 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ ok: true, compra_metal: resultado });
     } catch (err) {
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] compra_metal`, err);
+    }
+  }
+
+  /**
+   * REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL): solicitação de
+   * frete avulso feita pela consultora vira tarefa (ver criarFreteAvulso em
+   * src/lib/entrega-venda.ts). Ao APROVAR, libera a corrida (lança o saldo da
+   * gerente); ao REJEITAR, recusa (exige motivo). Reuso puro — as libs
+   * liberarFreteAvulso/recusarFreteAvulso já fazem saldo/FOR UPDATE/motivo;
+   * este bloco só localiza a entrega pela tarefa e delega.
+   * IMPACTO SE ALTERADO: duplicar a lógica aqui arrisca lançar saldo em dobro
+   * ou divergir do que a lib já garante com FOR UPDATE.
+   */
+  if (tarefaInfo?.tipo === "frete_avulso") {
+    try {
+      const [entregaFrete] = await sql`
+        SELECT id FROM alissonerp.entregas_venda WHERE tarefa_aprovacao_id = ${Number(id)} LIMIT 1
+      `;
+      if (!entregaFrete) {
+        return NextResponse.json(
+          { error: "Entrega de frete avulso não encontrada para esta tarefa" }, { status: 404 },
+        );
+      }
+      if (body.decisao === "aprovado") {
+        await liberarFreteAvulso(Number(entregaFrete.id), user.id);
+      } else {
+        if (!body.motivo?.trim()) {
+          return NextResponse.json({ error: "Motivo é obrigatório para recusar o frete avulso" }, { status: 400 });
+        }
+        await recusarFreteAvulso(Number(entregaFrete.id), user.id, body.motivo);
+      }
+      return NextResponse.json({
+        ok: true,
+        frete_avulso: { entrega_id: Number(entregaFrete.id), decisao: body.decisao },
+      });
+    } catch (err) {
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] frete_avulso`, err);
     }
   }
 

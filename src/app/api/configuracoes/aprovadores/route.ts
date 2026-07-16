@@ -36,6 +36,12 @@ const CHAVES = [
   // MULTI (vários UUIDs separados por vírgula): quem aprova a devolução da peça
   // quando a reserva do crediário vira vale-crédito (endpoint reserva/.../devolver-peca).
   "aprovadores_devolver_peca",
+  // MULTI (vários UUIDs separados por vírgula): pool de quem pode liberar/recusar
+  // uma solicitação de frete avulso feita pela consultora (migration 346, modelo
+  // TAREFA/POOL). Substitui a antiga tabela frete_avulso_liberadores — qualquer
+  // um da lista decide a MESMA tarefa de aprovação (ver módulo Tarefas, tipo
+  // 'frete_avulso'). Espelha exatamente o padrão de aprovadores_devolver_peca.
+  "aprovadores_frete_avulso",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
@@ -125,6 +131,8 @@ export async function GET() {
       aprovador_vale_troca_excecao: configMap.get("aprovador_vale_troca_excecao") ?? "",
       // MULTI: lista de UUIDs separados por vírgula.
       aprovadores_devolver_peca: configMap.get("aprovadores_devolver_peca") ?? "",
+      // MULTI: pool de liberadores do frete avulso solicitado (migration 346).
+      aprovadores_frete_avulso: configMap.get("aprovadores_frete_avulso") ?? "",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -212,6 +220,14 @@ export async function PUT(req: NextRequest) {
         String(body.aprovadores_devolver_peca).split(",").map((s) => s.trim()).filter(Boolean)
       )).join(",");
       updates.push({ chave: "aprovadores_devolver_peca", valor: lista });
+    }
+    // MULTI: pool de liberadores do frete avulso (migration 346, modelo TAREFA/POOL).
+    // Normaliza igual ao bloco de aprovadores_devolver_peca acima.
+    if (body.aprovadores_frete_avulso !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_frete_avulso).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_frete_avulso", valor: lista });
     }
 
     for (const u of updates) {

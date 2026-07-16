@@ -26,7 +26,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { criarEntrega, podeGerenciarSolicitacoesAvulso } from "@/lib/entrega-venda";
+import { criarEntrega } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
 import { authOr401, ForbiddenError } from "@/lib/auth-server";
 import { isVendasFullAccess, requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
@@ -79,15 +79,10 @@ export async function GET(req: NextRequest) {
     WHERE id = ${user.id}::uuid LIMIT 1
   `;
 
-  // REGRA DE NEGÓCIO (migration 346, modelo POOL): além dos ROLES_ENTREGAS,
-  // um liberador de frete avulso (tabela frete_avulso_liberadores) também
-  // precisa acessar esta rota — é daqui que ele vê a aba de solicitações
-  // ('situacao=solicitada'), mesmo que a role dele (ex: estoquista) não
-  // esteja na lista padrão de quem vê entregas.
-  // IMPACTO SE REMOVIDO: liberador configurado fica sem acesso à própria
-  // aba de solicitações.
-  const ehGestorSolicitacoes = await podeGerenciarSolicitacoesAvulso(user.id, (usuario?.role as string) ?? null);
-  if (!usuario || (!ROLES_ENTREGAS.includes(usuario.role as string) && !ehGestorSolicitacoes)) {
+  // REGRA DE NEGÓCIO (migration 346 — REVERTIDO na virada V2): o portão
+  // especial para o liberador de frete avulso (aba "Solicitações") foi
+  // removido junto com a aba — volta a ser role-only.
+  if (!usuario || !ROLES_ENTREGAS.includes(usuario.role as string)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -131,18 +126,6 @@ export async function GET(req: NextRequest) {
   const whereSituacao = situacao
     ? sql`AND ev.situacao = ${situacao}`
     : sql`AND ev.situacao NOT IN ('cancelada', 'solicitada')`;
-
-  // REGRA DE NEGÓCIO (migration 346, modelo POOL): a aba "Solicitações"
-  // (?situacao=solicitada) mostra TODAS as solicitações pendentes de decisão
-  // para QUALQUER liberador do pool — não filtra por responsável (não existe
-  // mais). Só quem pode gerenciar (podeGerenciarSolicitacoesAvulso) acessa
-  // esse filtro; os demais recebem 403 (evita vazar quem solicitou frete e
-  // o endereço de entrega para quem não decide sobre isso).
-  // IMPACTO SE REMOVIDO: qualquer usuário com acesso à listagem veria todas
-  // as solicitações de frete avulso, mesmo sem poder liberar/recusar.
-  if (situacao === "solicitada" && !ehGestorSolicitacoes) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
-  }
 
   const whereMotoboy = motoboyId
     ? sql`AND ev.motoboy_id = ${Number(motoboyId)}`

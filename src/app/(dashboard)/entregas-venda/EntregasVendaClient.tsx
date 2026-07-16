@@ -89,14 +89,12 @@ interface EntregasVendaClientProps {
   /** Role do usuário logado */
   userRole: string;
   /**
-   * REGRA DE NEGÓCIO (migration 346, modelo POOL): true quando o usuário
-   * logado pode gerenciar (ver/liberar/recusar) solicitações de frete avulso
-   * — é full-access (admin/dev/diretor) OU liberador ativo cadastrado em
-   * alissonerp.frete_avulso_liberadores (calculado no SSR via
-   * podeGerenciarSolicitacoesAvulso). A aba "Solicitações" em si (UI) é
-   * implementada em outra tarefa — este prop só habilita o acesso.
-   * IMPACTO SE REMOVIDO: o client não tem como saber se deve mostrar a aba
-   * de solicitações para roles fora da lista padrão de entregas.
+   * REGRA DE NEGÓCIO (migration 346 — REVERTIDO na virada V2 pra modelo
+   * TAREFA/POOL): a aba "Solicitações" desta tela e o cálculo de
+   * ehGestorSolicitacoes foram removidos — a decisão de frete avulso agora
+   * acontece pelo módulo Tarefas (ver src/lib/entrega-venda.ts e
+   * PATCH /api/tarefas/[id]/aprovacao, tipo 'frete_avulso'). Prop mantida
+   * (sempre false) só para não quebrar o tsc; sai de vez na V3.
    */
   podeLiberarSolicitacoes: boolean;
 }

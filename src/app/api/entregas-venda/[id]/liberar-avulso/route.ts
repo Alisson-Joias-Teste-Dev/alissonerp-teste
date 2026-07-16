@@ -3,10 +3,10 @@
  *
  * Libera um frete avulso SOLICITADO pela consultora ('solicitada' -> 'pendente').
  *
- * REGRA DE NEGÓCIO (migration 346, modelo POOL): pode liberar qualquer
- * liberador ativo (tabela alissonerp.frete_avulso_liberadores) ou
- * admin/dev/diretor (podeGerenciarSolicitacoesAvulso) — não há mais
- * responsável designado; qualquer um do pool decide qualquer solicitação. A
+ * REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL): pode liberar qualquer
+ * aprovador da chave de config `aprovadores_frete_avulso` (Config ›
+ * Aprovadores) ou admin/dev/diretor (podeGerenciarSolicitacoesAvulso) — não há
+ * mais responsável designado; qualquer um do pool decide qualquer solicitação. A
  * liberação é o momento em que o custo do frete é assumido pela loja — o
  * saldo da gerente é lançado dentro de liberarFreteAvulso() na lib.
  *

@@ -49,6 +49,25 @@ export async function GET(req: NextRequest) {
 
   const tagsList = tagsParam ? tagsParam.split(",").map(t => t.trim()).filter(Boolean) : [];
 
+  /**
+   * REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL — ADITIVO, escopado
+   * SÓ para tipo='frete_avulso'): além de responsavel_id/criado_por, quem está
+   * na chave de config `aprovadores_frete_avulso` também enxerga as tarefas de
+   * frete avulso — é o pool que decide (qualquer um, não só o 1º gravado como
+   * responsavel_id). Lida uma única vez por request (evita N+1 por linha).
+   * NÃO afeta a visibilidade dos demais tipos de tarefa.
+   * IMPACTO SE REMOVIDO: só o 1º aprovador da lista (responsavel_id) veria a
+   * tarefa — os demais do pool nunca a encontrariam para decidir.
+   */
+  let isPoolFreteAvulso = false;
+  if (!isAdmin) {
+    const [cfgPoolFrete] = await sql`
+      SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadores_frete_avulso'
+    `;
+    const listaPoolFrete = String(cfgPoolFrete?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    isPoolFreteAvulso = listaPoolFrete.includes(userId);
+  }
+
   const tarefas = await sql`
     SELECT
       t.id, t.titulo, t.descricao, t.prioridade, t.status, t.tipo,
@@ -69,12 +88,12 @@ export async function GET(req: NextRequest) {
           : visao === "time"
             ? sql``
             : !isAdmin
-              ? sql`AND (t.responsavel_id = ${userId}::uuid OR t.criado_por = ${userId}::uuid)`
+              ? sql`AND (t.responsavel_id = ${userId}::uuid OR t.criado_por = ${userId}::uuid OR (t.tipo = 'frete_avulso' AND ${isPoolFreteAvulso}::boolean))`
               : sql``}
       ${(visao === "aguardando_aprovacao" || visao === "aguardando")
         ? (isAdmin
             ? sql`AND t.status = 'aguardando_aprovacao'`
-            : sql`AND t.status = 'aguardando_aprovacao' AND t.responsavel_id = ${userId}::uuid`)
+            : sql`AND t.status = 'aguardando_aprovacao' AND (t.responsavel_id = ${userId}::uuid OR (t.tipo = 'frete_avulso' AND ${isPoolFreteAvulso}::boolean))`)
         : sql``}
       ${visao === "concluidas" ? sql`AND t.status IN ('concluida', 'aprovada')` : sql``}
       ${visao === "pendentes" ? sql`AND t.status IN ('pendente', 'em_andamento', 'aguardando_aprovacao')` : sql``}
@@ -94,7 +113,22 @@ export async function GET(req: NextRequest) {
     LIMIT 200
   `;
 
-  return NextResponse.json(tarefas);
+  /**
+   * REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL — ADITIVO, escopado
+   * SÓ para tipo='frete_avulso'): expõe um flag calculado no servidor (em vez
+   * de mandar a lista de UUIDs do pool pro client) para o TarefaDrawer decidir
+   * se mostra os botões Aprovar/Rejeitar a um usuário que NÃO é o
+   * responsavel_id da tarefa. Não é a autoridade final — o dispatcher
+   * (PATCH /api/tarefas/[id]/aprovacao) sempre revalida no servidor.
+   * IMPACTO SE REMOVIDO: pool decide certo no backend, mas o botão de decisão
+   * não aparece pra quem não é o responsavel_id gravado na criação.
+   */
+  const tarefasComFlag = tarefas.map((t: Record<string, unknown>) => ({
+    ...t,
+    pode_decidir_pool: t.tipo === "frete_avulso" && (isAdmin || isPoolFreteAvulso),
+  }));
+
+  return NextResponse.json(tarefasComFlag);
 }
 
 export async function POST(req: NextRequest) {
