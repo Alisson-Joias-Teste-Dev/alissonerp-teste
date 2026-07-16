@@ -1,124 +1,224 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { useState, useCallback } from "react";
+import { Search, CheckCircle2, Truck, HandHeart, Undo2, UserCheck, X, Plus, Package } from "lucide-react";
+import TreinamentoLayout, { type ColaItem } from "@/components/treinamentos/TreinamentoLayout";
+import { type PassoTreino } from "@/components/treinamentos/TreinamentoPlayer";
 import {
-  ArrowLeft, Play, Pause, Search, Camera, CheckCircle2, Truck, HandHeart,
-  Undo2, UserCheck, X, Info, Upload, Loader2,
-} from "lucide-react";
+  CT, criarStatusChip, type ChipDef, Cursor, BotaoMock, CardMock, TelaMock,
+  MenuMock, FotoObrigatoria, TimelineMock, nb,
+} from "@/components/treinamentos/cenario";
 
-const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8", cremeBg: "#FAFAF7" };
+/**
+ * TREINAMENTO — Movimentação Interna (v2, 16/07/2026).
+ * É o EXEMPLO DE REFERÊNCIA do formato padrão: só conteúdo (status, passos,
+ * cola e a prática); o player e a casca vêm de @/components/treinamentos.
+ *
+ * IMPACTO SE ALTERADO: os rótulos/cores/botões abaixo espelham a tela real
+ * (`movimentacao-interna/MovimentacaoInternaClient.tsx` → statusInfo/acoesDoStatus).
+ * Se a tela mudar, ATUALIZE AQUI — treinamento que ensina tela que não existe
+ * mais é pior do que não ter treinamento.
+ */
 
-type ChipTone = "amber" | "blue" | "slate" | "green";
-const TONE: Record<ChipTone, { bg: string; fg: string }> = {
-  amber: { bg: "#FBEFCF", fg: "#8A5A0B" },
-  blue:  { bg: "#E7EFFA", fg: "#2159A0" },
-  slate: { bg: "#ECEEEA", fg: "#586159" },
-  green: { bg: "#E4F1E9", fg: "#1C7A4C" },
+// ─── Status: cópia fiel de statusInfo() da tela real ──────────────────────────
+type StatusKey = "solicitado" | "entregue" | "recebido" | "volta_solicitada" | "cliente_levou" | "devolvido";
+const STATUS: Record<StatusKey, ChipDef> = {
+  solicitado:       { label: "Solicitado",        bg: "#FEF3C7", color: "#92400E" },
+  entregue:         { label: "Entregue",          bg: "#EFF6FF", color: "#2563EB" },
+  recebido:         { label: "Com a solicitante", bg: "#F3F4F6", color: "#6B7280" },
+  volta_solicitada: { label: "Volta solicitada",  bg: "#FEF3C7", color: "#92400E" },
+  cliente_levou:    { label: "Cliente levou",     bg: "#ECFDF5", color: "#059669" },
+  devolvido:        { label: "Devolvido",         bg: "#F3F4F6", color: "#6B7280" },
 };
-function Chip({ tone, children }: { tone: ChipTone; children: React.ReactNode }) {
-  const t = TONE[tone];
-  return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ backgroundColor: t.bg, color: t.fg }}>{children}</span>;
-}
+const StatusChip = criarStatusChip(STATUS);
 
-// ─── Simulador automático (toca sozinho) ──────────────────────────────────────
-interface Cena {
-  passo: string; quem: string; legenda: string; render: React.ReactNode;
-}
-function telaSolicitar() {
-  return (
-    <div className="rounded-xl border p-3" style={{ borderColor: C.cremeBorder, background: "#fff" }}>
-      <p className="text-sm font-medium mb-2" style={{ color: "#111827" }}>Solicitar Peça</p>
-      <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[13px]" style={{ borderColor: C.cremeBorder, color: "#9CA3AF" }}>
-        <Search size={13} /> anel…
-      </div>
-      <div className="flex gap-1.5 mt-2 flex-wrap">
-        <span className="text-[12px] px-2 py-0.5 rounded-full" style={{ background: "#18403612", color: C.esmeralda }}>Anel AS1002</span>
-      </div>
-      <div className="rounded-lg border px-2.5 py-2 text-[12px] mt-2" style={{ borderColor: C.cremeBorder, color: "#9CA3AF", background: C.cremeBg }}>Descrição: todos os anéis da vitrine 3</div>
-    </div>
-  );
-}
-function telaCard(status: React.ReactNode, extra?: React.ReactNode, subtitulo?: string) {
-  return (
-    <div className="rounded-xl border p-3" style={{ borderColor: C.cremeBorder, background: "#fff" }}>
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-sm" style={{ color: "#111827" }}>Anel AS1002</p>
-          {subtitulo && <p className="text-[12px]" style={{ color: "#9CA3AF" }}>{subtitulo}</p>}
+const PECA = "Anel Solitário Ouro 18k";
+
+// ─── Os 11 passos ─────────────────────────────────────────────────────────────
+const PASSOS: PassoTreino[] = [
+  {
+    quem: "Consultora",
+    titulo: "Abrir a tela",
+    narracao: <>No menu lateral, abra {nb("Logística → Movimentação Interna")}. É aqui que fica tudo que saiu do estoque e ainda não voltou.</>,
+    tela: (
+      <MenuMock grupo="Logística" itens={[
+        { label: "Protocolo" },
+        { label: "Movimentação Interna", Icon: Package, ativo: true },
+        { label: "Entregas" },
+      ]} />
+    ),
+  },
+  {
+    quem: "Consultora",
+    titulo: "Clicar em Solicitar Peça",
+    narracao: <>No topo da tela, clique em {nb("Solicitar Peça")}.</>,
+    tela: (
+      <div className="rounded-xl border p-3" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[13px] font-semibold" style={{ color: "#111827" }}>Movimentação Interna</p>
+          <BotaoMock label="Solicitar Peça" Icon={Plus} cursor />
         </div>
-        {status}
+        <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[12px] mt-3" style={{ borderColor: CT.cremeBorder, color: "#9CA3AF" }}>
+          <Search size={12} /> Buscar por produto, SKU ou descrição...
+        </div>
       </div>
-      {extra}
-    </div>
-  );
-}
-const camera = (
-  <div className="inline-flex items-center gap-1.5 text-[12px] mt-2 px-2 py-1 rounded" style={{ background: "#FBEFCF", color: "#8A5A0B" }}>
-    <Camera size={13} /> Foto obrigatória
-  </div>
-);
-const btn = (label: string, Icon?: React.ComponentType<{ size?: number }>) => (
-  <div className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg mt-2" style={{ background: C.esmeralda, color: C.creme }}>
-    {Icon && <Icon size={12} />}{label}
-  </div>
-);
-
-const CENAS: Cena[] = [
-  { passo: "1. Solicitar", quem: "Consultora", legenda: "A consultora busca a peça (ou descreve o lote) e clica em Solicitar. Sem foto — a peça ainda está no estoque.", render: telaSolicitar() },
-  { passo: "2. Confirmar entrega", quem: "Estoque", legenda: "O estoque separa a peça e confirma a entrega — com foto da peça saindo da mão dele.", render: telaCard(<Chip tone="amber">Solicitado</Chip>, <div>{camera}<div>{btn("Confirmar entrega", Truck)}</div></div>, "Solicitado por Débora") },
-  { passo: "3. Confirmar recebimento", quem: "Consultora", legenda: "Ao receber a peça na mão, a consultora confirma o recebimento — com foto.", render: telaCard(<Chip tone="blue">Entregue</Chip>, <div>{camera}<div>{btn("Confirmar recebimento", HandHeart)}</div></div>, "Entregue por Ana") },
-  { passo: "4. Finalizar", quem: "Consultora / Estoque", legenda: "Resolvido: ou o cliente levou (encerra na hora), ou volta ao estoque — e aí o estoque confirma a devolução com foto.", render: telaCard(<Chip tone="slate">Com a solicitante</Chip>, <div className="flex gap-1.5 mt-2 flex-wrap"><span className="inline-flex items-center gap-1 text-[12px] px-2.5 py-1.5 rounded-lg border" style={{ borderColor: "#CDD3CC", color: "#111827" }}><UserCheck size={12} />Cliente levou</span><span className="inline-flex items-center gap-1 text-[12px] px-2.5 py-1.5 rounded-lg border" style={{ borderColor: "#CDD3CC", color: "#111827" }}><Undo2 size={12} />Devolver ao estoque</span></div>, "Com você desde 14:20") },
-  { passo: "Encerrado", quem: "Histórico", legenda: "Fim. Tudo fica no histórico: quem fez cada passo, a data, a hora e as fotos. Nada some.", render: telaCard(<Chip tone="green">Cliente levou</Chip>, undefined, "Fechado por Débora") },
+    ),
+  },
+  {
+    quem: "Consultora",
+    titulo: "Buscar e marcar a peça",
+    narracao: <>Digite o {nb("nome ou o SKU")} e marque a peça. Pode marcar {nb("várias de uma vez")}.</>,
+    tela: (
+      <TelaMock titulo="Solicitar Peça">
+        <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[12px]" style={{ borderColor: CT.cremeBorder, color: "#374151" }}>
+          <Search size={12} style={{ color: "#9CA3AF" }} /> anel
+        </div>
+        <div className="mt-2 space-y-1">
+          <div className="relative flex items-center gap-2 px-2.5 py-2 rounded-lg border" style={{ borderColor: CT.esmeralda, background: "#18403610" }}>
+            <span className="w-3.5 h-3.5 rounded flex items-center justify-center" style={{ background: CT.esmeralda }}>
+              <CheckCircle2 size={9} style={{ color: CT.creme }} />
+            </span>
+            <span className="text-[12px] font-medium" style={{ color: CT.esmeralda }}>{PECA}</span>
+            <span className="text-[10px] font-mono ml-auto" style={{ color: "#9CA3AF" }}>AS1002</span>
+            <Cursor />
+          </div>
+          <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg border" style={{ borderColor: CT.cremeBorder }}>
+            <span className="w-3.5 h-3.5 rounded border" style={{ borderColor: "#D1D5DB" }} />
+            <span className="text-[12px]" style={{ color: "#374151" }}>Anel Aparador Cravejado</span>
+            <span className="text-[10px] font-mono ml-auto" style={{ color: "#9CA3AF" }}>AP204</span>
+          </div>
+        </div>
+      </TelaMock>
+    ),
+  },
+  {
+    quem: "Consultora",
+    titulo: "Lote grande? Use a Descrição",
+    narracao: <>Se for muita peça pra marcar uma a uma (uma bandeja inteira), escreva no campo {nb("Descrição (para lote grande)")}: “todos os anéis da vitrine 3”.</>,
+    porque: "Sem isso a consultora perde cinco minutos marcando peça por peça — e acaba não registrando nada. Um registro com descrição vale muito mais do que registro nenhum.",
+    tela: (
+      <TelaMock titulo="Solicitar Peça">
+        <p className="text-[11px] font-semibold mb-1" style={{ color: "#6B7280" }}>Descrição (para lote grande)</p>
+        <div className="rounded-lg border px-2.5 py-2 text-[12px]" style={{ borderColor: CT.esmeralda, color: "#374151", minHeight: 42 }}>
+          todos os anéis da vitrine 3
+          <span className="inline-block w-px h-3.5 ml-0.5 align-middle animate-pulse" style={{ background: CT.esmeralda }} />
+        </div>
+        <p className="text-[10px] mt-1" style={{ color: "#9CA3AF" }}>Ex: todos os anéis da vitrine 3</p>
+      </TelaMock>
+    ),
+  },
+  {
+    quem: "Consultora",
+    titulo: "Solicitar",
+    narracao: <>Clique em {nb("Solicitar")}. {nb("Aqui não tem foto")} — a peça ainda está no estoque, ninguém pegou nada.</>,
+    resultado: <StatusChip s="solicitado" />,
+    tela: (
+      <div className="space-y-2">
+        <div className="rounded-xl border px-3 py-2 flex justify-end items-center gap-2" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
+          <span className="text-[12px] px-3 py-1.5" style={{ color: "#6B7280" }}>Cancelar</span>
+          <BotaoMock label="Solicitar" cursor />
+        </div>
+        <CardMock titulo={PECA} sub="AS1002 · Solicitado por Débora · agora" chip={<StatusChip s="solicitado" />} />
+      </div>
+    ),
+  },
+  {
+    quem: "Estoque",
+    titulo: "Confirmar a entrega — com foto",
+    narracao: <>O estoque separa a peça e clica em {nb("Confirmar entrega")}. O sistema {nb("exige a foto")} — tire com a peça na mão, antes de passar pra consultora.</>,
+    porque: "A foto na saída prova o estado em que a peça saiu e que ela realmente saiu. Protege o estoquista: se aparecer um risco depois, a foto mostra como estava.",
+    resultado: <StatusChip s="entregue" />,
+    tela: (
+      <CardMock titulo={PECA} sub="AS1002 · Solicitado por Débora · 14:02" chip={<StatusChip s="solicitado" />}>
+        <FotoObrigatoria />
+        <div className="mt-2"><BotaoMock label="Confirmar entrega" Icon={Truck} cursor /></div>
+      </CardMock>
+    ),
+  },
+  {
+    quem: "Consultora",
+    titulo: "Confirmar o recebimento — com foto",
+    narracao: <>Ao pegar a peça {nb("na mão")}, clique em {nb("Confirmar recebimento")} e tire a foto.</>,
+    porque: "Fecha o elo. A partir daqui o sistema sabe que a peça está com você — e se ela sumir, dá pra saber em que mão estava.",
+    resultado: <StatusChip s="recebido" />,
+    tela: (
+      <CardMock titulo={PECA} sub="AS1002 · Entregue por Ana · 14:05" chip={<StatusChip s="entregue" />} etiquetas={["Foto da Entrega"]}>
+        <FotoObrigatoria />
+        <div className="mt-2"><BotaoMock label="Confirmar recebimento" Icon={HandHeart} cursor /></div>
+      </CardMock>
+    ),
+  },
+  {
+    quem: "Consultora",
+    titulo: "Desfecho A — Cliente levou",
+    narracao: <>Vendeu? Clique em {nb("Cliente levou")}. Encerra na hora e {nb("não pede foto")} — a peça saiu com o cliente.</>,
+    resultado: <StatusChip s="cliente_levou" />,
+    tela: (
+      <CardMock titulo={PECA} sub="Com você desde 14:20" chip={<StatusChip s="recebido" />} etiquetas={["Foto da Entrega", "Foto do Recebimento"]}>
+        <div className="flex gap-1.5 mt-2 flex-wrap">
+          <BotaoMock label="Cliente levou" Icon={UserCheck} primario={false} cursor />
+          <BotaoMock label="Devolver ao estoque" Icon={Undo2} primario={false} />
+        </div>
+      </CardMock>
+    ),
+  },
+  {
+    quem: "Consultora",
+    titulo: "Desfecho B — Devolver ao estoque",
+    narracao: <>Não vendeu? Clique em {nb("Devolver ao estoque")}. Atenção: isso {nb("ainda NÃO encerra")} — só avisa o estoque que a peça está voltando.</>,
+    porque: "É o passo que mais gera peça esquecida. Muita gente clica aqui, entrega a peça na mão e acha que acabou — mas o card fica em “Volta solicitada” até o estoque confirmar.",
+    resultado: <StatusChip s="volta_solicitada" />,
+    tela: (
+      <CardMock titulo={PECA} sub="Com você desde 14:20" chip={<StatusChip s="recebido" />} etiquetas={["Foto da Entrega", "Foto do Recebimento"]}>
+        <div className="flex gap-1.5 mt-2 flex-wrap">
+          <BotaoMock label="Cliente levou" Icon={UserCheck} primario={false} />
+          <BotaoMock label="Devolver ao estoque" Icon={Undo2} primario={false} cursor />
+        </div>
+      </CardMock>
+    ),
+  },
+  {
+    quem: "Estoque",
+    titulo: "Confirmar a devolução — com foto",
+    narracao: <>O estoque recebe a peça de volta e clica em {nb("Confirmar devolução")}, com foto. {nb("Só agora")} a solicitação encerra.</>,
+    porque: "A volta é em dois tempos de propósito: não basta dizer que devolveu — o estoque confirma que recebeu. Enquanto ninguém confirma, a peça continua na sua responsabilidade.",
+    resultado: <StatusChip s="devolvido" />,
+    tela: (
+      <CardMock titulo={PECA} sub="Volta pedida por Débora · 17:40" chip={<StatusChip s="volta_solicitada" />} etiquetas={["Foto da Entrega", "Foto do Recebimento"]}>
+        <FotoObrigatoria />
+        <div className="mt-2"><BotaoMock label="Confirmar devolução" Icon={CheckCircle2} cursor /></div>
+      </CardMock>
+    ),
+  },
+  {
+    quem: "Todos",
+    titulo: "Conferir o histórico",
+    narracao: <>Clique em {nb("qualquer card")} pra abrir a linha do tempo: quem fez cada passo, data, hora e as fotos. {nb("Nada é apagado.")}</>,
+    tela: (
+      <TelaMock titulo="Histórico da solicitação" acessorio={<StatusChip s="devolvido" />}>
+        <TimelineMock linhas={[
+          { t: "Solicitado", q: "Débora", h: "14:02" },
+          { t: "Entregue", q: "Ana", h: "14:05", foto: true },
+          { t: "Recebido", q: "Débora", h: "14:20", foto: true },
+          { t: "Volta solicitada", q: "Débora", h: "17:40" },
+          { t: "Devolvido", q: "Ana", h: "17:52", foto: true },
+        ]} />
+      </TelaMock>
+    ),
+  },
 ];
 
-function SimuladorAutomatico() {
-  const [i, setI] = useState(0);
-  const [tocando, setTocando] = useState(true);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+// ─── Cola rápida ──────────────────────────────────────────────────────────────
+const COLA: ColaItem[] = [
+  { chip: <StatusChip s="solicitado" />, txt: "A consultora pediu. A peça ainda está no estoque." },
+  { chip: <StatusChip s="entregue" />, txt: "O estoque já entregou (com foto). Falta a consultora confirmar que pegou." },
+  { chip: <StatusChip s="recebido" />, txt: "A peça está na mão da consultora. A responsabilidade é dela até encerrar." },
+  { chip: <StatusChip s="volta_solicitada" />, txt: "A consultora devolveu, mas o estoque ainda NÃO confirmou. Não está encerrada." },
+  { chip: <StatusChip s="cliente_levou" />, txt: "Encerrada: o cliente levou a peça." },
+  { chip: <StatusChip s="devolvido" />, txt: "Encerrada: o estoque confirmou o retorno da peça (com foto)." },
+];
 
-  useEffect(() => {
-    // Respeita quem prefere menos animação: começa pausado.
-    const reduz = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (reduz) setTocando(false);
-  }, []);
-
-  useEffect(() => {
-    if (!tocando) return;
-    timer.current = setTimeout(() => setI((v) => (v + 1) % CENAS.length), 3800);
-    return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [i, tocando]);
-
-  const cena = CENAS[i];
-  return (
-    <div className="rounded-2xl border overflow-hidden" style={{ borderColor: C.cremeBorder, background: C.cremeBg }}>
-      <div className="flex items-center justify-between px-4 py-2.5 border-b" style={{ borderColor: C.cremeBorder }}>
-        <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Demonstração automática</span>
-        <button onClick={() => setTocando((v) => !v)} className="flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-lg" style={{ background: "#18403612", color: C.esmeralda }} aria-label={tocando ? "Pausar" : "Tocar"}>
-          {tocando ? <Pause size={13} /> : <Play size={13} />}{tocando ? "Pausar" : "Tocar"}
-        </button>
-      </div>
-      <div className="p-4">
-        <div className="flex items-center gap-2 mb-2 flex-wrap">
-          <span className="text-sm font-semibold" style={{ color: C.esmeralda }}>{cena.passo}</span>
-          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: C.esmeralda, color: C.creme }}>{cena.quem}</span>
-        </div>
-        <div className="max-w-sm mx-auto md:mx-0">{cena.render}</div>
-        <p className="text-[13px] mt-3" style={{ color: "#4B5563" }}>{cena.legenda}</p>
-      </div>
-      <div className="flex items-center gap-1.5 px-4 pb-3">
-        {CENAS.map((_, idx) => (
-          <button key={idx} onClick={() => { setI(idx); setTocando(false); }} aria-label={`Ir para o passo ${idx + 1}`}
-            className="h-1.5 rounded-full transition-all" style={{ width: idx === i ? 22 : 8, background: idx === i ? C.esmeralda : "#D6CFC0" }} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Simulador interativo (praticar Solicitar Peça) ───────────────────────────
+// ─── Prática: Solicitar Peça ──────────────────────────────────────────────────
 const CATALOGO = [
   { nome: "Anel Solitário Ouro 18k", sku: "AS1002" },
   { nome: "Anel Aparador Cravejado", sku: "AP204" },
@@ -147,36 +247,36 @@ function SimuladorInterativo() {
 
   if (feito) {
     return (
-      <div className="rounded-2xl border p-6 text-center" style={{ borderColor: C.cremeBorder, background: "#fff" }}>
-        <div className="w-11 h-11 rounded-full inline-flex items-center justify-center mb-2" style={{ background: C.esmeralda, color: C.creme }}><CheckCircle2 size={20} /></div>
+      <div className="rounded-2xl border p-6 text-center" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
+        <div className="w-11 h-11 rounded-full inline-flex items-center justify-center mb-2" style={{ background: CT.esmeralda, color: CT.creme }}><CheckCircle2 size={20} /></div>
         <p className="text-lg font-semibold" style={{ color: "#111827" }}>Solicitado!</p>
-        <div className="rounded-xl border p-3 mt-3 text-left" style={{ borderColor: C.cremeBorder, background: C.cremeBg }}>
-          <div className="flex items-center justify-between"><span className="text-[12px] font-mono" style={{ color: "#9CA3AF" }}>#124 · agora</span><Chip tone="amber">Solicitado</Chip></div>
+        <div className="rounded-xl border p-3 mt-3 text-left" style={{ borderColor: CT.cremeBorder, background: CT.cremeBg }}>
+          <div className="flex items-center justify-between"><span className="text-[12px] font-mono" style={{ color: "#9CA3AF" }}>#124 · agora</span><StatusChip s="solicitado" /></div>
           {sel.length > 0 && <p className="text-[13px] mt-1.5" style={{ color: "#374151" }}>{sel.map((p) => `${p.nome} (${p.sku})`).join(", ")}</p>}
           {desc.trim() && <p className="text-[13px] mt-1 italic" style={{ color: "#6B7280" }}>“{desc.trim()}”</p>}
         </div>
         <p className="text-[13px] mt-3" style={{ color: "#6B7280" }}>Agora o estoque separa e confirma a entrega, com foto.</p>
-        <button onClick={reset} className="mt-4 text-[13px] font-semibold px-4 py-2 rounded-lg" style={{ background: C.esmeralda, color: C.creme }}>Fazer outro</button>
+        <button onClick={reset} className="mt-4 text-[13px] font-semibold px-4 py-2 rounded-lg" style={{ background: CT.esmeralda, color: CT.creme }}>Fazer outro</button>
       </div>
     );
   }
 
   return (
-    <div className="rounded-2xl border overflow-hidden" style={{ borderColor: C.cremeBorder, background: "#fff" }}>
-      <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
+    <div className="rounded-2xl border overflow-hidden" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
+      <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: CT.cremeBorder }}>
         <p className="font-semibold text-[15px]" style={{ color: "#111827" }}>Solicitar Peça</p>
         <span className="text-[12px]" style={{ color: "#9CA3AF" }}>{sel.length > 0 ? `${sel.length} peça(s)` : "pratique aqui"}</span>
       </div>
       <div className="p-4">
         <div className="relative">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: "#9CA3AF" }} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Digite o nome ou o código (ex.: anel, AL440)…"
-            className="w-full pl-7 pr-3 py-2 rounded-lg border text-sm focus:outline-none" style={{ borderColor: C.cremeBorder }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar produto por nome ou SKU..."
+            className="w-full pl-7 pr-3 py-2 rounded-lg border text-sm focus:outline-none" style={{ borderColor: CT.cremeBorder }} />
         </div>
         {sel.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-2">
             {sel.map((p) => (
-              <span key={p.sku} className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-full" style={{ background: "#18403612", color: C.esmeralda }}>
+              <span key={p.sku} className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-full" style={{ background: "#18403612", color: CT.esmeralda }}>
                 {p.nome}<button onClick={() => toggle(p)} aria-label="remover"><X size={11} /></button>
               </span>
             ))}
@@ -184,153 +284,58 @@ function SimuladorInterativo() {
         )}
         <div className="mt-2 space-y-1 max-h-44 overflow-auto">
           {term.length < 2 ? <p className="text-center text-[13px] py-3" style={{ color: "#9CA3AF" }}>Digite ao menos 2 letras</p>
-            : found.length === 0 ? <p className="text-center text-[13px] py-3" style={{ color: "#9CA3AF" }}>Nenhuma peça encontrada</p>
+            : found.length === 0 ? <p className="text-center text-[13px] py-3" style={{ color: "#9CA3AF" }}>Nenhum produto encontrado</p>
             : found.map((p) => {
               const on = has(p.sku);
               return (
                 <button key={p.sku} onClick={() => toggle(p)} className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left border transition-colors"
-                  style={{ borderColor: on ? C.esmeralda : C.cremeBorder, background: on ? "#18403612" : "transparent" }}>
-                  <span className="w-4 h-4 rounded flex items-center justify-center border" style={{ background: on ? C.esmeralda : "#fff", borderColor: on ? C.esmeralda : "#D1D5DB" }}>
+                  style={{ borderColor: on ? CT.esmeralda : CT.cremeBorder, background: on ? "#18403612" : "transparent" }}>
+                  <span className="w-4 h-4 rounded flex items-center justify-center border" style={{ background: on ? CT.esmeralda : "#fff", borderColor: on ? CT.esmeralda : "#D1D5DB" }}>
                     {on && <svg width="9" height="7" viewBox="0 0 9 7" fill="none"><path d="M1 3L3.5 5.5L8 1" stroke="#F3EADA" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                   </span>
-                  <span className="flex-1"><span className="text-[13px] font-medium" style={{ color: C.esmeralda }}>{p.nome}</span><br /><span className="text-[11px] font-mono" style={{ color: "#9CA3AF" }}>{p.sku}</span></span>
+                  <span className="flex-1"><span className="text-[13px] font-medium" style={{ color: CT.esmeralda }}>{p.nome}</span><br /><span className="text-[11px] font-mono" style={{ color: "#9CA3AF" }}>{p.sku}</span></span>
                 </button>
               );
             })}
         </div>
 
-        <div className="mt-4 rounded-xl border border-dashed p-3" style={{ borderColor: C.esmeralda, background: C.cremeBg }}>
+        <div className="mt-4 rounded-xl border border-dashed p-3" style={{ borderColor: CT.esmeralda, background: CT.cremeBg }}>
           <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: C.esmeralda, color: C.creme }}>LOTE GRANDE?</span>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: CT.esmeralda, color: CT.creme }}>LOTE GRANDE?</span>
             <b className="text-[13px]" style={{ color: "#111827" }}>Use a descrição</b>
           </div>
-          <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} placeholder="Ex.: todos os anéis da vitrine 3"
-            className="w-full px-2.5 py-2 rounded-lg border text-sm focus:outline-none resize-none" style={{ borderColor: C.cremeBorder }} />
+          <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} placeholder="Ex: todos os anéis da vitrine 3"
+            className="w-full px-2.5 py-2 rounded-lg border text-sm focus:outline-none resize-none" style={{ borderColor: CT.cremeBorder }} />
           <div className="flex flex-wrap gap-1.5 mt-2">
             {EXEMPLOS.map((ex) => (
               <button key={ex} onClick={() => setDesc((d) => d ? `${d.replace(/\s*$/, "")}; ${ex}` : ex)}
-                className="text-[12px] px-2.5 py-1 rounded-full border" style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>“{ex}”</button>
+                className="text-[12px] px-2.5 py-1 rounded-full border" style={{ borderColor: CT.cremeBorder, color: CT.esmeralda }}>“{ex}”</button>
             ))}
           </div>
         </div>
       </div>
-      <div className="px-4 py-3 border-t flex justify-end gap-2" style={{ borderColor: C.cremeBorder }}>
+      <div className="px-4 py-3 border-t flex justify-end gap-2" style={{ borderColor: CT.cremeBorder }}>
         <button onClick={reset} className="text-[13px] px-3 py-2 rounded-lg" style={{ color: "#6B7280" }}>Limpar</button>
-        <button onClick={() => setFeito(true)} disabled={!pode} className="text-[13px] font-semibold px-4 py-2 rounded-lg disabled:opacity-45" style={{ background: C.esmeralda, color: C.creme }}>Solicitar</button>
+        <button onClick={() => setFeito(true)} disabled={!pode} className="text-[13px] font-semibold px-4 py-2 rounded-lg disabled:opacity-45" style={{ background: CT.esmeralda, color: CT.creme }}>Solicitar</button>
       </div>
-    </div>
-  );
-}
-
-// ─── Passo a passo + por que importa ──────────────────────────────────────────
-const PASSOS = [
-  { n: "1", titulo: "Solicitar a peça", quem: "Consultora", oque: "Busque por SKU ou, se for muita peça, escreva na descrição. Sem foto aqui.", porque: "Registra desde o começo quem pediu e o quê — o ponto de partida da rastreabilidade." },
-  { n: "2", titulo: "Confirmar a entrega", quem: "Estoque", oque: "Separe a peça e confirme com foto.", porque: "A foto na saída prova o estado da peça e que ela saiu do estoque. Protege o estoquista." },
-  { n: "3", titulo: "Confirmar o recebimento", quem: "Consultora", oque: "Ao pegar a peça, confirme com foto.", porque: "Fecha o elo: agora o sistema sabe que a peça está com você. Se sumir, dá pra saber em que mão estava." },
-  { n: "4", titulo: "Finalizar", quem: "Consultora / Estoque", oque: "Cliente levou (encerra) ou Devolver ao estoque (o estoque confirma com foto).", porque: "Sem finalizar, a peça fica “em aberto” pra sempre. A devolução em 2 passos garante que o estoque confirmou o retorno — não basta dizer que devolveu." },
-];
-
-// ─── Vídeo do treinamento (upload só pra desenvolvedor) ───────────────────────
-function VideoTreinamento({ videoUrl, isDev, treinamentoKey }: { videoUrl: string | null; isDev: boolean; treinamentoKey: string }) {
-  const router = useRouter();
-  const [enviando, setEnviando] = useState(false);
-  const [erro, setErro] = useState("");
-
-  if (!videoUrl && !isDev) return null;
-
-  async function enviar(file: File) {
-    setErro("");
-    if (file.size > 37 * 1024 * 1024) { setErro("Vídeo muito grande (máx ~37MB)."); return; }
-    setEnviando(true);
-    try {
-      const base64 = await new Promise<string>((res, rej) => {
-        const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(file);
-      });
-      const resp = await fetch("/api/treinamentos/video", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ treinamento_key: treinamentoKey, base64, mime: file.type || "video/mp4" }),
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data?.error ?? `Erro ${resp.status}`);
-      router.refresh();
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao enviar vídeo");
-    } finally {
-      setEnviando(false);
-    }
-  }
-
-  return (
-    <div className="mb-6">
-      {videoUrl ? (
-        <video controls preload="metadata" className="w-full rounded-2xl border" style={{ borderColor: C.cremeBorder, background: "#000", maxHeight: 420 }} src={videoUrl} />
-      ) : (
-        <div className="rounded-2xl border border-dashed p-6 text-center" style={{ borderColor: C.cremeBorder, background: C.cremeBg }}>
-          <p className="text-sm" style={{ color: "#6B7280" }}>Nenhum vídeo anexado a este treinamento ainda.</p>
-        </div>
-      )}
-      {isDev && (
-        <div className="mt-2 flex items-center gap-3 flex-wrap">
-          <label className="inline-flex items-center gap-2 text-[13px] font-semibold px-3 py-2 rounded-lg cursor-pointer" style={{ background: "#18403612", color: C.esmeralda }}>
-            {enviando ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-            {enviando ? "Enviando…" : videoUrl ? "Trocar vídeo" : "Anexar vídeo"}
-            <input type="file" accept="video/*" className="hidden" disabled={enviando}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) enviar(f); }} />
-          </label>
-          <span className="text-[12px]" style={{ color: "#9CA3AF" }}>Só o desenvolvedor vê este botão · máx ~37MB</span>
-          {erro && <span className="text-[12px]" style={{ color: "#DC2626" }}>{erro}</span>}
-        </div>
-      )}
     </div>
   );
 }
 
 interface TreinoProps { videoUrl: string | null; isDev: boolean; treinamentoKey: string }
 
-export default function MovimentacaoInternaTreino({ videoUrl, isDev, treinamentoKey }: TreinoProps) {
+export default function MovimentacaoInternaTreino(props: TreinoProps) {
   return (
-    <div className="px-3 md:px-6 py-4 md:py-8 max-w-3xl">
-      <Link href="/treinamentos" className="inline-flex items-center gap-1.5 text-sm mb-4" style={{ color: C.esmeralda }}>
-        <ArrowLeft size={15} /> Central de Treinamentos
-      </Link>
-
-      <h2 className="text-xl md:text-2xl font-semibold" style={{ fontFamily: "var(--font-playfair)", color: C.esmeralda }}>
-        Movimentação Interna
-      </h2>
-      <p className="text-sm mt-1 mb-5" style={{ color: "#6B7280" }}>
-        Registra quem está com cada peça dentro da loja — do estoque até voltar (ou o cliente levar). Cada troca de mão fica com foto, quem, data e hora.
-      </p>
-
-      <div className="flex items-start gap-2.5 rounded-xl border p-3 mb-6" style={{ borderColor: C.cremeBorder, background: C.cremeBg }}>
-        <Info size={16} className="mt-0.5 shrink-0" style={{ color: C.esmeralda }} />
-        <p className="text-[13px]" style={{ color: "#4B5563" }}><b style={{ color: "#111827" }}>Regra de ouro:</b> foto em toda troca de mão (entrega, recebimento, devolução). Nada é apagado — tudo grava quem fez, a data e a hora.</p>
-      </div>
-
-      <VideoTreinamento videoUrl={videoUrl} isDev={isDev} treinamentoKey={treinamentoKey} />
-
-      <SimuladorAutomatico />
-
-      <h3 className="text-base font-semibold mt-8 mb-1" style={{ color: "#111827" }}>Pratique você mesmo</h3>
-      <p className="text-[13px] mb-3" style={{ color: "#6B7280" }}>Sem medo — isto é um treino, não mexe no sistema. Foque em <b>quando usar a descrição</b> (lote grande).</p>
+    <TreinamentoLayout
+      {...props}
+      titulo="Movimentação Interna"
+      subtitulo="Registra quem está com cada peça dentro da loja — do estoque até voltar (ou o cliente levar). Cada troca de mão fica com foto, quem, data e hora."
+      regraDeOuro={<>foto em toda troca de mão (entrega, recebimento, devolução). Nada é apagado — tudo grava quem fez, a data e a hora.</>}
+      passos={PASSOS}
+      cola={COLA}
+      praticaSub={<>Sem medo — isto é um treino, não mexe no sistema. Foque em <b>quando usar a descrição</b> (lote grande).</>}
+    >
       <SimuladorInterativo />
-
-      <h3 className="text-base font-semibold mt-8 mb-3" style={{ color: "#111827" }}>Passo a passo — e por que cada passo importa</h3>
-      <div className="space-y-3">
-        {PASSOS.map((p) => (
-          <div key={p.n} className="rounded-xl border p-4" style={{ borderColor: C.cremeBorder, background: "#fff" }}>
-            <div className="flex items-center gap-2.5 mb-1.5">
-              <span className="w-7 h-7 rounded-full flex items-center justify-center text-sm font-semibold shrink-0" style={{ background: C.esmeralda, color: C.creme }}>{p.n}</span>
-              <b className="text-[15px]" style={{ color: "#111827" }}>{p.titulo}</b>
-              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "#18403612", color: C.esmeralda }}>{p.quem}</span>
-            </div>
-            <p className="text-[13px] ml-[38px]" style={{ color: "#4B5563" }}>{p.oque}</p>
-            <div className="ml-[38px] mt-2 rounded-lg px-3 py-2" style={{ background: C.cremeBg, borderLeft: `3px solid ${C.esmeralda}` }}>
-              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.esmeralda }}>Por que importa</span>
-              <p className="text-[13px] mt-0.5" style={{ color: "#4B5563" }}>{p.porque}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+    </TreinamentoLayout>
   );
 }

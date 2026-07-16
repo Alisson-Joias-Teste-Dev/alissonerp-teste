@@ -1,30 +1,18 @@
 import Link from "next/link";
-import { GraduationCap, ArrowRight, PackageOpen, Clock } from "lucide-react";
+import { GraduationCap, ArrowRight, Clock } from "lucide-react";
+import { TREINAMENTOS, EM_BREVE } from "@/lib/treinamentos";
 
 export const dynamic = "force-dynamic";
 
 const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8", cremeBg: "#FAFAF7" };
 
 /**
- * Central de Treinamentos — página de documentação/onboarding do sistema.
- * Lista os treinamentos disponíveis. Cada treinamento tem sua própria página
- * com simulador automático + passo a passo. Começa por Movimentação Interna.
+ * Central de Treinamentos — índice.
+ * A lista vem de `src/lib/treinamentos.ts` (registro único): treinamento novo =
+ * uma entrada lá, sem mexer nesta página. Cada treinamento tem página própria
+ * com o player passo a passo padrão (receita: .claude/commands/treinamento.md).
  * Acessível a qualquer usuário logado (não gateado por módulo).
  */
-const TREINAMENTOS: {
-  href: string; titulo: string; desc: string; publico: string; disponivel: boolean;
-}[] = [
-  {
-    href: "/treinamentos/movimentacao-interna",
-    titulo: "Movimentação Interna",
-    desc: "Como solicitar uma peça, entregar, receber e finalizar (cliente levou ou voltou ao estoque).",
-    publico: "Consultoras e estoque",
-    disponivel: true,
-  },
-];
-
-const EM_BREVE = ["Crediário", "Vendas / PDV", "Protocolo (Loja ↔ Fábrica)", "Conferência"];
-
 export default function TreinamentosPage() {
   return (
     <div className="px-3 md:px-6 py-4 md:py-8">
@@ -45,13 +33,13 @@ export default function TreinamentosPage() {
       <div className="grid gap-3 md:grid-cols-2">
         {TREINAMENTOS.map((t) => (
           <Link
-            key={t.href}
+            key={t.key}
             href={t.href}
             className="group rounded-2xl border bg-white p-5 transition-shadow hover:shadow-md flex flex-col"
             style={{ borderColor: C.cremeBorder }}
           >
             <div className="w-10 h-10 rounded-lg flex items-center justify-center mb-3" style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-              <PackageOpen size={18} />
+              <t.Icon size={18} />
             </div>
             <h3 className="text-base font-semibold" style={{ color: "#111827" }}>{t.titulo}</h3>
             <p className="text-sm mt-1 flex-1" style={{ color: "#6B7280" }}>{t.desc}</p>
