@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+
 // ─── Paleta ───────────────────────────────────────────────────────────────────
 const P = {
   card: "#ffffff",
@@ -63,6 +65,20 @@ export default function FormularioAprovador({
 }: FormularioAprovadorProps) {
   const valorAtual = String((config as any)[item.chave] ?? "");
   const lista = usuarios[item.usuariosKey] ?? [];
+  const [aberto, setAberto] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  // Fecha o dropdown ao clicar fora — mantém a tela compacta (select fechado
+  // por padrão) em vez da lista de checkboxes sempre expandida, que ficava
+  // poluída em chaves com muitos usuários elegíveis (ex.: admins/devs).
+  useEffect(() => {
+    if (!aberto) return;
+    function onClickFora(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setAberto(false);
+    }
+    document.addEventListener("mousedown", onClickFora);
+    return () => document.removeEventListener("mousedown", onClickFora);
+  }, [aberto]);
 
   return (
     <div
@@ -83,27 +99,45 @@ export default function FormularioAprovador({
 
       {item.multi ? (
         podeEditar ? (
-          <div className="rounded-lg border divide-y" style={{ borderColor: P.border }}>
-            {lista.map((u) => {
-              const sel = String(valorAtual).split(",").map((s) => s.trim()).includes(u.id);
-              return (
-                <button
-                  key={u.id}
-                  type="button"
-                  onClick={() => toggleMulti(item.chave, u.id)}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors"
-                  style={{ backgroundColor: sel ? "#eff6ff" : "#fff", color: P.texto }}
-                >
-                  <span style={{ color: sel ? "#2563eb" : "#9ca3af", fontSize: 16, lineHeight: 1 }}>
-                    {sel ? "☑" : "☐"}
-                  </span>
-                  <span style={{ fontWeight: sel ? 500 : 400 }}>{u.nome}{u.role ? ` (${u.role})` : ""}</span>
-                </button>
-              );
-            })}
-            <div className="px-3 py-1.5 text-[11px]" style={{ color: P.secundario, backgroundColor: "#fafafa" }}>
-              {String(valorAtual).split(",").map((s) => s.trim()).filter(Boolean).length} selecionado(s) — marque mais de um se quiser
-            </div>
+          <div className="relative" ref={boxRef}>
+            <button
+              type="button"
+              onClick={() => setAberto((v) => !v)}
+              className="w-full flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm text-left"
+              style={{ borderColor: P.border, color: P.texto, backgroundColor: "#fff" }}
+            >
+              <span className="truncate" style={{ color: getMultiNames(item.chave) ? P.texto : P.secundario }}>
+                {getMultiNames(item.chave) || "— Selecione um ou mais aprovadores —"}
+              </span>
+              <span style={{ color: P.secundario, fontSize: 11, flexShrink: 0 }}>
+                {aberto ? "▲" : "▼"}
+              </span>
+            </button>
+
+            {aberto && (
+              <div
+                className="absolute z-10 mt-1 w-full rounded-lg border divide-y shadow-lg max-h-64 overflow-y-auto"
+                style={{ borderColor: P.border, backgroundColor: "#fff" }}
+              >
+                {lista.map((u) => {
+                  const sel = String(valorAtual).split(",").map((s) => s.trim()).includes(u.id);
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => toggleMulti(item.chave, u.id)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors"
+                      style={{ backgroundColor: sel ? "#eff6ff" : "#fff", color: P.texto }}
+                    >
+                      <span style={{ color: sel ? "#2563eb" : "#9ca3af", fontSize: 16, lineHeight: 1 }}>
+                        {sel ? "☑" : "☐"}
+                      </span>
+                      <span style={{ fontWeight: sel ? 500 : 400 }}>{u.nome}{u.role ? ` (${u.role})` : ""}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : (
           <div
