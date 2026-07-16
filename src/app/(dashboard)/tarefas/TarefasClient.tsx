@@ -199,6 +199,75 @@ function infoVendaDoGrupo(tarefas: Tarefa[]): { numero?: string; total?: string;
   return {};
 }
 
+/** Nome curto pro cabeçalho do card — o TIPO_LABEL completo ("Conversão reversa
+ *  (ouro → joia)") não cabe ao lado do número da ordem. Só os tipos SEM venda
+ *  precisam: os de venda usam "Venda {numero}". */
+const TIPO_CURTO: Record<string, string> = {
+  conversao: "Conversão",
+  conversao_sku: "Conversão SKU",
+  conversao_reversa: "Reversa",
+  compra_comercial: "Compra",
+  compra_metal: "Compra de metal",
+  protocolo_metal: "Protocolo",
+  aprovacao_quebra_metal: "Quebra de metal",
+  sangria: "Sangria",
+};
+
+/**
+ * REGRA (16/07, pedido do Jonathan: "todas as aprovações no mesmo padrão da
+ * venda"): as aprovações SEM venda também ganham cabeçalho — identificador da
+ * ordem + o número que importa — igual ao card da venda, em vez de despejar a
+ * descrição crua. Espelha infoVendaDoGrupo, só que a partir de uma tarefa só.
+ *
+ * href: SÓ pros tipos com tela de detalhe que existe de fato — conferido em
+ * src/app/(dashboard) (16/07): `conversoes/[id]` existe; compra_comercial
+ * (compras-comercial) e conversao_reversa NÃO têm rota de detalhe. Link
+ * chutado pra esses viraria 404 no clique.
+ *
+ * metrica devolve null quando não reconhece o formato da descrição — a linha
+ * fica só com o solicitante, sem inventar número.
+ */
+function cabecalhoAprovacao(t: Tarefa): {
+  titulo: string;
+  metrica: string | null;
+  href?: string;
+  hrefLabel?: string;
+} {
+  const d = (t.descricao ?? "").replace(/\\n/g, "\n");
+  const curto = t.tipo ? TIPO_CURTO[t.tipo] : undefined;
+  // Identificador: numero_ordem (C-2411 / CS-2410 / CR-2409) ou o "#15" que a
+  // compra comercial carrega no título (ela não preenche numero_ordem).
+  const ref = t.numero_ordem ?? t.titulo.match(/#\d+/)?.[0] ?? null;
+  const titulo = curto ? (ref ? `${curto} ${ref}` : curto) : t.titulo;
+
+  const peso =
+    d.match(/Peso Total:\s*([\d.,]+\s*g)/i)?.[1] ??
+    d.match(/([\d.,]+\s*g)\s*x\s*\d+/i)?.[1] ??
+    null;
+  const valor = d.match(/Valor total:\s*(R\$\s*[\d.,]+)/i)?.[1] ?? null;
+  const pecas = d.match(/Quantidade Total:\s*(\d+)\s*pe[cç]as?/i)?.[1] ?? null;
+  const itens = d.match(/Itens:\s*(\d+)\s*item/i)?.[1] ?? null;
+
+  const qtd = pecas
+    ? `${pecas} ${pecas === "1" ? "peça" : "peças"}`
+    : itens
+      ? `${itens} ${itens === "1" ? "item" : "itens"}`
+      : null;
+
+  const partes = [peso ?? valor, qtd].filter(Boolean) as string[];
+  const metrica = partes.length > 0 ? partes.join(" · ") : null;
+
+  const idConversao = t.numero_ordem?.match(/(\d+)$/)?.[1];
+  const temDetalhe = (t.tipo === "conversao" || t.tipo === "conversao_sku") && !!idConversao;
+
+  return {
+    titulo,
+    metrica,
+    href: temDetalhe ? `/conversoes/${idConversao}` : undefined,
+    hrefLabel: temDetalhe ? "Ver ordem" : undefined,
+  };
+}
+
 function gerarChips(t: Tarefa): Chip[] {
   const chips: Chip[] = [];
   const desc = t.descricao ?? "";
@@ -764,18 +833,29 @@ export default function TarefasClient() {
    * O PORQUÊ: antes cada aprovação era um card grande repetindo solicitante,
    *   total e a lista de itens da MESMA venda — poluía e não deixava claro que
    *   eram da mesma venda.
-   * O IMPACTO: tarefas SEM venda_id (metal, PCP, protocolo, conversão de
-   *   estoque) não são tocadas — seguem no card antigo, exatamente como hoje.
    * NOTA: as tarefas que chegam aqui já são só as que ESTE usuário pode ver
    *   (o servidor filtra por responsavel_id/aprovador configurado em
    *   /api/tarefas). Então "Aprovar todas" nunca tenta decidir a aprovação de
    *   outra pessoa — se a venda tem 2 aprovações com aprovadores diferentes,
    *   cada um vê (e aprova) só a sua.
+   *
+   * ATUALIZAÇÃO 16/07 (2ª rodada, pedido do Jonathan: "quero todas as
+   * aprovações no mesmo padrão da venda"): as tarefas SEM venda_id (conversão,
+   * compra, reversa, metal...) deixaram de ter card próprio e passaram a ser
+   * grupo de UMA tarefa. Assim existe UM formato de card na tela, não dois — o
+   * cabeçalho delas vem de cabecalhoAprovacao() em vez de infoVendaDoGrupo().
+   * IMPACTO SE REVERTIDO: volta o card antigo, que despeja a descrição crua
+   * inteira ("ATENCAO: ...") e repete "Solicitante/Tipo" empilhados.
    */
-  type ItemAprov =
-    | { kind: "venda"; vendaId: number; tarefas: Tarefa[] }
-    | { kind: "card"; tarefa: Tarefa };
-  const listaAprovacoes: ItemAprov[] = (() => {
+  type GrupoAprov = {
+    chave: string;
+    titulo: string;
+    metrica: string | null;
+    href?: string;
+    hrefLabel?: string;
+    tarefas: Tarefa[];
+  };
+  const listaAprovacoes: GrupoAprov[] = (() => {
     const porVenda = new Map<number, Tarefa[]>();
     const semVenda: Tarefa[] = [];
     for (const t of aprovacoesPendentes) {
@@ -784,10 +864,30 @@ export default function TarefasClient() {
       arr.push(t);
       porVenda.set(t.venda_id, arr);
     }
-    return [
-      ...[...porVenda.entries()].map(([vendaId, tarefas]) => ({ kind: "venda" as const, vendaId, tarefas })),
-      ...semVenda.map((tarefa) => ({ kind: "card" as const, tarefa })),
-    ];
+    const grupos: GrupoAprov[] = [];
+    for (const [vendaId, tarefas] of porVenda.entries()) {
+      const info = infoVendaDoGrupo(tarefas);
+      grupos.push({
+        chave: `venda-${vendaId}`,
+        titulo: `Venda ${info.numero ?? `#${vendaId}`}`,
+        metrica: [info.total, info.cliente].filter(Boolean).join(" · ") || null,
+        href: `/vendas/${vendaId}`,
+        hrefLabel: "Ver venda",
+        tarefas,
+      });
+    }
+    for (const t of semVenda) {
+      const cab = cabecalhoAprovacao(t);
+      grupos.push({
+        chave: `tarefa-${t.id}`,
+        titulo: cab.titulo,
+        metrica: cab.metrica,
+        href: cab.href,
+        hrefLabel: cab.hrefLabel,
+        tarefas: [t],
+      });
+    }
+    return grupos;
   })();
 
   const porStatus = (s: string) => tarefasFiltradas.filter(t => t.status === s);
@@ -1044,44 +1144,53 @@ export default function TarefasClient() {
               </div>
             ) : (
               listaAprovacoes.map(item => {
-                /* ── Card ÚNICO da venda: tudo da mesma venda junto (16/07) ── */
-                if (item.kind === "venda") {
-                  const info = infoVendaDoGrupo(item.tarefas);
+                /* ── Card ÚNICO por venda/ordem: um formato só na tela (16/07) ── */
+                {
                   const solicitantes = [...new Set(item.tarefas.map(t => t.criador_nome).filter(Boolean))];
                   return (
-                    <div key={`venda-${item.vendaId}`}
+                    <div key={item.chave}
                       className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden min-w-0">
-                      {/* Cabeçalho: dados da venda uma vez só */}
+                      {/* Cabeçalho: dados da venda/ordem uma vez só */}
                       <div className="p-4 border-b border-gray-100">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <p className="text-sm font-semibold" style={{ color: "#1A1A1A" }}>
-                                Venda {info.numero ?? `#${item.vendaId}`}
+                              <p className="text-sm font-semibold break-words" style={{ color: "#1A1A1A" }}>
+                                {item.titulo}
                               </p>
-                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                                style={{ backgroundColor: "#EDE9FE", color: "#5B21B6" }}>
-                                {item.tarefas.length} {item.tarefas.length === 1 ? "aprovação" : "aprovações"}
-                              </span>
+                              {item.tarefas.length > 1 && (
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                                  style={{ backgroundColor: "#EDE9FE", color: "#5B21B6" }}>
+                                  {item.tarefas.length} aprovações
+                                </span>
+                              )}
                             </div>
                             <p className="text-xs mt-1 break-words" style={{ color: "#6B7280" }}>
                               {solicitantes.join(", ") || "—"}
-                              {info.total ? ` · ${info.total}` : ""}
-                              {info.cliente ? ` · ${info.cliente}` : ""}
+                              {item.metrica ? ` · ${item.metrica}` : ""}
                             </p>
                           </div>
-                          <a href={`/vendas/${item.vendaId}`}
-                            className="text-xs px-2 py-1 rounded-lg border shrink-0"
-                            style={{ borderColor: "#E5E7EB", color: "#6B7280" }}>
-                            Ver venda
-                          </a>
+                          {item.href && (
+                            <a href={item.href}
+                              className="text-xs px-2 py-1 rounded-lg border shrink-0"
+                              style={{ borderColor: "#E5E7EB", color: "#6B7280" }}>
+                              {item.hrefLabel ?? "Ver"}
+                            </a>
+                          )}
                         </div>
                       </div>
 
                       {/* Uma linha por aprovação */}
                       {item.tarefas.map(t => {
                         const tipoLabel = t.tipo ? (TIPO_LABEL[t.tipo] ?? t.tipo) : "Aprovação";
-                        const resumo = resumoAprovacao(t);
+                        // Esconde o resumo quando o cabeçalho JÁ mostra o mesmo número
+                        // (conversão: "0.610g" no topo + "Peso: 0.610g" na linha).
+                        const resumoBruto = resumoAprovacao(t);
+                        const valorResumo = resumoBruto?.split(": ")[1];
+                        const resumo =
+                          resumoBruto && valorResumo && item.metrica?.includes(valorResumo)
+                            ? null
+                            : resumoBruto;
                         const aberta = aprovExpandida.has(t.id);
                         const estaRejeitando = rejeitandoId === t.id;
                         return (
@@ -1125,12 +1234,51 @@ export default function TarefasClient() {
                               )}
                             </div>
 
-                            {/* Descrição completa (expandir) */}
-                            {aberta && t.descricao && (
-                              <div className="px-4 pb-3 pl-10">
-                                <p className="text-xs whitespace-pre-wrap break-words rounded-lg p-2.5"
-                                  style={{ color: "#4B5563", backgroundColor: "#F9FAFB" }}>
-                                  {t.descricao.replace(/\\n/g, "\n")}
+                            {/* Detalhe completo (expandir). Chips/evidências/tempo vinham
+                                do card antigo — ao unificar os formatos (16/07) eles
+                                passaram pra cá, senão a conversão/limpeza perderia
+                                informação que hoje o aprovador usa pra decidir. */}
+                            {aberta && (
+                              <div className="px-4 pb-3 pl-10 space-y-2">
+                                {t.descricao && (
+                                  <p className="text-xs whitespace-pre-wrap break-words rounded-lg p-2.5"
+                                    style={{ color: "#4B5563", backgroundColor: "#F9FAFB", overflowWrap: "anywhere" }}>
+                                    {t.descricao
+                                      .replace(/\\n/g, "\n")
+                                      .replace(/• null\s?—?\s?/g, "• ")
+                                      .replace(/• null/g, "•")
+                                      .replace(/\*\*([^*]+)\*\*/g, "$1")}
+                                  </p>
+                                )}
+                                {(() => {
+                                  const chips = gerarChips(t);
+                                  return chips.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {chips.map((chip, i) => (
+                                        chip.href ? (
+                                          <a key={i} href={chip.href}
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium hover:opacity-75 hover:underline transition-opacity max-w-full break-words"
+                                            style={{ backgroundColor: chip.bg, color: chip.color, overflowWrap: "anywhere" }}>
+                                            {chip.icon} {chip.label}
+                                          </a>
+                                        ) : (
+                                          <span key={i}
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium max-w-full break-words"
+                                            style={{ backgroundColor: chip.bg, color: chip.color, overflowWrap: "anywhere" }}>
+                                            {chip.icon} {chip.label}
+                                          </span>
+                                        )
+                                      ))}
+                                    </div>
+                                  ) : null;
+                                })()}
+                                {(() => {
+                                  const baixaId = extrairBaixaIdLimpeza(t.tags);
+                                  if (baixaId <= 0) return null;
+                                  return <EvidenciasLimpeza baixaId={baixaId} compact />;
+                                })()}
+                                <p className="text-xs" style={{ color: "#9CA3AF" }}>
+                                  {tempoRelativo(t.created_at)}
                                 </p>
                               </div>
                             )}
@@ -1182,129 +1330,6 @@ export default function TarefasClient() {
                     </div>
                   );
                 }
-                const t = item.tarefa;
-                const pri = PRIORIDADE_BADGE[t.prioridade] ?? PRIORIDADE_BADGE.media;
-                const tipoLabel = t.tipo ? (TIPO_LABEL[t.tipo] ?? t.tipo) : null;
-                const estaRejeitando = rejeitandoId === t.id;
-                const estaAprovando = salvandoAprov && aprovandoId === t.id;
-                return (
-                  <div key={t.id} className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 transition-all overflow-hidden min-w-0">
-                    {/* Solicitante */}
-                    <div className="mb-2 min-w-0">
-                      <p className="text-xs" style={{ color: "#6B7280" }}>Solicitante</p>
-                      <p className="text-sm font-semibold break-words" style={{ color: "#1A1A1A" }}>
-                        {t.criador_nome ?? "—"}
-                      </p>
-                    </div>
-
-                    {/* Tipo */}
-                    {tipoLabel && (
-                      <div className="mb-2 min-w-0">
-                        <p className="text-xs" style={{ color: "#6B7280" }}>Tipo</p>
-                        <p className="text-sm font-medium break-words" style={{ color: "#1A1A1A" }}>{tipoLabel}</p>
-                      </div>
-                    )}
-
-                    {/* Título */}
-                    <p className="text-sm font-semibold leading-snug mb-2 break-words" style={{ color: "#1A1A1A" }}>
-                      {t.titulo}
-                    </p>
-
-                    {/* Descrição completa */}
-                    {t.descricao && (
-                      <p className="text-xs leading-relaxed mb-3 whitespace-pre-line break-words" style={{ color: "#6B7280", overflowWrap: "anywhere" }}>
-                        {t.descricao.replace(/\\n/g, "\n").replace(/• null\s?—?\s?/g, "• ").replace(/• null/g, "•").replace(/\*\*([^*]+)\*\*/g, "$1")}
-                      </p>
-                    )}
-
-                    {/* Chips estruturados por tipo de aprovação */}
-                    {(() => {
-                      const chips = gerarChips(t);
-                      return chips.length > 0 ? (
-                        <div className="flex flex-wrap gap-1.5 mt-1 mb-3">
-                          {chips.map((chip, i) => (
-                            chip.href ? (
-                              <a
-                                key={i}
-                                href={chip.href}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium hover:opacity-75 hover:underline transition-opacity max-w-full break-words"
-                                style={{ backgroundColor: chip.bg, color: chip.color, overflowWrap: "anywhere" }}
-                              >
-                                {chip.icon} {chip.label}
-                              </a>
-                            ) : (
-                              <span
-                                key={i}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium max-w-full break-words"
-                                style={{ backgroundColor: chip.bg, color: chip.color, overflowWrap: "anywhere" }}
-                              >
-                                {chip.icon} {chip.label}
-                              </span>
-                            )
-                          ))}
-                        </div>
-                      ) : null;
-                    })()}
-
-                    {/* Evidências da limpeza de ouro v2 */}
-                    {(() => {
-                      const baixaId = extrairBaixaIdLimpeza(t.tags);
-                      if (baixaId <= 0) return null;
-                      return <EvidenciasLimpeza baixaId={baixaId} compact />;
-                    })()}
-
-                    {/* Tempo */}
-                    <p className="text-xs mb-3" style={{ color: "#9CA3AF" }}>
-                      {tempoRelativo(t.created_at)}
-                      {t.numero_ordem && <span className="ml-2">#{t.numero_ordem}</span>}
-                    </p>
-
-                    {/* Botões Aprovar / Rejeitar — sempre no DOM, visibilidade via CSS */}
-                    <div className={estaRejeitando ? "hidden" : "flex gap-2"}>
-                      <button
-                        onClick={() => handleAprovar(t.id, t.tipo)}
-                        disabled={salvandoAprov}
-                        className="flex-1 py-2.5 text-sm rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
-                        style={{ backgroundColor: "#059669", color: "#fff" }}>
-                        {estaAprovando ? "Aguarde..." : "✓ Aprovar"}
-                      </button>
-                      <button
-                        onClick={() => { setRejeitandoId(t.id); setMotivoRejeicao(""); }}
-                        disabled={salvandoAprov}
-                        className="flex-1 py-2.5 text-sm rounded-xl font-semibold border disabled:opacity-50"
-                        style={{ borderColor: "#DC2626", color: "#DC2626", backgroundColor: "#fff" }}>
-                        ✗ Rejeitar
-                      </button>
-                    </div>
-
-                    {/* Form de rejeição — sempre no DOM, visibilidade via CSS */}
-                    <div className={estaRejeitando ? "space-y-2" : "hidden"}>
-                      <textarea
-                        placeholder="Motivo da rejeição (opcional)"
-                        value={motivoRejeicao}
-                        onChange={e => setMotivoRejeicao(e.target.value)}
-                        rows={2}
-                        className="w-full px-3 py-2 border rounded-xl text-sm outline-none resize-none"
-                        style={{ borderColor: "#E5E7EB" }}
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => { setRejeitandoId(null); setMotivoRejeicao(""); }}
-                          className="flex-1 py-2 text-sm rounded-xl border font-medium"
-                          style={{ borderColor: "#E5E7EB", color: "#6B7280" }}>
-                          Cancelar
-                        </button>
-                        <button
-                          onClick={() => handleRejeitar(t.id, t.tipo)}
-                          disabled={salvandoAprov}
-                          className="flex-1 py-2 text-sm rounded-xl font-semibold disabled:opacity-50"
-                          style={{ backgroundColor: "#DC2626", color: "#fff" }}>
-                          {salvandoAprov ? "Aguarde..." : "Confirmar"}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
               })
             )}
           </div>
