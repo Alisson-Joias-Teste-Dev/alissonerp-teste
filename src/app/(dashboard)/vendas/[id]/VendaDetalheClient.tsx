@@ -1665,6 +1665,51 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     finally { setUpdating(false); }
   }
 
+  /**
+   * REGRA DE NEGÓCIO (16/07, pedido do Jonathan): pede de uma vez TODAS as
+   * aprovações pendentes da venda (desconto + cartão), pra consultora não ter
+   * que clicar em dois banners.
+   *
+   * O QUÊ: dispara os POSTs em sequência e junta o resultado. Cada pedido é
+   *   independente: se um falhar, o outro segue e a falha é reportada.
+   * O PORQUÊ: os botões individuais CONTINUAM existindo — se a venda vai ser
+   *   paga no Pix, ela pede só o desconto e não incomoda o aprovador com uma
+   *   aprovação de cartão que não vai usar. Este botão é atalho, não substituto.
+   * O IMPACTO: só aparece quando há 2+ pendentes (ver aprovacoesPendentes).
+   * NOTA: pedir cartão junto só funciona porque o guard do backend foi
+   *   liberado pra cartao_desconto em 16/07 (solicitar-aprovacao/route.ts) —
+   *   antes dava 409 "solicite o desconto primeiro".
+   */
+  async function solicitarTodasAprovacoes() {
+    if (!venda) return;
+    setUpdating(true); setSaveErr("");
+    const pedidos: { tipo: string; label: string }[] = [];
+    if (precisaSolicitarDesconto) pedidos.push({ tipo: "desconto", label: "Desconto" });
+    if (precisaSolicitarDescontoCartao) pedidos.push({ tipo: "cartao_desconto", label: "Cartão" });
+    const falhas: string[] = [];
+    for (const p of pedidos) {
+      try {
+        const res = await fetch(`/api/vendas/${venda.id}/solicitar-aprovacao`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tipo: p.tipo }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error((d.error as string | undefined) ?? `HTTP ${res.status}`);
+      } catch (e) {
+        falhas.push(`${p.label}: ${e instanceof Error ? e.message : "erro"}`);
+      }
+    }
+    await load();
+    setUpdating(false);
+    if (falhas.length > 0) {
+      setSaveErr(
+        falhas.length === pedidos.length
+          ? `Nenhuma solicitação foi enviada — ${falhas.join(" | ")}`
+          : `Enviadas com 1 falha — ${falhas.join(" | ")}`,
+      );
+    }
+  }
+
   // ── Solicitar aprovação (com suporte a crédito gerente) ────────────────────
   async function solicitarAprovacao() {
     if (!venda) return;
@@ -2167,6 +2212,10 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const cartaoBloqueado = temDescontoCartao && !descontoCartaoAprovado;
   // REGRA DE NEGÓCIO #1: verifica campo próprio de cartão, não de crédito
   const precisaSolicitarDescontoCartao = cartaoBloqueado && !venda.aprovacao_cartao_desconto_tarefa_id && venda.situacao === "rascunho";
+  // REGRA DE NEGÓCIO (16/07): quantas aprovações esta venda ainda precisa pedir.
+  // Só com 2+ o atalho "Solicitar todas" faz sentido — com 1 o banner individual
+  // já resolve e um botão a mais só polui.
+  const aprovacoesPendentes = [precisaSolicitarDesconto, precisaSolicitarDescontoCartao].filter(Boolean).length;
   // REGRA DE NEGOCIO: Automacao de Estoque 2.0.
   // O QUE: badge visual e derivado do backend quando venda entregue ainda tem
   // saldo aberto aprovado por excecao.
@@ -2383,6 +2432,23 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           style={{ backgroundColor: "#EFF6FF", borderColor: "#BFDBFE", color: "#1E40AF" }}>
           <Loader2 size={16} className="animate-spin shrink-0" />
           <p className="text-sm font-medium">Confirme o pagamento Manual (MP) antes de aprovar a venda.</p>
+        </div>
+      )}
+
+      {/* ── Atalho: pedir todas as aprovações de uma vez ──
+          Aparece só com 2+ pendentes. Os banners individuais abaixo continuam —
+          quem vai receber no Pix pede só o desconto (decisão do Jonathan, 16/07). */}
+      {aprovacoesPendentes >= 2 && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-3"
+          style={{ backgroundColor: "#F5F3FF", borderColor: "#DDD6FE", color: "#5B21B6" }}>
+          <p className="text-sm font-medium">
+            Esta venda precisa de {aprovacoesPendentes} aprovações. Você pode pedir todas de uma vez ou uma por uma abaixo.
+          </p>
+          <button onClick={solicitarTodasAprovacoes} disabled={updating}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 disabled:opacity-50"
+            style={{ backgroundColor: "#6D28D9", color: "#fff" }}>
+            {updating ? "Enviando..." : `Solicitar todas (${aprovacoesPendentes})`}
+          </button>
         </div>
       )}
 

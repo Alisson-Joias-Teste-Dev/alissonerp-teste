@@ -580,6 +580,49 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           WHERE id = ${tarefaInfo.venda_id}
         `;
         console.log(`[desconto] vendas_erp: lock removido (rejeição)`);
+
+        /**
+         * REGRA DE NEGÓCIO (16/07, decisão do Jonathan): REPROVAR o desconto
+         * reprova, em cascata, a aprovação de CARTÃO da mesma venda.
+         *
+         * O QUÊ: se existir tarefa de cartão pendente nesta venda, ela é
+         *   marcada rejeitada junto e o lock da venda é limpo.
+         * O PORQUÊ: as duas passaram a poder ser pedidas juntas (ver
+         *   solicitar-aprovacao/route.ts, mesma data). Sem a cascata, reprovar
+         *   o desconto deixaria órfã uma tarefa de "cartão com desconto de X%"
+         *   cujo X foi recusado — o aprovador decidiria sobre um desconto que
+         *   não existe mais. Aprovar o desconto NÃO aprova o cartão: cada uma
+         *   tem sua decisão (só a reprovação cascateia).
+         * O IMPACTO SE REMOVIDO: volta a tarefa órfã de cartão, e a consultora
+         *   veria "aguardando aprovação de cartão" numa venda cujo desconto foi
+         *   recusado (o banner some só quando a tarefa é decidida).
+         */
+        const [vendaCartao] = await sql`
+          SELECT aprovacao_cartao_desconto_tarefa_id AS tid
+          FROM alissonerp.vendas_erp WHERE id = ${tarefaInfo.venda_id}
+        `;
+        const cartaoTarefaId = vendaCartao?.tid ? Number(vendaCartao.tid) : null;
+        if (cartaoTarefaId) {
+          const motivoCascata = `Reprovado automaticamente: o desconto desta venda foi reprovado${body.motivo ? ` (${body.motivo})` : ""}.`;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await sql.begin(async (tx: any) => {
+            await tx`
+              UPDATE alissonerp.aprovacoes_tarefa
+              SET status = 'rejeitado', motivo = ${motivoCascata}, respondido_em = now()
+              WHERE tarefa_id = ${cartaoTarefaId} AND status = 'pendente'
+            `;
+            await tx`
+              UPDATE alissonerp.tarefas SET status = 'rejeitada', updated_at = now()
+              WHERE id = ${cartaoTarefaId} AND status = 'aguardando_aprovacao'
+            `;
+            await tx`
+              UPDATE alissonerp.vendas_erp
+              SET aprovacao_cartao_desconto_tarefa_id = NULL, updated_at = NOW()
+              WHERE id = ${tarefaInfo.venda_id}
+            `;
+          });
+          console.log(`[desconto] cascata: tarefa de cartão ${cartaoTarefaId} reprovada junto`);
+        }
       }
       const [aprov] = await sql`SELECT solicitante_id FROM alissonerp.aprovacoes_tarefa WHERE tarefa_id = ${Number(id)} LIMIT 1`;
       if (aprov?.solicitante_id) {

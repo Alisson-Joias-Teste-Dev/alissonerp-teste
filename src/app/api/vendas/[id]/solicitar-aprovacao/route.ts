@@ -84,8 +84,22 @@ export async function POST(
     if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
     throw e;
   }
-  // ── Bloquear solicitação de crédito/gerente se desconto > threshold não aprovado ─
-  if (tipo !== "desconto" && venda.tem_desconto_alto && !venda.desconto_aprovado_por) {
+  // ── Bloquear solicitação de CRÉDITO se desconto > threshold não aprovado ─
+  // REGRA DE NEGÓCIO: o valor do "A Receber" é derivado do desconto — aprovar
+  // crédito antes seria aprovar um número que ainda pode mudar. Por isso o
+  // crédito continua esperando o desconto ser decidido.
+  //
+  // MUDANÇA (16/07, decisão do Jonathan): `cartao_desconto` saiu deste bloqueio.
+  // ANTES: a tela mostrava os 2 botões (desconto + cartão) mas o de cartão dava
+  // 409 aqui — a consultora tinha que aprovar o desconto, voltar e pedir o cartão.
+  // AGORA: as 2 podem ser pedidas juntas ("Solicitar todas as aprovações").
+  // O risco de aprovar cartão de um desconto que depois cai foi coberto pela
+  // regra irmã: REPROVAR o desconto reprova a tarefa de cartão em cascata
+  // (ver bloco `desconto_acima` em tarefas/[id]/aprovacao/route.ts). Aprovar o
+  // desconto NÃO aprova o cartão — cada uma tem sua decisão.
+  // IMPACTO SE REVERTIDO: o botão "Solicitar todas" volta a falhar em 409.
+  const bloqueiaPorDescontoPendente = tipo !== "desconto" && tipo !== "cartao_desconto";
+  if (bloqueiaPorDescontoPendente && venda.tem_desconto_alto && !venda.desconto_aprovado_por) {
     return NextResponse.json(
       { error: `Esta venda tem desconto acima de ${descontoThreshold}%. Solicite aprovação de desconto primeiro (tipo=desconto).` },
       { status: 409 }
