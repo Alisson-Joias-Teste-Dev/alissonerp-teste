@@ -40,7 +40,7 @@ const FreteAvulsoSchema = z.object({
   // REGRA DE NEGÓCIO (solicitação da consultora — migration 346, modelo POOL):
   // campos só usados quando quem cria é a consultora (vira modoSolicitacao=true
   // na lib). Não existe mais escolha de responsável — a solicitação cai no
-  // pool de liberadores (ver podeGerenciarSolicitacoesAvulso).
+  // pool de liberadores (ver listarAprovadoresFreteAvulso em @/lib/entrega-venda).
   vendaId: z.number().int().positive().optional(),
   enderecoEntrega: z.string().max(1000).optional(),
 });

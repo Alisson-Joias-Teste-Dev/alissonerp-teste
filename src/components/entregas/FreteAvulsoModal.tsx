@@ -13,8 +13,16 @@
  * — apenas SOLICITA a partir de uma venda própria, informando o endereço de
  * entrega (editável aqui, NÃO altera o cadastro do cliente/venda) e o valor
  * cobrado do cliente. Não escolhe motoboy nem responsável: a solicitação cai
- * no pool de liberadores (qualquer um decide, ver aba "Solicitações" em
- * EntregasVendaClient e TabFreteAvulsoLiberadores em Configurações).
+ * no pool de aprovadores da chave de config `aprovadores_frete_avulso`
+ * (Config › Aprovadores; qualquer um decide via módulo Tarefas).
+ *
+ * REGRA DE NEGÓCIO (V3 — solicitar DE DENTRO da venda): quando a prop
+ * `vendaId` é informada (aberto pelo botão "Solicitar frete avulso" da própria
+ * tela da venda — ver VendaDetalheClient), a venda já é conhecida e o modal
+ * NÃO mostra o buscador de venda — só o endereço (pré-preenchido via
+ * `enderecoInicial`, ainda editável) e o valor cobrado. O modo de busca de
+ * venda (ehConsultora sem vendaId) continua existindo para quem abre o modal
+ * pela tela de Entregas.
  *
  * IMPACTO SE ALTERADO: delegar a criação para POST /api/entregas-venda/frete-avulso.
  * Não fazer INSERT direto.
@@ -77,6 +85,20 @@ interface Props {
   onCriado: () => void;
   /** Role do usuário logado — decide se o modal é de CRIAÇÃO (loja) ou SOLICITAÇÃO (consultora) */
   userRole: string;
+  /**
+   * REGRA DE NEGÓCIO (V3): quando informado, o modal já nasce vinculado a
+   * esta venda (aberto de dentro da tela da venda) — esconde o buscador de
+   * venda e usa este id direto no submit. Só faz sentido combinado com
+   * userRole="consultora".
+   */
+  vendaId?: number;
+  /** Endereço de entrega sugerido (concatenado pelo caller) para pré-preencher
+   *  o textarea editável quando `vendaId` é informado. Ignorado sem vendaId. */
+  enderecoInicial?: string;
+  /** Callback extra disparado quando a solicitação é enviada com sucesso —
+   *  além de onCriado, permite o caller (ex.: VendaDetalheClient) recarregar
+   *  só o status da venda sem fechar/atualizar toda a lista de entregas. */
+  onSolicitado?: () => void;
 }
 
 const REGIOES = [
@@ -109,10 +131,14 @@ function montarEndereco(v: VendaEnderecoResp): string {
   return partes.join(", ");
 }
 
-export default function FreteAvulsoModal({ isOpen, onClose, onCriado, userRole }: Props) {
+export default function FreteAvulsoModal({ isOpen, onClose, onCriado, userRole, vendaId, enderecoInicial, onSolicitado }: Props) {
   // REGRA DE NEGÓCIO (modelo POOL): consultora só SOLICITA — não cria o
   // avulso já liberado e não escolhe motoboy/responsável.
   const ehConsultora = userRole === "consultora";
+  // REGRA DE NEGÓCIO (V3): quando aberto de dentro da venda, a venda já é
+  // conhecida — não precisa buscar. IMPACTO SE REMOVIDO: reaparece o
+  // buscador de venda mesmo quando o caller já sabe qual é.
+  const vendaFixada = ehConsultora && vendaId != null;
 
   const [motoboys, setMotoboys] = useState<Motoboy[]>([]);
   const [motoboyId, setMotoboyId] = useState("");
@@ -203,10 +229,21 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, userRole }
   }, []);
 
   useEffect(() => {
-    if (!ehConsultora) return;
+    if (!ehConsultora || vendaFixada) return;
     const t = setTimeout(() => buscarVendas(vendaBusca), 300);
     return () => clearTimeout(t);
-  }, [vendaBusca, buscarVendas, ehConsultora]);
+  }, [vendaBusca, buscarVendas, ehConsultora, vendaFixada]);
+
+  // REGRA DE NEGÓCIO (V3): venda fixada (aberto de dentro da tela da venda) —
+  // pré-preenche o endereço editável com o que o caller já calculou (cadastro
+  // de entrega da venda), sem precisar de uma 2ª chamada a /api/vendas/[id].
+  // Roda a cada abertura do modal (resetar() limpa ao fechar).
+  useEffect(() => {
+    if (isOpen && vendaFixada) {
+      setEnderecoEntrega(enderecoInicial ?? "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, vendaFixada, enderecoInicial]);
 
   /** Seleciona a venda e busca o endereço de entrega para pré-preencher o textarea editável */
   async function selecionarVenda(v: VendaBusca) {
@@ -259,13 +296,15 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, userRole }
         // REGRA DE NEGÓCIO (modelo POOL): body da solicitação NÃO inclui
         // motoboyId/contatoId/liberacaoResponsavelId — a consultora só informa
         // a venda, o endereço confirmado e o valor cobrado do cliente.
-        if (!vendaSelecionada || !enderecoEntrega.trim() || freteCobradoConsultora === "") {
+        // Com venda fixada (V3), o id vem da prop; sem ela, do buscador.
+        const vendaIdEfetivo = vendaId ?? vendaSelecionada?.id;
+        if (!vendaIdEfetivo || !enderecoEntrega.trim() || freteCobradoConsultora === "") {
           throw new Error("Preencha a venda, o endereço de entrega e o valor cobrado.");
         }
         await apiFetch("/api/entregas-venda/frete-avulso", {
           method: "POST",
           body: JSON.stringify({
-            vendaId: vendaSelecionada.id,
+            vendaId: vendaIdEfetivo,
             enderecoEntrega: enderecoEntrega.trim(),
             freteCobrado: parseFloat(freteCobradoConsultora.replace(",", ".")) || 0,
             regiao,
@@ -274,6 +313,10 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, userRole }
             observacoes: observacoes.trim() || undefined,
           }),
         });
+        // REGRA DE NEGÓCIO (V3): avisa o caller (ex.: VendaDetalheClient) logo
+        // após o POST confirmar, para recarregar o status da venda enquanto o
+        // modal ainda mostra a animação de sucesso (1.5s antes de fechar).
+        onSolicitado?.();
       } else {
         await apiFetch("/api/entregas-venda/frete-avulso", {
           method: "POST",
@@ -305,7 +348,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, userRole }
 
   // Validação de submit — cada modo tem seus próprios campos obrigatórios
   const disabledConsultora =
-    enviando || !vendaSelecionada || !enderecoEntrega.trim() || freteCobradoConsultora === "" || !descricao.trim();
+    enviando || !(vendaId ?? vendaSelecionada) || !enderecoEntrega.trim() || freteCobradoConsultora === "" || !descricao.trim();
   const disabledPadrao =
     enviando || !motoboyId || !descricao.trim() ||
     (freteCalculado === 0 && !(freteNegociado && parseFloat(freteNegociado.replace(",", ".")) > 0));
@@ -387,7 +430,8 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, userRole }
 
             {ehConsultora ? (
               <>
-                {/* Venda (consultora) */}
+                {/* Venda (consultora) — escondido quando a venda já vem fixada (V3, aberto de dentro da venda) */}
+                {!vendaFixada && (
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
                     <Search size={13} /> Venda *
@@ -456,6 +500,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, userRole }
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* Endereço de entrega (editável — não altera o cadastro do cliente) */}
                 <div style={{ marginBottom: 14 }}>
@@ -681,7 +726,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, userRole }
               {enviando ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Bike size={16} />}
               {enviando
                 ? (ehConsultora ? "Enviando..." : "Registrando...")
-                : (ehConsultora ? "Solicitar" : "Registrar Corrida")}
+                : (ehConsultora ? "Solicitar frete avulso" : "Registrar Corrida")}
             </button>
           </form>
         )}

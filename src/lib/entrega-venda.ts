@@ -30,7 +30,6 @@ import { logAudit } from "@/lib/audit";
 import { vendaEntregaDevendo, vendaTemExcecaoEntregaAprovada } from "@/lib/entrega-sem-pagamento";
 import { enviarCodigoWhatsAppDetalhado, enviarCodigoClienteEmRota, enviarConfirmacaoEntregaConcluida, enviarAvisoDesenvolvedor } from "@/lib/whatsapp";
 import { uploadFile } from "@/lib/storage";
-import { isFullAccess } from "@/lib/roles";
 import { criarNotificacao } from "@/lib/notificacoes";
 
 // O client transacional do pacote postgres não expõe call signature adequada
@@ -1972,38 +1971,26 @@ function montarMovimentacao(r: any): MovimentacaoFrete {
 // ─── 10. Frete Avulso ─────────────────────────────────────────────────────────
 
 /**
- * Verifica se o usuário pode gerenciar solicitações de frete avulso (liberar/
- * recusar/ver a aba de solicitações do modelo TAREFA/POOL).
+ * Lê o pool de aprovadores de frete avulso (chave MULTI `aprovadores_frete_avulso`,
+ * Config › Aprovadores, UUIDs separados por vírgula).
  *
- * REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL — virada de config):
- * substitui o "responsável designado" escolhido pela consultora. Pode
- * gerenciar quem é full-access (admin/desenvolvedor/diretor) OU quem está na
- * chave MULTI `aprovadores_frete_avulso` (Config › Aprovadores, UUIDs
- * separados por vírgula) — espelha exatamente o padrão de
- * `aprovadores_devolver_peca` (ver src/app/api/crediario/reserva/[vendaId]/
- * devolver-peca/route.ts). Substitui a antiga tabela
- * alissonerp.frete_avulso_liberadores (removida na migration 346): a lista
- * agora vive em configuracoes_sistema, não numa tabela própria.
+ * REGRA DE NEGÓCIO (V3 — consolidação): FONTE ÚNICA da lista do pool. Antes
+ * a mesma query (SELECT + split(",") + trim + filter(Boolean)) estava
+ * duplicada em 4 lugares (criarFreteAvulso, o antigo podeGerenciarSolicitacoesAvulso,
+ * GET /api/tarefas e PATCH /api/tarefas/[id]/aprovacao) — quem AUTORIZA (decide
+ * a tarefa) e quem CRIA a tarefa (responsavel_id) têm que ver exatamente a
+ * mesma lista, senão a tela mostra a solicitação para alguém que a API depois
+ * nega (ou vice-versa).
  *
- * Mantém nome/assinatura para não quebrar as chamadas existentes (page.tsx,
- * /api/entregas-venda, /liberar-avulso, /recusar-avulso).
- *
- * IMPACTO SE REMOVIDO: rotas de liberar/recusar/listar solicitações perdem a
- * checagem de autorização — ou travam para todos (fail-closed indevido) ou
- * ficam abertas para qualquer usuário logado (fail-open), dependendo de como
- * fosse substituída.
+ * IMPACTO SE ALTERADO: divergência entre os consumidores volta a acontecer —
+ * cada um lendo a config de um jeito ligeiramente diferente.
  */
-export async function podeGerenciarSolicitacoesAvulso(
-  userId: string,
-  role: string | null,
-): Promise<boolean> {
-  if (isFullAccess(role)) return true;
+export async function listarAprovadoresFreteAvulso(): Promise<string[]> {
   const [cfg] = await sql`
     SELECT valor FROM alissonerp.configuracoes_sistema
     WHERE chave = 'aprovadores_frete_avulso'
   `;
-  const lista = String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  return lista.includes(userId);
+  return String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 /**
@@ -2168,23 +2155,37 @@ export async function criarFreteAvulso(
       throw new Error(`Venda ${params.vendaId} não encontrada.`);
     }
     numeroVendaSolicitacao = venda.numero_venda ? String(venda.numero_venda) : null;
+
+    // REGRA DE NEGÓCIO (guard de solicitação duplicada — V3): espelha o guard
+    // de src/lib/inventario-solicitacoes.ts (criarSolicitacaoInventario) — não
+    // deixa abrir uma 2ª solicitação de frete avulso para a MESMA venda
+    // enquanto a 1ª ainda está 'solicitada' (aguardando decisão do pool).
+    // IMPACTO SE REMOVIDO: a consultora clica de novo (ou dá duplo-clique) e
+    // duas tarefas idênticas nascem para a mesma venda, confundindo o pool.
+    const [jaSolicitada] = await sql`
+      SELECT id FROM alissonerp.entregas_venda
+      WHERE is_avulso = true AND venda_id = ${params.vendaId} AND situacao = 'solicitada'
+      LIMIT 1
+    `;
+    if (jaSolicitada) {
+      throw new Error(
+        "Já existe uma solicitação de frete avulso aguardando decisão para esta venda.",
+      );
+    }
   }
 
   // REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL): a solicitação vira
   // TAREFA DE APROVAÇÃO para a lista configurada em `aprovadores_frete_avulso`
   // (Config › Aprovadores) — mesma engrenagem de compra comercial e
   // solicitações de inventário (ver src/lib/inventario-solicitacoes.ts).
-  // Lê a config e falha cedo (ANTES de abrir a transação) se ninguém estiver
-  // configurado — igual ao padrão de criarSolicitacaoInventario.
+  // Lê a config (fonte única: listarAprovadoresFreteAvulso) e falha cedo
+  // (ANTES de abrir a transação) se ninguém estiver configurado — igual ao
+  // padrão de criarSolicitacaoInventario.
   // IMPACTO SE REMOVIDO: a solicitação ficaria 'solicitada' para sempre, sem
   // tarefa e sem ninguém no pool para decidir.
   let listaAprovadoresFrete: string[] = [];
   if (params.modoSolicitacao) {
-    const [cfg] = await sql`
-      SELECT valor FROM alissonerp.configuracoes_sistema
-      WHERE chave = 'aprovadores_frete_avulso'
-    `;
-    listaAprovadoresFrete = String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    listaAprovadoresFrete = await listarAprovadoresFreteAvulso();
     if (listaAprovadoresFrete.length === 0) {
       throw new Error(
         "Nenhum aprovador de frete avulso configurado (Config › Aprovadores — chave aprovadores_frete_avulso).",
@@ -2384,7 +2385,7 @@ export async function criarFreteAvulso(
  * saldo da gerente é lançado (lancarSaldoFreteAvulsoNoTx). A checagem de QUEM
  * pode liberar (modelo TAREFA/POOL: qualquer aprovador da chave de config
  * aprovadores_frete_avulso — ou admin/dev/diretor, ver
- * podeGerenciarSolicitacoesAvulso) fica na rota/dispatcher; esta função só valida o
+ * PATCH /api/tarefas/[id]/aprovacao) fica no dispatcher; esta função só valida o
  * ESTADO da entrega.
  *
  * O QUE: tranca a linha (FOR UPDATE) dentro da transação para evitar liberar

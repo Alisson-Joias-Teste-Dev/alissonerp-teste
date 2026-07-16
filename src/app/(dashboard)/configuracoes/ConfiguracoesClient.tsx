@@ -42,7 +42,6 @@ import {
   Search,
   Scale,
   MessageCircle,
-  Bike,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { dispararWebhook } from "@/lib/webhooks";
@@ -53,7 +52,6 @@ import LocaisEstoqueTab from "@/components/LocaisEstoqueTab";
 import { useErrorStore } from "@/stores/errorStore";
 import TabProdutoVisibilidade from "@/components/configuracoes/TabProdutoVisibilidade";
 import TabAprovadores from "@/components/configuracoes/TabAprovadores";
-import TabFreteAvulsoLiberadores from "@/components/configuracoes/TabFreteAvulsoLiberadores";
 
 // ─── Paleta (tema claro — alinhado com aba Usuários) ─────────────────────────
 const P = {
@@ -144,7 +142,7 @@ interface Props {
   ligaTipos: LigaTipo[];
 }
 
-type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja" | "maquininhas" | "fretes" | "gateways" | "metal" | "produto_visibilidade" | "aprovadores" | "frete_avulso_liberadores";
+type Tab = "parametros" | "webhooks" | "usuarios" | "ia" | "depositos" | "permissoes" | "teores" | "locais" | "tipos_servico" | "cotacoes" | "integracoes" | "comissoes" | "credito_loja" | "maquininhas" | "fretes" | "gateways" | "metal" | "produto_visibilidade" | "aprovadores";
 
 interface Gateway {
   id: number;
@@ -5094,7 +5092,7 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab");
     const u = params.get("user");
-    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes", "maquininhas", "fretes", "gateways", "produto_visibilidade", "aprovadores", "frete_avulso_liberadores"].includes(t)) {
+    if (t && ["parametros", "webhooks", "usuarios", "ia", "depositos", "permissoes", "teores", "locais", "tipos_servico", "cotacoes", "integracoes", "maquininhas", "fretes", "gateways", "produto_visibilidade", "aprovadores"].includes(t)) {
       setTab(t as Tab);
     }
     if (u) setInitialUserId(u);
@@ -5117,7 +5115,6 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
     { key: "gateways",    label: "Gateways",          icon: CreditCard },
     { key: "metal",       label: "Metal",             icon: Scale },
     { key: "aprovadores", label: "Aprovadores",       icon: Shield },
-    { key: "frete_avulso_liberadores", label: "Liberadores Frete Avulso", icon: Bike },
   ];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let tabs: { key: Tab; label: string; icon: any }[] = isSuperAdmin
@@ -5186,7 +5183,6 @@ export default function ConfiguracoesClient({ parametros, webhooks, logs, usuari
       {tab === "gateways"            && isSuperAdmin && <TabGateways />}
       {tab === "produto_visibilidade" && isSuperAdmin && <TabProdutoVisibilidade />}
       {tab === "aprovadores" && <TabAprovadores />}
-      {tab === "frete_avulso_liberadores" && <TabFreteAvulsoLiberadores />}
 
       {tab === "metal" && <TabMetal />}
     </div>

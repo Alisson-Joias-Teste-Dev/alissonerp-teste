@@ -6,6 +6,7 @@ import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 import { criarNotificacao } from "@/lib/notificacoes";
+import { listarAprovadoresFreteAvulso } from "@/lib/entrega-venda";
 
 const TarefaPatchSchema = z.object({
   titulo: z.string().optional(),
@@ -53,8 +54,23 @@ export async function GET(
 
     const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
     const isOwner = tarefa.responsavel_id === user.id || tarefa.criado_por === user.id;
+    const isAdminOuDev = isFullAccess(usuario?.role);
 
-    if (!isOwner && !isFullAccess(usuario?.role)) {
+    // REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL — ADITIVO, escopado
+    // SÓ para tipo='frete_avulso'): mesmo padrão aditivo/escopado usado em
+    // GET /api/tarefas e PATCH /api/tarefas/[id]/aprovacao — qualquer membro
+    // do pool (chave de config aprovadores_frete_avulso) também pode ABRIR a
+    // tarefa (e ver a aba Comentários), não só o responsavel_id/criado_por
+    // gravado na criação. Só consulta a config quando necessário (tipo bate).
+    // IMPACTO SE REMOVIDO: membro do pool decide a tarefa (PATCH já libera),
+    // mas o GET desta tarefa devolve 403 — a aba Comentários fica vazia/quebrada.
+    let isPoolFreteAvulso = false;
+    if (!isOwner && !isAdminOuDev && tarefa.tipo === "frete_avulso") {
+      const listaPool = await listarAprovadoresFreteAvulso();
+      isPoolFreteAvulso = listaPool.includes(user.id);
+    }
+
+    if (!isOwner && !isAdminOuDev && !isPoolFreteAvulso) {
       return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
     }
 

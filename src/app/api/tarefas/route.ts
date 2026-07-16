@@ -11,6 +11,7 @@ import {
 } from "@/lib/payload-limits";
 import { zodError } from "@/lib/schemas/common";
 import { criarNotificacao } from "@/lib/notificacoes";
+import { listarAprovadoresFreteAvulso } from "@/lib/entrega-venda";
 
 const TarefaPostSchema = z.object({
   titulo: z.string().min(1, "obrigatório"),
@@ -61,10 +62,9 @@ export async function GET(req: NextRequest) {
    */
   let isPoolFreteAvulso = false;
   if (!isAdmin) {
-    const [cfgPoolFrete] = await sql`
-      SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadores_frete_avulso'
-    `;
-    const listaPoolFrete = String(cfgPoolFrete?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    // Fonte única (V3): listarAprovadoresFreteAvulso (@/lib/entrega-venda) —
+    // antes essa mesma query estava duplicada aqui, na lib e no dispatcher.
+    const listaPoolFrete = await listarAprovadoresFreteAvulso();
     isPoolFreteAvulso = listaPoolFrete.includes(userId);
   }
 

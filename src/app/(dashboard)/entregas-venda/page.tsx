@@ -252,11 +252,6 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
       dataInicioFiltro={dataInicio}
       dataFimFiltro={dataFim}
       userRole={usuario.role as string}
-      // ADITIVO REVERTIDO (V2): a aba "Solicitações" e o cálculo de
-      // ehGestorSolicitacoes saem nesta virada (V3 recria via tarefa, não
-      // aba própria). Prop mantida (obrigatória em EntregasVendaClient) só
-      // para não quebrar o tsc — sempre false até a V3 decidir o que entra aqui.
-      podeLiberarSolicitacoes={false}
     />
   );
 }

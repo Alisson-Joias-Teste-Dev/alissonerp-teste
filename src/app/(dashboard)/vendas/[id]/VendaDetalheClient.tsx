@@ -7,7 +7,7 @@ import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle, XCircle, AlertCircle,
   Truck, Video, RefreshCw, Share2, Download,
   Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
-  RotateCcw, ArrowRight, PackageCheck, ScanLine,
+  RotateCcw, ArrowRight, PackageCheck, ScanLine, Bike,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { maskCpfCnpj, maskCelular, onlyDigits } from "@/lib/formatters";
@@ -26,6 +26,9 @@ import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 // REGRA DE NEGÓCIO: modal de entrega (parcial/total) da venda
 import MarcarEntregaModal from "@/components/entregas/MarcarEntregaModal";
+// REGRA DE NEGÓCIO (V3): modal de solicitação de frete avulso — mesma consultora,
+// aberto de dentro da venda (vendaId fixado, ver props abaixo)
+import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
 import { useErrorStore } from "@/stores/errorStore";
 import { getPublicUrl } from "@/lib/storage-url";
 // REGRA DE NEGOCIO: helpers de rodio (Frente A — 30/05/2026)
@@ -129,6 +132,11 @@ interface Venda {
   endereco_entrega_complemento?: string | null; endereco_entrega_bairro?: string | null;
   endereco_entrega_cidade?: string | null; endereco_entrega_cep?: string | null;
   endereco_entrega_uf?: string | null;
+  /** Última corrida avulsa solicitada pela consultora desta venda (V3) — null se nunca solicitou. */
+  frete_avulso?: {
+    id: number; situacao: string; motivo_recusa: string | null;
+    frete_cobrado: number; created_at: string;
+  } | null;
   cliente_endereco?: string | null; cliente_numero?: string | null;
   cliente_complemento?: string | null; cliente_bairro?: string | null;
   cliente_municipio?: string | null; cliente_cep?: string | null; cliente_uf?: string | null;
@@ -668,6 +676,10 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   // REGRA DE NEGÓCIO: controla a abertura do modal de Marcar Entrega — permite
   // registrar entregas parciais ou totais dos itens da venda aprovada.
   const [showMarcarEntrega, setShowMarcarEntrega] = useState(false);
+  // REGRA DE NEGÓCIO (V3): controla a abertura do modal de Solicitar Frete
+  // Avulso — a consultora dona da venda pede diretamente daqui, sem passar
+  // pelo menu Entregas (ver botão/status na barra de banners abaixo).
+  const [showFreteAvulsoModal, setShowFreteAvulsoModal] = useState(false);
 
   // Modal de solicitação de alteração (quando o backend devolve 403 com solicitar:true)
   const [solicitarPayload, setSolicitarPayload] = useState<{
@@ -2096,6 +2108,30 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const situacaoStyle = SITUACAO_COLOR[venda.situacao] ?? SITUACAO_COLOR.rascunho;
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
 
+  // ── Frete avulso solicitado pela consultora (V3) ────────────────────────────
+  // REGRA DE NEGÓCIO: só a consultora DONA da venda vê o botão/status — o
+  // backend (GET /api/vendas/[id] via requireVendaOwnership) já barra o
+  // carregamento da venda para quem não é dono, então basta checar a role
+  // aqui (sem duplicar a checagem de vendedor_id no front).
+  // QUANDO: venda já confirmada (aprovado/enviado/concluido) — nunca em
+  // rascunho (venda ainda não fechada) nem cancelado (não faz mais sentido).
+  // ⚠️ 'enviado'/'concluido' são situações HISTÓRICAS (aposentadas — ver
+  // src/lib/vendas-situacoes.ts): vendas novas não transicionam mais para
+  // elas, o fluxo atual vai aprovado → em_rota → entregue. Mantido literal
+  // conforme o plano aprovado; reportado como dúvida em separado.
+  const podeSolicitarFreteAvulso = role === "consultora" && ["aprovado", "enviado", "concluido"].includes(venda.situacao);
+  // Endereço sugerido para pré-preencher o textarea editável do modal —
+  // mesma concatenação usada em FreteAvulsoModal.montarEndereco().
+  const enderecoInicialFreteAvulso = [
+    venda.endereco_entrega,
+    venda.endereco_entrega_numero ? `nº ${venda.endereco_entrega_numero}` : null,
+    venda.endereco_entrega_complemento,
+    venda.endereco_entrega_bairro,
+    venda.endereco_entrega_cidade,
+    venda.endereco_entrega_uf,
+    venda.endereco_entrega_cep,
+  ].filter((p): p is string => !!p && p.trim() !== "").join(", ");
+
   // REGRA DE NEGÓCIO (12/06 — Jonathan): reposição bloqueia a entrega POR ITEM
   // (ver temItemEntregavel/bloqueioVendaInteira acima, vindos do saldo-pendente):
   // o item da reposição espera, mas os itens prontos podem ser entregues. A regra
@@ -2508,6 +2544,56 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               {solicitandoEntrega ? "Solicitando..." : "Solicitar aprovação para entregar devendo"}
             </span>
             <span className="ml-auto text-xs opacity-80">peça com antecedência</span>
+          </button>
+        )
+      )}
+
+      {/* ── Frete avulso solicitado pela consultora (V3) ──
+          REGRA DE NEGÓCIO: mostra o botão de solicitar OU (se já existe uma
+          corrida avulsa vinculada a esta venda) o status no lugar do botão —
+          aguardando decisão do pool / liberada / recusada (com motivo).
+          IMPACTO SE REMOVIDO: a consultora só teria acesso pelo menu Entregas
+          (perderia o atalho de dentro da própria venda) e não veria o motivo
+          de uma recusa sem abrir o módulo de Tarefas. */}
+      {podeSolicitarFreteAvulso && (
+        venda.frete_avulso?.situacao === "solicitada" ? (
+          <div className="mb-3 px-4 py-2 rounded-lg border flex items-center gap-2"
+            style={{ backgroundColor: "#EFF6FF", borderColor: "#93C5FD", color: "#1E40AF" }}>
+            <Bike size={14} className="shrink-0" />
+            <p className="text-xs font-medium">Frete avulso solicitado — aguardando decisão do pool de aprovadores.</p>
+          </div>
+        ) : venda.frete_avulso?.situacao === "cancelada" ? (
+          <div className="mb-3 px-4 py-2 rounded-lg border flex items-center justify-between gap-2 flex-wrap"
+            style={{ backgroundColor: "#FEF2F2", borderColor: "#FCA5A5", color: "#991B1B" }}>
+            <div className="flex items-center gap-2">
+              <XCircle size={14} className="shrink-0" />
+              <p className="text-xs font-medium">
+                Frete avulso recusado{venda.frete_avulso.motivo_recusa ? `: ${venda.frete_avulso.motivo_recusa}` : "."}
+              </p>
+            </div>
+            <button
+              onClick={() => setShowFreteAvulsoModal(true)}
+              className="text-xs font-semibold underline shrink-0"
+              style={{ color: "#991B1B" }}
+            >
+              Solicitar novamente
+            </button>
+          </div>
+        ) : venda.frete_avulso ? (
+          // 'pendente' (liberado, ainda sem motoboy) / 'em_rota' / 'confirmada'
+          <div className="mb-3 px-4 py-2 rounded-lg border flex items-center gap-2"
+            style={{ backgroundColor: "#ECFDF5", borderColor: "#A7F3D0", color: "#065F46" }}>
+            <CheckCircle size={14} className="shrink-0" />
+            <p className="text-xs font-medium">Frete avulso liberado.</p>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowFreteAvulsoModal(true)}
+            className="mb-3 w-full px-4 py-2.5 rounded-lg border flex items-center gap-2 text-left transition-all hover:brightness-95"
+            style={{ backgroundColor: "#FAFAF7", borderColor: C.cremeBorder, color: C.esmeralda }}
+          >
+            <Bike size={15} className="shrink-0" />
+            <span className="text-sm font-medium">Solicitar frete avulso</span>
           </button>
         )
       )}
@@ -4523,6 +4609,22 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           setShowMarcarEntrega(false);
           load();
         }}
+      />
+    )}
+    {/* REGRA DE NEGÓCIO (V3): Modal de Solicitar Frete Avulso — aberto pelo
+     * botão/banner acima. vendaId fixo esconde o buscador de venda do modal;
+     * enderecoInicial pré-preenche o textarea editável. onSolicitado recarrega
+     * a venda (silencioso) assim que o POST confirma, para o banner de status
+     * trocar sem esperar o fechamento do modal. */}
+    {showFreteAvulsoModal && venda && (
+      <FreteAvulsoModal
+        isOpen={showFreteAvulsoModal}
+        onClose={() => setShowFreteAvulsoModal(false)}
+        onCriado={() => setShowFreteAvulsoModal(false)}
+        onSolicitado={() => load(true)}
+        userRole={role}
+        vendaId={venda.id}
+        enderecoInicial={enderecoInicialFreteAvulso}
       />
     )}
     </>

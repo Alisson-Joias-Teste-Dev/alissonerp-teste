@@ -25,7 +25,7 @@ import { zodError } from "@/lib/schemas/common";
 import { processarAprovacaoQuebraLimpeza } from "@/lib/limpeza-ouro-aprovacao";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } from "@/lib/entrega-sem-pagamento";
-import { liberarFreteAvulso, recusarFreteAvulso } from "@/lib/entrega-venda";
+import { liberarFreteAvulso, recusarFreteAvulso, listarAprovadoresFreteAvulso } from "@/lib/entrega-venda";
 
 const AprovacaoTarefaPostSchema = z.object({
   aprovador_id: z.string().min(1, "obrigatório"),
@@ -347,10 +347,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       SELECT tipo FROM alissonerp.tarefas WHERE id = ${Number(id)} LIMIT 1
     `;
     if (tarefaTipoCheck?.tipo === "frete_avulso") {
-      const [cfgPool] = await sql`
-        SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadores_frete_avulso'
-      `;
-      const listaPool = String(cfgPool?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      // Fonte única (V3): listarAprovadoresFreteAvulso (@/lib/entrega-venda) —
+      // antes essa mesma query estava duplicada aqui, na lib e em GET /api/tarefas.
+      const listaPool = await listarAprovadoresFreteAvulso();
       isPoolFreteAvulso = listaPool.includes(user.id);
     }
   }
@@ -692,6 +691,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         }
         await recusarFreteAvulso(Number(entregaFrete.id), user.id, body.motivo);
       }
+
+      // REGRA DE NEGÓCIO (V3): a consultora que solicitou precisa saber o
+      // resultado sem precisar abrir o módulo de Tarefas — espelha o mesmo
+      // padrão de notificação usado nos blocos cartao_desconto/desconto_acima
+      // acima (aprovacao.solicitante_id = quem pediu, já carregado no SELECT
+      // de aprovacao_tarefa no início do PATCH).
+      // IMPACTO SE REMOVIDO: a consultora só saberia da decisão entrando na
+      // tela de Tarefas — sem alarme nem confirmação.
+      await criarNotificacao({
+        usuarioId: String(aprovacao.solicitante_id),
+        tipo: "aprovacao",
+        titulo: body.decisao === "aprovado" ? "Frete avulso liberado" : "Frete avulso recusado",
+        mensagem: body.decisao === "aprovado"
+          ? "O frete avulso foi liberado e entrou no pool de motoboys."
+          : (body.motivo ?? "O frete avulso foi recusado."),
+        remetenteId: user.id,
+        link: tarefaInfo?.venda_id ? `/vendas/${tarefaInfo.venda_id}` : `/tarefas?abrir=${Number(id)}`,
+        vendaId: tarefaInfo?.venda_id ? Number(tarefaInfo.venda_id) : null,
+      }).catch(() => {});
+
       return NextResponse.json({
         ok: true,
         frete_avulso: { entrega_id: Number(entregaFrete.id), decisao: body.decisao },
