@@ -21,3 +21,6 @@ export {
   resolverAprovadores,
   podeDecidir,
 } from "./autoridade";
+
+export type { TarefaInfoParaEvento } from "./evento-da-tarefa";
+export { eventoDaTarefa } from "./evento-da-tarefa";
