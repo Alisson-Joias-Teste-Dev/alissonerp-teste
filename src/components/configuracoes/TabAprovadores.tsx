@@ -24,6 +24,8 @@ interface AprovadorConfig {
   aprovador_devolucao?: string; // Fase 3e: devolução etapa 1 (1 aprovador, sem distinção de prazo)
   aprovador_alteracao_venda?: string; // Fase 3g.1: alteração de venda (era ROLES_FINANCEIRO fixo)
   aprovadores_conversao_reversa?: string; // MULTI: UUIDs separados por vírgula
+  desconto_fallback_sem_cadastro_pct?: string; // Fase 5: teto (%) sem cadastro de mx_desconto_permitido
+  limite_desconto_cartao_pct?: string; // Fase 5: acima disso, cartão de crédito exige aprovação
 }
 
 interface Usuario {
@@ -76,6 +78,8 @@ export default function TabAprovadores() {
     aprovador_devolucao: "",
     aprovador_alteracao_venda: "",
     aprovadores_conversao_reversa: "",
+    desconto_fallback_sem_cadastro_pct: "0",
+    limite_desconto_cartao_pct: "20",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
     gerentes: [],
@@ -115,6 +119,8 @@ export default function TabAprovadores() {
           aprovador_devolucao: d.aprovador_devolucao ?? "",
           aprovador_alteracao_venda: d.aprovador_alteracao_venda ?? "",
           aprovadores_conversao_reversa: d.aprovadores_conversao_reversa ?? "",
+          desconto_fallback_sem_cadastro_pct: d.desconto_fallback_sem_cadastro_pct ?? "0",
+          limite_desconto_cartao_pct: d.limite_desconto_cartao_pct ?? "20",
         });
         setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [], conversao_aprovadores: [], precificacao_aprovadores: [], devolucao_aprovadores: [] });
       })

@@ -57,6 +57,18 @@ const CHAVES = [
   "aprovadores_conversao_reversa",
 ] as const;
 
+// Chaves NUMÉRICAS (%) — não são UUID de aprovador, são o limiar que decide
+// SE precisa de aprovação (Fase 5, 15/07). Ficaram só no banco no pacote
+// original ("UI fica pra depois") — Jonathan pediu a tela em 16/07.
+const CHAVES_NUMERICAS = [
+  // Sem cadastro de mx_desconto_permitido, este é o teto (fallback do fallback:
+  // FALLBACK_TETO_DESCONTO_PCT=0 em precificar-item.ts se a chave nem existir).
+  "desconto_fallback_sem_cadastro_pct",
+  // Acima deste %, pagamento em Cartão de Crédito exige aprovação (era hardcoded
+  // 20 em 4 lugares — ver LIMITE_DESCONTO_CARTAO_PADRAO em precificar-item.ts).
+  "limite_desconto_cartao_pct",
+] as const;
+
 // GET /api/configuracoes/aprovadores
 // Retorna a config atual + lista de usuários elegíveis por role
 export async function GET() {
@@ -64,7 +76,7 @@ export async function GET() {
     // Ler valores atuais — busca TODAS as chaves, incluindo a já existente
     const configs = await sql`
       SELECT chave, valor FROM alissonerp.configuracoes_sistema
-      WHERE chave = ANY(${CHAVES})
+      WHERE chave = ANY(${[...CHAVES, ...CHAVES_NUMERICAS]})
     `;
     const configMap = new Map(configs.map((r: any) => [r.chave, r.valor]));
 
@@ -165,6 +177,9 @@ export async function GET() {
       aprovador_devolucao: configMap.get("aprovador_devolucao") ?? "",
       aprovador_alteracao_venda: configMap.get("aprovador_alteracao_venda") ?? "",
       aprovadores_conversao_reversa: configMap.get("aprovadores_conversao_reversa") ?? "",
+      // Fase 5 (15/07): limites numéricos (%), não são UUID de aprovador — ver CHAVES_NUMERICAS.
+      desconto_fallback_sem_cadastro_pct: configMap.get("desconto_fallback_sem_cadastro_pct") ?? "0",
+      limite_desconto_cartao_pct: configMap.get("limite_desconto_cartao_pct") ?? "20",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -281,6 +296,18 @@ export async function PUT(req: NextRequest) {
         String(body.aprovadores_conversao_reversa).split(",").map((s) => s.trim()).filter(Boolean)
       )).join(",");
       updates.push({ chave: "aprovadores_conversao_reversa", valor: lista });
+    }
+    // Fase 5 (15/07, tela adicionada 16/07): limites em % — valida 0-100, número.
+    // Sem isso gravado errado, o fallback do código (0 / 20) nunca é sobrescrito
+    // e o comportamento muda silenciosamente sem avisar ninguém.
+    for (const chaveNum of CHAVES_NUMERICAS) {
+      const bodyRec = body as unknown as Record<string, string>;
+      if (bodyRec[chaveNum] === undefined) continue;
+      const n = Number(bodyRec[chaveNum]);
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        return NextResponse.json({ error: `${chaveNum}: precisa ser um número entre 0 e 100` }, { status: 400 });
+      }
+      updates.push({ chave: chaveNum, valor: String(n) });
     }
 
     for (const u of updates) {

@@ -226,6 +226,80 @@ export default function ListaAprovadores({
         )}
       </div>
 
+      {/* REGRA DE NEGÓCIO (Fase 5, 15/07 — tela adicionada 16/07 a pedido do
+          Jonathan): limites em % que decidem SE precisa de aprovação — não são
+          UUID de aprovador, então ficam fora da grade de cards acima. Antes
+          hardcoded no código (30/50/15 por cargo, 20% do cartão); agora vêm
+          do banco (configuracoes_sistema) com fallback seguro se a chave não
+          existir. Ver docs/regras-negocio/aprovacoes-refatoracao/17-FASE-5-limites.md */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="rounded-lg border p-2.5 space-y-2" style={{ backgroundColor: P.card, borderColor: P.border }}>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm shrink-0">🎚️</span>
+            <p className="text-xs font-semibold flex-1 min-w-0" style={{ color: P.texto }}>
+              Teto sem cadastro de desconto
+            </p>
+            <span
+              title="Vendedora sem % de desconto cadastrado no perfil dela cai neste teto. 0 = qualquer desconto pede aprovação."
+              style={{ color: P.secundario, cursor: "help", flexShrink: 0, fontSize: 13, lineHeight: 1 }}
+            >
+              ⓘ
+            </span>
+          </div>
+          {podeEditar ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={config.desconto_fallback_sem_cadastro_pct ?? "0"}
+                onChange={(e) => onChange("desconto_fallback_sem_cadastro_pct", e.target.value)}
+                className="w-full rounded-lg border px-2.5 py-1.5 text-xs"
+                style={{ borderColor: P.border, color: P.texto, backgroundColor: "#fff" }}
+              />
+              <span className="text-xs shrink-0" style={{ color: P.secundario }}>%</span>
+            </div>
+          ) : (
+            <div className="w-full rounded-lg border px-2.5 py-1.5 text-xs" style={{ borderColor: P.border, backgroundColor: "#f9fafb", color: P.texto }}>
+              {config.desconto_fallback_sem_cadastro_pct ?? "0"}%
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-lg border p-2.5 space-y-2" style={{ backgroundColor: P.card, borderColor: P.border }}>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm shrink-0">💳</span>
+            <p className="text-xs font-semibold flex-1 min-w-0" style={{ color: P.texto }}>
+              Limite de desconto no cartão
+            </p>
+            <span
+              title="Acima deste %, pagar no Cartão de Crédito exige aprovação (card 'Cartão de crédito com desconto' abaixo)."
+              style={{ color: P.secundario, cursor: "help", flexShrink: 0, fontSize: 13, lineHeight: 1 }}
+            >
+              ⓘ
+            </span>
+          </div>
+          {podeEditar ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={config.limite_desconto_cartao_pct ?? "20"}
+                onChange={(e) => onChange("limite_desconto_cartao_pct", e.target.value)}
+                className="w-full rounded-lg border px-2.5 py-1.5 text-xs"
+                style={{ borderColor: P.border, color: P.texto, backgroundColor: "#fff" }}
+              />
+              <span className="text-xs shrink-0" style={{ color: P.secundario }}>%</span>
+            </div>
+          ) : (
+            <div className="w-full rounded-lg border px-2.5 py-1.5 text-xs" style={{ borderColor: P.border, backgroundColor: "#f9fafb", color: P.texto }}>
+              {config.limite_desconto_cartao_pct ?? "20"}%
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* REGRA DE NEGÓCIO (16/07 — pedido do Jonathan): grade de 2 colunas em vez
           de 1 card por linha — com 16 tipos de aprovação, a tela empilhada
           exigia rolar ~8 telas. Card compacto (FormularioAprovador) + descrição
