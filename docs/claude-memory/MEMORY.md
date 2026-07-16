@@ -392,10 +392,17 @@ pra todos: `Teste@123`**. Todos `ativo=true`, `mx_desconto_permitido=0` (default
 desconto, cai no fallback da Fase 5 = 0%, exceto admin/desenvolvedor que sao full-access=100%).
 
 **IMPORTANTE — login e compartilhado entre homolog e prod pro MESMO Supabase Auth, mas os dois
-bancos Postgres (homolog/prod) sao independentes** (ver [[reference_criar_login_erp]]). Estes
-usuarios foram inseridos **SO no `auth.users`/`alissonerp.usuarios` de HOMOLOG** (banco
-`postgres-homolog`, cloud.alisson.api.br:5435) — nao existem em produacao, entao so logam quando o
-app estiver apontando pro banco de homolog.
+bancos Postgres (homolog/prod) sao independentes** (ver [[reference_criar_login_erp]]).
+`alissonerp.usuarios` (o perfil/role de negocio) existe **SO em HOMOLOG** (banco `postgres-homolog`,
+cloud.alisson.api.br:5435) — sem perfil em producao, entao nao aparecem/nao funcionam la.
+
+**CORRECAO 16/07 (testado e confirmado funcionando):** `auth.users`/`auth.identities` (o login em
+si) tiveram que ser criados TAMBEM em PRODUCAO (mesmo UUID, assinado via `assinar_mudanca_banco`,
+assinatura #227) — o GoTrue que autentica de verdade nao le o Postgres de homolog (confirmado:
+`auth.audit_log_entries` de homolog nunca registra nenhuma tentativa, nem as validas). So inserir em
+homolog deixa o login SEMPRE falhando, silenciosamente. Detalhe completo em
+[[reference_criar_login_erp]]. **Login CONFIRMADO funcionando** (testado `teste-consultora@alisson.com`
+no app apontando pra homolog, 16/07).
 
 | Email | Role | UUID |
 |---|---|---|
