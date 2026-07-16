@@ -107,6 +107,27 @@ de aprovação ao vivo.
 - [ ] `aprovar-desconto` (rota antiga) → 404 (arquivo apagado).
 - [ ] Compra comercial com chegada prévia → aprovar → não duplica `contas_pagar` nem estoque.
 
+### Conversão Reversa (feature independente, PR#94 — alinhada ao padrão nesta sessão, 16/07)
+
+Essa feature nasceu numa branch separada (`feat/conversao-reversa`) e já foi mergeada em `main`
+ontem, SEM usar a camada `src/lib/aprovacoes/` — tinha um fallback próprio pra admin/desenvolvedor
+quando a config estava vazia, violando a política config-first. Corrigido nesta branch (commit
+`dfce3331`) trazendo o `main` atualizado pra dentro de `feat/centralizar-aprovacoes` (merge, 4
+conflitos resolvidos — todos união de listas, nada perdido) e plugando `aprovar`/`recusar`/criação
+no `podeDecidir`/`resolverAprovadores`.
+
+- [ ] Abrir uma conversão reversa nova (ouro do cofre → joia) → confirma que ainda abre normal.
+- [ ] Aprovar como Alisson (configurado em homolog) → passa.
+- [ ] Tentar aprovar como você (admin/dev, NÃO configurado) → agora dá 403 (antes passava pelo
+  fallback — **esse é o comportamento NOVO, intencional**, alinhado aos outros ~15 fluxos).
+- [ ] `npx vitest run src/lib/aprovacoes` → 122/122 (era 121 — o evento novo soma 1 teste).
+
+🔴 **Antes de mergear esta branch pra `main`**: a chave `aprovadores_conversao_reversa` está **VAZIA
+em produção** (conferido 16/07, read-only). Como a conversão reversa já está ATIVA em prod com o
+fallback antigo, preencher essa chave em prod é pré-requisito ABSOLUTO — sem isso, o merge quebra a
+aprovação da conversão reversa em produção pra todo mundo (nem admin passa). Ver seção "Depois de
+validar tudo" abaixo.
+
 ## Depois de validar tudo
 
 Se estiver tudo certo, os próximos passos são (na ordem):
@@ -122,9 +143,15 @@ Se estiver tudo certo, os próximos passos são (na ordem):
      que já desativei em homolog.
    - `aprovador_desconto_padrao`/`aprovador_cartao_desconto_padrao` já existem em prod mas confirmar
      que têm valor preenchido (eram decorativas antes da 3g.3, agora são lidas de verdade).
+   - **`aprovadores_conversao_reversa` — 🔴 CRÍTICO, checado agora (16/07): está VAZIA EM PROD.**
+     A Conversão Reversa (PR#94) está rodando em produção AGORA com o fallback antigo (admin/dev
+     aprova mesmo sem config). Esta branch REMOVE esse fallback (alinhamento ao padrão config-first —
+     ver commit `dfce3331`). **Se mergear sem preencher essa chave em prod ANTES, ninguém — nem
+     admin — vai conseguir aprovar conversão reversa em produção.** Preencher é pré-requisito
+     ABSOLUTO deste merge, não só recomendação.
 3. Sem essas chaves em prod, os fluxos correspondentes trocam de "aprova pelo cargo" para
-   `409 nao_configurado` — ninguém aprova nada até eu criar as chaves. **Não fazer merge pra main sem
-   esse passo.**
+   `409`/403 "não configurado" — ninguém aprova nada até eu criar as chaves. **Não fazer merge pra
+   main sem esse passo — em especial a de conversão reversa, que já está ativa em produção.**
 
 ## O que eu já validei sozinho (não precisa reconferir)
 
