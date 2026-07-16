@@ -20,7 +20,10 @@ import { NextRequest } from "next/server";
 
 const USER_ID = "user-aprovador-uuid";
 
-const sqlMock = Object.assign(vi.fn(), { array: (arr: unknown[]) => arr });
+const sqlMock = Object.assign(vi.fn(), {
+  array: (arr: unknown[]) => arr,
+  begin: async (fn: (tx: unknown) => unknown) => fn(sqlMock),
+});
 vi.mock("@/lib/db", () => ({ default: sqlMock }));
 
 const mockGetUser = vi.fn();
@@ -91,6 +94,10 @@ describe("PATCH aprovacao — crédito: revert on failure", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     (sqlMock as unknown as { array: (a: unknown[]) => unknown[] }).array = (arr) => arr;
+    // Restaura sql.begin(tx=>...) após reset — o PATCH agora envolve as escritas
+    // genéricas numa transação (BUG 2, item c); o `tx` roteia pelo mesmo mock
+    // por conteúdo (routeSqlByContent), então o comportamento não muda.
+    (sqlMock as unknown as { begin: (fn: (tx: unknown) => unknown) => unknown }).begin = (fn) => fn(sqlMock);
     sqlMock.mockImplementation(routeSqlByContent);
     mockGetUser.mockResolvedValue({ data: { user: { id: USER_ID } } });
   });

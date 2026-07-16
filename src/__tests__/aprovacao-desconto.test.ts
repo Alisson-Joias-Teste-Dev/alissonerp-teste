@@ -15,7 +15,11 @@ import { NextRequest } from "next/server";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
-const sqlMock = Object.assign(vi.fn(), { array: (arr: unknown[]) => arr });
+const sqlMock = Object.assign(vi.fn(), {
+  array: (arr: unknown[]) => arr,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  begin: async (fn: (tx: unknown) => unknown) => fn(sqlMock),
+});
 vi.mock("@/lib/db", () => ({ default: sqlMock }));
 
 const mockGetUser = vi.fn();
@@ -83,6 +87,9 @@ describe("PATCH aprovacao — hook aprovacao_desconto", () => {
     vi.resetAllMocks();
     // Restaura propriedade de fragment após reset
     (sqlMock as unknown as { array: (a: unknown[]) => unknown[] }).array = (arr) => arr;
+    // Restaura sql.begin(tx=>...) após reset — o PATCH agora envolve as escritas
+    // genéricas numa transação (BUG 2, item c); sem isto o mock não tem `.begin`.
+    (sqlMock as unknown as { begin: (fn: (tx: unknown) => unknown) => unknown }).begin = (fn) => fn(sqlMock);
     // Default seguro: queries sem mock específico retornam array vazio
     sqlMock.mockResolvedValue([]);
     mockGetUser.mockResolvedValue({ data: { user: { id: USER_ID } } });
