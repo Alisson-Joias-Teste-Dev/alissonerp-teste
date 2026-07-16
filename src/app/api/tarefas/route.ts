@@ -67,12 +67,20 @@ export async function GET(req: NextRequest) {
   // Generaliza o padrão que já existia só pra conversao_reversa (acima) pros
   // eventos que hoje suportam múltiplos aprovadores. Mapeamento tipo/tags →
   // chave de config conferido direto no código de cada criação (grep, 16/07)
-  // — não adivinhado. Eventos fora desta lista (conversao_sku, precificacao,
-  // limpeza_ouro, compra_metal, recebimento_metal) continuam só com
-  // `responsavel_id` — não têm essa necessidade hoje (config de 1 aprovador
-  // só), mas dá pra estender aqui do mesmo jeito quando precisar.
-  // IMPACTO SE REMOVIDO: volta o problema — só o "sortudo" (1º da lista)
-  // recebe a tarefa; os outros aprovadores configurados ficam cegos.
+  // — não adivinhado.
+  //
+  // 16/07 (2ª rodada) — cobre TODOS os eventos do CATALOGO que criam tarefa.
+  // Os 4 que faltavam (conversao_sku, compra_metal, recebimento_metal,
+  // limpeza_ouro) entraram depois de um achado testando no homolog: a tarefa
+  // 305 (conversao_sku) ficou SEM SAÍDA. Ela nasce com responsavel_id de quem
+  // o fluxo elegeu (Paloma), que NÃO estava em `aprovador_conversao` — então
+  // quem podia decidir (config) não via, e quem via não podia decidir
+  // (podeDecidir é config-first estrito, sem fallback por cargo). Resultado:
+  // travada, só saía por SQL. `precificacao` ficou de fora de propósito: não
+  // existe criação de tarefa pra ela em lugar nenhum (só permissão de módulo).
+  // IMPACTO SE REMOVIDO: volta o problema — só o "sortudo" (responsavel_id)
+  // recebe a tarefa; os outros aprovadores configurados ficam cegos, e se o
+  // responsavel_id não estiver na config a aprovação trava de vez.
   const multiAprovadorCond = sql`(
     ${reversaAprovadorCond}
     OR (t.tipo = 'desconto_acima' AND EXISTS (
@@ -94,6 +102,24 @@ export async function GET(req: NextRequest) {
     OR (t.tipo = 'conversao' AND EXISTS (
       SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovador_conversao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    -- conversao_sku: MESMA chave de 'conversao' (decisão do Jonathan, 12/07 — vide catalogo.ts).
+    OR (t.tipo = 'conversao_sku' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_conversao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    -- compra_metal e recebimento_metal: chave 'metal_aprovador_id' (api/metal/compras
+    -- e api/metal/recebimentos gravam esses tipos — conferido no INSERT, 16/07).
+    OR (t.tipo IN ('compra_metal', 'recebimento_metal') AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'metal_aprovador_id' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    -- limpeza de ouro: a tarefa nasce com tipo 'aprovacao_quebra_metal' (NÃO
+    -- 'limpeza_ouro') — api/purificacao/limpeza grava assim de propósito, porque o
+    -- aprovador valida a QUEBRA, não o recebimento. Chave: 'aprovador_limpeza'.
+    OR (t.tipo = 'aprovacao_quebra_metal' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_limpeza' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     -- credito_loja: tags = ['credito_loja', 'gerente'|'diretor'] (vendas-credito-aprovar.ts) — tipo NULL.
     OR ('credito_loja' = ANY(t.tags) AND 'gerente' = ANY(t.tags) AND EXISTS (
