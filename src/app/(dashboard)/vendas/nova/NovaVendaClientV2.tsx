@@ -22,6 +22,8 @@ import { createClient } from "@/lib/supabase/client";
 // Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos frontends.
 import { isServicoRodioProduto, descricaoItemComBaseRodio, calcularPreviewRodioPorSkuBase, getPctRodio, round2, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
 import { useErrorStore } from "@/stores/errorStore";
+// Formas que contam como cartão pro gate de desconto (fonte única, espelha o servidor).
+import { ehFormaCartao } from "@/lib/desconto/precificar-item";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -1802,7 +1804,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     }
     if (step === 3 && tipoVenda !== "servico" && itens.length === 0) { setSaveErr("Adicione pelo menos 1 item"); return; }
     if (step === 3 && precisaAprovacaoDesconto) { setSaveErr(`Desconto acima de ${maxDesconto}% requer aprovação. Clique em 'Solicitar Aprovação'.`); return; }
-    if (step === 3 && cartaoBloqueado && pagForma === "Cartão de Crédito") { setSaveErr(`Cartão de crédito bloqueado para esta venda devido a descontos acima de ${LIMITE_DESCONTO_CARTAO}%. Solicite aprovação ou escolha outra forma de pagamento.`); return; }
+    if (step === 3 && cartaoBloqueado && ehFormaCartao(pagForma)) { setSaveErr(`Pagamento em ${pagForma} bloqueado: desconto acima de ${LIMITE_DESCONTO_CARTAO}%. Solicite aprovação ou escolha outra forma (Dinheiro, Pix, Ouro, Vale-Troca seguem liberadas).`); return; }
     // Valida pendencias de personalizacao no passo 3
     if (step === 3) {
       const pendencias = itens
@@ -1907,8 +1909,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       setConcluindo(false);
       return;
     }
-    if (cartaoBloqueado && pagForma === "Cartão de Crédito") {
-      setSaveErr("Cartão de crédito bloqueado para esta venda. Solicite aprovação ou escolha outra forma de pagamento.");
+    if (cartaoBloqueado && ehFormaCartao(pagForma)) {
+      setSaveErr(`Pagamento em ${pagForma} bloqueado para esta venda. Solicite aprovação ou escolha outra forma (Dinheiro, Pix, Ouro, Vale-Troca seguem liberadas).`);
       setConcluindo(false);
       return;
     }

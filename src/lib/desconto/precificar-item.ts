@@ -142,6 +142,29 @@ export const FALLBACK_TETO_DESCONTO_PCT = 0;
  *  IMPACTO: antes 20% estava hardcoded em >=4 lugares; centralizar aqui acaba com isso. */
 export const LIMITE_DESCONTO_CARTAO_PADRAO = 20;
 
+/** Formas de pagamento que contam como CARTÃO DE CRÉDITO pro gate de desconto.
+ *  O QUÊ: quando algum item passa do limite (`limite_desconto_cartao_pct`), estas
+ *    formas — e SÓ estas — ficam bloqueadas até a aprovação do cartão. As demais
+ *    (Dinheiro, Pix, Ouro, Vale-Troca, A Receber) seguem livres.
+ *  POR QUÊ (decisão do Jonathan, 16/07): "Manual (MP)" e "Manual (PagBank)" são
+ *    lançamentos de cobrança no cartão pelos gateways — deixá-los livres era um
+ *    furo: bastava lançar por eles pra pular a aprovação que o "Cartão de Crédito"
+ *    exigia.
+ *  IMPACTO SE ALTERADO: tirar uma forma daqui reabre o furo; adicionar uma que
+ *    não é cartão (ex.: Pix) trava pagamento que o negócio quer livre.
+ *  NÃO CONFUNDIR com a trava do DESCONTO (`tem_desconto_alto`, R3 do dossiê): essa
+ *    é outra regra e trava TODAS as formas até o desconto ser aprovado. */
+export const FORMAS_PAGAMENTO_CARTAO = [
+  "Cartão de Crédito",
+  "Manual (MP)",
+  "Manual (PagBank)",
+] as const;
+
+/** true se a forma exige aprovação de cartão quando o desconto passa do limite. */
+export function ehFormaCartao(forma: string | null | undefined): boolean {
+  return !!forma && (FORMAS_PAGAMENTO_CARTAO as readonly string[]).includes(forma);
+}
+
 // ─── Helpers puros ────────────────────────────────────────────────────────────
 
 /** Arredonda para 2 casas (centavos) — VALOR REAL, sem arredondar para reais/dezenas.
