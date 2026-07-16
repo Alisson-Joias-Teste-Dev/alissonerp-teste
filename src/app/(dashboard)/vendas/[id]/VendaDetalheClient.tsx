@@ -2113,13 +2113,19 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   // backend (GET /api/vendas/[id] via requireVendaOwnership) já barra o
   // carregamento da venda para quem não é dono, então basta checar a role
   // aqui (sem duplicar a checagem de vendedor_id no front).
-  // QUANDO: venda já confirmada (aprovado/enviado/concluido) — nunca em
-  // rascunho (venda ainda não fechada) nem cancelado (não faz mais sentido).
-  // ⚠️ 'enviado'/'concluido' são situações HISTÓRICAS (aposentadas — ver
-  // src/lib/vendas-situacoes.ts): vendas novas não transicionam mais para
-  // elas, o fluxo atual vai aprovado → em_rota → entregue. Mantido literal
-  // conforme o plano aprovado; reportado como dúvida em separado.
-  const podeSolicitarFreteAvulso = role === "consultora" && ["aprovado", "enviado", "concluido"].includes(venda.situacao);
+  // QUANDO (decisão Jonathan): a janela INTEIRA da entrega — 'aprovado' (antes
+  // de sair), 'em_rota' (entrega a caminho) e 'entregue'. O QUE: 'entregue'
+  // entra de propósito, não é engano. POR QUÊ: existe corrida complementar
+  // DEPOIS da entrega — o caso real é "levar a aliança que ficou para ajuste".
+  // Cortar em 'em_rota' mataria justamente esse cenário.
+  // Fora da lista: 'rascunho' (venda ainda não fechada), 'cancelado' e
+  // 'virou_credito' (não há mais entrega a fazer).
+  // ⚠️ 'enviado'/'concluido' NÃO entram: são situações APOSENTADAS (ver
+  // src/lib/vendas-situacoes.ts) — nenhuma venda transiciona para elas desde
+  // 06/2026, o fluxo atual é rascunho → aprovado → em_rota → entregue.
+  // IMPACTO SE ALTERADO: tirar 'entregue' esconde o botão no cenário de ajuste
+  // pós-entrega; incluir 'rascunho' deixaria pedir frete de venda não fechada.
+  const podeSolicitarFreteAvulso = role === "consultora" && ["aprovado", "em_rota", "entregue"].includes(venda.situacao);
   // Endereço sugerido para pré-preencher o textarea editável do modal —
   // mesma concatenação usada em FreteAvulsoModal.montarEndereco().
   const enderecoInicialFreteAvulso = [
