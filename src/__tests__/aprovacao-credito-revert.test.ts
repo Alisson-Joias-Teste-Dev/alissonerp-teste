@@ -43,6 +43,23 @@ vi.mock("@/lib/devolucoes", () => ({
   processarAprovacaoEstoqueDevolucao: vi.fn(),
 }));
 
+/**
+ * Camada de autoridade (PR #97). O handler de crédito real (route.ts ~709-719)
+ * chama `podeDecidir({..}, "credito_diretor" | "credito_gerente")` ANTES de
+ * processar a decisão. Sem este mock, `podeDecidir` roda de verdade e busca a
+ * config em alissonerp.configuracoes_sistema via `routeSqlByContent` abaixo —
+ * que não modela essa query, então cai em `nao_configurado` → 403 → o teste
+ * nunca chega a chamar processarAprovacaoCredito. Era esse o motivo dos 4
+ * testes deste arquivo estarem vermelhos desde a PR #97. Aqui a autoridade é
+ * sempre "pode": o objetivo deste arquivo é o revert-on-failure do handler de
+ * crédito, não quem pode decidir (isso é testado em
+ * src/lib/aprovacoes/__tests__/autoridade.test.ts).
+ */
+vi.mock("@/lib/aprovacoes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/aprovacoes")>()),
+  podeDecidir: vi.fn(async () => ({ pode: true })),
+}));
+
 // ── Import DEPOIS dos mocks ───────────────────────────────────────────────────
 const { PATCH } = await import("@/app/api/tarefas/[id]/aprovacao/route");
 
