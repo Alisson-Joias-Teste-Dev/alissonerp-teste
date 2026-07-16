@@ -57,6 +57,64 @@ export async function GET(req: NextRequest) {
       AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
   ))`;
 
+  // REGRA DE NEGÓCIO (16/07 — decisão do Jonathan): "toda aprovação pode ter
+  // mais de um aprovador, todos devem RECEBER a tarefa de aprovação — só
+  // basta um aprovar". Sem isto, só quem virou `responsavel_id` (o 1º UUID
+  // resolvido na criação — ver resolverAprovadores/criarTarefaAprovacao) via
+  // a tarefa na fila; o 2º+ aprovador configurado na MESMA chave (MULTI,
+  // separada por vírgula) não a via, mesmo podendo decidir (podeDecidir já
+  // aceitava qualquer um da lista — só a LISTAGEM que só mostrava o 1º).
+  // Generaliza o padrão que já existia só pra conversao_reversa (acima) pros
+  // eventos que hoje suportam múltiplos aprovadores. Mapeamento tipo/tags →
+  // chave de config conferido direto no código de cada criação (grep, 16/07)
+  // — não adivinhado. Eventos fora desta lista (conversao_sku, precificacao,
+  // limpeza_ouro, compra_metal, recebimento_metal) continuam só com
+  // `responsavel_id` — não têm essa necessidade hoje (config de 1 aprovador
+  // só), mas dá pra estender aqui do mesmo jeito quando precisar.
+  // IMPACTO SE REMOVIDO: volta o problema — só o "sortudo" (1º da lista)
+  // recebe a tarefa; os outros aprovadores configurados ficam cegos.
+  const multiAprovadorCond = sql`(
+    ${reversaAprovadorCond}
+    OR (t.tipo = 'desconto_acima' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_desconto_padrao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR (t.tipo = 'cartao_desconto' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_cartao_desconto_padrao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR (t.tipo = 'entrega_sem_pagamento_total' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_entrega_sem_pagamento' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR (t.tipo = 'compra_comercial' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_compra_comercial' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR (t.tipo = 'conversao' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_conversao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    -- credito_loja: tags = ['credito_loja', 'gerente'|'diretor'] (vendas-credito-aprovar.ts) — tipo NULL.
+    OR ('credito_loja' = ANY(t.tags) AND 'gerente' = ANY(t.tags) AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovadora_credito_gerente' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR ('credito_loja' = ANY(t.tags) AND 'diretor' = ANY(t.tags) AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_credito_diretor' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    -- devolucao: tags=['devolucao'] (etapa 1) vs tags=['devolucao','devolucao_estoque'] (etapa 2) — tipo NULL (devolucoes.ts).
+    OR ('devolucao_estoque' = ANY(t.tags) AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_devolucao_estoque' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR ('devolucao' = ANY(t.tags) AND NOT ('devolucao_estoque' = ANY(t.tags)) AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_devolucao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+  )`;
+
   const tagsList = tagsParam ? tagsParam.split(",").map(t => t.trim()).filter(Boolean) : [];
 
   const tarefas = await sql`
@@ -79,18 +137,26 @@ export async function GET(req: NextRequest) {
       -- NEM admin vê se não estiver na lista, e o solicitante também não a vê na
       -- fila (ele acompanha pelo selo "aguardando aprovação" na aba Ouro). Vale pra
       -- QUALQUER visão (por isso é global, fora dos filtros de visao/isAdmin abaixo).
-      ${sql`AND (t.tipo <> 'conversao_reversa' OR ${reversaAprovadorCond})`}
+      -- BUGFIX (16/07 — achado testando o front): 'conversao_reversa' <> t.tipo
+      -- dá NULL (não FALSE) quando t.tipo IS NULL em SQL — e credito_loja e
+      -- devolucao NUNCA setam t.tipo (só tags — ver vendas-credito-aprovar.ts/
+      -- devolucoes.ts). Resultado: NULL OR FALSE = NULL = linha EXCLUÍDA da
+      -- consulta pra QUALQUER usuário, inclusive admin (bypass de isAdmin nunca
+      -- chegava a rodar — a linha já tinha sumido aqui). 2 tarefas de crédito
+      -- reais ficaram invisíveis em PRODUÇÃO por causa disso (achado 16/07,
+      -- corrigido na mesma sessão). COALESCE trata o NULL como "não é reversa".
+      ${sql`AND (COALESCE(t.tipo, '') <> 'conversao_reversa' OR ${reversaAprovadorCond})`}
       ${visao === "minhas"
           ? sql`AND (t.responsavel_id = ${userId}::uuid)`
           : visao === "time"
             ? sql``
             : !isAdmin
-              ? sql`AND (t.responsavel_id = ${userId}::uuid OR t.criado_por = ${userId}::uuid OR ${reversaAprovadorCond})`
+              ? sql`AND (t.responsavel_id = ${userId}::uuid OR t.criado_por = ${userId}::uuid OR ${multiAprovadorCond})`
               : sql``}
       ${(visao === "aguardando_aprovacao" || visao === "aguardando")
         ? (isAdmin
             ? sql`AND t.status = 'aguardando_aprovacao'`
-            : sql`AND t.status = 'aguardando_aprovacao' AND (t.responsavel_id = ${userId}::uuid OR ${reversaAprovadorCond})`)
+            : sql`AND t.status = 'aguardando_aprovacao' AND (t.responsavel_id = ${userId}::uuid OR ${multiAprovadorCond})`)
         : sql``}
       ${visao === "concluidas" ? sql`AND t.status IN ('concluida', 'aprovada')` : sql``}
       ${visao === "pendentes" ? sql`AND t.status IN ('pendente', 'em_andamento', 'aguardando_aprovacao')` : sql``}
