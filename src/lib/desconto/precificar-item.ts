@@ -143,21 +143,34 @@ export const FALLBACK_TETO_DESCONTO_PCT = 0;
 export const LIMITE_DESCONTO_CARTAO_PADRAO = 20;
 
 /** Formas de pagamento que contam como CARTÃO DE CRÉDITO pro gate de desconto.
- *  O QUÊ: quando algum item passa do limite (`limite_desconto_cartao_pct`), estas
- *    formas — e SÓ estas — ficam bloqueadas até a aprovação do cartão. As demais
- *    (Dinheiro, Pix, Ouro, Vale-Troca, A Receber) seguem livres.
- *  POR QUÊ (decisão do Jonathan, 16/07): "Manual (MP)" e "Manual (PagBank)" são
- *    lançamentos de cobrança no cartão pelos gateways — deixá-los livres era um
- *    furo: bastava lançar por eles pra pular a aprovação que o "Cartão de Crédito"
- *    exigia.
- *  IMPACTO SE ALTERADO: tirar uma forma daqui reabre o furo; adicionar uma que
- *    não é cartão (ex.: Pix) trava pagamento que o negócio quer livre.
+ *  O QUÊ: quando algum item passa do limite (`limite_desconto_cartao_pct`), esta
+ *    forma — e SÓ ela — fica bloqueada até a aprovação do cartão. As demais
+ *    (Dinheiro, Pix, Ouro, Vale-Troca, A Receber, Manual) seguem livres.
+ *
+ *  HISTÓRICO — leia antes de mexer:
+ *  - 16/07: "Manual (MP)" e "Manual (PagBank)" ENTRARAM aqui, porque são cobrança
+ *    no cartão lançada à mão pelos gateways. Na época QUALQUER usuário via essas
+ *    formas no seletor, então bastava lançar por elas pra pular a aprovação que o
+ *    "Cartão de Crédito" exigia. Era um furo real.
+ *  - 17/07 (decisão do Jonathan): SAÍRAM. O que mudou foi o contexto, não a
+ *    natureza delas: o PR #99 passou a esconder as formas manuais de quem não é
+ *    admin/desenvolvedor ("as vendedoras não têm mais essa forma"). Com o seletor
+ *    restrito, a trava só atrapalhava o admin — que é justamente quem lança manual
+ *    quando o gateway não fecha sozinho.
+ *
+ *  O FURO NÃO SUMIU, FOI CONTIDO: um admin ainda consegue pagar no cartão com
+ *  desconto acima do limite sem aprovação, escolhendo Manual. Isso é ACEITO
+ *  (decisão do Jonathan) porque agora depende de alguém com poder de admin.
+ *  IMPACTO SE A #99 FOR REVERTIDA (formas manuais voltarem a aparecer pra
+ *  consultora): o furo volta a valer pra todo mundo e estas 2 formas PRECISAM
+ *  voltar pra esta lista. As duas coisas andam juntas.
+ *
+ *  IMPACTO SE ALTERADO: adicionar uma forma que não é cartão (ex.: Pix) trava
+ *    pagamento que o negócio quer livre.
  *  NÃO CONFUNDIR com a trava do DESCONTO (`tem_desconto_alto`, R3 do dossiê): essa
  *    é outra regra e trava TODAS as formas até o desconto ser aprovado. */
 export const FORMAS_PAGAMENTO_CARTAO = [
   "Cartão de Crédito",
-  "Manual (MP)",
-  "Manual (PagBank)",
 ] as const;
 
 /** true se a forma exige aprovação de cartão quando o desconto passa do limite. */

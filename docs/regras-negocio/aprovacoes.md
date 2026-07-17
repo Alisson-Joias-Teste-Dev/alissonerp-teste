@@ -128,10 +128,26 @@ procure tarefa dela.
 - **Passou do teto da pessoa → pede aprovação.** Não é um número fixo: se a
   consultora tem 15%, passa de 15; se tem 30, passa de 30.
 - **Cartão:** acima de `limite_desconto_cartao_pct` (default **20%**), a venda só
-  passa no cartão com aprovação. Enquanto não aprovado, **as 3 formas de cartão
-  ficam bloqueadas** — `Cartão de Crédito`, `Manual (MP)`, `Manual (PagBank)`.
-  As outras formas seguem livres (Pix, dinheiro): o que não pode é **pagar no
-  cartão** sem aprovação. Depois de aprovado, não pede de novo.
+  passa no cartão com aprovação. Enquanto não aprovado, **só `Cartão de Crédito`
+  fica bloqueado**. As outras formas seguem livres (Pix, dinheiro, ouro,
+  vale-troca): o que não pode é **pagar no cartão** sem aprovação. Depois de
+  aprovado, não pede de novo.
+  - Quem está na trava é decidido por `FORMAS_PAGAMENTO_CARTAO`
+    (`src/lib/desconto/precificar-item.ts`) — lista única que alimenta o front
+    **e** o gate do servidor.
+  - **`Manual (MP)` e `Manual (PagBank)` NÃO travam** (decisão do Jonathan,
+    17/07). Elas são cobrança no cartão lançada à mão e chegaram a travar em
+    16/07, quando **qualquer usuário** as via no seletor — bastava escolher uma
+    delas pra pular a aprovação. Saíram quando a PR #99 passou a **escondê-las de
+    quem não é admin/desenvolvedor**: com o seletor restrito, a trava só
+    atrapalhava o admin, que é justamente quem lança manual quando o gateway não
+    fecha sozinho.
+  - **O furo não sumiu, foi contido:** um admin ainda consegue pagar no cartão
+    com desconto acima do limite sem aprovação, escolhendo Manual. Risco aceito.
+  - ⚠️ **Se a PR #99 for revertida** (manuais voltarem a aparecer pra
+    consultora), o furo volta a valer pra todo mundo e as 2 formas **precisam**
+    voltar pra `FORMAS_PAGAMENTO_CARTAO`. As duas coisas andam juntas — há teste
+    fixando a lista em `src/lib/desconto/__tests__/formas-cartao.test.ts`.
 - **Cascata:** reprovar o desconto reprova **junto** a aprovação de cartão da
   mesma venda (o cartão foi pedido pra um % que foi recusado). **Aprovar o
   desconto NÃO aprova o cartão** — cada uma tem sua decisão.

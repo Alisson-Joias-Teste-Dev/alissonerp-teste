@@ -1804,7 +1804,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     }
     if (step === 3 && tipoVenda !== "servico" && itens.length === 0) { setSaveErr("Adicione pelo menos 1 item"); return; }
     if (step === 3 && precisaAprovacaoDesconto) { setSaveErr(`Desconto acima de ${maxDesconto}% requer aprovação. Clique em 'Solicitar Aprovação'.`); return; }
-    if (step === 3 && cartaoBloqueado && ehFormaCartao(pagForma)) { setSaveErr(`Pagamento em ${pagForma} bloqueado: desconto acima de ${LIMITE_DESCONTO_CARTAO}%. Solicite aprovação ou escolha outra forma (Dinheiro, Pix, Ouro, Vale-Troca seguem liberadas).`); return; }
+    if (step === 3 && cartaoBloqueado && ehFormaCartao(pagForma)) { setSaveErr(`Pagamento em ${pagForma} bloqueado: desconto acima de ${LIMITE_DESCONTO_CARTAO}%. Solicite aprovação ou escolha outra forma — as demais seguem liberadas.`); return; }
     // Valida pendencias de personalizacao no passo 3
     if (step === 3) {
       const pendencias = itens
@@ -1910,7 +1910,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       return;
     }
     if (cartaoBloqueado && ehFormaCartao(pagForma)) {
-      setSaveErr(`Pagamento em ${pagForma} bloqueado para esta venda. Solicite aprovação ou escolha outra forma (Dinheiro, Pix, Ouro, Vale-Troca seguem liberadas).`);
+      setSaveErr(`Pagamento em ${pagForma} bloqueado para esta venda. Solicite aprovação ou escolha outra forma — as demais seguem liberadas.`);
       setConcluindo(false);
       return;
     }
