@@ -2,6 +2,29 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(garantia): regras de abertura de ordem de garantia
+
+**O quê (regras aprovadas pelo Jonathan em 17/07/2026 — `docs/regras-negocio/ordens.md`):**
+- Só é possível abrir garantia de venda com situação `entregue` (trava seca, sem aprovação).
+- `Acabamento e polimento` tem garantia **vitalícia** (sem prazo).
+- Demais serviços: **7 dias úteis** desde a entrega; fora disso, exige **aprovação**.
+- Garantia com serviços misturados: o mais restritivo vence (basta um não-vitalício).
+- A aprovação de fora do prazo é **uso único** (uma aprovação = uma garantia).
+
+**Como (reaproveitando o que já existe):**
+- Regra em `src/lib/garantia/prazo-garantia.ts` (`avaliarGarantia`), reusando
+  `src/lib/dias-uteis.ts` (o mesmo cálculo de 7 dias úteis + feriados de Fortaleza da devolução).
+- Data da entrega: entrega real → transição para `entregue` → `data_entrega` do PDV (com
+  sanidade contra datas futuras/absurdas). Sem data confiável, não bloqueia por prazo.
+- Trava no servidor em `POST /api/ordens` (dentro da transação, junto do guard de rascunho);
+  o modal só antecipa o aviso via `POST /api/garantia/avaliar`.
+- Aprovação pela camada config-first: evento `garantia_fora_prazo`, chave
+  `aprovadores_garantia_fora_prazo` em Configurações › Aprovadores. A tarefa libera a
+  **venda**; a ordem só nasce ao abrir a garantia, que consome a aprovação
+  (`tarefas.ordem_id`, `UPDATE ... WHERE ordem_id IS NULL` na mesma transação = uso único).
+- Migration `348_garantia_vitalicia.sql`: coluna `tipos_servico.garantia_vitalicia`
+  (marca `Acabamento e polimento`). A chave de config não tem migration — criar via `/dba`.
+
 ## feat(produtos): localização física no cadastro e na edição de produtos (v2.85.0)
 
 **O quê:** o campo **Localização** (prateleira/gaveta), já disponível no Estoque Comercial
