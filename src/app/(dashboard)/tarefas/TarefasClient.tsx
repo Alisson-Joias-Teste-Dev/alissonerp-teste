@@ -162,6 +162,19 @@ function parsearCamposDescricao(descricao: string): {
 }
 
 /**
+ * "1.640g" / "1.640 g" → "1,64 g": peso em pt-BR (vírgula, 2 casas). O número
+ * vem CRU da descrição da tarefa, onde o banco gravou peso_total/peso_saida
+ * (NUMERIC(10,3): ponto decimal, 3 casas, nunca separador de milhar — são
+ * gramas de joia, valores pequenos). Aqui só reformatamos a EXIBIÇÃO; o valor
+ * armazenado não muda.
+ */
+function formatPesoBR(pesoStr: string): string {
+  const num = parseFloat(pesoStr.replace(/[^\d.]/g, ""));
+  if (!Number.isFinite(num)) return pesoStr;
+  return `${num.toFixed(2).replace(".", ",")} g`;
+}
+
+/**
  * REGRA DE NEGÓCIO (16/07, pedido do Jonathan): no card único por venda, cada
  * aprovação vira uma LINHA curta — o texto completo fica no "expandir".
  * Este helper tira da descrição o número que importa pra decidir sem abrir.
@@ -177,7 +190,7 @@ function resumoAprovacao(t: Tarefa): string | null {
   const aReceber = d.match(/A Receber:\s*(R\$\s*[\d.,]+)/i);
   if (aReceber) return `A Receber: ${aReceber[1]}`;
   const peso = d.match(/Peso Total:\s*([\d.,]+\s*g)/i);
-  if (peso) return `Peso: ${peso[1]}`;
+  if (peso) return `Peso: ${formatPesoBR(peso[1])}`;
   return null;
 }
 
@@ -240,10 +253,11 @@ function cabecalhoAprovacao(t: Tarefa): {
   const ref = t.numero_ordem ?? t.titulo.match(/#\d+/)?.[0] ?? null;
   const titulo = curto ? (ref ? `${curto} ${ref}` : curto) : t.titulo;
 
-  const peso =
+  const pesoBruto =
     d.match(/Peso Total:\s*([\d.,]+\s*g)/i)?.[1] ??
     d.match(/([\d.,]+\s*g)\s*x\s*\d+/i)?.[1] ??
     null;
+  const peso = pesoBruto ? formatPesoBR(pesoBruto) : null;
   const valor = d.match(/Valor total:\s*(R\$\s*[\d.,]+)/i)?.[1] ?? null;
   const pecas = d.match(/Quantidade Total:\s*(\d+)\s*pe[cç]as?/i)?.[1] ?? null;
   const itens = d.match(/Itens:\s*(\d+)\s*item/i)?.[1] ?? null;
