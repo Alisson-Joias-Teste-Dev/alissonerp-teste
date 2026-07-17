@@ -191,6 +191,13 @@ export interface PagamentoFormProps {
   maxParcelasPromo?: number | null;
   /** Nome(s) das campanhas que impuseram o limite — exibido no aviso. */
   nomesPromosNaVenda?: string[];
+
+  /**
+   * Role do usuario logado. Define se as formas manuais (Manual (MP) /
+   * Manual (PagBank)) aparecem no seletor — so admin e desenvolvedor.
+   * Ausente = mostra tudo (compatibilidade).
+   */
+  role?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -199,6 +206,10 @@ const FORMAS_PAGAMENTO_BASE = [
   "Dinheiro", "Cartão de Crédito", "Pix", "Ouro",
   "Vale-Troca", "A Receber", "Múltiplas", "Manual (MP)", "Manual (PagBank)",
 ];
+
+/** Formas manuais (confirmam pagamento por ID da transacao) — so admin/dev. */
+const FORMAS_MANUAIS = ["Manual (MP)", "Manual (PagBank)"];
+const ROLES_FORMAS_MANUAIS = ["admin", "desenvolvedor"];
 
 const CONDICOES = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
 const COM_CARTAO = ["Cartão de Crédito", "Pix"];
@@ -302,8 +313,12 @@ export default function PagamentoForm({
   solicitandoAprovacaoCartao,
   maxParcelasPromo,
   nomesPromosNaVenda,
+  role,
 }: PagamentoFormProps) {
-  const formasPagamento = FORMAS_PAGAMENTO_BASE;
+  const podeManual = role == null || ROLES_FORMAS_MANUAIS.includes(role);
+  const formasPagamento = podeManual
+    ? FORMAS_PAGAMENTO_BASE
+    : FORMAS_PAGAMENTO_BASE.filter(f => !FORMAS_MANUAIS.includes(f));
   const totalMult = payments.reduce((s, p) => s + p.valor, 0);
   const restante = +(totalVenda - totalMult).toFixed(2);
 
