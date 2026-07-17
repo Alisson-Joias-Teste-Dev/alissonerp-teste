@@ -119,7 +119,18 @@ describe("PATCH aprovacao — crédito: revert on failure", () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: USER_ID } } });
   });
 
-  it("approveVenda falhou → reverte a tarefa e retorna 409 com o erro real", async () => {
+  /**
+   * REGRA NOVA (17/07, decisão do Jonathan) — este teste foi INVERTIDO de
+   * propósito. Antes (fd80d4d0, 23/06) a rota revertia a tarefa pra
+   * 'aguardando_aprovacao' e devolvia 409, obrigando o aprovador a decidir de
+   * novo. O Jonathan mudou o desenho: "pedir aprovação é chato" — a decisão do
+   * aprovador é VÁLIDA, a falha é operacional (cadastro), não de decisão.
+   * Agora a aprovação FICA e quem cuida da venda corrige e aprova na mão; o
+   * `aviso` no 200 é o que conta isso pra quem aprovou (antes: 200 mudo).
+   * Quem avisa na tela da venda é a faixa `creditoAprovadoVendaNao`
+   * (VendaDetalheClient), deduzida sem coluna nova.
+   */
+  it("approveVenda falhou → NÃO reverte, mantém aprovado e devolve o aviso no 200", async () => {
     mockProcessarAprovacaoCredito.mockResolvedValueOnce({
       ok: true,
       acao: "aprovado",
@@ -131,11 +142,13 @@ describe("PATCH aprovacao — crédito: revert on failure", () => {
     const data = await res.json();
 
     expect(mockProcessarAprovacaoCredito).toHaveBeenCalledTimes(1);
-    expect(res.status).toBe(409);
-    expect(data.ok).toBe(false);
-    expect(data.error).toMatch(/celular/i);
-    // reverteu a tarefa pra reprocessar
-    expect(algumSqlContem(/aguardando_aprovacao/)).toBe(true);
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    // o motivo REAL chega em quem aprovou, em vez do 200 mudo de antes
+    expect(data.aviso).toMatch(/celular/i);
+    expect(data.aviso).toMatch(/aprove a venda manualmente/i);
+    // e a tarefa NÃO volta pra fila — ninguém reaprova
+    expect(algumSqlContem(/aguardando_aprovacao/)).toBe(false);
   });
 
   it("venda aprovada de fato → 200 e NÃO reverte", async () => {

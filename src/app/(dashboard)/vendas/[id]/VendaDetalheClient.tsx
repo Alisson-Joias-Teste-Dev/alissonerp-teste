@@ -2189,6 +2189,32 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const totalEmPagamentos = venda.pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0);
   const pagamentoCobreTotal = totalEmPagamentos + 0.01 >= venda.total_venda;
 
+  /**
+   * REGRA DE NEGÓCIO (17/07, decisão do Jonathan): "crédito aprovado, mas a
+   * venda não". Aprovar o crédito e aprovar a venda são 2 passos; o 2º
+   * (approveVenda) pode falhar por motivo OPERACIONAL — o clássico é cliente
+   * sem celular. Quando falha, a aprovação do crédito CONTINUA valendo (não
+   * voltamos a tarefa pra fila: "pedir aprovação é chato") e alguém precisa
+   * corrigir o cadastro e aprovar a venda na mão. Sem esta faixa, quem abre a
+   * venda não tem como saber disso — o aprovador via 200 "sucesso".
+   *
+   * DEDUZIDO, não gravado (decisão do Jonathan: sem migration). Os 3 estados se
+   * separam sozinhos, porque quando a venda aprova de fato o
+   * `aprovacao_credito_tarefa_id` é LIMPO (vendas-credito-aprovar.ts):
+   *   - aprovou              → campo NULL          → creditoFoiAprovado=false aqui
+   *   - esperando pagamento  → campo preenchido + AINDA há pagamento não-"A
+   *     Receber" pendente  → NÃO é falha, não mostra (espera legítima)
+   *   - approveVenda falhou  → campo preenchido + todos os outros já confirmados
+   * A 3ª condição espelha `todosOutrosConfirmados` da lib (linhas 380-385):
+   * COUNT de pagamentos com forma != 'A Receber' e status 'pendente' = 0.
+   * IMPACTO SE A REGRA DA LIB MUDAR: a faixa pode aparecer na hora errada — é
+   * só um aviso com botão, não trava nada, mas tem que andar junto.
+   */
+  const outrosPagamentosConfirmados = !venda.pagamentos.some(
+    p => p.forma !== "A Receber" && p.status === "pendente",
+  );
+  const creditoAprovadoVendaNao = creditoFoiAprovado && vendaEmRascunho && outrosPagamentosConfirmados;
+
   // Desconto acima do limite — usa campo próprio (aprovacao_desconto_tarefa_id)
   const isDescontoApproval = !!venda.aprovacao_desconto_tarefa_id && venda.aprovacao_desconto_status === "aguardando_aprovacao";
 
@@ -2403,6 +2429,24 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               Ver Tarefa →
             </a>
           )}
+        </div>
+      )}
+
+      {/* ── Banner: crédito aprovado, mas a venda não (approveVenda falhou) ──
+           Laranja, não amarelo-"aguardando": aqui não há espera — a decisão já
+           foi tomada e a bola está com quem abriu a venda. Ver a dedução em
+           `creditoAprovadoVendaNao`. */}
+      {creditoAprovadoVendaNao && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-2"
+          style={{ backgroundColor: "#FFF7ED", borderColor: "#FED7AA", color: "#7C2D12" }}>
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle size={16} className="shrink-0" />
+            <p className="text-sm font-medium break-words">
+              Crédito aprovado — falta aprovar a venda. A aprovação automática não passou
+              (geralmente cadastro do cliente incompleto, ex.: sem celular). Corrija o cadastro
+              e aprove a venda.
+            </p>
+          </div>
         </div>
       )}
 

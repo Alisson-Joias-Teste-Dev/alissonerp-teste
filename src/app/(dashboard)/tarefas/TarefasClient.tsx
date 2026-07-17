@@ -679,7 +679,14 @@ export default function TarefasClient() {
    * Extraído de handleAprovar (16/07) pra ser reusado pelo "Aprovar todas"
    * (handleAprovarLote) sem duplicar o roteamento por tipo.
    */
-  async function aprovarUma(tarefaId: number, tipo: string | null) {
+  /**
+   * Devolve o `aviso` do endpoint quando a decisão colou mas sobrou pendência
+   * OPERACIONAL pra alguém resolver — hoje só o crédito usa: o crédito é
+   * aprovado, o approveVenda falha (ex.: cliente sem celular) e a venda precisa
+   * ser aprovada na mão. Antes isso voltava 200 mudo e quem aprovou não ficava
+   * sabendo (a consultora era notificada; o aprovador, não).
+   */
+  async function aprovarUma(tarefaId: number, tipo: string | null): Promise<string | null> {
     // Tarefas de conversão de estoque/SKU usam endpoints próprios — não
     // gravam em aprovacoes_tarefa, então o fluxo genérico falha com "Aprovação não encontrada".
     if (tipo === "conversao_sku") {
@@ -706,19 +713,25 @@ export default function TarefasClient() {
       const aprovacoes = await apiFetch<{ id: number; status: string }[]>(`/api/tarefas/${tarefaId}/aprovacao`);
       const pendente = aprovacoes.find(a => a.status === "pendente") ?? aprovacoes[0];
       if (!pendente) throw new Error("Aprovação não encontrada");
-      await apiFetch(`/api/tarefas/${tarefaId}/aprovacao`, {
+      const r = await apiFetch<{ aviso?: string }>(`/api/tarefas/${tarefaId}/aprovacao`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ aprovacao_id: pendente.id, decisao: "aprovado" }),
       });
+      return r?.aviso ?? null;
     }
+    return null;
   }
 
   async function handleAprovar(tarefaId: number, tipo: string | null) {
     setSalvandoAprov(true);
     setAprovandoId(tarefaId);
     try {
-      await aprovarUma(tarefaId, tipo);
+      const aviso = await aprovarUma(tarefaId, tipo);
+      // Laranja, não vermelho: a aprovação COLOU — o que falta é operacional
+      // (corrigir cadastro e aprovar a venda). Vermelho faria parecer que a
+      // decisão dele não valeu, e ele tentaria aprovar de novo à toa.
+      if (aviso) useErrorStore.getState().push(aviso, { level: "warning" });
       carregar();
       carregarStats();
     } catch (err) {
@@ -745,10 +758,12 @@ export default function TarefasClient() {
   async function handleAprovarLote(tarefas: Tarefa[]) {
     setSalvandoAprov(true);
     const falhas: string[] = [];
+    const avisos: string[] = [];
     for (const t of tarefas) {
       setAprovandoId(t.id);
       try {
-        await aprovarUma(t.id, t.tipo);
+        const aviso = await aprovarUma(t.id, t.tipo);
+        if (aviso) avisos.push(aviso);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Erro desconhecido";
         const label = t.tipo ? (TIPO_LABEL[t.tipo] ?? t.tipo) : `Tarefa ${t.id}`;
@@ -759,6 +774,11 @@ export default function TarefasClient() {
     carregarStats();
     setSalvandoAprov(false);
     setAprovandoId(null);
+    // Avisos são independentes das falhas: uma aprovação pode ter COLADO e
+    // ainda assim deixar pendência operacional (crédito ok, venda não aprovada).
+    for (const aviso of avisos) {
+      useErrorStore.getState().push(aviso, { level: "warning" });
+    }
     if (falhas.length > 0) {
       useErrorStore.getState().push(
         falhas.length === tarefas.length

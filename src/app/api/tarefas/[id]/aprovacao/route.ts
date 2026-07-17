@@ -722,7 +722,40 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const resultado = await processarAprovacaoCredito(
         Number(id), user.id, body.decisao, body.motivo,
       );
-      return NextResponse.json({ ok: true, credito: resultado });
+
+      /**
+       * REGRA DE NEGÓCIO (17/07, decisão do Jonathan): aprovar o crédito e a
+       * venda ser aprovada são 2 passos, e o 2º (approveVenda) pode falhar por
+       * motivo OPERACIONAL — o clássico é cliente sem celular cadastrado.
+       *
+       * O QUE: quando falha, a aprovação do crédito CONTINUA VALENDO (a tarefa
+       *   não volta pra fila) e devolvemos o motivo real junto do 200, pra tela
+       *   avisar quem aprovou. Quem corrige o cadastro aprova a venda na mão.
+       * POR QUE: o aprovador já decidiu — a decisão dele é válida. A falha não é
+       *   de decisão, é de cadastro. Fazer ele aprovar de novo é ruído ("pedir
+       *   aprovação é chato" — Jonathan).
+       *   Isto DIVERGE de propósito do fd80d4d0 (23/06), que revertia a tarefa
+       *   pra 'aguardando_aprovacao' e devolvia 409. Aquele bloco sumiu no
+       *   0ae5e1607 (26/06, base errada); NÃO restaurar — o desenho mudou.
+       * IMPACTO SE REMOVIDO: volta o 200 mudo — o aprovador vê "sucesso", o
+       *   approveVenda falhou por baixo e ninguém avisa que falta aprovar a
+       *   venda na mão. (A consultora é notificada por
+       *   vendas-credito-aprovar.ts; quem aprova, não era.)
+       *
+       * Espera legítima por pagamento (venda_aprovada=false SEM erro_aprovacao)
+       * não é falha — segue 200 limpo, sem aviso.
+       */
+      const falhouAoAprovarVenda = body.decisao === "aprovado" && !!resultado.erro_aprovacao;
+      return NextResponse.json({
+        ok: true,
+        credito: resultado,
+        ...(falhouAoAprovarVenda
+          ? {
+              aviso: `Crédito aprovado, mas a venda não foi aprovada automaticamente: ${resultado.erro_aprovacao}. Corrija o cadastro e aprove a venda manualmente.`,
+              venda_id: tarefaInfo?.venda_id ?? null,
+            }
+          : {}),
+      });
     } catch (err) {
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] credito`, err);
     }
