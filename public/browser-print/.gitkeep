@@ -1,0 +1,13 @@
+O SDK Zebra Browser Print deve ser baixado do instalador oficial e colocado nesta pasta.
+
+1. Baixar o instalador do Browser Print v1.3+ de:
+   https://www.zebra.com/us/en/support-downloads/printer-software/printer-setup-utilities/browser-print.html
+
+2. Instalar no PC da loja.
+
+3. Copiar o arquivo `BrowserPrint-3.x.x.min.js` da pasta de instalação
+   (geralmente `C:\Program Files (x86)\Zebra Technologies\Browser Print\`)
+   para esta pasta (`public/browser-print/`).
+
+4. O SDK será carregado via `<Script src="/browser-print/BrowserPrint-3.x.x.min.js" />`
+   no Next.js, expondo `window.BrowserPrint` para o módulo `lib/rfid/browser-print.ts`.

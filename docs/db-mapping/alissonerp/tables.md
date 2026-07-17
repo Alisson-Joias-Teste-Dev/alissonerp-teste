@@ -3025,7 +3025,7 @@ _Sem referência identificada no código._
 | 2 | `epc` | text | — | — | — |
 | 3 | `evento` | text | — | — | Tipo de evento: cadastro (1a impressao), reimpressao, inventario (leitura em contagem), movimentacao (mudanca de local), cancelamento (rollback ou baixa). |
 | 4 | `localizacao` | text | ✓ | — | — |
-| 5 | `leitor_id` | text | ✓ | — | Identificador do dispositivo de leitura/gravacao. Ex: ZEBRA-ZD621R, TSL-1128-SN123. |
+| 5 | `leitor_id` | text | ✓ | — | Identificador do dispositivo de leitura/gravacao. Ex: ZEBRA-ZD500R, TSL-1128-SN123. |
 | 6 | `operador` | uuid | ✓ | — | — |
 | 7 | `metadata` | jsonb | ✓ | — | — |
 | 8 | `lido_em` | timestamp with time zone | — | `now()` | — |

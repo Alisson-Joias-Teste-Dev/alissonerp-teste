@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, isFullAccess } from "@/lib/roles";
-import { gerarZplEtiquetaJoia } from "@/lib/rfid-zpl";
+import { ROLES_CADASTRAR_RFID } from "@/lib/rfid/roles";
+import { RfidReimprimirSchema } from "@/lib/rfid/tipos";
+import { buscarJoiaPorEpc, registrarReimpressao } from "@/lib/rfid/repo";
+import { validateEpc, extrairIdProduto } from "@/lib/rfid/epc";
+import { gerarZplEtiquetaJoia } from "@/lib/rfid/zpl";
+import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
-
-const RfidReimprimirSchema = z.object({
-  epc: z.string().min(1, "obrigatório"),
-}).passthrough();
 
 /**
  * POST /api/rfid/reimprimir
@@ -24,54 +24,57 @@ const RfidReimprimirSchema = z.object({
  *   401 nao autenticado
  *   403 sem permissao
  *   400 epc invalido / body invalido
- *   404 joia nao encontrada ou nao esta ativa
+ *   404 joia nao encontrada
+ *   409 joia nao esta ativa
  */
-
-const ROLES_REIMPRIMIR_RFID = [
-  "admin",
-  "desenvolvedor",
-  "gerente_fabrica",
-  "estoquista_fabrica",
-] as const;
-
 export async function POST(req: NextRequest) {
+  // -----------------------------------------------------------
+  // 1. Auth
+  // -----------------------------------------------------------
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
   }
 
+  // -----------------------------------------------------------
+  // 2. Role check
+  // -----------------------------------------------------------
   const [u] = await sql`
     SELECT role::text AS role
     FROM alissonerp.usuarios
     WHERE id = ${user.id}::uuid
   `;
   const role = u?.role ?? null;
-  if (!role || (!isFullAccess(role) && !hasRole(role, ROLES_REIMPRIMIR_RFID))) {
+  if (!role || (!isFullAccess(role) && !hasRole(role, ROLES_CADASTRAR_RFID))) {
     return NextResponse.json(
       { error: "Sem permissao para reimprimir tag RFID" },
       { status: 403 },
     );
   }
 
+  // -----------------------------------------------------------
+  // 3. Parse + valida body
+  // -----------------------------------------------------------
   const raw = await req.json().catch(() => null);
   if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
   const parsed = RfidReimprimirSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const epc = parsed.data.epc.trim();
-  if (!/^AJ\d{2}\d{8}$/.test(epc)) {
+
+  // Valida formato EPC (24 digitos, prefixo 1001 ou 0000)
+  if (!validateEpc(epc)) {
     return NextResponse.json(
-      { error: "epc invalido — esperado formato AJ{AA}{NNNNNNNN}" },
+      { error: "EPC invalido — esperado 24 digitos numericos" },
       { status: 400 },
     );
   }
 
   try {
-    const [joia] = await sql`
-      SELECT epc, sku, nome, status
-      FROM alissonerp.joias_rfid
-      WHERE epc = ${epc}
-    `;
+    // -----------------------------------------------------------
+    // 4. Busca joia pelo EPC
+    // -----------------------------------------------------------
+    const joia = await buscarJoiaPorEpc(epc);
 
     if (!joia) {
       return NextResponse.json(
@@ -79,6 +82,7 @@ export async function POST(req: NextRequest) {
         { status: 404 },
       );
     }
+
     if (joia.status !== "ativo") {
       return NextResponse.json(
         { error: `Joia esta em status '${joia.status}' — so joias ativas podem ser reimpressas` },
@@ -86,28 +90,37 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Registra evento de reimpressao
-    await sql`
-      INSERT INTO alissonerp.joias_leituras (
-        epc, evento, localizacao, leitor_id, operador
-      ) VALUES (
-        ${epc},
-        'reimpressao',
-        null,
-        'ZEBRA-ZD621R',
-        ${user.id}::uuid
-      )
-    `;
+    if (!joia.sku || !joia.nome) {
+      return NextResponse.json(
+        { error: "Joia nao tem SKU ou nome preenchidos — impossivel gerar etiqueta" },
+        { status: 422 },
+      );
+    }
 
-    const zpl = gerarZplEtiquetaJoia({
-      epc:  joia.epc,
-      sku:  joia.sku,
-      nome: joia.nome,
-    });
+    // Extrai id_produto do EPC para montar DadosEtiqueta
+    const idProduto = extrairIdProduto(epc);
+    if (idProduto === null) {
+      return NextResponse.json(
+        { error: "Nao foi possivel extrair id_produto do EPC" },
+        { status: 500 },
+      );
+    }
 
-    return NextResponse.json({ ok: true, epc: joia.epc, zpl });
+    // -----------------------------------------------------------
+    // 5. Registra evento de reimpressao
+    // -----------------------------------------------------------
+    await registrarReimpressao(epc, user.id);
+
+    // -----------------------------------------------------------
+    // 6. Gera ZPL
+    // -----------------------------------------------------------
+    const zpl = gerarZplEtiquetaJoia(
+      { id_produto: idProduto, sku: joia.sku, nome: joia.nome },
+      epc,
+    );
+
+    return NextResponse.json({ ok: true, epc, zpl });
   } catch (err) {
-    console.error("[POST /api/rfid/reimprimir] Erro:", err);
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
+    return internalError("[POST /api/rfid/reimprimir]", err, "Erro interno");
   }
 }

@@ -1,72 +1,148 @@
 "use client";
 
-import { useState } from "react";
-import { Printer, Loader2, Copy, CheckCircle2, AlertTriangle, ArrowLeft, Download } from "lucide-react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Printer,
+  Loader2,
+  Copy,
+  CheckCircle2,
+  AlertTriangle,
+  ArrowLeft,
+  Download,
+} from "lucide-react";
+import { toast } from "sonner";
 
-export default function TestarRFID() {
+import { useImpressora } from "@/hooks/rfid/useImpressora";
+import { enviarEVerificar } from "@/lib/rfid/browser-print";
+import { interpretarRespostaGravacao } from "@/lib/rfid/verificacao";
+import type { Epc } from "@/lib/rfid/tipos";
+
+import { BannerImpressora } from "@/components/rfid/BannerImpressora";
+
+// ---------------------------------------------------------------------------
+// Componente
+// ---------------------------------------------------------------------------
+
+export default function TestarRfidPage() {
   const router = useRouter();
+
+  // ── Impressora ────────────────────────────────────────────────────────
+  const { device, status, reconectar } = useImpressora();
+  const conectado = status === "conectado" && device !== null;
+
+  // ── Estado local ──────────────────────────────────────────────────────
   const [produtoId, setProdutoId] = useState(39187);
   const [loading, setLoading] = useState(false);
+  const [imprimindo, setImprimindo] = useState(false);
   const [resultado, setResultado] = useState<{
-    epc: string; zpl: string; status: string; warning?: string;
+    epc: string;
+    zpl: string;
+    status: string;
+    warning?: string;
     produto?: { id: number; sku: string; nome: string };
   } | null>(null);
   const [erro, setErro] = useState("");
   const [copiado, setCopiado] = useState(false);
-  const [localPrinting, setLocalPrinting] = useState(false);
-  const [localPrintMsg, setLocalPrintMsg] = useState("");
-  const [bridgeUrl, setBridgeUrl] = useState("http://localhost:3456");
+  const [impressaoResultado, setImpressaoResultado] = useState<{
+    status: string;
+    mensagem: string;
+  } | null>(null);
 
-  async function testar(tipo: "gerar" | "imprimir") {
+  // ── Gerar ZPL ─────────────────────────────────────────────────────────
+
+  const gerarZpl = useCallback(async () => {
     setLoading(true);
     setErro("");
     setResultado(null);
+    setImpressaoResultado(null);
+
     try {
-      const r = await fetch("/api/rfid/imprimir", {
+      const res = await fetch("/api/rfid/cadastrar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ produto_id: produtoId, tipo }),
+        body: JSON.stringify({ produto_id: produtoId }),
       });
-      const data = await r.json();
-      if (!r.ok) { setErro(data.error); return; }
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        setErro(data.error ?? `Erro ${res.status} ao gerar ZPL`);
+        return;
+      }
+
       setResultado(data);
+      toast.success("ZPL gerado com sucesso", {
+        description: `EPC: ${data.epc}`,
+      });
     } catch {
-      setErro("Erro de conexão");
+      setErro("Erro de conex\u00e3o com o servidor");
     } finally {
       setLoading(false);
     }
-  }
+  }, [produtoId]);
 
-  function copiarZpl() {
+  // ── Imprimir (Browser Print + verificação) ────────────────────────────
+
+  const imprimir = useCallback(async () => {
+    if (!resultado?.zpl) {
+      toast.error("Gere o ZPL primeiro");
+      return;
+    }
+
+    if (!conectado || !device) {
+      toast.error("Impressora n\u00e3o conectada", {
+        description: "Verifique o Zebra Browser Print.",
+      });
+      return;
+    }
+
+    setImprimindo(true);
+    setImpressaoResultado(null);
+    try {
+      const raw = await enviarEVerificar(device, resultado.zpl);
+      const interpretado = interpretarRespostaGravacao(raw, resultado.epc as Epc);
+
+      setImpressaoResultado({
+        status: interpretado.status,
+        mensagem: interpretado.mensagem,
+      });
+
+      if (interpretado.status === "ok") {
+        toast.success("Impress\u00e3o conclu\u00edda", {
+          description: interpretado.mensagem,
+        });
+      } else if (interpretado.status === "void") {
+        toast.error("Etiqueta VOID", {
+          description: interpretado.mensagem,
+        });
+      } else {
+        toast.warning("Aten\u00e7\u00e3o", {
+          description: interpretado.mensagem,
+        });
+      }
+    } catch (err) {
+      toast.error("Falha ao enviar para impressora", {
+        description: err instanceof Error ? err.message : "Erro desconhecido",
+      });
+    } finally {
+      setImprimindo(false);
+    }
+  }, [resultado, conectado, device]);
+
+  // ── Copiar ZPL ────────────────────────────────────────────────────────
+
+  const copiarZpl = useCallback(() => {
     if (resultado?.zpl) {
       navigator.clipboard.writeText(resultado.zpl);
       setCopiado(true);
       setTimeout(() => setCopiado(false), 2000);
     }
-  }
+  }, [resultado]);
 
-  async function imprimirLocal() {
-    if (!resultado?.zpl) return;
-    setLocalPrinting(true);
-    setLocalPrintMsg("");
-    try {
-      const r = await fetch(`${bridgeUrl}/print`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ zpl: resultado.zpl }),
-      });
-      if (!r.ok) throw new Error((await r.json()).error || "Falha ao imprimir");
-      setLocalPrintMsg("✅ Impresso com sucesso!");
-    } catch (err) {
-      setLocalPrintMsg(`❌ ${(err as Error).message}`);
-    } finally {
-      setLocalPrinting(false);
-    }
-  }
+  // ── Baixar ZPL ────────────────────────────────────────────────────────
 
-  function baixarZpl() {
-    if (!resultado?.zpl) return;
+  const baixarZpl = useCallback(() => {
+    if (!resultado) return;
     const blob = new Blob([resultado.zpl], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -74,126 +150,211 @@ export default function TestarRFID() {
     a.download = `rfid-${resultado.epc}.zpl`;
     a.click();
     URL.revokeObjectURL(url);
-  }
+  }, [resultado]);
+
+  // ── Render ────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-4 sm:p-6 max-w-3xl mx-auto">
-      <button
-        className="flex items-center gap-1.5 text-sm mb-6 hover:opacity-70"
-        style={{ color: "#184036" }}
-        onClick={() => router.push("/rfid/cadastro")}
-      >
-        <ArrowLeft size={15} />
-        Voltar
-      </button>
+    <div className="min-h-full bg-stone-50">
+      <div className="max-w-3xl mx-auto p-4 sm:p-6">
+        {/* Voltar */}
+        <button
+          type="button"
+          onClick={() => router.push("/rfid/cadastro")}
+          className="flex items-center gap-1.5 text-sm text-emerald-800 hover:text-emerald-700 transition-colors mb-6"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Voltar para Cadastro RFID
+        </button>
 
-      <div className="rounded-2xl p-6 mb-6" style={{ background: "#FAFAF7", border: "1px solid #E8DCC8" }}>
-        <div className="flex items-center gap-3 mb-2">
-          <Printer size={24} style={{ color: "#184036" }} />
-          <h1 className="text-xl font-bold" style={{ fontFamily: "Georgia, serif", color: "#184036" }}>
-            Testar Etiqueta RFID
-          </h1>
-        </div>
-        <p className="text-sm text-gray-500 mb-6">
-          Gere uma etiqueta RFID de teste e envie para a Zebra ZD500R.
-        </p>
+        {/* Card principal */}
+        <div className="rounded-2xl p-6 mb-6 bg-white border border-stone-200 shadow-sm">
+          {/* Header */}
+          <div className="flex items-center gap-3 mb-2">
+            <Printer className="w-6 h-6 text-emerald-800" />
+            <h1 className="text-xl font-bold text-emerald-800 font-serif">
+              Testar Etiqueta RFID
+            </h1>
+          </div>
+          <p className="text-sm text-gray-600 mb-6">
+            Ferramenta de diagn&oacute;stico &mdash; ZD500R
+          </p>
 
-        <div className="flex items-end gap-3 mb-6">
-          <div className="flex-1">
-            <label className="block text-xs font-semibold mb-1 text-gray-500">ID do Produto</label>
-            <input
-              type="number"
-              value={produtoId}
-              onChange={e => setProdutoId(Number(e.target.value))}
-              className="w-full border rounded-lg px-3 py-2.5 text-sm outline-none bg-white"
-              style={{ borderColor: "#E8DCC8" }}
+          {/* Status Browser Print */}
+          <div className="mb-6">
+            <BannerImpressora
+              status={status}
+              device={device}
+              onReconectar={reconectar}
             />
-            <p className="text-xs text-gray-400 mt-1">39187 = Teste Evolur | 39188 = Teste Ytalo</p>
           </div>
-          <button
-            onClick={() => testar("gerar")}
-            disabled={loading}
-            className="px-4 py-2.5 rounded-xl text-sm font-medium"
-            style={{ background: "#184036", color: "#F3EADA", opacity: loading ? 0.5 : 1 }}
-          >
-            {loading ? <Loader2 size={15} className="animate-spin" /> : "Gerar ZPL"}
-          </button>
-          <button
-            onClick={() => testar("imprimir")}
-            disabled={loading}
-            className="px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-1.5"
-            style={{ background: "#D4A843", color: "#fff", opacity: loading ? 0.5 : 1 }}
-          >
-            {loading ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />}
-            Imprimir
-          </button>
-        </div>
 
-        {erro && (
-          <div className="flex items-center gap-2 text-sm p-3 rounded-xl mb-4" style={{ background: "#FEE2E2", color: "#991B1B" }}>
-            <AlertTriangle size={15} />
-            {erro}
+          {/* Input + botões */}
+          <div className="flex flex-wrap items-end gap-3 mb-6">
+            <div className="flex-1 min-w-[180px]">
+              <label className="block text-xs font-semibold mb-1 text-gray-500">
+                ID do Produto
+              </label>
+              <input
+                type="number"
+                value={produtoId}
+                onChange={(e) => setProdutoId(Number(e.target.value))}
+                className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm outline-none bg-white focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 transition-colors"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                39187 = Teste Evolur | 39188 = Teste Ytalo
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={gerarZpl}
+              disabled={loading}
+              className="px-4 py-2.5 rounded-xl text-sm font-medium bg-emerald-800 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : null}
+              Gerar ZPL
+            </button>
+
+            <button
+              type="button"
+              onClick={imprimir}
+              disabled={imprimindo || !resultado || !conectado}
+              className="px-4 py-2.5 rounded-xl text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {imprimindo ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Printer className="w-4 h-4" />
+              )}
+              Imprimir
+            </button>
           </div>
-        )}
 
-        {resultado && (
-          <div className="space-y-4">
-            <div className="rounded-xl p-4" style={{ background: "#F0FDF4", border: "1px solid #BBF7D0" }}>
-              <div className="flex items-center gap-2 mb-2">
-                <CheckCircle2 size={16} style={{ color: "#16A34A" }} />
-                <span className="font-semibold text-sm">RFID gerado</span>
+          {/* Erro */}
+          {erro && (
+            <div className="flex items-center gap-2 text-sm p-3 rounded-xl mb-4 bg-red-50 border border-red-200 text-red-800">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              {erro}
+            </div>
+          )}
+
+          {/* Resultado da impressão */}
+          {impressaoResultado && (
+            <div
+              className={`flex items-start gap-3 rounded-xl p-4 mb-4 border ${
+                impressaoResultado.status === "ok"
+                  ? "bg-emerald-50 border-emerald-200"
+                  : "bg-amber-50 border-amber-200"
+              }`}
+            >
+              {impressaoResultado.status === "ok" ? (
+                <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0 text-emerald-600" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-600" />
+              )}
+              <div>
+                <p
+                  className={`text-sm font-semibold ${
+                    impressaoResultado.status === "ok"
+                      ? "text-emerald-800"
+                      : "text-amber-800"
+                  }`}
+                >
+                  {impressaoResultado.status === "ok"
+                    ? "Impress\u00e3o OK"
+                    : impressaoResultado.status === "void"
+                      ? "Etiqueta VOID"
+                      : "Aten\u00e7\u00e3o"}
+                </p>
+                <p className="text-sm mt-0.5 text-gray-600">
+                  {impressaoResultado.mensagem}
+                </p>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <span className="text-gray-500">EPC:</span>
-                  <span className="ml-2 font-mono">{resultado.epc}</span>
+            </div>
+          )}
+
+          {/* Resultado do ZPL */}
+          {resultado && (
+            <div className="space-y-4">
+              {/* Banner de sucesso */}
+              <div className="rounded-xl p-4 bg-emerald-50 border border-emerald-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span className="font-semibold text-sm text-emerald-900">
+                    RFID gerado
+                  </span>
                 </div>
-                <div>
-                  <span className="text-gray-500">Status:</span>
-                  <span className="ml-2">{resultado.status}</span>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-gray-500">EPC:</span>
+                    <span className="ml-2 font-mono text-emerald-800">
+                      {resultado.epc}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Status:</span>
+                    <span className="ml-2">{resultado.status}</span>
+                  </div>
+                  {resultado.produto && (
+                    <>
+                      <div>
+                        <span className="text-gray-500">Produto:</span>
+                        <span className="ml-2">{resultado.produto.nome}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">SKU:</span>
+                        <span className="ml-2">{resultado.produto.sku}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
-                {resultado.produto && (
-                  <>
-                    <div>
-                      <span className="text-gray-500">Produto:</span>
-                      <span className="ml-2">{resultado.produto.nome}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">SKU:</span>
-                      <span className="ml-2">{resultado.produto.sku}</span>
-                    </div>
-                  </>
+                {resultado.warning && (
+                  <div className="flex items-center gap-2 text-sm mt-3 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    {resultado.warning}
+                  </div>
                 )}
               </div>
-              {resultado.warning && (
-                <div className="flex items-center gap-2 text-sm mt-3 p-2 rounded-lg" style={{ background: "#FEF3C7", color: "#92400E" }}>
-                  <AlertTriangle size={14} />
-                  {resultado.warning}
-                </div>
-              )}
-            </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">ZPL Gerado</span>
-                <button
-                  onClick={copiarZpl}
-                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
-                  style={{ color: "#184036" }}
-                >
-                  {copiado ? <CheckCircle2 size={12} /> : <Copy size={12} />}
-                  {copiado ? "Copiado!" : "Copiar ZPL"}
-                </button>
+              {/* ZPL Preview */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    ZPL Gerado
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={copiarZpl}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg hover:bg-stone-100 transition-colors text-emerald-800"
+                    >
+                      {copiado ? (
+                        <CheckCircle2 className="w-3 h-3" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                      {copiado ? "Copiado!" : "Copiar ZPL"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={baixarZpl}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg hover:bg-stone-100 transition-colors text-emerald-800"
+                    >
+                      <Download className="w-3 h-3" />
+                      Baixar
+                    </button>
+                  </div>
+                </div>
+                <pre className="text-xs font-mono p-4 rounded-xl overflow-x-auto whitespace-pre bg-gray-900 text-green-400 border border-gray-700">
+                  {resultado.zpl}
+                </pre>
               </div>
-              <pre
-                className="text-xs font-mono p-4 rounded-xl overflow-x-auto whitespace-pre"
-                style={{ background: "#1A1A1A", color: "#A7F3D0", border: "1px solid #374151" }}
-              >
-                {resultado.zpl}
-              </pre>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
