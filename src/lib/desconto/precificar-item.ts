@@ -148,25 +148,20 @@ export const LIMITE_DESCONTO_CARTAO_PADRAO = 20;
  *    (Dinheiro, Pix, Ouro, Vale-Troca, A Receber, Manual) seguem livres.
  *
  *  HISTÓRICO — leia antes de mexer:
- *  - 16/07: "Manual (MP)" e "Manual (PagBank)" ENTRARAM aqui, porque são cobrança
- *    no cartão lançada à mão pelos gateways. Na época QUALQUER usuário via essas
- *    formas no seletor, então bastava lançar por elas pra pular a aprovação que o
- *    "Cartão de Crédito" exigia. Era um furo real.
- *  - 17/07 (decisão do Jonathan): SAÍRAM. O que mudou foi o contexto, não a
- *    natureza delas: o PR #99 passou a esconder as formas manuais de quem não é
- *    admin/desenvolvedor ("as vendedoras não têm mais essa forma"). Com o seletor
- *    restrito, a trava só atrapalhava o admin — que é justamente quem lança manual
- *    quando o gateway não fecha sozinho.
- *
- *  O FURO NÃO SUMIU, FOI CONTIDO: um admin ainda consegue pagar no cartão com
- *  desconto acima do limite sem aprovação, escolhendo Manual. Isso é ACEITO
- *  (decisão do Jonathan) porque agora depende de alguém com poder de admin.
- *  IMPACTO SE A #99 FOR REVERTIDA (formas manuais voltarem a aparecer pra
- *  consultora): o furo volta a valer pra todo mundo e estas 2 formas PRECISAM
- *  voltar pra esta lista. As duas coisas andam juntas.
- *
- *  IMPACTO SE ALTERADO: adicionar uma forma que não é cartão (ex.: Pix) trava
- *    pagamento que o negócio quer livre.
+ *  - 16/07: "Manual (MP)" e "Manual (PagBank)" ENTRARAM aqui, tratados como
+ *    cobrança no cartão. QUALQUER usuário via essas formas, então dava pra pular
+ *    a aprovação escolhendo Manual em vez de "Cartão de Crédito". Furo real.
+ *  - 17/07 (PR #99): saíram da trava porque o seletor passou a esconder as
+ *    manuais de quem não é admin — a trava só atrapalhava o admin.
+ *  - 17/07 (decisão FINAL do Jonathan): **"Manual (MP)" NÃO é cartão** na
+ *    operação da loja (é confirmação por ID de transação do MP). Foi liberado de
+ *    volta pra TODOS (ver FORMAS_RESTRITAS_ADMIN em PagamentoForm) e fica FORA
+ *    desta trava DE PROPÓSITO — não porque "está escondido", mas porque não é
+ *    pagamento no cartão. NÃO devolva "Manual (MP)" pra esta lista citando o
+ *    furo antigo: pra ele, não há furo.
+ *  - "Manual (PagBank)" continua fora da trava E ainda restrito a admin — não
+ *    foi reavaliado; se um dia for liberado pra todos, aí sim reavalie se é
+ *    cartão (se for, volta pra cá).
  *  NÃO CONFUNDIR com a trava do DESCONTO (`tem_desconto_alto`, R3 do dossiê): essa
  *    é outra regra e trava TODAS as formas até o desconto ser aprovado. */
 export const FORMAS_PAGAMENTO_CARTAO = [
