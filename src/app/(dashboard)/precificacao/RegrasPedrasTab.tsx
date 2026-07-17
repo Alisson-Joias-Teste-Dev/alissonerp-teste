@@ -49,6 +49,18 @@ interface ProdutoAuditoria {
   markup_calculado: number | null;
 }
 
+/** Pedra sem preço (nenhum grupo casou) — precisa ser colocada num grupo */
+interface PedraAguardando {
+  id_produto: number;
+  sku: string;
+  nome: string;
+  tipo_de_pedra: string | null;
+  tamanho_mm: number | null;
+  peso_ct: number | null;
+  custo_proprio_usd: number | null;
+  grupo_precificacao_id: number | null;
+}
+
 const C = {
   bg: "#f9fafb",
   card: "#ffffff",
@@ -99,6 +111,11 @@ export default function RegrasPedrasTab() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // Auditoria: expansão por regra individual → lista de produtos
   const [expandirRegra, setExpandirRegra] = useState<Record<number, { loading: boolean; produtos: ProdutoAuditoria[] } | null>>({});
+  // Pedras aguardando markup (sem grupo) + resumo de cobertura
+  const [pedrasResumo, setPedrasResumo] = useState<{ total: number; com_preco: number; aguardando: number } | null>(null);
+  const [aguardando, setAguardando] = useState<PedraAguardando[]>([]);
+  const [grupoSel, setGrupoSel] = useState<Record<number, string>>({});
+  const [movendo, setMovendo] = useState<number | null>(null);
 
   const carregarRegras = useCallback(async () => {
     setLoading(true);
@@ -116,6 +133,45 @@ export default function RegrasPedrasTab() {
   }, []);
 
   useEffect(() => { carregarRegras(); }, [carregarRegras]);
+
+  // Carrega as pedras sem preço (aguardando markup) + o resumo de cobertura.
+  // REGRA: toda pedra tem que aparecer — as sem grupo ficam aqui pra serem movidas.
+  const carregarPedras = useCallback(async () => {
+    try {
+      const r = await fetch("/api/precificacao/pedras");
+      if (!r.ok) return;
+      const d = await r.json();
+      setPedrasResumo(d.resumo ?? null);
+      setAguardando(d.aguardando ?? []);
+    } catch { /* silencioso — bucket some se a chamada falhar */ }
+  }, []);
+
+  useEffect(() => { carregarPedras(); }, [carregarPedras]);
+
+  // Move (fixa) a pedra num grupo. O preço sai do markup do grupo × custo da pedra.
+  async function moverPedra(produtoId: number, grupoId: number) {
+    setMovendo(produtoId);
+    try {
+      const r = await fetch(`/api/precificacao/pedras/${produtoId}/grupo`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grupo_precificacao_id: grupoId }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) { showToast(d.error ?? "Erro ao mover", false); return; }
+      showToast(
+        d.aguardando_markup
+          ? "Movida, mas segue sem preço — confira a faixa de tamanho do grupo"
+          : `Precificada no grupo ${d.grupo}`,
+        !d.aguardando_markup,
+      );
+      carregarPedras();
+    } catch {
+      showToast("Erro ao mover", false);
+    } finally {
+      setMovendo(null);
+    }
+  }
 
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok });
@@ -169,6 +225,7 @@ export default function RegrasPedrasTab() {
       showToast("Regra atualizada", true);
       cancelarEdicao();
       carregarRegras();
+      carregarPedras(); // markup mudou → preço/cobertura das pedras pode mudar
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Erro", false);
     } finally {
@@ -237,6 +294,7 @@ export default function RegrasPedrasTab() {
       if (!res.ok) { showToast("Erro ao ativar", false); return; }
       showToast(`Regra "${r.nome_tabela}" ativada para ${r.categoria_pedra}`, true);
       carregarRegras();
+      carregarPedras();
     } catch {
       showToast("Erro ao ativar", false);
     }
@@ -306,6 +364,75 @@ export default function RegrasPedrasTab() {
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             {saving ? "Salvando..." : "Criar Regra"}
           </button>
+        </div>
+      )}
+
+      {/* Resumo de cobertura + bucket "aguardando markup" */}
+      {pedrasResumo && (
+        <div className="mb-4">
+          <div className="flex items-center gap-4 mb-2 text-sm">
+            <span style={{ color: C.sage }}><strong style={{ color: C.text }}>{pedrasResumo.total}</strong> pedras</span>
+            <span style={{ color: C.verde }}><Check size={13} className="inline mr-1" />{pedrasResumo.com_preco} com preço</span>
+            <span style={{ color: pedrasResumo.aguardando > 0 ? C.amber : C.sage }}>
+              {pedrasResumo.aguardando} aguardando markup
+            </span>
+          </div>
+
+          {aguardando.length > 0 && (
+            <div className="rounded-xl border overflow-hidden" style={{ borderColor: C.amber, backgroundColor: "#fffbeb" }}>
+              <div className="px-3 py-2 text-sm font-medium flex items-center gap-2" style={{ color: C.amber }}>
+                <AlertTriangle size={14} /> Pedras sem preço — coloque cada uma num grupo
+              </div>
+              <div className="overflow-x-auto" style={{ borderTop: `1px solid ${C.amber}` }}>
+                <table className="w-full text-sm" style={{ backgroundColor: C.card }}>
+                  <thead>
+                    <tr style={{ backgroundColor: "#fffbeb", color: C.sage }}>
+                      <th className="p-2 text-left font-medium">SKU</th>
+                      <th className="p-2 text-left font-medium">Pedra</th>
+                      <th className="p-2 text-left font-medium">Tipo</th>
+                      <th className="p-2 text-right font-medium">Tam (mm)</th>
+                      <th className="p-2 text-right font-medium">Custo US$</th>
+                      <th className="p-2 text-left font-medium">Pôr no grupo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aguardando.map((p) => (
+                      <tr key={p.id_produto} style={{ borderTop: `1px solid ${C.border}` }}>
+                        <td className="p-2 font-mono" style={{ color: C.sage }}>{p.sku}</td>
+                        <td className="p-2" style={{ color: C.text }}>{p.nome}</td>
+                        <td className="p-2 capitalize" style={{ color: C.sage }}>{p.tipo_de_pedra ?? "—"}</td>
+                        <td className="p-2 text-right" style={{ color: C.text }}>{p.tamanho_mm ?? "—"}</td>
+                        <td className="p-2 text-right" style={{ color: C.text }}>{p.custo_proprio_usd != null ? `$${p.custo_proprio_usd}` : "—"}</td>
+                        <td className="p-2">
+                          <div className="flex items-center gap-1">
+                            <select
+                              value={grupoSel[p.id_produto] ?? ""}
+                              onChange={(e) => setGrupoSel((s) => ({ ...s, [p.id_produto]: e.target.value }))}
+                              className="px-2 py-1 rounded border text-xs"
+                              style={{ borderColor: C.border }}
+                            >
+                              <option value="">escolher grupo…</option>
+                              {regras.map((r) => (
+                                <option key={r.id} value={r.id}>{r.categoria_pedra} · {r.nome_tabela}</option>
+                              ))}
+                            </select>
+                            <button
+                              disabled={!grupoSel[p.id_produto] || movendo === p.id_produto}
+                              onClick={() => moverPedra(p.id_produto, Number(grupoSel[p.id_produto]))}
+                              className="px-2 py-1 rounded text-xs text-white disabled:opacity-40"
+                              style={{ backgroundColor: C.verde }}
+                            >
+                              {movendo === p.id_produto ? "…" : "mover"}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
