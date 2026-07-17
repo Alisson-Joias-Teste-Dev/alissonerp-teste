@@ -62,14 +62,17 @@ export default function AcaoSolicitacaoModal({ isOpen, onClose, solicitacaoId, t
 
   // Adiciona os arquivos escolhidos, respeitando o teto de 5 (silenciosamente
   // ignora o excedente pra nao travar quem selecionou uma pasta inteira).
+  //
+  // BUG QUE ISSO CONSERTA (v2.87.x): o onChange do input chama addFiles e LOGO
+  // em seguida faz `e.target.value = ""` pra permitir re-selecionar o mesmo
+  // arquivo. Se a leitura da FileList acontecesse DENTRO do updater do setState
+  // (que o React roda depois), o value="" ja teria esvaziado a lista e nenhuma
+  // foto entrava ("a foto nao vai"). Por isso capturamos os arquivos AGORA,
+  // sincrono, ANTES de o input ser limpo — o updater so junta o que ja foi lido.
   function addFiles(files: FileList | null) {
-    if (!files) return;
-    setFotos((atual) => {
-      const espaco = MAX_FOTOS - atual.length;
-      const novos = Array.from(files).slice(0, Math.max(0, espaco))
-        .map((file) => ({ file, preview: URL.createObjectURL(file) }));
-      return [...atual, ...novos];
-    });
+    if (!files || files.length === 0) return;
+    const escolhidos = Array.from(files).map((file) => ({ file, preview: URL.createObjectURL(file) }));
+    setFotos((atual) => [...atual, ...escolhidos].slice(0, MAX_FOTOS));
   }
   function removeFoto(idx: number) {
     setFotos((atual) => atual.filter((_, i) => i !== idx));
