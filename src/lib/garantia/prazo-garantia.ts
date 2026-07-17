@@ -151,7 +151,7 @@ export async function avaliarGarantia(
       -- é previsão ou erro de digitação.
       (CASE
          WHEN v.data_entrega IS NOT NULL
-          AND v.data_entrega >= DATE ${DATA_ENTREGA_MINIMA_SA}
+          AND v.data_entrega >= ${DATA_ENTREGA_MINIMA_SA}::date
           AND v.data_entrega <= CURRENT_DATE
          THEN v.data_entrega::timestamptz
        END) AS data_pdv,
