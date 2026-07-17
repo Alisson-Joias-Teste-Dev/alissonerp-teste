@@ -558,7 +558,7 @@ export default function PagamentoForm({
       )}
 
       {/* ── Bloqueio por desconto acima do limite do cartão ──
-          Vale pras 3 formas de cartão (ver bloqueioCartaoAtivo). Substitui o
+          Só "Cartão de Crédito" (ver FORMAS_PAGAMENTO_CARTAO). Substitui o
           painel de cobrança da forma escolhida pelo aviso + botão de solicitar. */}
       {bloqueioCartaoAtivo && (
         <div className="rounded-xl border p-4 space-y-3"
@@ -569,7 +569,7 @@ export default function PagamentoForm({
               <p className="font-medium">Pagamento no cartão bloqueado</p>
               <p className="mt-1">
                 Este pedido possui itens com desconto acima de {limiteDescontoCartao ?? 20}%. Para pagar em {pagForma}, solicite aprovação.
-                Outras formas (Dinheiro, Pix, Ouro, Vale-Troca) seguem liberadas.
+                As outras formas seguem liberadas.
               </p>
             </div>
           </div>
