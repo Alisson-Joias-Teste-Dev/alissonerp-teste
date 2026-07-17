@@ -135,19 +135,20 @@ procure tarefa dela.
   - Quem está na trava é decidido por `FORMAS_PAGAMENTO_CARTAO`
     (`src/lib/desconto/precificar-item.ts`) — lista única que alimenta o front
     **e** o gate do servidor.
-  - **`Manual (MP)` e `Manual (PagBank)` NÃO travam** (decisão do Jonathan,
-    17/07). Elas são cobrança no cartão lançada à mão e chegaram a travar em
-    16/07, quando **qualquer usuário** as via no seletor — bastava escolher uma
-    delas pra pular a aprovação. Saíram quando a PR #99 passou a **escondê-las de
-    quem não é admin/desenvolvedor**: com o seletor restrito, a trava só
-    atrapalhava o admin, que é justamente quem lança manual quando o gateway não
-    fecha sozinho.
-  - **O furo não sumiu, foi contido:** um admin ainda consegue pagar no cartão
-    com desconto acima do limite sem aprovação, escolhendo Manual. Risco aceito.
-  - ⚠️ **Se a PR #99 for revertida** (manuais voltarem a aparecer pra
-    consultora), o furo volta a valer pra todo mundo e as 2 formas **precisam**
-    voltar pra `FORMAS_PAGAMENTO_CARTAO`. As duas coisas andam juntas — há teste
-    fixando a lista em `src/lib/desconto/__tests__/formas-cartao.test.ts`.
+  - **`Manual (MP)` e `Manual (PagBank)` NÃO travam.** O caminho até aqui teve 3
+    passos, todos em 16-17/07: (1) entraram na trava, tratadas como cartão; (2)
+    saíram, porque a PR #99 passou a escondê-las de quem não é admin/dev e a trava
+    só atrapalhava o admin; (3) **decisão final do Jonathan: `Manual (MP)` NÃO é
+    cartão** na operação da loja (é confirmação por ID de transação do MP) — foi
+    **liberado de volta pra todos** e fica **fora da trava de propósito**, não por
+    estar escondido. **Não devolva `Manual (MP)` pra `FORMAS_PAGAMENTO_CARTAO`
+    citando o furo antigo — pra ele não há furo.**
+  - `Manual (PagBank)`: continua **fora da trava** e **restrito a admin/dev** no
+    seletor (não foi reavaliado). ⚠️ Se um dia for liberado pra todos, aí sim
+    reavalie se é cartão — se for, volta pra `FORMAS_PAGAMENTO_CARTAO`.
+  - Quem aparece no seletor pra não-admin é decidido por `FORMAS_RESTRITAS_ADMIN`
+    (`src/components/vendas/PagamentoForm.tsx`) — hoje só `Manual (PagBank)`. Há
+    teste fixando a lista da trava em `src/lib/desconto/__tests__/formas-cartao.test.ts`.
 - **Cascata:** reprovar o desconto reprova **junto** a aprovação de cartão da
   mesma venda (o cartão foi pedido pra um % que foi recusado). **Aprovar o
   desconto NÃO aprova o cartão** — cada uma tem sua decisão.
