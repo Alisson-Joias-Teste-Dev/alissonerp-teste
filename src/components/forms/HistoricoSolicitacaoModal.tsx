@@ -1,6 +1,6 @@
 "use client";
 
-import { X, Check } from "lucide-react";
+import { X, Check, Ban } from "lucide-react";
 import { getPublicUrl } from "@/lib/storage-url";
 
 const C = { esmeralda: "#184036", cremeBorder: "#E8DCC8" };
@@ -9,6 +9,9 @@ interface HistoricoRow {
   id: number;
   status: string;
   motivo_final: string | null;
+  cancelado_em: string | null;
+  motivo_cancelamento: string | null;
+  cancelado_por_nome: string | null;
   created_at: string;
   entregue_em: string | null;
   recebido_em: string | null;
@@ -49,6 +52,8 @@ interface Passo {
   nome: string | null;
   em: string | null;
   foto: string | null;
+  detalhe?: string | null;  // texto livre sob o passo (hoje: motivo do cancelamento)
+  perigo?: boolean;         // pinta o marcador de vermelho (encerramento sem desfecho fisico)
 }
 
 /**
@@ -65,6 +70,12 @@ export default function HistoricoSolicitacaoModal({ isOpen, onClose, row, produt
   if (row.entregue_em) passos.push({ label: "Entregue pelo estoque", nome: row.entregue_por_nome, em: row.entregue_em, foto: row.foto_entrega });
   if (row.recebido_em) passos.push({ label: "Recebido pela solicitante", nome: row.recebido_por_nome, em: row.recebido_em, foto: row.foto_recebimento });
   if (row.volta_solicitada_em) passos.push({ label: "Volta ao estoque solicitada", nome: row.volta_solicitada_por_nome, em: row.volta_solicitada_em, foto: null });
+  // Cancelamento: encerra a linha do tempo logo apos "Solicitado" — por regra so
+  // acontece a partir de 'solicitado', entao nunca convive com entrega/recebimento.
+  if (row.status === "cancelado") {
+    passos.push({ label: "Cancelada", nome: row.cancelado_por_nome, em: row.cancelado_em, foto: null,
+      detalhe: row.motivo_cancelamento, perigo: true });
+  }
   if (row.status === "finalizado") {
     if (row.motivo_final === "cliente_levou") {
       passos.push({ label: "Cliente levou", nome: row.finalizado_por_nome, em: row.finalizado_em, foto: null });
@@ -100,8 +111,8 @@ export default function HistoricoSolicitacaoModal({ isOpen, onClose, row, produt
             return (
               <div key={i} className="flex gap-3">
                 <div className="flex flex-col items-center">
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: C.esmeralda }}>
-                    <Check size={13} color="#fff" />
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: p.perigo ? "#A32D2D" : C.esmeralda }}>
+                    {p.perigo ? <Ban size={13} color="#fff" /> : <Check size={13} color="#fff" />}
                   </div>
                   {!ultimo && <div className="w-0.5 flex-1" style={{ backgroundColor: C.cremeBorder, minHeight: 16 }} />}
                 </div>
@@ -109,6 +120,11 @@ export default function HistoricoSolicitacaoModal({ isOpen, onClose, row, produt
                   <p className="text-[13px] font-semibold" style={{ color: "#1A1A1A" }}>{p.label}</p>
                   <p className="text-[12px]" style={{ color: "#6B7280" }}>{p.nome ?? "—"}</p>
                   <p className="text-[12px] font-mono" style={{ color: "#9CA3AF" }}>{fmtDT(p.em)}</p>
+                  {p.detalhe && (
+                    <p className="text-[12px] italic mt-1 px-2 py-1 rounded" style={{ backgroundColor: "#FCEBEB", color: "#A32D2D" }}>
+                      &ldquo;{p.detalhe}&rdquo;
+                    </p>
+                  )}
                   {fotoUrl && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={fotoUrl} alt={`Foto ${p.label}`} title={`Foto ${p.label}`}
