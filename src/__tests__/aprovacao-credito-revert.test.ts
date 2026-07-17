@@ -20,7 +20,10 @@ import { NextRequest } from "next/server";
 
 const USER_ID = "user-aprovador-uuid";
 
-const sqlMock = Object.assign(vi.fn(), { array: (arr: unknown[]) => arr });
+const sqlMock = Object.assign(vi.fn(), {
+  array: (arr: unknown[]) => arr,
+  begin: async (fn: (tx: unknown) => unknown) => fn(sqlMock),
+});
 vi.mock("@/lib/db", () => ({ default: sqlMock }));
 
 const mockGetUser = vi.fn();
@@ -38,6 +41,23 @@ vi.mock("@/lib/vendas-credito-aprovar", () => ({
 vi.mock("@/lib/devolucoes", () => ({
   processarAprovacaoDevolucao: vi.fn(),
   processarAprovacaoEstoqueDevolucao: vi.fn(),
+}));
+
+/**
+ * Camada de autoridade (PR #97). O handler de crédito real (route.ts ~709-719)
+ * chama `podeDecidir({..}, "credito_diretor" | "credito_gerente")` ANTES de
+ * processar a decisão. Sem este mock, `podeDecidir` roda de verdade e busca a
+ * config em alissonerp.configuracoes_sistema via `routeSqlByContent` abaixo —
+ * que não modela essa query, então cai em `nao_configurado` → 403 → o teste
+ * nunca chega a chamar processarAprovacaoCredito. Era esse o motivo dos 4
+ * testes deste arquivo estarem vermelhos desde a PR #97. Aqui a autoridade é
+ * sempre "pode": o objetivo deste arquivo é o revert-on-failure do handler de
+ * crédito, não quem pode decidir (isso é testado em
+ * src/lib/aprovacoes/__tests__/autoridade.test.ts).
+ */
+vi.mock("@/lib/aprovacoes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/aprovacoes")>()),
+  podeDecidir: vi.fn(async () => ({ pode: true })),
 }));
 
 // ── Import DEPOIS dos mocks ───────────────────────────────────────────────────
@@ -91,11 +111,26 @@ describe("PATCH aprovacao — crédito: revert on failure", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     (sqlMock as unknown as { array: (a: unknown[]) => unknown[] }).array = (arr) => arr;
+    // Restaura sql.begin(tx=>...) após reset — o PATCH agora envolve as escritas
+    // genéricas numa transação (BUG 2, item c); o `tx` roteia pelo mesmo mock
+    // por conteúdo (routeSqlByContent), então o comportamento não muda.
+    (sqlMock as unknown as { begin: (fn: (tx: unknown) => unknown) => unknown }).begin = (fn) => fn(sqlMock);
     sqlMock.mockImplementation(routeSqlByContent);
     mockGetUser.mockResolvedValue({ data: { user: { id: USER_ID } } });
   });
 
-  it("approveVenda falhou → reverte a tarefa e retorna 409 com o erro real", async () => {
+  /**
+   * REGRA NOVA (17/07, decisão do Jonathan) — este teste foi INVERTIDO de
+   * propósito. Antes (fd80d4d0, 23/06) a rota revertia a tarefa pra
+   * 'aguardando_aprovacao' e devolvia 409, obrigando o aprovador a decidir de
+   * novo. O Jonathan mudou o desenho: "pedir aprovação é chato" — a decisão do
+   * aprovador é VÁLIDA, a falha é operacional (cadastro), não de decisão.
+   * Agora a aprovação FICA e quem cuida da venda corrige e aprova na mão; o
+   * `aviso` no 200 é o que conta isso pra quem aprovou (antes: 200 mudo).
+   * Quem avisa na tela da venda é a faixa `creditoAprovadoVendaNao`
+   * (VendaDetalheClient), deduzida sem coluna nova.
+   */
+  it("approveVenda falhou → NÃO reverte, mantém aprovado e devolve o aviso no 200", async () => {
     mockProcessarAprovacaoCredito.mockResolvedValueOnce({
       ok: true,
       acao: "aprovado",
@@ -107,11 +142,13 @@ describe("PATCH aprovacao — crédito: revert on failure", () => {
     const data = await res.json();
 
     expect(mockProcessarAprovacaoCredito).toHaveBeenCalledTimes(1);
-    expect(res.status).toBe(409);
-    expect(data.ok).toBe(false);
-    expect(data.error).toMatch(/celular/i);
-    // reverteu a tarefa pra reprocessar
-    expect(algumSqlContem(/aguardando_aprovacao/)).toBe(true);
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    // o motivo REAL chega em quem aprovou, em vez do 200 mudo de antes
+    expect(data.aviso).toMatch(/celular/i);
+    expect(data.aviso).toMatch(/aprove a venda manualmente/i);
+    // e a tarefa NÃO volta pra fila — ninguém reaprova
+    expect(algumSqlContem(/aguardando_aprovacao/)).toBe(false);
   });
 
   it("venda aprovada de fato → 200 e NÃO reverte", async () => {

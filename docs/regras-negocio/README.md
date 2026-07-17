@@ -15,6 +15,7 @@
 | Módulo | Arquivo | Status |
 |--------|---------|--------|
 | Comercial (vendas, vale-troca, comissão, entrega) | `comercial.md` | ✅ documentado |
+| **Aprovações** (quem decide o quê — config-first, os 19 eventos) | `aprovacoes.md` | ✅ documentado |
 | Promoções (campanhas de desconto) | `promocoes.md` | ✅ documentado |
 | Orçamento (cotações → vira venda) | `orcamento.md` | ✅ documentado |
 | Produtos (precificação, pedras, pai/variações) | `produtos.md` | ✅ documentado |

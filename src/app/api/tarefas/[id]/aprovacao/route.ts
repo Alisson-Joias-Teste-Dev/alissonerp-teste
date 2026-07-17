@@ -25,7 +25,7 @@ import { zodError } from "@/lib/schemas/common";
 import { processarAprovacaoQuebraLimpeza } from "@/lib/limpeza-ouro-aprovacao";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } from "@/lib/entrega-sem-pagamento";
-import { podeDecidir } from "@/lib/aprovacoes";
+import { podeDecidir, eventoDaTarefa } from "@/lib/aprovacoes";
 
 const AprovacaoTarefaPostSchema = z.object({
   aprovador_id: z.string().min(1, "obrigatório"),
@@ -363,31 +363,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   `;
   if (!aprovacao) return NextResponse.json({ error: "Aprovação não encontrada" }, { status: 404 });
 
-  // Admin e desenvolvedor podem responder qualquer aprovação
   const [usuarioLogado] = await sql`
     SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
   `;
-  const isAdminOuDev = ["admin", "desenvolvedor"].includes(usuarioLogado?.role ?? "");
 
-  if (String(aprovacao.aprovador_id) !== user.id && !isAdminOuDev) {
-    return NextResponse.json({ error: "Somente o aprovador pode responder" }, { status: 403 });
-  }
-
-  await sql`
-    UPDATE alissonerp.aprovacoes_tarefa
-    SET status = ${body.decisao}, motivo = ${body.motivo ?? null}, respondido_em = now()
-    WHERE id = ${body.aprovacao_id}
-  `;
-
-  const novoStatus = body.decisao === "aprovado" ? "aprovada" : "rejeitada";
-  await sql`
-    UPDATE alissonerp.tarefas SET status = ${novoStatus}, updated_at = now()
-    ${body.decisao === "aprovado" ? sql`, concluida_em = now()` : sql``}
-    WHERE id = ${Number(id)}
-  `;
-
-  await processarDecisao(Number(id), body.decisao, user.id, body.motivo);
-
+  // REGRA DE NEGÓCIO (BUG 2, item b — docs/regras-negocio/aprovacoes-refatoracao/
+  // 19-FASE-7-bugs-pos-merge.md): o SELECT da tarefa (tipo/tags/venda) sobe pra
+  // ANTES do portão de permissão (antes era feito só depois das escritas, linha
+  // ~391 na versão anterior). eventoDaTarefa precisa desses dados pra saber qual
+  // evento do CATÁLOGO decide quem pode responder — sem isso o portão só
+  // enxergava o UUID gravado em aprovacoes_tarefa.aprovador_id (BUG 1).
+  // IMPACTO SE REMOVIDO/MOVIDO: o portão volta a decidir sem saber o evento —
+  // mesmo bug do 2º aprovador configurado tomando 403.
   const [tarefaInfo] = await sql`
     SELECT t.venda_id, t.tags, t.tipo,
            ve.aprovacao_credito_tipo,
@@ -400,6 +387,61 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const tags: string[] = Array.isArray(tagsRaw)
     ? tagsRaw
     : (typeof tagsRaw === "string" ? tagsRaw.replace(/[{}"]/g, "").split(",").filter(Boolean) : []);
+
+  // REGRA DE NEGÓCIO (BUG 1 — 19-FASE-7-bugs-pos-merge.md): o portão genérico
+  // do PATCH passa a ser "é o aprovador gravado OU a config do evento diz que
+  // pode". `isAdminOuDev` SOME de propósito: a política é config-first ESTRITA
+  // (03b-config-first-estrito.md) — nem admin/desenvolvedor decide fora da
+  // lista configurada. Quando eventoDaTarefa devolve null (tarefa 'geral',
+  // 'sangria' — que não são aprovação de negócio), vale só o aprovador gravado,
+  // igual ao comportamento de sempre (menos o bypass de admin que havia antes).
+  // POR QUÊ: sem isto, o 2º/3º aprovador configurado (não-admin) de um evento
+  // com múltiplos aprovadores tomava 403 ao tentar decidir — só quem tinha
+  // role admin/desenvolvedor conseguia (achado testando com o dono, 16/07,
+  // tarefa 301 de desconto em homolog).
+  // IMPACTO SE REMOVIDO: volta o 403 pro 2º/3º aprovador configurado.
+  const evento = eventoDaTarefa(tarefaInfo?.tipo ?? null, tags, tarefaInfo);
+  const ehAprovadorGravado = String(aprovacao.aprovador_id) === user.id;
+  let autorizado = ehAprovadorGravado;
+  if (!autorizado && evento) {
+    autorizado = (await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, evento)).pode;
+  }
+  if (!autorizado) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
+  // REGRA DE NEGÓCIO (BUG 2, item c — cinto e suspensório): as 2 escritas
+  // genéricas (status da aprovação + status da tarefa) e o registro de
+  // histórico rodam na MESMA transação. O portão acima (BUG 1) já autoriza
+  // ANTES de qualquer escrita — isto é proteção extra contra o mapa
+  // eventoDaTarefa errar um tipo (ou um handler abaixo negar por outro motivo
+  // não previsto): se a transação falhar/for revertida, nenhuma das 2 escritas
+  // fica gravada pela metade.
+  // POR QUÊ: antes desta correção, essas escritas rodavam SEM transação e
+  // ANTES do 403 dos handlers por tipo — a tarefa ficava "aprovada"/"rejeitada"
+  // mesmo quando o negócio (venda, estoque, financeiro) não rodava. Mesma
+  // classe de bug que travou as vendas 15300/15312/15399/15562 (dossiê
+  // comercial.md) — lá a causa era outra, mas o sintoma (tarefa órfã, venda
+  // travada) é idêntico.
+  // IMPACTO SE REMOVIDO: volta o risco de tarefa órfã (aprovada/rejeitada sem
+  // o negócio ter rodado) se o mapa de eventos errar um caso.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await sql.begin(async (tx: any) => {
+    await tx`
+      UPDATE alissonerp.aprovacoes_tarefa
+      SET status = ${body.decisao}, motivo = ${body.motivo ?? null}, respondido_em = now()
+      WHERE id = ${body.aprovacao_id}
+    `;
+
+    const novoStatus = body.decisao === "aprovado" ? "aprovada" : "rejeitada";
+    await tx`
+      UPDATE alissonerp.tarefas SET status = ${novoStatus}, updated_at = now()
+      ${body.decisao === "aprovado" ? tx`, concluida_em = now()` : tx``}
+      WHERE id = ${Number(id)}
+    `;
+
+    await processarDecisao(Number(id), body.decisao, user.id, body.motivo, tx);
+  });
 
   /**
    * REGRA DE NEGOCIO: Automacao de Estoque 2.0.
@@ -680,7 +722,40 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const resultado = await processarAprovacaoCredito(
         Number(id), user.id, body.decisao, body.motivo,
       );
-      return NextResponse.json({ ok: true, credito: resultado });
+
+      /**
+       * REGRA DE NEGÓCIO (17/07, decisão do Jonathan): aprovar o crédito e a
+       * venda ser aprovada são 2 passos, e o 2º (approveVenda) pode falhar por
+       * motivo OPERACIONAL — o clássico é cliente sem celular cadastrado.
+       *
+       * O QUE: quando falha, a aprovação do crédito CONTINUA VALENDO (a tarefa
+       *   não volta pra fila) e devolvemos o motivo real junto do 200, pra tela
+       *   avisar quem aprovou. Quem corrige o cadastro aprova a venda na mão.
+       * POR QUE: o aprovador já decidiu — a decisão dele é válida. A falha não é
+       *   de decisão, é de cadastro. Fazer ele aprovar de novo é ruído ("pedir
+       *   aprovação é chato" — Jonathan).
+       *   Isto DIVERGE de propósito do fd80d4d0 (23/06), que revertia a tarefa
+       *   pra 'aguardando_aprovacao' e devolvia 409. Aquele bloco sumiu no
+       *   0ae5e1607 (26/06, base errada); NÃO restaurar — o desenho mudou.
+       * IMPACTO SE REMOVIDO: volta o 200 mudo — o aprovador vê "sucesso", o
+       *   approveVenda falhou por baixo e ninguém avisa que falta aprovar a
+       *   venda na mão. (A consultora é notificada por
+       *   vendas-credito-aprovar.ts; quem aprova, não era.)
+       *
+       * Espera legítima por pagamento (venda_aprovada=false SEM erro_aprovacao)
+       * não é falha — segue 200 limpo, sem aviso.
+       */
+      const falhouAoAprovarVenda = body.decisao === "aprovado" && !!resultado.erro_aprovacao;
+      return NextResponse.json({
+        ok: true,
+        credito: resultado,
+        ...(falhouAoAprovarVenda
+          ? {
+              aviso: `Crédito aprovado, mas a venda não foi aprovada automaticamente: ${resultado.erro_aprovacao}. Corrija o cadastro e aprove a venda manualmente.`,
+              venda_id: tarefaInfo?.venda_id ?? null,
+            }
+          : {}),
+      });
     } catch (err) {
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] credito`, err);
     }

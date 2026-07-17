@@ -150,13 +150,24 @@ async function criarTarefaAprovacao(
   return tarefa.id;
 }
 
+/**
+ * REGRA DE NEGÓCIO (BUG 2, item c — 19-FASE-7-bugs-pos-merge.md): aceita um
+ * cliente sql opcional (o `tx` de um `sql.begin`) pra poder rodar dentro da
+ * MESMA transação das outras escritas genéricas do PATCH de aprovação
+ * (aprovacoes_tarefa + tarefas). Sem isso, o INSERT do histórico ficaria de
+ * fora do "cinto e suspensório" e sobreviveria a um rollback das outras 2.
+ * Default = `sql` (module-level) — 100% compatível com qualquer outro caller
+ * que não passe transação.
+ */
 async function processarDecisao(
   tarefaId: number,
   decisao: "aprovado" | "rejeitado",
   aprovadorId: string,
   motivo?: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  clienteSql: any = sql,
 ): Promise<void> {
-  await sql`
+  await clienteSql`
     INSERT INTO alissonerp.tarefas_historico
       (tarefa_id, usuario_id, acao, comentario, created_at)
     VALUES (${tarefaId}, ${aprovadorId}::uuid, ${decisao}, ${motivo ?? null}, now())
