@@ -211,6 +211,22 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
       "conferência (usuarios.vendedor_id === aprovacoes_consultora.consultora_id, ver " +
       "src/app/api/aprovacao/[aprovacaoId]/route.ts). NÃO pode aprovar a de outra consultora.",
   },
+  garantia_fora_prazo: {
+    evento: "garantia_fora_prazo",
+    rotulo: "Garantia fora do prazo de 7 dias úteis",
+    configKeys: ["aprovadores_garantia_fora_prazo"],
+    configMulti: true,
+    camposLock: ["tarefas.status", "tarefas.ordem_id"],
+    observacao:
+      "Regra do Jonathan (17/07) — docs/regras-negocio/ordens.md. Autoriza abrir garantia depois dos 7 " +
+      "dias úteis da entrega, para serviços NÃO vitalícios. NÃO cobre a trava de venda-não-entregue: " +
+      "essa é seca, sem saída por aprovação. " +
+      "A tarefa libera a VENDA, não a ordem — a ordem só nasce depois de aprovada (assim nada vaza pro " +
+      "Protocolo esperando decisão, e a consultora não sobe foto/peso/vídeo antes de saber se pode). " +
+      "USO ÚNICO: `tarefas.ordem_id` é consumido pela garantia que a aprovação gerou (UPDATE ... WHERE " +
+      "ordem_id IS NULL, na mesma transação do INSERT). É o que impede uma aprovação virar passe " +
+      "vitalício — 18% das vendas têm mais de uma garantia. Chave NOVA: criar em PROD via /dba ANTES do deploy.",
+  },
   alteracao_venda: {
     evento: "alteracao_venda",
     rotulo: "Solicitação de alteração de venda (campo restrito ou pagamento)",

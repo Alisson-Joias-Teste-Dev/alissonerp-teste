@@ -193,6 +193,14 @@ const CONFIG_ITENS: ConfigItem[] = [
     icone: "💎",
     multi: true,
   },
+  {
+    chave: "aprovadores_garantia_fora_prazo",
+    titulo: "Garantia fora do prazo (7 dias úteis)",
+    descricao: "Quem aprova abrir garantia depois dos 7 dias úteis da entrega, para serviços que não são vitalícios. Acabamento e polimento é vitalício e não passa por aqui; venda não entregue é bloqueio sem aprovação. Só quem estiver marcado aqui aprova. Pode marcar vários.",
+    usuariosKey: "diretores_admins",
+    icone: "🛡️",
+    multi: true,
+  },
 ];
 
 // ─── Componente ───────────────────────────────────────────────────────────────

@@ -11,6 +11,8 @@ import {
 import { zodError, IdSchema, DateSchema } from "@/lib/schemas/common";
 import { LIMITS } from "@/lib/payload-limits";
 import { assertVendaForaDeRascunho, VendaGuardError } from "@/lib/venda-guards";
+import { avaliarGarantia, GarantiaGuardError } from "@/lib/garantia/prazo-garantia";
+import { GARANTIA_FORA_PRAZO_TIPO } from "@/lib/garantia/solicitar-aprovacao";
 
 const FULL_ACCESS_ROLES = ["desenvolvedor", "admin"];
 const ALL_TIPOS = [
@@ -245,6 +247,43 @@ export async function POST(req: NextRequest) {
       await assertVendaForaDeRascunho(tx, venda_id, "abrir ordem");
     }
 
+    // 0-b. Trava de garantia (docs/regras-negocio/ordens.md, Jonathan 17/07):
+    //   1. só de venda ENTREGUE; 2. Acabamento e polimento é vitalício; 3. resto
+    //   vale 7 dias úteis desde a entrega, e fora disso exige aprovação prévia.
+    //   Dentro da transação (mesma razão TOCTOU do guard de rascunho). Se estiver
+    //   fora do prazo, guardamos o id da tarefa aprovada para CONSUMIR depois do
+    //   INSERT — uso único (uma aprovação = uma garantia). Ver ordens.md §2.6/§3.1.
+    let tarefaGarantiaAConsumir: number | null = null;
+    if (tipo_ordem === "garantia" && venda_id) {
+      const tiposGarantia: number[] = Array.isArray(tipos_servico_ids)
+        ? tipos_servico_ids.map(Number).filter((n) => !isNaN(n))
+        : [];
+      const aval = await avaliarGarantia(tx, venda_id, tiposGarantia);
+      if (!aval.permitido) {
+        if (aval.motivo === "fora_do_prazo") {
+          // Procura aprovação concedida e AINDA NÃO consumida para esta venda.
+          // COALESCE(tipo,'') — tipo é NULL em vários fluxos (armadilha aprovacoes.md §5).
+          const [aprovada] = await tx`
+            SELECT id
+              FROM alissonerp.tarefas
+             WHERE COALESCE(tipo, '') = ${GARANTIA_FORA_PRAZO_TIPO}
+               AND venda_id = ${venda_id}
+               AND status = 'aprovada'
+               AND ordem_id IS NULL
+             ORDER BY id DESC
+             LIMIT 1
+          `;
+          if (!aprovada) {
+            throw new GarantiaGuardError("fora_do_prazo", aval.mensagem ?? "Garantia fora do prazo — solicite aprovação.");
+          }
+          tarefaGarantiaAConsumir = Number(aprovada.id);
+        } else {
+          // venda_nao_entregue: trava seca, sem saída por aprovação.
+          throw new GarantiaGuardError("venda_nao_entregue", aval.mensagem ?? "Só é possível abrir garantia de pedido entregue.");
+        }
+      }
+    }
+
     // 0. Gerar numero_ordem dentro da transação (evita race condition)
     const [{ max_id_ali }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_ali FROM alissonerp.ordens`;
     const [{ max_id_dir }] = await tx`SELECT COALESCE(MAX(id), 0) AS max_id_dir FROM directus.ordens`;
@@ -313,6 +352,26 @@ export async function POST(req: NextRequest) {
       )
       RETURNING id, numero_ordem
     `;
+
+    // 1-b. Consumir a aprovação de garantia fora do prazo (uso único). O
+    //   `WHERE ordem_id IS NULL` fecha a corrida entre duas abas: se a mesma
+    //   aprovação já foi gasta por outra ordem, o UPDATE pega 0 linhas e a
+    //   transação inteira aborta — nada de duas garantias numa aprovação só.
+    //   Ver docs/regras-negocio/ordens.md §2.6/§3.1.
+    if (tarefaGarantiaAConsumir) {
+      const consumo = await tx`
+        UPDATE alissonerp.tarefas
+           SET ordem_id = ${ordem.id}, updated_at = now()
+         WHERE id = ${tarefaGarantiaAConsumir}
+           AND ordem_id IS NULL
+      `;
+      if (consumo.count === 0) {
+        throw new GarantiaGuardError(
+          "fora_do_prazo",
+          "A aprovação desta garantia já foi usada em outra ordem. Solicite uma nova aprovação.",
+        );
+      }
+    }
 
     // 2. Inserir itens (se houver)
     //    Personalizacao e propagada da venda (itens_venda_erp.personalizacao)
@@ -411,6 +470,13 @@ export async function POST(req: NextRequest) {
     }
     if (err instanceof VendaGuardError && err.motivo === "nao_encontrada") {
       return NextResponse.json({ error: err.message }, { status: 404 });
+    }
+    // Trava de garantia (prazo-garantia.ts): venda não entregue = 422 (seca);
+    // fora do prazo sem aprovação = 409 (falta solicitar aprovação). O front usa
+    // o status pra decidir se mostra o botão "Solicitar aprovação".
+    if (err instanceof GarantiaGuardError) {
+      const status = err.motivo === "fora_do_prazo" ? 409 : 422;
+      return NextResponse.json({ error: err.message, motivo: err.motivo }, { status });
     }
     throw err;
   }

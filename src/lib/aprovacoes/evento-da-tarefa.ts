@@ -116,5 +116,13 @@ export function eventoDaTarefa(
     return "compra_metal";
   }
 
+  // Garantia fora do prazo (17/07): a tarefa nasce com tipo 'garantia_fora_prazo'
+  // (api/garantia/solicitar-aprovacao). Não tem handler de efeito no PATCH — o
+  // efeito (consumir a liberação) roda na CRIAÇÃO da ordem. Aqui só serve pro
+  // portão genérico saber que existe evento e delegar a decisão pra podeDecidir.
+  if (tipo === "garantia_fora_prazo") {
+    return "garantia_fora_prazo";
+  }
+
   return null;
 }

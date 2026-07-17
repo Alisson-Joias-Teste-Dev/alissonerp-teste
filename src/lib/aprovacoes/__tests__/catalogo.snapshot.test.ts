@@ -41,6 +41,8 @@ const SNAPSHOT_ESPERADO: Record<
   auditoria: { configKeys: ["aprovador_auditoria"], configMulti: true },
   conferencia_consultora: { configKeys: [], configMulti: false, solicitantePodeAprovar: true },
   alteracao_venda: { configKeys: ["aprovador_alteracao_venda"], configMulti: true },
+  // 17/07: garantia depois dos 7 dias úteis da entrega (docs/regras-negocio/ordens.md).
+  garantia_fora_prazo: { configKeys: ["aprovadores_garantia_fora_prazo"], configMulti: true },
 };
 
 describe("snapshot do CATALOGO — trava a política; qualquer mudança quebra este teste", () => {
@@ -60,7 +62,7 @@ describe("snapshot do CATALOGO — trava a política; qualquer mudança quebra e
     },
   );
 
-  it("cobre exatamente os 19 eventos do catálogo, sem sobra nem falta", () => {
+  it("cobre exatamente os 20 eventos do catálogo, sem sobra nem falta", () => {
     expect(Object.keys(CATALOGO).sort()).toEqual(Object.keys(SNAPSHOT_ESPERADO).sort());
   });
 

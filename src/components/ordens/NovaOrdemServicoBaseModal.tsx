@@ -9,7 +9,9 @@ import {
   X, Search, Loader2, Shield, Calendar, CheckSquare, Square,
   Upload, Trash2, Camera, CheckCircle2, AlertCircle, Video,
   ShoppingBag, Package, ChevronRight,
+  AlertTriangle, Infinity as InfinityIcon, Send, ClockCheck,
 } from "lucide-react";
+/* ClockCheck/InfinityIcon/Send/AlertTriangle: avisos da regra de garantia (17/07) */
 import { maskCpfCnpj } from "@/lib/formatters";
 import { useDebounce } from "./_shared/useDebounce";
 import { Steps } from "./_shared/Steps";
@@ -93,6 +95,22 @@ export default function NovaOrdemServicoBaseModal({
   const [outrosDescricao,   setOutrosDescricao]   = useState("");
   const [loadingTipos,     setLoadingTipos]     = useState(false);
 
+  // ── Garantia: avaliação de entrega/prazo/vitalício (só tipoOrdem === "garantia") ──
+  // A regra vive no servidor (src/lib/garantia/prazo-garantia.ts). O modal só
+  // ANTECIPA o aviso — a trava real é no POST /api/ordens. Ver ordens.md §4.
+  interface AvaliacaoGarantiaFront {
+    permitido: boolean;
+    motivo: "venda_nao_entregue" | "fora_do_prazo" | null;
+    mensagem: string | null;
+    vitalicia: boolean;
+    diasUteis: number | null;
+    podeSolicitarAprovacao: boolean;
+  }
+  const [avalGarantia, setAvalGarantia] = useState<AvaliacaoGarantiaFront | null>(null);
+  const [avaliandoGarantia, setAvaliandoGarantia] = useState(false);
+  const [solicitandoAprovacao, setSolicitandoAprovacao] = useState(false);
+  const [aprovacaoSolicitada, setAprovacaoSolicitada] = useState(false);
+
   // Peso + foto balança
   const [pesoDigitado,     setPesoDigitado]     = useState("");
   const [fotoBalanca,      setFotoBalanca]       = useState<{ file: File; preview: string } | null>(null);
@@ -147,6 +165,8 @@ export default function NovaOrdemServicoBaseModal({
       setFotosAdicional([]);
       setSalvando(false); setErro(null);
       setProximoNumero(null); setLoadingNumero(false);
+      setAvalGarantia(null); setAvaliandoGarantia(false);
+      setSolicitandoAprovacao(false); setAprovacaoSolicitada(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
@@ -232,6 +252,58 @@ export default function NovaOrdemServicoBaseModal({
       .catch(() => setTiposServico([]))
       .finally(() => setLoadingTipos(false));
   }, [step]);
+
+  // ── Garantia: reavalia entrega/prazo/vitalício quando muda a seleção de serviços ──
+  // Só para garantia; servico_venda não tem essa regra. Debounce leve pra não
+  // disparar a cada clique de checkbox. A resposta define qual aviso aparece e se
+  // o botão "Solicitar aprovação" surge. Ver ordens.md §2.7.
+  useEffect(() => {
+    if (tipoOrdem !== "garantia" || step !== 3 || !vendaSelecionada) {
+      setAvalGarantia(null);
+      return;
+    }
+    let cancelado = false;
+    setAvaliandoGarantia(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch("/api/garantia/avaliar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ venda_id: vendaSelecionada.id, tipos_servico_ids: tiposSelecionados }),
+        });
+        if (!cancelado && r.ok) setAvalGarantia(await r.json());
+      } catch {
+        if (!cancelado) setAvalGarantia(null);
+      } finally {
+        if (!cancelado) setAvaliandoGarantia(false);
+      }
+    }, 250);
+    return () => { cancelado = true; clearTimeout(t); };
+  }, [tipoOrdem, step, vendaSelecionada, tiposSelecionados]);
+
+  // ── Garantia: solicita aprovação para abrir fora do prazo ─────────────────
+  async function solicitarAprovacaoGarantia() {
+    if (!vendaSelecionada) return;
+    setSolicitandoAprovacao(true);
+    setErro(null);
+    try {
+      const r = await fetch("/api/garantia/solicitar-aprovacao", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ venda_id: vendaSelecionada.id, tipos_servico_ids: tiposSelecionados }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) {
+        setAprovacaoSolicitada(true);
+      } else {
+        setErro(d?.error ?? "Não foi possível solicitar a aprovação.");
+      }
+    } catch {
+      setErro("Não foi possível solicitar a aprovação.");
+    } finally {
+      setSolicitandoAprovacao(false);
+    }
+  }
 
   // ── Toggle item selecionado ───────────────────────────────────────────────
   function toggleItem(id: number) {
@@ -701,15 +773,25 @@ export default function NovaOrdemServicoBaseModal({
                 </div>
               ) : (
                 <ul className="space-y-2">
-                  {vendas.map(v => (
+                  {vendas.map(v => {
+                    // REGRA DE NEGÓCIO (garantia, 17/07 — ordens.md §2.1): só é
+                    // possível abrir garantia de venda ENTREGUE. Venda fora disso
+                    // aparece TRAVADA (não some — decisão do Jonathan: a consultora
+                    // vê que existe e entende o porquê). servico_venda não trava.
+                    const bloqueadaGarantia = tipoOrdem === "garantia" && v.situacao !== "entregue";
+                    const selecionada = vendaSelecionada?.id === v.id;
+                    return (
                     <li key={v.id}>
                       <button
+                        disabled={bloqueadaGarantia}
                         className="w-full text-left rounded-xl p-3 transition-colors hover:opacity-90"
                         style={{
-                          border: `1px solid ${vendaSelecionada?.id === v.id ? C.esmeralda : C.cremeBorder}`,
-                          background: vendaSelecionada?.id === v.id ? "#F0FDF4" : C.bg,
+                          border: `1px solid ${selecionada ? C.esmeralda : C.cremeBorder}`,
+                          background: selecionada ? "#F0FDF4" : C.bg,
+                          opacity: bloqueadaGarantia ? 0.6 : 1,
+                          cursor: bloqueadaGarantia ? "not-allowed" : "pointer",
                         }}
-                        onClick={() => handleVendaSelect(v)}
+                        onClick={() => { if (!bloqueadaGarantia) handleVendaSelect(v); }}
                       >
                         <div className="flex items-center justify-between">
                           <div>
@@ -721,9 +803,14 @@ export default function NovaOrdemServicoBaseModal({
                             <p className="text-xs text-gray-400">{SITUACAO_LABEL[v.situacao] ?? v.situacao}</p>
                           </div>
                         </div>
+                        {bloqueadaGarantia && (
+                          <p className="text-xs mt-2 flex items-center gap-1" style={{ color: "#854F0B" }}>
+                            <AlertTriangle size={12} /> Só é possível abrir garantia de pedido entregue.
+                          </p>
+                        )}
                       </button>
                     </li>
-                  ))}
+                  );})}
                 </ul>
               )}
 
@@ -871,6 +958,54 @@ export default function NovaOrdemServicoBaseModal({
                   ) : null;
                 })()}
               </div>
+
+              {/* Aviso da regra de garantia (só tipoOrdem garantia). A regra vem
+                  do servidor (/api/garantia/avaliar) — o modal só antecipa. Ver
+                  docs/regras-negocio/ordens.md §2.7. */}
+              {tipoOrdem === "garantia" && tiposSelecionados.length > 0 && (
+                <div>
+                  {avaliandoGarantia && !avalGarantia ? (
+                    <div className="flex items-center gap-2 text-xs text-gray-400">
+                      <Loader2 size={14} className="animate-spin" /> Verificando prazo da garantia...
+                    </div>
+                  ) : avalGarantia?.vitalicia ? (
+                    <div className="rounded-xl px-3 py-2.5 text-sm flex items-start gap-2"
+                         style={{ background: "#E1F5EE", border: "1px solid #5DCAA5", color: "#085041" }}>
+                      <InfinityIcon size={16} style={{ marginTop: 1, color: "#0F6E56" }} />
+                      <span><strong>Garantia vitalícia.</strong> Acabamento e polimento não tem prazo — pode abrir a garantia.</span>
+                    </div>
+                  ) : avalGarantia?.permitido ? (
+                    <div className="rounded-xl px-3 py-2.5 text-sm flex items-start gap-2"
+                         style={{ background: C.bg, border: `1px solid ${C.cremeBorder}`, color: "#374151" }}>
+                      <ClockCheck size={16} style={{ marginTop: 1, color: C.esmeralda }} />
+                      <span>Dentro do prazo{avalGarantia.diasUteis != null ? ` (entregue há ${avalGarantia.diasUteis} dia(s) útil(eis))` : ""} — pode abrir a garantia.</span>
+                    </div>
+                  ) : avalGarantia?.motivo === "fora_do_prazo" ? (
+                    <div className="rounded-xl px-3 py-2.5 text-sm"
+                         style={{ background: "#FAEEDA", border: "1px solid #EF9F27", color: "#633806" }}>
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle size={16} style={{ marginTop: 1, color: "#854F0B" }} />
+                        <span>{avalGarantia.mensagem ?? "Garantia fora do prazo de 7 dias úteis."}</span>
+                      </div>
+                      {aprovacaoSolicitada ? (
+                        <p className="mt-2 flex items-center gap-1.5 font-medium" style={{ color: "#0F6E56" }}>
+                          <CheckCircle2 size={15} /> Aprovação solicitada. Quando for aprovada, reabra a garantia desta venda.
+                        </p>
+                      ) : (
+                        <button
+                          className="mt-2.5 inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors disabled:opacity-60"
+                          style={{ border: "0.5px solid #854F0B", color: "#633806" }}
+                          disabled={solicitandoAprovacao}
+                          onClick={solicitarAprovacaoGarantia}
+                        >
+                          {solicitandoAprovacao ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                          Solicitar aprovação
+                        </button>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              )}
 
               {/* Peso metal externo + foto balança */}
               <div>
