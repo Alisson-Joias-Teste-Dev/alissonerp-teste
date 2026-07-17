@@ -193,9 +193,9 @@ export interface PagamentoFormProps {
   nomesPromosNaVenda?: string[];
 
   /**
-   * Role do usuario logado. Define se as formas manuais (Manual (MP) /
-   * Manual (PagBank)) aparecem no seletor — so admin e desenvolvedor.
-   * Ausente = mostra tudo (compatibilidade).
+   * Role do usuario logado. Hoje decide só se "Manual (PagBank)" aparece no
+   * seletor (admin/dev). "Manual (MP)" aparece pra todos desde 17/07 — ver
+   * FORMAS_RESTRITAS_ADMIN. Ausente = mostra tudo (compatibilidade).
    */
   role?: string;
 }
@@ -207,8 +207,22 @@ const FORMAS_PAGAMENTO_BASE = [
   "Vale-Troca", "A Receber", "Múltiplas", "Manual (MP)", "Manual (PagBank)",
 ];
 
-/** Formas manuais (confirmam pagamento por ID da transacao) — so admin/dev. */
-const FORMAS_MANUAIS = ["Manual (MP)", "Manual (PagBank)"];
+/**
+ * Formas restritas a admin/dev no seletor.
+ *
+ * 17/07 (decisão do Jonathan): **Manual (MP) SAIU daqui — volta a aparecer pra
+ * todos.** Motivo dele: no fluxo da loja o "Manual (MP)" não é cobrança no
+ * cartão (é confirmação por ID de transação do MP), então nem entra no limite
+ * de 20% do cartão nem precisa ficar escondido. Manual (PagBank) CONTINUA
+ * restrito — não foi pedido pra liberar.
+ * (Contexto: o PR #99, 17/07, tinha escondido as DUAS de quem não é admin.)
+ *
+ * ATENÇÃO — anda junto com FORMAS_PAGAMENTO_CARTAO (precificar-item.ts): Manual
+ * (MP) está liberado E fora da trava do cartão PORQUE não é tratado como cartão.
+ * Se um dia ele voltar a ser cobrança no cartão, as duas coisas mudam juntas:
+ * volta pra trava E (se for esconder de novo) volta pra esta lista.
+ */
+export const FORMAS_RESTRITAS_ADMIN = ["Manual (PagBank)"];
 const ROLES_FORMAS_MANUAIS = ["admin", "desenvolvedor"];
 
 const CONDICOES = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
@@ -315,10 +329,10 @@ export default function PagamentoForm({
   nomesPromosNaVenda,
   role,
 }: PagamentoFormProps) {
-  const podeManual = role == null || ROLES_FORMAS_MANUAIS.includes(role);
-  const formasPagamento = podeManual
+  const podeVerRestritas = role == null || ROLES_FORMAS_MANUAIS.includes(role);
+  const formasPagamento = podeVerRestritas
     ? FORMAS_PAGAMENTO_BASE
-    : FORMAS_PAGAMENTO_BASE.filter(f => !FORMAS_MANUAIS.includes(f));
+    : FORMAS_PAGAMENTO_BASE.filter(f => !FORMAS_RESTRITAS_ADMIN.includes(f));
   const totalMult = payments.reduce((s, p) => s + p.valor, 0);
   const restante = +(totalVenda - totalMult).toFixed(2);
 

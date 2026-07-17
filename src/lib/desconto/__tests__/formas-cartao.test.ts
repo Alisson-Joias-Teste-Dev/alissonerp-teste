@@ -8,15 +8,15 @@
  * Histórico (o "porquê" completo está no comentário de FORMAS_PAGAMENTO_CARTAO):
  *  - 16/07: as manuais ENTRARAM — qualquer usuário via essas formas, então dava
  *    pra pular a aprovação escolhendo "Manual (MP)" em vez de "Cartão de Crédito".
- *  - 17/07: SAÍRAM — o PR #99 passou a escondê-las de quem não é admin/dev, e a
- *    trava só atrapalhava o admin. O furo não sumiu: foi contido a quem já tem
- *    poder de admin. Decisão do Jonathan, com o trade-off na mesa.
- *
- * SE A #99 FOR REVERTIDA (manuais voltarem a aparecer pra consultora), estes
- * testes têm que virar de novo — as 2 coisas andam juntas.
+ *  - 17/07: SAÍRAM — o PR #99 escondeu as manuais de não-admin.
+ *  - 17/07 (final): "Manual (MP)" foi liberado de volta pra TODOS e fica fora da
+ *    trava DE PROPÓSITO — decisão do Jonathan: na loja ele não é cartão, é
+ *    confirmação por ID de transação. Pra ele não há furo, então a liberação de
+ *    visibilidade NÃO reabre nada. "Manual (PagBank)" segue restrito a admin.
  */
 import { describe, it, expect } from "vitest";
 import { FORMAS_PAGAMENTO_CARTAO, ehFormaCartao } from "../precificar-item";
+import { FORMAS_RESTRITAS_ADMIN } from "@/components/vendas/PagamentoForm";
 
 describe("ehFormaCartao — quem a trava do cartão pega", () => {
   it("pega Cartão de Crédito", () => {
@@ -47,5 +47,18 @@ describe("ehFormaCartao — quem a trava do cartão pega", () => {
   it("casa a forma exata, sem normalizar (o valor vem do seletor, não do usuário)", () => {
     expect(ehFormaCartao("cartão de crédito")).toBe(false);
     expect(ehFormaCartao("Cartao de Credito")).toBe(false);
+  });
+});
+
+describe("FORMAS_RESTRITAS_ADMIN — quem o seletor esconde de não-admin", () => {
+  it("é exatamente ['Manual (PagBank)'] — Manual (MP) foi liberado pra todos (17/07)", () => {
+    // Se este teste quebrar porque alguém re-adicionou "Manual (MP)": foi decisão
+    // do Jonathan que Manual (MP) aparece pra TODOS (não é cartão na loja). NÃO
+    // "conserte" devolvendo ele pra cá — confirme com ele primeiro.
+    expect([...FORMAS_RESTRITAS_ADMIN]).toEqual(["Manual (PagBank)"]);
+  });
+
+  it("Manual (MP) NÃO está escondido (o pedido explícito deste ajuste)", () => {
+    expect(FORMAS_RESTRITAS_ADMIN).not.toContain("Manual (MP)");
   });
 });

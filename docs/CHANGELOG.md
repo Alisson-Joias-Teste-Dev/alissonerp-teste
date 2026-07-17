@@ -25,6 +25,63 @@
 - Migration `348_garantia_vitalicia.sql`: coluna `tipos_servico.garantia_vitalicia`
   (marca `Acabamento e polimento`). A chave de config não tem migration — criar via `/dba`.
 
+## feat(movimentacao-interna): multiplas fotos por passo + observacao na devolucao (v2.87.0)
+
+**O que:** os usuarios pediram (1) poder anexar mais de uma foto em cada passo fisico
+e (2) um campo de observacao na volta ao estoque.
+
+- **Ate 5 fotos por passo** (entrega, recebimento, devolucao), em vez de uma so.
+- **Observacao opcional** na confirmacao da devolucao, pro estoque anotar o estado da
+  peca na volta ("voltou com risco perto do fecho").
+
+**Como (blindado, sem quebrar o que existe):**
+- Migration **349**: tabela filha `solicitacao_peca_fotos` (uma linha por foto, com
+  `etapa` + CHECK), copia as fotos que ja existiam (idempotente), e coluna
+  `obs_devolucao`. As colunas antigas `foto_*` ficam CONGELADAS (nao removidas) — a
+  fonte de verdade das fotos passou a ser a tabela filha.
+- `PATCH /api/solicitacao-peca/[id]`: aceita `foto_paths[]` (1..5) — mantem `foto_path`
+  singular por compatibilidade — e `obs`. Status + insert das fotos numa transacao
+  (atomico). Passo com foto exige pelo menos 1.
+- Front: `AcaoSolicitacaoModal` com grade de fotos (adicionar/remover, teto de 5) e
+  textarea de observacao so na devolucao; lista e historico mostram todas as fotos e a
+  observacao. Upload client-side (1 chamada por foto), mesmo padrao provado.
+- Docs: `comercial.md` §10 atualizada.
+
+**Testado no homolog:** query agregando arrays por etapa, observacao gravada, CHECK de
+etapa invalida rejeitado, cascade (apagar a solicitacao apaga as fotos). tsc limpo.
+
+## feat(movimentacao-interna): cancelar solicitação de peça (v2.86.0)
+
+**O quê:** a consultora que solicita uma peça e desiste agora consegue **cancelar** a
+solicitação. Antes não havia saída: a solicitação ficava presa em "Solicitado" pra
+sempre, sujando o filtro "Em aberto" e mentindo sobre o que estava pendente no estoque
+(havia **5 solicitações presas** em prod na data desta mudança).
+
+**Regra (o porquê dos limites):**
+- **Só cancela a partir de `solicitado`** — enquanto a peça ainda está fisicamente no
+  estoque e nada aconteceu. A partir de `entregue` a peça saiu, e o desfecho honesto é a
+  **devolução** (com foto) ou "cliente levou"; cancelar ali apagaria o rastro de que
+  alguém está com a peça. API devolve **409** e aponta pra devolução.
+- **Motivo obrigatório** — é o que dá visibilidade de por que as consultoras desistem.
+  Travado em dois níveis: API (400) e banco (CHECK `chk_solic_peca_cancelado_motivo`).
+- **Cancelada não conta como "em aberto"** — o filtro deixou de ser `!= finalizado` e
+  passou a excluir também `cancelado`, que é o propósito da feature. Chip "Canceladas".
+- **Não movimenta estoque** — coerente com o módulo, que só registra posse (nunca saldo).
+  Nada é estornado: a peça nunca saiu.
+
+**Como:**
+- Migration **347**: estado `cancelado` no CHECK de status (superset — nenhuma linha
+  existente viola) + colunas `cancelado_por_id`, `cancelado_em`, `motivo_cancelamento`
+  + CHECK `NOT VALID` exigindo motivo quando cancelado.
+- `PATCH /api/solicitacao-peca/[id]`: nova action `cancelar` (motivo obrigatório, guarda
+  de estado, `logAudit` com o motivo).
+- Front: `AcaoSolicitacaoModal` **estendido** (não duplicado) com suporte a motivo/aviso/
+  perigo; botão "Cancelar" vermelho só em `solicitado`; badge "Cancelada"; chip de filtro;
+  motivo visível na lista e na linha do tempo do histórico. No modal de cancelamento o
+  botão de sair virou **"Voltar"** — dois "Cancelar" na mesma barra fariam a consultora
+  encerrar a solicitação achando que estava desistindo.
+- Docs: `docs/regras-negocio/comercial.md` §10 (seção nova — o módulo não tinha).
+
 ## feat(produtos): localização física no cadastro e na edição de produtos (v2.85.0)
 
 **O quê:** o campo **Localização** (prateleira/gaveta), já disponível no Estoque Comercial

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard,
@@ -214,6 +214,10 @@ export default function Sidebar() {
 
   // Notificações
   const [drawerAberto, setDrawerAberto] = useState(false);
+  // Espelha o estado do drawer para uso dentro do listener realtime (evita
+  // re-subscrever o canal a cada abrir/fechar).
+  const drawerAbertoRef = useRef(false);
+  useEffect(() => { drawerAbertoRef.current = drawerAberto; }, [drawerAberto]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [notificacoes, setNotificacoes] = useState<any[]>([]);
   const [carregandoNotifs, setCarregandoNotifs] = useState(false);
@@ -244,10 +248,10 @@ export default function Sidebar() {
         schema: "alissonerp",
         table: "notificacoes",
       }, () => {
+        // Atualiza só o badge (contador). NÃO abre o drawer sozinho.
         queryClient.invalidateQueries({ queryKey: ["notificacoes", "contagem"] });
-        // Se drawer estiver aberto, recarrega lista na próxima tick
-        setDrawerAberto((prev) => prev); // força re-render
-        setTimeout(() => abrirDrawer(), 0);
+        // Se o drawer já estiver aberto, recarrega a lista sem reabrir.
+        if (drawerAbertoRef.current) recarregarNotifs();
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
