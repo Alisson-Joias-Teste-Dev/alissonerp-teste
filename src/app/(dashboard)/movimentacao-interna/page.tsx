@@ -10,6 +10,9 @@ export const dynamic = 'force-dynamic';
  * aprovacao, sem role propria. Ciclo: solicitado -> entregue -> recebido ->
  * finalizado (devolvido ao estoque | cliente levou). Cada passo grava quem fez,
  * quando, e (nos passos fisicos) uma foto. Independente do modulo Protocolo.
+ *
+ * Saida lateral (mig 347): solicitado -> cancelado, quando a consultora desiste
+ * antes de a peca sair do estoque. Grava quem cancelou, quando e o motivo.
  */
 export default async function MovimentacaoInternaPage() {
   const supabase = await createServerSupabase();
@@ -26,6 +29,8 @@ export default async function MovimentacaoInternaPage() {
       s.volta_solicitada_em,
       s.finalizado_em,
       s.motivo_final,
+      s.cancelado_em,
+      s.motivo_cancelamento,
       s.foto_entrega,
       s.foto_recebimento,
       s.foto_devolucao,
@@ -34,6 +39,7 @@ export default async function MovimentacaoInternaPage() {
       rec.nome AS recebido_por_nome,
       vlt.nome AS volta_solicitada_por_nome,
       fin.nome AS finalizado_por_nome,
+      can.nome AS cancelado_por_nome,
       COALESCE(
         (SELECT json_agg(json_build_object('nome', pr.nome, 'sku', pr.sku) ORDER BY pr.nome)
          FROM alissonerp.solicitacao_peca_produtos spp
@@ -47,6 +53,7 @@ export default async function MovimentacaoInternaPage() {
     LEFT JOIN alissonerp.usuarios rec ON rec.id = s.recebido_por_id
     LEFT JOIN alissonerp.usuarios vlt ON vlt.id = s.volta_solicitada_por_id
     LEFT JOIN alissonerp.usuarios fin ON fin.id = s.finalizado_por_id
+    LEFT JOIN alissonerp.usuarios can ON can.id = s.cancelado_por_id
     ORDER BY s.id DESC
     LIMIT 200
   ` : [];

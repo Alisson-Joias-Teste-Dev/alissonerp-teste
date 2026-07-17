@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Search, CheckCircle2, Truck, HandHeart, Undo2, UserCheck, X, Plus, Package } from "lucide-react";
+import { Search, CheckCircle2, Truck, HandHeart, Undo2, UserCheck, X, Plus, Package, Ban } from "lucide-react";
 import TreinamentoLayout, { type ColaItem } from "@/components/treinamentos/TreinamentoLayout";
 import { type PassoTreino } from "@/components/treinamentos/TreinamentoPlayer";
 import {
@@ -21,12 +21,13 @@ import {
  */
 
 // ─── Status: cópia fiel de statusInfo() da tela real ──────────────────────────
-type StatusKey = "solicitado" | "entregue" | "recebido" | "volta_solicitada" | "cliente_levou" | "devolvido";
+type StatusKey = "solicitado" | "entregue" | "recebido" | "volta_solicitada" | "cliente_levou" | "devolvido" | "cancelado";
 const STATUS: Record<StatusKey, ChipDef> = {
   solicitado:       { label: "Solicitado",        bg: "#FEF3C7", color: "#92400E" },
   entregue:         { label: "Entregue",          bg: "#EFF6FF", color: "#2563EB" },
   recebido:         { label: "Com a solicitante", bg: "#F3F4F6", color: "#6B7280" },
   volta_solicitada: { label: "Volta solicitada",  bg: "#FEF3C7", color: "#92400E" },
+  cancelado:        { label: "Cancelada",         bg: "#FCEBEB", color: "#A32D2D" },
   cliente_levou:    { label: "Cliente levou",     bg: "#ECFDF5", color: "#059669" },
   devolvido:        { label: "Devolvido",         bg: "#F3F4F6", color: "#6B7280" },
 };
@@ -120,6 +121,25 @@ const PASSOS: PassoTreino[] = [
         </div>
         <CardMock titulo={PECA} sub="AS1002 · Solicitado por Débora · agora" chip={<StatusChip s="solicitado" />} />
       </div>
+    ),
+  },
+  {
+    quem: "Consultora",
+    titulo: "Desistiu? Cancele — não deixe pendurado",
+    narracao: <>Cliente mudou de ideia antes de a peça sair do estoque? Clique em {nb("Cancelar")} e {nb("escreva o motivo")} (é obrigatório). Só dá pra cancelar enquanto está {nb("Solicitado")} — depois que a peça foi entregue, o caminho é {nb("Devolver ao estoque")}.</>,
+    porque: "Solicitação abandonada em “Solicitado” faz o estoque perseguir peça que ninguém quer, e o filtro Em aberto vira mentira. O motivo é obrigatório porque é ele que mostra por que as vendas estão morrendo antes de começar.",
+    resultado: <StatusChip s="cancelado" />,
+    tela: (
+      <CardMock titulo={PECA} sub="AS1002 · Solicitado por Débora · 14:02" chip={<StatusChip s="solicitado" />}>
+        <div className="rounded-lg px-2.5 py-2 text-[11px]" style={{ background: "#FFFBEB", color: "#92400E", border: "1px solid #FDE68A" }}>
+          A peça continua no estoque. Nada é movimentado.
+        </div>
+        <div className="rounded-lg border px-2.5 py-2 mt-2 text-[11px]" style={{ borderColor: CT.cremeBorder, color: "#374151" }}>
+          Cliente desistiu da peça
+          <span className="inline-block w-px h-3.5 ml-0.5 align-middle animate-pulse" style={{ background: CT.esmeralda }} />
+        </div>
+        <div className="mt-2"><BotaoMock label="Cancelar solicitação" Icon={Ban} cursor /></div>
+      </CardMock>
     ),
   },
   {

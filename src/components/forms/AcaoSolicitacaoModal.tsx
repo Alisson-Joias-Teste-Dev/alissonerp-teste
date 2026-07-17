@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Loader2, CheckCircle, AlertCircle, Camera, RotateCcw } from "lucide-react";
+import { X, Loader2, CheckCircle, AlertCircle, AlertTriangle, Camera, RotateCcw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8" };
 
-export type AcaoTipo = "entregar" | "receber" | "cliente_levou" | "solicitar_volta" | "confirmar_devolucao";
+export type AcaoTipo = "entregar" | "receber" | "cliente_levou" | "solicitar_volta" | "confirmar_devolucao" | "cancelar";
 
 interface Props {
   isOpen: boolean;
@@ -17,32 +17,45 @@ interface Props {
   onSuccess?: () => void;
 }
 
-const CONFIG: Record<AcaoTipo, { titulo: string; subtitulo: string; label: string; foto: boolean; campo: string }> = {
+/**
+ * REGRA DE NEGOCIO: cada acao do ciclo da peca exige uma prova diferente.
+ * - foto: passos FISICOS (a peca trocou de mao) — a foto e a prova.
+ * - motivo: cancelamento — a peca NAO se moveu, entao nao ha foto a tirar; o que
+ *   se registra e o PORQUE da desistencia (visibilidade pro gestor).
+ * - perigo: pinta a acao de vermelho — encerramento sem desfecho fisico.
+ * IMPACTO: mudar 'motivo' para false no cancelar faz a API devolver 400
+ * (motivo e obrigatorio la) e o botao para de funcionar.
+ */
+const CONFIG: Record<AcaoTipo, { titulo: string; subtitulo: string; label: string; foto: boolean; campo: string; motivo?: boolean; perigo?: boolean; aviso?: string }> = {
   entregar:            { titulo: "Confirmar Entrega",     subtitulo: "Estoque separou e está entregando",  label: "Confirmar entrega",     foto: true,  campo: "entrega" },
   receber:             { titulo: "Confirmar Recebimento", subtitulo: "Você está recebendo a peça",         label: "Confirmar recebimento", foto: true,  campo: "recebimento" },
   cliente_levou:       { titulo: "Cliente Levou",         subtitulo: "A peça saiu de vez — encerra aqui",  label: "Confirmar",             foto: false, campo: "" },
   solicitar_volta:     { titulo: "Devolver ao Estoque",   subtitulo: "Mandar a peça de volta pro estoque", label: "Solicitar volta",       foto: false, campo: "" },
   confirmar_devolucao: { titulo: "Confirmar Devolução",   subtitulo: "Estoque recebeu a peça de volta",    label: "Confirmar devolução",   foto: true,  campo: "devolucao" },
+  cancelar:            { titulo: "Cancelar Solicitação",  subtitulo: "Desistiu antes de a peça sair",      label: "Cancelar solicitação",  foto: false, campo: "", motivo: true, perigo: true,
+                         aviso: "A peça continua no estoque. Nada é movimentado — a solicitação só é encerrada." },
 };
 
 export default function AcaoSolicitacaoModal({ isOpen, onClose, solicitacaoId, tipo, produtosLabel, onSuccess }: Props) {
   const [fotoFile, setFotoFile] = useState<File | null>(null);
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
+  const [motivo, setMotivo] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    setFotoFile(null); setFotoPreview(null); setError(""); setSuccess(false);
+    setFotoFile(null); setFotoPreview(null); setMotivo(""); setError(""); setSuccess(false);
   }, [isOpen]);
 
   const cfg = CONFIG[tipo];
-  const podeEnviar = cfg.foto ? !!fotoFile : true;
+  const podeEnviar = (cfg.foto ? !!fotoFile : true) && (cfg.motivo ? motivo.trim().length > 0 : true);
 
   async function handleSubmit() {
     setError("");
     if (cfg.foto && !fotoFile) { setError("Foto é obrigatória."); return; }
+    if (cfg.motivo && !motivo.trim()) { setError("Motivo é obrigatório."); return; }
     setLoading(true);
     try {
       let foto_path: string | undefined;
@@ -59,7 +72,7 @@ export default function AcaoSolicitacaoModal({ isOpen, onClose, solicitacaoId, t
       const res = await fetch(`/api/solicitacao-peca/${solicitacaoId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: tipo, foto_path }),
+        body: JSON.stringify({ action: tipo, foto_path, ...(cfg.motivo ? { motivo: motivo.trim() } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`);
@@ -91,6 +104,24 @@ export default function AcaoSolicitacaoModal({ isOpen, onClose, solicitacaoId, t
           <div className="rounded-xl px-3 py-2.5 text-sm" style={{ border: `1px solid ${C.cremeBorder}`, color: "#374151" }}>
             {produtosLabel}
           </div>
+
+          {cfg.aviso && (
+            <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg text-[12px]" style={{ backgroundColor: "#FFFBEB", color: "#92400E", border: "1px solid #FDE68A" }}>
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />{cfg.aviso}
+            </div>
+          )}
+
+          {cfg.motivo && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#9CA3AF" }}>
+                Motivo do cancelamento <span style={{ color: "#DC2626" }}>*</span>
+              </p>
+              <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={3} maxLength={2000}
+                placeholder="Cliente desistiu da peça"
+                className="w-full px-3 py-2 rounded-xl text-sm resize-none focus:outline-none"
+                style={{ border: `1px solid ${C.cremeBorder}`, color: "#374151" }} />
+            </div>
+          )}
 
           {cfg.foto && (
             <div>
@@ -131,10 +162,15 @@ export default function AcaoSolicitacaoModal({ isOpen, onClose, solicitacaoId, t
         </div>
 
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t" style={{ borderColor: C.cremeBorder }}>
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px]" style={{ color: "#6B7280" }}>Cancelar</button>
+          {/* No modal de cancelamento o botao de sair vira "Voltar": dois botoes
+              "Cancelar" na mesma barra (sair x cancelar a solicitacao) fariam a
+              consultora encerrar a solicitacao achando que estava desistindo. */}
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-[13px]" style={{ color: "#6B7280" }}>
+            {cfg.perigo ? "Voltar" : "Cancelar"}
+          </button>
           <button onClick={handleSubmit} disabled={loading || success || !podeEnviar}
             className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
-            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+            style={{ backgroundColor: cfg.perigo ? "#A32D2D" : C.esmeralda, color: cfg.perigo ? "#FFFFFF" : C.creme }}>
             {loading ? <><Loader2 size={14} className="animate-spin" />Salvando...</> : cfg.label}
           </button>
         </div>

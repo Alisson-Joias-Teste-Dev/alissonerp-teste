@@ -12,6 +12,16 @@ import { zodError } from "@/lib/schemas/common";
  *   solicitado --entregar(foto)--> entregue --receber(foto)--> recebido
  *   recebido --cliente_levou--> finalizado (sem foto)
  *   recebido --solicitar_volta--> volta_solicitada --confirmar_devolucao(foto)--> finalizado
+ *   solicitado --cancelar(motivo)--> cancelado
+ *
+ * CANCELAR (mig 347): a consultora desiste antes de a peca sair do estoque.
+ * So sai de 'solicitado' — enquanto a peca esta FISICAMENTE no estoque e nada
+ * aconteceu. A partir de 'entregue' a peca ja saiu, e o caminho honesto e a
+ * devolucao (com foto); permitir cancelar ali apagaria o rastro de que alguem
+ * esta com a peca. Motivo e OBRIGATORIO: e o que da visibilidade de por que as
+ * consultoras desistem — sem ele o cancelamento vira buraco no historico.
+ * Nao movimenta estoque (este modulo nunca movimentou) — e encerramento
+ * administrativo puro.
  *
  * A volta ao estoque e um handshake dentro da MESMA solicitacao (nao cria
  * registro novo): a solicitante pede a volta (sem foto), o estoque confirma o
@@ -24,8 +34,9 @@ import { zodError } from "@/lib/schemas/common";
  * (a sessao do usuario passa na RLS; upload server-side com anon-key nao passa).
  */
 const SolicitacaoPatchSchema = z.object({
-  action: z.enum(["entregar", "receber", "cliente_levou", "solicitar_volta", "confirmar_devolucao"]),
+  action: z.enum(["entregar", "receber", "cliente_levou", "solicitar_volta", "confirmar_devolucao", "cancelar"]),
   foto_path: z.string().max(500).optional(),
+  motivo: z.string().max(2000).optional(),
 }).passthrough();
 
 export async function PATCH(
@@ -44,7 +55,7 @@ export async function PATCH(
   const raw = await req.json().catch(() => ({}));
   const parsed = SolicitacaoPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
-  const { action, foto_path } = parsed.data;
+  const { action, foto_path, motivo } = parsed.data;
 
   const [sol] = await sql`
     SELECT id, status::text FROM alissonerp.solicitacoes_peca WHERE id = ${id}
@@ -120,12 +131,30 @@ export async function PATCH(
     `;
   }
 
+  // ── cancelar: solicitado -> cancelado (motivo obrigatorio, sem foto) ──────
+  // Trava no 'solicitado': a peca nunca saiu do estoque, entao encerrar aqui
+  // nao apaga nenhum rastro fisico. Em qualquer outro estado a peca ja circulou
+  // e o desfecho tem que ser devolucao ou cliente_levou.
+  else if (action === "cancelar") {
+    if (sol.status !== "solicitado") {
+      return NextResponse.json({ error: `So da pra cancelar quando esta 'solicitado' (atual: ${sol.status}). Se a peca ja saiu do estoque, use a devolucao.` }, { status: 409 });
+    }
+    const motivoLimpo = motivo?.trim();
+    if (!motivoLimpo) return NextResponse.json({ error: "Motivo do cancelamento e obrigatorio" }, { status: 400 });
+    await sql`
+      UPDATE alissonerp.solicitacoes_peca
+      SET status = 'cancelado', cancelado_por_id = ${user.id}::uuid,
+          cancelado_em = now(), motivo_cancelamento = ${motivoLimpo}, updated_at = now()
+      WHERE id = ${id}
+    `;
+  }
+
   await logAudit(sql, {
     tabela: "solicitacoes_peca",
     operacao: "UPDATE",
     registro_id: id,
     usuario_id: user.id,
-    dados_depois: { action },
+    dados_depois: { action, ...(action === "cancelar" ? { motivo: motivo?.trim() } : {}) },
   });
 
   return NextResponse.json({ ok: true });
