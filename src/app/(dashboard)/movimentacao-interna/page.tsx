@@ -31,9 +31,29 @@ export default async function MovimentacaoInternaPage() {
       s.motivo_final,
       s.cancelado_em,
       s.motivo_cancelamento,
-      s.foto_entrega,
-      s.foto_recebimento,
-      s.foto_devolucao,
+      s.obs_devolucao,
+      -- Fotos vem da tabela filha (mig 349): 1+ por etapa, em ordem de criacao.
+      -- FALLBACK pra coluna antiga foto_*: cobre a JANELA entre a migration entrar
+      -- em prod e o deploy do codigo novo — nesse intervalo o codigo VELHO ainda
+      -- grava a foto so na coluna foto_* (nao na tabela filha). Sem o fallback,
+      -- foto tirada nessa janela sumiria da tela apos o deploy. array_agg sobre
+      -- zero linhas retorna NULL -> cai no CASE da coluna antiga. Cada etapa
+      -- acontece uma vez, entao nunca duplica (ou esta na filha, ou na coluna).
+      COALESCE(
+        (SELECT array_agg(f.foto_path ORDER BY f.criado_em, f.id)
+         FROM alissonerp.solicitacao_peca_fotos f WHERE f.solicitacao_id = s.id AND f.etapa = 'entrega'),
+        CASE WHEN NULLIF(btrim(s.foto_entrega), '') IS NOT NULL THEN ARRAY[s.foto_entrega] ELSE '{}'::text[] END
+      ) AS fotos_entrega,
+      COALESCE(
+        (SELECT array_agg(f.foto_path ORDER BY f.criado_em, f.id)
+         FROM alissonerp.solicitacao_peca_fotos f WHERE f.solicitacao_id = s.id AND f.etapa = 'recebimento'),
+        CASE WHEN NULLIF(btrim(s.foto_recebimento), '') IS NOT NULL THEN ARRAY[s.foto_recebimento] ELSE '{}'::text[] END
+      ) AS fotos_recebimento,
+      COALESCE(
+        (SELECT array_agg(f.foto_path ORDER BY f.criado_em, f.id)
+         FROM alissonerp.solicitacao_peca_fotos f WHERE f.solicitacao_id = s.id AND f.etapa = 'devolucao'),
+        CASE WHEN NULLIF(btrim(s.foto_devolucao), '') IS NOT NULL THEN ARRAY[s.foto_devolucao] ELSE '{}'::text[] END
+      ) AS fotos_devolucao,
       sol.nome AS solicitante_nome,
       ent.nome AS entregue_por_nome,
       rec.nome AS recebido_por_nome,

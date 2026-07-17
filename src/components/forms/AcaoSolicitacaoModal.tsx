@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Loader2, CheckCircle, AlertCircle, AlertTriangle, Camera, RotateCcw } from "lucide-react";
+import { X, Loader2, CheckCircle, AlertCircle, AlertTriangle, Camera } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8" };
@@ -17,62 +17,95 @@ interface Props {
   onSuccess?: () => void;
 }
 
+const MAX_FOTOS = 5;
+
 /**
  * REGRA DE NEGOCIO: cada acao do ciclo da peca exige uma prova diferente.
- * - foto: passos FISICOS (a peca trocou de mao) — a foto e a prova.
+ * - foto: passos FISICOS (a peca trocou de mao) — a foto e a prova. Aceita ATE
+ *   5 fotos por passo (mig 349): varios angulos, nota, etc.
  * - motivo: cancelamento — a peca NAO se moveu, entao nao ha foto a tirar; o que
  *   se registra e o PORQUE da desistencia (visibilidade pro gestor).
+ * - obs: observacao OPCIONAL — hoje so na confirmacao da devolucao, pro estoque
+ *   anotar o estado da peca na volta ("voltou com risco").
  * - perigo: pinta a acao de vermelho — encerramento sem desfecho fisico.
  * IMPACTO: mudar 'motivo' para false no cancelar faz a API devolver 400
  * (motivo e obrigatorio la) e o botao para de funcionar.
  */
-const CONFIG: Record<AcaoTipo, { titulo: string; subtitulo: string; label: string; foto: boolean; campo: string; motivo?: boolean; perigo?: boolean; aviso?: string }> = {
+const CONFIG: Record<AcaoTipo, { titulo: string; subtitulo: string; label: string; foto: boolean; campo: string; motivo?: boolean; obs?: boolean; perigo?: boolean; aviso?: string }> = {
   entregar:            { titulo: "Confirmar Entrega",     subtitulo: "Estoque separou e está entregando",  label: "Confirmar entrega",     foto: true,  campo: "entrega" },
   receber:             { titulo: "Confirmar Recebimento", subtitulo: "Você está recebendo a peça",         label: "Confirmar recebimento", foto: true,  campo: "recebimento" },
   cliente_levou:       { titulo: "Cliente Levou",         subtitulo: "A peça saiu de vez — encerra aqui",  label: "Confirmar",             foto: false, campo: "" },
   solicitar_volta:     { titulo: "Devolver ao Estoque",   subtitulo: "Mandar a peça de volta pro estoque", label: "Solicitar volta",       foto: false, campo: "" },
-  confirmar_devolucao: { titulo: "Confirmar Devolução",   subtitulo: "Estoque recebeu a peça de volta",    label: "Confirmar devolução",   foto: true,  campo: "devolucao" },
+  confirmar_devolucao: { titulo: "Confirmar Devolução",   subtitulo: "Estoque recebeu a peça de volta",    label: "Confirmar devolução",   foto: true,  campo: "devolucao", obs: true },
   cancelar:            { titulo: "Cancelar Solicitação",  subtitulo: "Desistiu antes de a peça sair",      label: "Cancelar solicitação",  foto: false, campo: "", motivo: true, perigo: true,
                          aviso: "A peça continua no estoque. Nada é movimentado — a solicitação só é encerrada." },
 };
 
+// uma foto escolhida no modal, com preview local pra exibir antes do upload
+interface FotoLocal { file: File; preview: string; }
+
 export default function AcaoSolicitacaoModal({ isOpen, onClose, solicitacaoId, tipo, produtosLabel, onSuccess }: Props) {
-  const [fotoFile, setFotoFile] = useState<File | null>(null);
-  const [fotoPreview, setFotoPreview] = useState<string | null>(null);
+  const [fotos, setFotos] = useState<FotoLocal[]>([]);
   const [motivo, setMotivo] = useState("");
+  const [obs, setObs] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    setFotoFile(null); setFotoPreview(null); setMotivo(""); setError(""); setSuccess(false);
+    setFotos([]); setMotivo(""); setObs(""); setError(""); setSuccess(false);
   }, [isOpen]);
 
   const cfg = CONFIG[tipo];
-  const podeEnviar = (cfg.foto ? !!fotoFile : true) && (cfg.motivo ? motivo.trim().length > 0 : true);
+  const podeEnviar = (cfg.foto ? fotos.length > 0 : true) && (cfg.motivo ? motivo.trim().length > 0 : true);
+
+  // Adiciona os arquivos escolhidos, respeitando o teto de 5 (silenciosamente
+  // ignora o excedente pra nao travar quem selecionou uma pasta inteira).
+  function addFiles(files: FileList | null) {
+    if (!files) return;
+    setFotos((atual) => {
+      const espaco = MAX_FOTOS - atual.length;
+      const novos = Array.from(files).slice(0, Math.max(0, espaco))
+        .map((file) => ({ file, preview: URL.createObjectURL(file) }));
+      return [...atual, ...novos];
+    });
+  }
+  function removeFoto(idx: number) {
+    setFotos((atual) => atual.filter((_, i) => i !== idx));
+  }
 
   async function handleSubmit() {
     setError("");
-    if (cfg.foto && !fotoFile) { setError("Foto é obrigatória."); return; }
+    if (cfg.foto && fotos.length === 0) { setError("Pelo menos uma foto é obrigatória."); return; }
     if (cfg.motivo && !motivo.trim()) { setError("Motivo é obrigatório."); return; }
     setLoading(true);
     try {
-      let foto_path: string | undefined;
-      if (fotoFile) {
+      const foto_paths: string[] = [];
+      if (fotos.length > 0) {
         const supabase = createClient();
         const { data: { user } } = await supabase.auth.getUser();
-        const path = `movimentacao-interna/${cfg.campo}/${solicitacaoId}/${user?.id ?? "anon"}-${Date.now()}.jpg`;
-        const { error: upErr } = await supabase.storage
-          .from("protocolo-fotos")
-          .upload(path, fotoFile, { contentType: fotoFile.type || "image/jpeg", upsert: false });
-        if (upErr) throw new Error(`Upload foto: ${upErr.message}`);
-        foto_path = path;
+        // Uma chamada de upload por foto — o indice garante caminho unico mesmo
+        // que duas fotos caiam no mesmo milissegundo.
+        for (let i = 0; i < fotos.length; i++) {
+          const { file } = fotos[i];
+          const path = `movimentacao-interna/${cfg.campo}/${solicitacaoId}/${user?.id ?? "anon"}-${Date.now()}-${i}.jpg`;
+          const { error: upErr } = await supabase.storage
+            .from("protocolo-fotos")
+            .upload(path, file, { contentType: file.type || "image/jpeg", upsert: false });
+          if (upErr) throw new Error(`Upload foto: ${upErr.message}`);
+          foto_paths.push(path);
+        }
       }
       const res = await fetch(`/api/solicitacao-peca/${solicitacaoId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: tipo, foto_path, ...(cfg.motivo ? { motivo: motivo.trim() } : {}) }),
+        body: JSON.stringify({
+          action: tipo,
+          ...(foto_paths.length > 0 ? { foto_paths } : {}),
+          ...(cfg.motivo ? { motivo: motivo.trim() } : {}),
+          ...(cfg.obs && obs.trim() ? { obs: obs.trim() } : {}),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`);
@@ -126,26 +159,43 @@ export default function AcaoSolicitacaoModal({ isOpen, onClose, solicitacaoId, t
           {cfg.foto && (
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#9CA3AF" }}>
-                Foto <span style={{ color: "#DC2626" }}>*</span>
+                Fotos <span style={{ color: "#DC2626" }}>*</span>
+                <span className="ml-1 font-normal normal-case tracking-normal" style={{ color: "#B4B2A9" }}>(até {MAX_FOTOS})</span>
               </p>
-              {fotoPreview ? (
-                <div className="relative rounded-xl overflow-hidden">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={fotoPreview} alt="Foto" className="w-full max-h-36 object-cover rounded-xl" />
-                  <button onClick={() => { setFotoFile(null); setFotoPreview(null); }}
-                    className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.55)" }}>
-                    <RotateCcw size={13} color="white" />
-                  </button>
-                </div>
-              ) : (
-                <label className="flex flex-col items-center justify-center h-24 rounded-xl cursor-pointer transition-colors"
-                  style={{ border: `2px dashed ${C.cremeBorder}`, backgroundColor: "#FAFAF7" }}>
-                  <Camera size={22} style={{ color: "#9CA3AF" }} />
-                  <span className="text-xs mt-1.5" style={{ color: "#9CA3AF" }}>Tirar foto ou selecionar</span>
-                  <input type="file" accept="image/*" capture="environment" className="hidden"
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) { setFotoFile(f); setFotoPreview(URL.createObjectURL(f)); } }} />
-                </label>
-              )}
+              <div className="flex gap-2 flex-wrap">
+                {fotos.map((f, i) => (
+                  <div key={i} className="relative w-[72px] h-[72px] rounded-lg overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={f.preview} alt={`Foto ${i + 1}`} className="w-full h-full object-cover" />
+                    <button onClick={() => removeFoto(i)} type="button"
+                      className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.6)" }}>
+                      <X size={12} color="white" />
+                    </button>
+                  </div>
+                ))}
+                {fotos.length < MAX_FOTOS && (
+                  <label className="flex flex-col items-center justify-center w-[72px] h-[72px] rounded-lg cursor-pointer transition-colors"
+                    style={{ border: `2px dashed ${C.cremeBorder}`, backgroundColor: "#FAFAF7" }}>
+                    <Camera size={18} style={{ color: "#9CA3AF" }} />
+                    <span className="text-[10px] mt-1" style={{ color: "#9CA3AF" }}>Adicionar</span>
+                    {/* multiple: dá pra escolher várias de uma vez; capture abre a câmera no mobile */}
+                    <input type="file" accept="image/*" capture="environment" multiple className="hidden"
+                      onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
+                  </label>
+                )}
+              </div>
+            </div>
+          )}
+
+          {cfg.obs && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#9CA3AF" }}>
+                Observação <span className="font-normal normal-case tracking-normal" style={{ color: "#B4B2A9" }}>(opcional)</span>
+              </p>
+              <textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={2} maxLength={2000}
+                placeholder="Ex: voltou com risco perto do fecho"
+                className="w-full px-3 py-2 rounded-xl text-sm resize-none focus:outline-none"
+                style={{ border: `1px solid ${C.cremeBorder}`, color: "#374151" }} />
             </div>
           )}
 

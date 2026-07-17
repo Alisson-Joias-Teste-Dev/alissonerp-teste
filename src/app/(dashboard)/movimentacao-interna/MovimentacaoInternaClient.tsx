@@ -27,9 +27,10 @@ interface SolicitacaoRow {
   motivo_final: string | null;
   cancelado_em: string | null;
   motivo_cancelamento: string | null;
-  foto_entrega: string | null;
-  foto_recebimento: string | null;
-  foto_devolucao: string | null;
+  obs_devolucao: string | null;
+  fotos_entrega: string[];
+  fotos_recebimento: string[];
+  fotos_devolucao: string[];
   solicitante_nome: string | null;
   entregue_por_nome: string | null;
   recebido_por_nome: string | null;
@@ -131,15 +132,16 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
 
   function FotosCell({ r, small }: { r: SolicitacaoRow; small?: boolean }) {
     const size = small ? "w-12 h-12" : "w-10 h-10";
-    const fotos: { path: string | null; titulo: string }[] = [
-      { path: r.foto_entrega, titulo: "Foto da Entrega" },
-      { path: r.foto_recebimento, titulo: "Foto do Recebimento" },
-      { path: r.foto_devolucao, titulo: "Foto da Devolução" },
+    // Cada etapa pode ter VARIAS fotos (mig 349) — achata todas numa lista so.
+    const fotos: { path: string; titulo: string }[] = [
+      ...r.fotos_entrega.map((p) => ({ path: p, titulo: "Foto da Entrega" })),
+      ...r.fotos_recebimento.map((p) => ({ path: p, titulo: "Foto do Recebimento" })),
+      ...r.fotos_devolucao.map((p) => ({ path: p, titulo: "Foto da Devolução" })),
     ];
     const visiveis = fotos.filter((f) => resolveStorageUrl(f.path));
     if (visiveis.length === 0) return <span style={{ color: "#9CA3AF" }}>—</span>;
     return (
-      <div className="flex gap-1.5">
+      <div className="flex gap-1.5 flex-wrap">
         {visiveis.map((f, i) => (
           // eslint-disable-next-line @next/next/no-img-element
           <img key={i} src={resolveStorageUrl(f.path)!} alt={f.titulo} title={f.titulo}
