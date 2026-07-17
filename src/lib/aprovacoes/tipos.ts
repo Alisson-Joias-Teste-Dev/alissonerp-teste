@@ -31,7 +31,8 @@ export type EventoAprovacao =
   | "devolver_peca"
   | "auditoria"
   | "conferencia_consultora"
-  | "alteracao_venda";
+  | "alteracao_venda"
+  | "garantia_fora_prazo";
 
 export interface RegraAutoridade {
   evento: EventoAprovacao;

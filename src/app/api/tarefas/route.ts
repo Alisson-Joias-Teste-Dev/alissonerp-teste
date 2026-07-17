@@ -121,6 +121,13 @@ export async function GET(req: NextRequest) {
       SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovador_limpeza' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
+    -- garantia fora do prazo (17/07): tarefa nasce com tipo 'garantia_fora_prazo'
+    -- em api/garantia/solicitar-aprovacao (conferido no INSERT, não adivinhado).
+    -- Chave: 'aprovadores_garantia_fora_prazo'. Ver docs/regras-negocio/ordens.md §3.
+    OR (t.tipo = 'garantia_fora_prazo' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovadores_garantia_fora_prazo' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
     -- credito_loja: tags = ['credito_loja', 'gerente'|'diretor'] (vendas-credito-aprovar.ts) — tipo NULL.
     OR ('credito_loja' = ANY(t.tags) AND 'gerente' = ANY(t.tags) AND EXISTS (
       SELECT 1 FROM alissonerp.configuracoes_sistema cs

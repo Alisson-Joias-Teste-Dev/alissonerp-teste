@@ -22,7 +22,7 @@
 | Financeiro (contas a receber, caixa, crediário, comissão/fechamento) | `financeiro.md` | ⬜ a capturar |
 | Estoque (comercial + insumos) | `estoque.md` | ⬜ a capturar |
 | PCP / Produção | `pcp.md` | ⬜ a capturar |
-| Ordens | `ordens.md` | ⬜ a capturar |
+| Ordens | `ordens.md` | 🟨 só **garantia** documentado (17/07) — os outros 8 tipos, a capturar |
 | Metal/Ouro (purificação, ligação, quebra, cofre) | `metal.md` | ⬜ a capturar |
 | Protocolo | `protocolo.md` | ⬜ a capturar |
 | Devolução | `devolucao.md` | ⬜ a capturar |

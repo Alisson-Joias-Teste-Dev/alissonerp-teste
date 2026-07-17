@@ -55,6 +55,10 @@ const CHAVES = [
   // Plugada na camada config-first nesta mesma sessão (15/07) — config vazia ->
   // nao_configurado (ninguém decide, nem admin), sem fallback de cargo.
   "aprovadores_conversao_reversa",
+  // MULTI: quem aprova abrir garantia DEPOIS dos 7 dias úteis da entrega, para
+  // serviços não vitalícios (regra do Jonathan, 17/07 — docs/regras-negocio/ordens.md).
+  // NÃO cobre venda não entregue: essa trava é seca, sem saída por aprovação.
+  "aprovadores_garantia_fora_prazo",
 ] as const;
 
 // Chaves NUMÉRICAS (%) — não são UUID de aprovador, são o limiar que decide
@@ -177,6 +181,7 @@ export async function GET() {
       aprovador_devolucao: configMap.get("aprovador_devolucao") ?? "",
       aprovador_alteracao_venda: configMap.get("aprovador_alteracao_venda") ?? "",
       aprovadores_conversao_reversa: configMap.get("aprovadores_conversao_reversa") ?? "",
+      aprovadores_garantia_fora_prazo: configMap.get("aprovadores_garantia_fora_prazo") ?? "",
       // Fase 5 (15/07): limites numéricos (%), não são UUID de aprovador — ver CHAVES_NUMERICAS.
       desconto_fallback_sem_cadastro_pct: configMap.get("desconto_fallback_sem_cadastro_pct") ?? "0",
       limite_desconto_cartao_pct: configMap.get("limite_desconto_cartao_pct") ?? "20",
@@ -296,6 +301,14 @@ export async function PUT(req: NextRequest) {
         String(body.aprovadores_conversao_reversa).split(",").map((s) => s.trim()).filter(Boolean)
       )).join(",");
       updates.push({ chave: "aprovadores_conversao_reversa", valor: lista });
+    }
+    // MULTI (17/07): aprovadores de garantia fora do prazo de 7 dias úteis.
+    // Vários UUIDs separados por vírgula. Ver docs/regras-negocio/ordens.md §3.
+    if (body.aprovadores_garantia_fora_prazo !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_garantia_fora_prazo).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_garantia_fora_prazo", valor: lista });
     }
     // Fase 5 (15/07, tela adicionada 16/07): limites em % — valida 0-100, número.
     // Sem isso gravado errado, o fallback do código (0 / 20) nunca é sobrescrito
