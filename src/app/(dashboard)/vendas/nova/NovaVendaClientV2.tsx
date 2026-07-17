@@ -3228,6 +3228,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               vendaId={vendaId}
               numeroVenda={numeroVenda || "Nova"}
               mode="criacao"
+              role={role}
               gateways={gateways}
               // Payment form
               pagForma={pagForma} setPagForma={setPagForma}

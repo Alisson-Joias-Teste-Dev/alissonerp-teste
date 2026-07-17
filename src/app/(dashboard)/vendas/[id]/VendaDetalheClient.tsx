@@ -4086,6 +4086,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                   vendaId={venda.id}
                   numeroVenda={venda.numero_venda}
                   mode="edicao"
+                  role={role}
                   gateways={gateways.length > 0 ? gateways : [{ id: 1, nome: "Mercado Pago" }, { id: 2, nome: "PagBank" }]}
                   // Payment form
                   pagForma={newPagForma} setPagForma={setNewPagForma}
@@ -4199,6 +4200,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       vendaId={venda.id}
                       numeroVenda={venda.numero_venda}
                       mode="edicao"
+                      role={role}
                       gateways={gateways.length > 0 ? gateways : [{ id: 1, nome: "Mercado Pago" }, { id: 2, nome: "PagBank" }]}
                       pagForma={newPagForma} setPagForma={setNewPagForma}
                       pagGateway={newPagGateway} setPagGateway={setNewPagGateway}
