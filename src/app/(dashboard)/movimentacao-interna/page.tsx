@@ -31,9 +31,15 @@ export default async function MovimentacaoInternaPage() {
       s.motivo_final,
       s.cancelado_em,
       s.motivo_cancelamento,
-      s.foto_entrega,
-      s.foto_recebimento,
-      s.foto_devolucao,
+      s.obs_devolucao,
+      -- Fotos vem da tabela filha (mig 349): 1+ por etapa, em ordem de criacao.
+      -- As colunas antigas foto_* ficaram congeladas e ja foram copiadas pra ca.
+      COALESCE((SELECT array_agg(f.foto_path ORDER BY f.criado_em, f.id)
+        FROM alissonerp.solicitacao_peca_fotos f WHERE f.solicitacao_id = s.id AND f.etapa = 'entrega'), '{}') AS fotos_entrega,
+      COALESCE((SELECT array_agg(f.foto_path ORDER BY f.criado_em, f.id)
+        FROM alissonerp.solicitacao_peca_fotos f WHERE f.solicitacao_id = s.id AND f.etapa = 'recebimento'), '{}') AS fotos_recebimento,
+      COALESCE((SELECT array_agg(f.foto_path ORDER BY f.criado_em, f.id)
+        FROM alissonerp.solicitacao_peca_fotos f WHERE f.solicitacao_id = s.id AND f.etapa = 'devolucao'), '{}') AS fotos_devolucao,
       sol.nome AS solicitante_nome,
       ent.nome AS entregue_por_nome,
       rec.nome AS recebido_por_nome,

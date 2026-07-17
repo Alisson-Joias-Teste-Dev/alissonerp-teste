@@ -29,15 +29,33 @@ import { zodError } from "@/lib/schemas/common";
  *
  * Sem checagem de role: qualquer usuario autenticado opera; grava quem fez cada
  * passo. As transicoes so avancam a partir do estado correto (nao pula, nao
- * repete). A FOTO ja vem enviada pelo client (foto_path) direto no bucket
+ * repete). As FOTOS ja vem enviadas pelo client (foto_paths) direto no bucket
  * privado protocolo-fotos — mesmo padrao provado em prod dos modais de Protocolo
  * (a sessao do usuario passa na RLS; upload server-side com anon-key nao passa).
+ *
+ * MULTIPLAS FOTOS (mig 349): cada passo fisico aceita ATE 5 fotos. Elas vao pra
+ * tabela filha solicitacao_peca_fotos (uma linha por foto, com a etapa). As
+ * colunas antigas foto_entrega/recebimento/devolucao estao CONGELADAS (nao sao
+ * mais escritas) — a fonte de verdade das fotos passou a ser a tabela filha.
+ * Aceita tambem foto_path (singular) por compatibilidade, tratando como [1].
+ * OBS na devolucao: obs_devolucao — texto opcional que o estoque anota ao receber
+ * a peca de volta (ex.: "voltou com risco"). So no confirmar_devolucao.
  */
+const MAX_FOTOS = 5;
 const SolicitacaoPatchSchema = z.object({
   action: z.enum(["entregar", "receber", "cliente_levou", "solicitar_volta", "confirmar_devolucao", "cancelar"]),
-  foto_path: z.string().max(500).optional(),
+  foto_paths: z.array(z.string().max(500)).max(MAX_FOTOS).optional(),
+  foto_path: z.string().max(500).optional(),  // compat: 1 foto
   motivo: z.string().max(2000).optional(),
+  obs: z.string().max(2000).optional(),
 }).passthrough();
+
+// etapa gravada na tabela de fotos por acao
+const ETAPA_FOTO: Record<string, "entrega" | "recebimento" | "devolucao"> = {
+  entregar: "entrega",
+  receber: "recebimento",
+  confirmar_devolucao: "devolucao",
+};
 
 export async function PATCH(
   req: NextRequest,
@@ -55,25 +73,43 @@ export async function PATCH(
   const raw = await req.json().catch(() => ({}));
   const parsed = SolicitacaoPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
-  const { action, foto_path, motivo } = parsed.data;
+  const { action, foto_paths, foto_path, motivo, obs } = parsed.data;
+
+  // Normaliza as fotos: aceita array (novo) ou singular (compat), tira vazios.
+  const fotos = (foto_paths ?? (foto_path ? [foto_path] : []))
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
 
   const [sol] = await sql`
     SELECT id, status::text FROM alissonerp.solicitacoes_peca WHERE id = ${id}
   `;
   if (!sol) return NextResponse.json({ error: "Solicitacao nao encontrada" }, { status: 404 });
 
+  // Insere as fotos do passo na tabela filha, DENTRO da transacao que muda o
+  // status — se qualquer insert falhar, o passo inteiro volta atras (atomico).
+  // tx: any segue o padrao do projeto pra sql.begin (ver CLAUDE.md pitfall).
+  const inserirFotos = (tx: any, etapa: "entrega" | "recebimento" | "devolucao") => {
+    const rows = fotos.map((foto_path) => ({
+      solicitacao_id: id, etapa, foto_path, criado_por_id: user.id,
+    }));
+    return tx`INSERT INTO alissonerp.solicitacao_peca_fotos ${tx(rows)}`;
+  };
+
   // ── entregar: solicitado -> entregue ──────────────────────────────────────
   if (action === "entregar") {
     if (sol.status !== "solicitado") {
       return NextResponse.json({ error: `So da pra entregar quando esta 'solicitado' (atual: ${sol.status})` }, { status: 409 });
     }
-    if (!foto_path) return NextResponse.json({ error: "Foto da entrega e obrigatoria" }, { status: 400 });
-    await sql`
-      UPDATE alissonerp.solicitacoes_peca
-      SET status = 'entregue', entregue_por_id = ${user.id}::uuid,
-          entregue_em = now(), foto_entrega = ${foto_path}, updated_at = now()
-      WHERE id = ${id}
-    `;
+    if (fotos.length === 0) return NextResponse.json({ error: "Pelo menos uma foto da entrega e obrigatoria" }, { status: 400 });
+    await (sql as any).begin(async (tx: any) => {
+      await tx`
+        UPDATE alissonerp.solicitacoes_peca
+        SET status = 'entregue', entregue_por_id = ${user.id}::uuid,
+            entregue_em = now(), updated_at = now()
+        WHERE id = ${id}
+      `;
+      await inserirFotos(tx, ETAPA_FOTO[action]);
+    });
   }
 
   // ── receber: entregue -> recebido ─────────────────────────────────────────
@@ -81,13 +117,16 @@ export async function PATCH(
     if (sol.status !== "entregue") {
       return NextResponse.json({ error: `So da pra confirmar recebimento quando esta 'entregue' (atual: ${sol.status})` }, { status: 409 });
     }
-    if (!foto_path) return NextResponse.json({ error: "Foto do recebimento e obrigatoria" }, { status: 400 });
-    await sql`
-      UPDATE alissonerp.solicitacoes_peca
-      SET status = 'recebido', recebido_por_id = ${user.id}::uuid,
-          recebido_em = now(), foto_recebimento = ${foto_path}, updated_at = now()
-      WHERE id = ${id}
-    `;
+    if (fotos.length === 0) return NextResponse.json({ error: "Pelo menos uma foto do recebimento e obrigatoria" }, { status: 400 });
+    await (sql as any).begin(async (tx: any) => {
+      await tx`
+        UPDATE alissonerp.solicitacoes_peca
+        SET status = 'recebido', recebido_por_id = ${user.id}::uuid,
+            recebido_em = now(), updated_at = now()
+        WHERE id = ${id}
+      `;
+      await inserirFotos(tx, ETAPA_FOTO[action]);
+    });
   }
 
   // ── cliente_levou: recebido -> finalizado (sem foto) ──────────────────────
@@ -116,19 +155,24 @@ export async function PATCH(
     `;
   }
 
-  // ── confirmar_devolucao: volta_solicitada -> finalizado (devolvido, foto) ──
+  // ── confirmar_devolucao: volta_solicitada -> finalizado (devolvido, foto+obs) ──
+  // obs_devolucao: observacao opcional do estoque sobre o estado da peca na volta.
   else if (action === "confirmar_devolucao") {
     if (sol.status !== "volta_solicitada") {
       return NextResponse.json({ error: `So da pra confirmar a devolucao quando a volta foi solicitada (atual: ${sol.status})` }, { status: 409 });
     }
-    if (!foto_path) return NextResponse.json({ error: "Foto da devolucao e obrigatoria" }, { status: 400 });
-    await sql`
-      UPDATE alissonerp.solicitacoes_peca
-      SET status = 'finalizado', finalizado_por_id = ${user.id}::uuid,
-          finalizado_em = now(), motivo_final = 'devolvido',
-          foto_devolucao = ${foto_path}, updated_at = now()
-      WHERE id = ${id}
-    `;
+    if (fotos.length === 0) return NextResponse.json({ error: "Pelo menos uma foto da devolucao e obrigatoria" }, { status: 400 });
+    const obsLimpa = obs?.trim() || null;
+    await (sql as any).begin(async (tx: any) => {
+      await tx`
+        UPDATE alissonerp.solicitacoes_peca
+        SET status = 'finalizado', finalizado_por_id = ${user.id}::uuid,
+            finalizado_em = now(), motivo_final = 'devolvido',
+            obs_devolucao = ${obsLimpa}, updated_at = now()
+        WHERE id = ${id}
+      `;
+      await inserirFotos(tx, ETAPA_FOTO[action]);
+    });
   }
 
   // ── cancelar: solicitado -> cancelado (motivo obrigatorio, sem foto) ──────
@@ -154,7 +198,12 @@ export async function PATCH(
     operacao: "UPDATE",
     registro_id: id,
     usuario_id: user.id,
-    dados_depois: { action, ...(action === "cancelar" ? { motivo: motivo?.trim() } : {}) },
+    dados_depois: {
+      action,
+      ...(action === "cancelar" ? { motivo: motivo?.trim() } : {}),
+      ...(action in ETAPA_FOTO ? { fotos: fotos.length } : {}),
+      ...(action === "confirmar_devolucao" && obs?.trim() ? { obs: true } : {}),
+    },
   });
 
   return NextResponse.json({ ok: true });
