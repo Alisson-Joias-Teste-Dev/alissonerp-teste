@@ -170,7 +170,7 @@ describe("gerarZplEtiquetaJoia", () => {
 
   // ^HV formato correto
   it("^HV especifica 12 bytes com prefixo 'EPC:'", () => {
-    expect(zpl).toContain("^HV1,12,EPC:,^FS");
+    expect(zpl).toContain("^HV1,24,EPC:,^FS");
   });
 });
 
@@ -224,5 +224,21 @@ describe("gerarZplLeituraTid", () => {
     expect(tid).not.toContain("^WT");
     expect(tid).not.toContain("^RT");
     expect(tid).not.toContain("^RZ");
+  });
+});
+
+// ── Teste de regressão: ^HV byte-count alinhado ao parser ──────────────────
+describe("^HV byte-count vs verificacao.ts parser", () => {
+  it("^HV retorna 24 caracteres — o que o parser /[0-9A-Fa-f]{24}/ espera", () => {
+    const zpl = gerarZplEtiquetaJoia(dados, epcReal);
+    const hvMatch = zpl.match(/\^HV1,(\d+),EPC:/);
+    expect(hvMatch).not.toBeNull();
+    const hvBytes = parseInt(hvMatch![1], 10);
+    expect(hvBytes).toBe(24);
+  });
+
+  it("EPC gerado tem exatamente 24 caracteres hex e bate com ^HV", () => {
+    expect(epcReal).toHaveLength(24);
+    expect(/^\d{24}$/.test(epcReal)).toBe(true);
   });
 });

@@ -17,7 +17,7 @@ import type { ProdutoRfid } from "@/lib/rfid/tipos";
 
 import { BannerImpressora } from "@/components/rfid/BannerImpressora";
 import { BuscaProduto } from "@/components/rfid/BuscaProduto";
-import { CardProdutoRfid } from "@/components/rfid/CardProdutoRfid";
+import { CardProdutoPreview } from "@/components/rfid/CardProdutoPreview";
 import { BotaoImprimir } from "@/components/rfid/BotaoImprimir";
 import { SessaoSidebar } from "@/components/rfid/SessaoSidebar";
 
@@ -260,7 +260,7 @@ export default function CadastroRfidClient() {
             />
 
             {/* Card preview do produto */}
-            <CardProdutoRfid
+            <CardProdutoPreview
               produto={selectedProduct}
               carregando={false}
               onLimpar={handleLimparSelecao}

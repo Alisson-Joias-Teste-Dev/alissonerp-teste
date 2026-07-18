@@ -5,7 +5,7 @@
  * RFID: UHF EPC Gen2 V2 / ISO 18000-63 / RAIN, ThingMagic encoder
  * EPC: 24-digit numeric hex (0-9 only), 96-bit format
  *
- * Protocol: TCP/IP raw (port 9100) or Zebra Browser Print (localhost:9100/9101).
+ * Protocol: Zebra Browser Print v1.3+ (HTTPS localhost:9101).
  *
  * Each fact in this file is backed by:
  * - RFID Programming Guide 3, P1062165-05EN [Zebra-RFID3]
@@ -55,7 +55,7 @@ export function sanitizeZpl(input: string): string {
  * Fluxo RFID (Zebra standard read-back verification):
  *   1. ^RFW,H  — grava EPC de 96 bits (12 bytes hex) no banco EPC
  *   2. ^RFR,H^FN1 — relê o EPC recém-gravado no campo 1
- *   3. ^HV1,12,EPC: — devolve ao host "EPC:" + 12 bytes para conferência
+ *   3. ^HV1,24,EPC: — devolve ao host "EPC:" + 24 caracteres hex (96 bits)
  *
  *   [CONFIRMADO: Zebra-RFID3 p.24-27 — "RFID Label Format 5:
  *   Encode Tag, Read Tag, and Return Results to Host"]
@@ -121,7 +121,7 @@ export function gerarZplEtiquetaJoia(dados: DadosEtiqueta, epc: Epc): string {
     "^RFR,H^FN1^FS",
     // Devolve ao host: 12 bytes (96 bits) do campo 1, prefixados com "EPC:".
     // [CONFIRMADO: Zebra-RFID3 p.43]
-    "^HV1,12,EPC:,^FS",
+    "^HV1,24,EPC:,^FS",
 
     "^XZ",
   ].join("\n");

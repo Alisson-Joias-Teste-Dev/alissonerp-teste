@@ -5,7 +5,6 @@ import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 import { RfidLookupSchema } from "@/lib/rfid/tipos";
 import {
-  validateEpc,
   isEpcERP,
   isEpcLegado,
   extrairIdProduto,
