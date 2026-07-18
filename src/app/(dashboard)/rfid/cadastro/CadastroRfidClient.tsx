@@ -230,11 +230,11 @@ export default function CadastroRfidClient() {
   return (
     <>
       <Script
-        src="/browser-print/BrowserPrint-3.x.x.min.js"
+        src="/browser-print/BrowserPrint-3.1.250.min.js"
         strategy="afterInteractive"
       />
       <Script
-        src="/browser-print/BrowserPrint-Zebra-1.x.x.min.js"
+        src="/browser-print/BrowserPrint-Zebra-1.1.250.min.js"
         strategy="afterInteractive"
       />
       <div className="min-h-full bg-stone-50">

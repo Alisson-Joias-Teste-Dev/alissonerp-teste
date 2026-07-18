@@ -103,8 +103,10 @@ export async function listarImpressoras(): Promise<ZebraDevice[]> {
 
   return new Promise<ZebraDevice[]>((resolve, reject) => {
     bp.getLocalDevices(
-      (devices: ZebraDevice[]) => {
-        resolve(Array.isArray(devices) ? devices : []);
+      (devices: ZebraDevice[] | { printer?: ZebraDevice[] }) => {
+        // getLocalDevices SEM tipo retorna { printer: [...] } (agrupado por tipo);
+        // COM "printer" retorna um array. Tratamos os dois formatos por segurança.
+        resolve(Array.isArray(devices) ? devices : (devices?.printer ?? []));
       },
       (err: any) => {
         reject(
@@ -113,6 +115,7 @@ export async function listarImpressoras(): Promise<ZebraDevice[]> {
           ),
         );
       },
+      "printer",
     );
   });
 }
@@ -130,7 +133,10 @@ export async function impressoraPadrao(): Promise<ZebraDevice | null> {
     bp.getDefaultDevice(
       "printer",
       (device: ZebraDevice | null | undefined) => {
-        resolve(device ?? null);
+        // Browser Print retorna {} (objeto vazio) quando não há padrão definido.
+        // Como {} é truthy em JS, validamos que é um device real (uid/name),
+        // senão o chamador nunca cairia na lista de impressoras disponíveis.
+        resolve(device && (device.uid || device.name) ? device : null);
       },
       (_err: any) => {
         // Nenhuma impressora padrão configurada — não é erro fatal
