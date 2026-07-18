@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import Script from "next/script";
 import { Tag, Loader2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
@@ -227,7 +228,16 @@ export default function CadastroRfidClient() {
   // ── Render principal ──────────────────────────────────────────────────
 
   return (
-    <div className="min-h-full bg-stone-50">
+    <>
+      <Script
+        src="/browser-print/BrowserPrint-3.x.x.min.js"
+        strategy="afterInteractive"
+      />
+      <Script
+        src="/browser-print/BrowserPrint-Zebra-1.x.x.min.js"
+        strategy="afterInteractive"
+      />
+      <div className="min-h-full bg-stone-50">
       <div className="max-w-7xl mx-auto p-4 md:p-6">
         {/* Header */}
         <div className="mb-4">
@@ -283,5 +293,6 @@ export default function CadastroRfidClient() {
         </div>
       </div>
     </div>
+    </>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
+import Script from "next/script";
 import {
   Printer,
   Loader2,
@@ -155,7 +156,16 @@ export default function TestarRfidPage() {
   // ── Render ────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-full bg-stone-50">
+    <>
+      <Script
+        src="/browser-print/BrowserPrint-3.x.x.min.js"
+        strategy="afterInteractive"
+      />
+      <Script
+        src="/browser-print/BrowserPrint-Zebra-1.x.x.min.js"
+        strategy="afterInteractive"
+      />
+      <div className="min-h-full bg-stone-50">
       <div className="max-w-3xl mx-auto p-4 sm:p-6">
         {/* Voltar */}
         <button
@@ -357,5 +367,6 @@ export default function TestarRfidPage() {
         </div>
       </div>
     </div>
+    </>
   );
 }

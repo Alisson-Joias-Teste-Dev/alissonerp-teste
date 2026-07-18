@@ -83,6 +83,10 @@ export function gerarZplEtiquetaJoia(dados: DadosEtiqueta, epc: Epc): string {
   // ^RFW,H interpreta cada par de caracteres como um byte hex direto.
   // NÃO usar Buffer.from / epcToHex — isso introduziria uma camada
   // ASCII indesejada (ex.: "1" → 0x31 em vez de nibble 0x1).
+  //
+  // Se o EPC interno mudar para tamanho diferente de 96 bits no futuro,
+  // usar ^RFW,H,,,A (auto-ajuste dos PC bits) em vez de ^RFW,H.
+  // [CONFIRMADO: Zebra-RFID3 p.48 — modo A atualiza os PC bits]
   const epcHex = epc;
 
   // Label 74×20mm @ 203dpi = 8 dots/mm:

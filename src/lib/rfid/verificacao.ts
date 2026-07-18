@@ -18,10 +18,15 @@ function sanitizar(raw: string): string {
  * Extrai um EPC (24 caracteres hex) da resposta crua da impressora.
  *
  * Prioridade de extração:
- *   1. Cabeçalho "EPC:" (saída do ^HV)
- *   2. Linha de log ^HL (campo de dados ao final)
+ *   1. Cabeçalho "EPC:" (saída do ^HV) — caminho principal
+ *   2. Linha de log ^HL (campo de dados ao final) — FALLBACK
  *   3. Qualquer sequência de 24 hex delimitada por borda de palavra
  *   4. Qualquer sequência de 24+ hex (recorte dos primeiros 24)
+ *
+ * NOTA SOBRE ^HL: Na ZD500R com firmware X.20.16Z+, o log RFID vem
+ * DESABILITADO por padrão. Para usar este fallback, habilitar via SGD:
+ *   ! U1 setvar "rfid.log.enabled" "on"
+ * [CONFIRMADO: Zebra-RFID3 seção 11 — ^HL/~HL]
  *
  * Retorna a string hex em maiúsculas, ou null se nada foi encontrado.
  */

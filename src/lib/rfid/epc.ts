@@ -19,6 +19,9 @@ export function buildEpc(idProduto: number, serial: number): Epc {
   const prod = String(idProduto).padStart(ID_PRODUTO_DIGITS, "0");
   const ser = String(serial).padStart(SERIAL_DIGITS, "0");
 
+  // id_produto max atual = 90.000.852 (~11x de folga nos 9 dígitos).
+  // Se aproximar de 1e9, redistribuir dígitos entre id_produto e serial
+  // sem tocar nas etiquetas antigas (o lookup usa casamento exato em joias_rfid).
   if (prod.length > ID_PRODUTO_DIGITS) {
     throw new Error(
       `id_produto ${idProduto} excede ${ID_PRODUTO_DIGITS} dígitos`
