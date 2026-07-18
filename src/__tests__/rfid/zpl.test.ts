@@ -79,8 +79,9 @@ describe("gerarZplEtiquetaJoia", () => {
     expect(zpl).toContain("^LL304");
   });
 
-  it("aplica o offset via ^LH (deslocamento X/Y do modelo)", () => {
-    expect(zpl).toContain("^LH16,24");
+  it("aplica o offset — X via ^LS (aceita esquerda) e Y via ^LH", () => {
+    expect(zpl).toContain("^LS-16"); // -offsetXDots (X pra esquerda usa negativo no modelo)
+    expect(zpl).toContain("^LH0,24"); // offsetYDots (vertical)
   });
 
   // Comandos RFID

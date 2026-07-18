@@ -113,8 +113,12 @@ export function gerarZplEtiquetaJoia(
     "^CI28", // UTF-8
     `^PW${layout.larguraDots}`,
     `^LL${layout.alturaDots}`,
-    // ^LH = label home: desloca TODA a etiqueta pelo X/Y do modelo (ajuste da tela).
-    `^LH${layout.offsetXDots},${layout.offsetYDots}`,
+    // Deslocamento horizontal via ^LS (Label Shift): aceita -9999..9999 e move
+    // pra ESQUERDA — o ^LH não aceita negativo. [CONFIRMADO: Zebra-ZPL ^LS]
+    // Convenção do modelo: X negativo = esquerda → ^LS positivo desloca à esquerda.
+    `^LS${-layout.offsetXDots}`,
+    // Deslocamento vertical via ^LH (0..32000, só pra baixo — sem negativo).
+    `^LH0,${Math.max(0, layout.offsetYDots)}`,
     "^MMF", // modo RFID
     `^RS8,${pos},,3,N`, // posição de programação calibrada (ex.: F1)
 
