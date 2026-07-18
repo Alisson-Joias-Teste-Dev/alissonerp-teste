@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Loader2, Save, Printer, Crosshair, Trash2, Plus } from "lucide-react";
+import { Loader2, Save, Printer, Crosshair, Trash2, Plus, Ruler } from "lucide-react";
 import { toast } from "sonner";
 
 import { useImpressora } from "@/hooks/rfid/useImpressora";
@@ -66,6 +66,7 @@ export function PainelLayoutEtiqueta() {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [calibrando, setCalibrando] = useState(false);
+  const [calibrandoMidia, setCalibrandoMidia] = useState(false);
   const [imprimindo, setImprimindo] = useState(false);
   const [tid, setTid] = useState<string | null>(null);
 
@@ -99,6 +100,32 @@ export function PainelLayoutEtiqueta() {
     offsetYDots: mmToDots(form.offset_y_mm),
     posicaoRfid: form.posicao_rfid || "F0",
   });
+
+  // ── Calibrar mídia (comprimento/gap da etiqueta) ────────────────────────
+  async function calibrarMidia() {
+    if (!device) return;
+    setCalibrandoMidia(true);
+    try {
+      // ~JC calibra a mídia (avança medindo); o getvar devolve o comprimento.
+      const raw = await enviarEVerificar(
+        device,
+        '~JC\r\n! U1 getvar "zpl.label_length"\r\n',
+        40_000,
+      );
+      const m = raw.match(/(\d+)/);
+      if (m) {
+        const mm = Math.round((parseInt(m[1], 10) / 8) * 10) / 10; // dots→mm (203dpi)
+        if (mm > 0) set("altura_mm", mm);
+        toast.success(`Mídia calibrada — etiqueta ~${mm} mm de altura`);
+      } else {
+        toast.success("Mídia calibrada.");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao calibrar mídia");
+    } finally {
+      setCalibrandoMidia(false);
+    }
+  }
 
   // ── Calibrar chip (varredura ampla ^HR) ────────────────────────────────
   async function calibrar() {
@@ -272,6 +299,15 @@ export function PainelLayoutEtiqueta() {
         <div className="flex flex-wrap gap-2 pt-1">
           <button
             type="button"
+            disabled={!conectada || calibrandoMidia}
+            className={btnBase + " border border-gray-400 text-gray-700 hover:bg-gray-50"}
+            onClick={calibrarMidia}
+          >
+            {calibrandoMidia ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ruler className="w-4 h-4" />}
+            Calibrar mídia
+          </button>
+          <button
+            type="button"
             disabled={!conectada || calibrando}
             className={btnBase + " bg-emerald-800 text-white hover:bg-emerald-700"}
             onClick={calibrar}
@@ -316,8 +352,9 @@ export function PainelLayoutEtiqueta() {
       </div>
 
       <p className="text-xs text-gray-500">
-        Fluxo: <strong>Calibrar chip</strong> (acha a posição) → ajuste os
-        <strong> deslocamentos X/Y</strong> e <strong>Imprimir teste</strong> até
+        Fluxo: <strong>Calibrar mídia</strong> (mede a etiqueta) →{" "}
+        <strong>Calibrar chip</strong> (acha a posição) → ajuste os{" "}
+        <strong>deslocamentos X/Y</strong> e <strong>Imprimir teste</strong> até
         alinhar → <strong>Salvar modelo</strong>. O cadastro passa a imprimir com
         esse modelo.
       </p>
