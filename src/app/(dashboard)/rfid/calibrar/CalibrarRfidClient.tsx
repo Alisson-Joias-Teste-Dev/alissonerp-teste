@@ -12,7 +12,7 @@ import { ROLES_CALIBRAR_RFID } from "@/lib/rfid/roles";
 import { useImpressora } from "@/hooks/rfid/useImpressora";
 
 import { BannerImpressora } from "@/components/rfid/BannerImpressora";
-import { PainelCalibracao } from "@/components/rfid/PainelCalibracao";
+import { PainelLayoutEtiqueta } from "@/components/rfid/PainelLayoutEtiqueta";
 
 // ---------------------------------------------------------------------------
 // Componente
@@ -86,10 +86,10 @@ export default function CalibrarRfidClient() {
         {/* Header */}
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-emerald-800 font-serif">
-            Calibra&ccedil;&atilde;o RFID
+            Calibra&ccedil;&atilde;o e layout da etiqueta
           </h1>
           <p className="text-sm text-gray-600 mt-1">
-            Ajusta posi&ccedil;&atilde;o de grava&ccedil;&atilde;o da etiqueta &mdash; ZD500R
+            Calibra o chip, ajusta o layout e salva o modelo &mdash; ZD500R
           </p>
         </div>
 
@@ -100,8 +100,8 @@ export default function CalibrarRfidClient() {
           onReconectar={reconectar}
         />
 
-        {/* Painel de calibração */}
-        <PainelCalibracao />
+        {/* Painel de calibração + layout + modelos */}
+        <PainelLayoutEtiqueta />
       </div>
     </div>
     </>
