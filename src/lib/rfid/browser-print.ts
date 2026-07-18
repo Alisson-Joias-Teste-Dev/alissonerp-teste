@@ -225,6 +225,47 @@ export async function enviarComando(
   return enviarEVerificar(device, zpl, 300_000);
 }
 
+/**
+ * Envia um comando e lê até o MARCADOR de fim aparecer na resposta (ou timeout).
+ *
+ * Necessário para a calibração `^HR`: a impressora manda "start" na hora, depois
+ * varre por MINUTOS em silêncio e só no fim manda a tabela + "end". O
+ * enviarEVerificar desiste cedo (2 leituras vazias após "start"); aqui NÃO
+ * desistimos por leitura vazia — esperamos o `marcadorFim` (ex.: "end").
+ *
+ * @param device       Dispositivo Zebra.
+ * @param zpl          ZPL a enviar (ex.: ^XA^HR,,B30,A,A^XZ).
+ * @param marcadorFim  Texto que marca o fim da resposta (ex.: "end").
+ * @param timeoutMs    Tempo máximo (default 5 min).
+ */
+export async function enviarECapturarAte(
+  device: ZebraDevice,
+  zpl: string,
+  marcadorFim: string,
+  timeoutMs = 300_000,
+): Promise<string> {
+  const dev = device as any;
+  const deadline = Date.now() + timeoutMs;
+  await sendZpl(dev, zpl);
+
+  const alvo = marcadorFim.toLowerCase();
+  let acumulado = "";
+
+  while (Date.now() < deadline) {
+    const restante = deadline - Date.now();
+    if (restante <= 0) break;
+    const chunk = await readWithTimeout(dev, Math.min(restante, 5000));
+    if (chunk) {
+      acumulado += chunk;
+      if (acumulado.toLowerCase().includes(alvo)) break;
+    } else {
+      await sleep(500);
+    }
+  }
+
+  return acumulado;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers internos (promisify dos callbacks da SDK)
 // ---------------------------------------------------------------------------

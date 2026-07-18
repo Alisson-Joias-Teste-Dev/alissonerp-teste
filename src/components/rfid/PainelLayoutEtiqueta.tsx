@@ -5,7 +5,7 @@ import { Loader2, Save, Printer, Crosshair, Trash2, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { useImpressora } from "@/hooks/rfid/useImpressora";
-import { enviarEVerificar } from "@/lib/rfid/browser-print";
+import { enviarEVerificar, enviarECapturarAte } from "@/lib/rfid/browser-print";
 import {
   gerarZplCalibracao,
   gerarZplEtiquetaJoia,
@@ -106,7 +106,8 @@ export function PainelLayoutEtiqueta() {
     setCalibrando(true);
     setTid(null);
     try {
-      const raw = await enviarEVerificar(device, gerarZplCalibracao(), 240_000);
+      // ^HR manda "start", varre por minutos em silêncio e fecha com "end".
+      const raw = await enviarECapturarAte(device, gerarZplCalibracao(), "end", 300_000);
       const res = interpretarRespostaCalibracao(raw);
       if (res.sucesso && res.posicao) {
         set("posicao_rfid", res.posicao);
