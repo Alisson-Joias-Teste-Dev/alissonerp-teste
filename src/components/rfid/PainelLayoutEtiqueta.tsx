@@ -276,8 +276,30 @@ export function PainelLayoutEtiqueta() {
               placeholder="F0 / F1 / B5…"
             />
           </div>
-          <Campo label="Deslocamento X (mm)" value={form.offset_x_mm} onChange={(v) => set("offset_x_mm", v)} step={0.5} />
-          <Campo label="Deslocamento Y (mm)" value={form.offset_y_mm} onChange={(v) => set("offset_y_mm", v)} step={0.5} />
+          <Campo
+            label="← Esquerda (mm)"
+            value={form.offset_x_mm < 0 ? -form.offset_x_mm : 0}
+            onChange={(v) => set("offset_x_mm", -Math.abs(v))}
+            step={0.5}
+          />
+          <Campo
+            label="Direita → (mm)"
+            value={form.offset_x_mm > 0 ? form.offset_x_mm : 0}
+            onChange={(v) => set("offset_x_mm", Math.abs(v))}
+            step={0.5}
+          />
+          <Campo
+            label="↑ Cima (mm, máx 15)"
+            value={form.offset_y_mm < 0 ? -form.offset_y_mm : 0}
+            onChange={(v) => set("offset_y_mm", -Math.min(15, Math.abs(v)))}
+            step={0.5}
+          />
+          <Campo
+            label="↓ Baixo (mm)"
+            value={form.offset_y_mm > 0 ? form.offset_y_mm : 0}
+            onChange={(v) => set("offset_y_mm", Math.abs(v))}
+            step={0.5}
+          />
           <label className="flex items-end gap-2 pb-1 text-sm text-gray-700">
             <input
               type="checkbox"
