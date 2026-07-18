@@ -1,4 +1,4 @@
--- Migration 347: RFID — Serial para novo formato EPC 24 dígitos
+-- Migration 350: RFID — Serial para novo formato EPC 24 dígitos
 -- ─────────────────────────────────────────────────────────────────────────────
 -- CONTEXTO:
 --   O módulo RFID foi refatorado (branch feat/rfid-impressao-zebra).
@@ -17,7 +17,7 @@
 --   O unique index impede uma segunda linha acidental.
 --   A função usa CREATE OR REPLACE.
 --
--- PGAPPNAME: rfid_migration_347
+-- PGAPPNAME: rfid_migration_350
 
 -- ── Tabela ──────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS alissonerp.epc_serial_rfid (
