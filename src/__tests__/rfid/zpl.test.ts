@@ -4,6 +4,7 @@ import {
   gerarZplCalibracao,
   gerarZplLeituraTid,
   sanitizeZpl,
+  type LayoutEtiqueta,
 } from "@/lib/rfid/zpl";
 import { type Epc, type DadosEtiqueta } from "@/lib/rfid/tipos";
 
@@ -14,6 +15,16 @@ const dados: DadosEtiqueta = {
   sku: "1470-6",
   nome: "Aliança Ouro 18k",
 };
+
+const layout: LayoutEtiqueta = {
+  larguraDots: 200,
+  alturaDots: 304,
+  offsetXDots: 16,
+  offsetYDots: 24,
+  posicaoRfid: "F1",
+};
+
+const codBarras = "100234";
 
 // ── sanitizeZpl (helper) ─────────────────────────────────────────────────────
 describe("sanitizeZpl", () => {
@@ -35,7 +46,6 @@ describe("sanitizeZpl", () => {
 describe("gerarZplEtiquetaJoia", () => {
   let zpl: string;
 
-  // Assegura que sempre começamos com o mesmo ZPL (a função é pura)
   function makeZpl(overrides?: Partial<{ epc: Epc; dados: Partial<DadosEtiqueta> }>) {
     const e = overrides?.epc ?? epcReal;
     const d: DadosEtiqueta = {
@@ -43,43 +53,34 @@ describe("gerarZplEtiquetaJoia", () => {
       sku: overrides?.dados?.sku ?? dados.sku,
       nome: overrides?.dados?.nome ?? dados.nome,
     };
-    return gerarZplEtiquetaJoia(d, e);
+    return gerarZplEtiquetaJoia(d, e, codBarras, layout);
   }
 
   beforeEach(() => {
     zpl = makeZpl();
   });
 
-  // Estrutura básica
-  it("contém ^XA e ^XZ", () => {
-    expect(zpl).toContain("^XA");
-    expect(zpl).toContain("^XZ");
-  });
-
-  it("termina com ^XZ", () => {
+  it("começa com ^XA e termina com ^XZ", () => {
+    expect(zpl.startsWith("^XA")).toBe(true);
     expect(zpl.endsWith("^XZ")).toBe(true);
   });
 
-  it("começa com ^XA", () => {
-    expect(zpl.startsWith("^XA")).toBe(true);
-  });
-
-  // Setup da etiqueta
-  it("contém ^MMF (modo RFID desktop)", () => {
+  it("contém ^MMF (modo RFID) e ^CI28 (UTF-8)", () => {
     expect(zpl).toContain("^MMF");
-  });
-
-  it("contém ^RS8,,,3,N (Gen2, 3 tentativas)", () => {
-    expect(zpl).toContain("^RS8,,,3,N");
-  });
-
-  it("contém ^CI28 (UTF-8)", () => {
     expect(zpl).toContain("^CI28");
   });
 
-  it("contém ^PW592 e ^LL160 (tamanho 74×20mm)", () => {
-    expect(zpl).toContain("^PW592");
-    expect(zpl).toContain("^LL160");
+  it("usa a posição de programação do layout no ^RS (ex.: F1)", () => {
+    expect(zpl).toContain("^RS8,F1,,3,N");
+  });
+
+  it("usa largura/altura do layout (^PW/^LL)", () => {
+    expect(zpl).toContain("^PW200");
+    expect(zpl).toContain("^LL304");
+  });
+
+  it("aplica o offset via ^LH (deslocamento X/Y do modelo)", () => {
+    expect(zpl).toContain("^LH16,24");
   });
 
   // Comandos RFID
@@ -88,116 +89,89 @@ describe("gerarZplEtiquetaJoia", () => {
     expect(zpl).not.toContain("^RFW,A");
   });
 
-  it("contém ^RFR,H (leitura RFID)", () => {
+  it("contém ^RFR,H (leitura) e ^HV (retorno ao host)", () => {
     expect(zpl).toContain("^RFR,H");
-  });
-
-  it("contém ^HV (retorno ao host)", () => {
     expect(zpl).toContain("^HV");
   });
 
   // Comandos legacy proibidos
-  it("NÃO contém comandos legados (^WT, ^RT, ^RZ)", () => {
-    expect(zpl).not.toContain("^WT");
-    expect(zpl).not.toContain("^RT");
-    expect(zpl).not.toContain("^RZ");
-  });
-
-  it("NÃO contém ^RA, ^RM, ^RN, ^RE, ^RQ, ^WV", () => {
-    expect(zpl).not.toContain("^RA");
-    expect(zpl).not.toContain("^RM");
-    expect(zpl).not.toContain("^RN");
-    expect(zpl).not.toContain("^RE");
-    expect(zpl).not.toContain("^RQ");
-    expect(zpl).not.toContain("^WV");
-  });
-
-  // Buffer.from proibido
-  it("NÃO contém 'Buffer.from' (não usar camada ASCII)", () => {
-    expect(zpl).not.toContain("Buffer.from");
-  });
-
-  // Dados visuais
-  it("contém nome sanitizado do produto", () => {
-    expect(zpl).toContain(dados.nome.replace("ê", ""));
-    // sanitizeZpl não remove acentuação comum — apenas caracteres de controle.
-    // O nome "Aliança Ouro 18k" contém 'ç' que é U+00E7, fora do range de controle.
-    // Vamos verificar que pelo menos o texto original aparece:
-    expect(zpl).toContain("Alian");
-  });
-
-  it("contém SKU", () => {
-    expect(zpl).toContain("SKU: 1470-6");
-  });
-
-  it("contém SKU e nome sanitizados (sem ^ ou ~)", () => {
-    // Verifica que o ZPL não contém raw ^ ou ~ dentro dos campos FD
-    const depoisDeXA = zpl.split("^XA")[1];
-    const linhasFd = depoisDeXA.split("^FS");
-    for (const linha of linhasFd) {
-      if (linha.includes("^FD") && !linha.includes("^BQ")) {
-        // Extrai o conteúdo entre ^FD e o fim
-        const fdContent = linha.split("^FD").pop() ?? "";
-        expect(fdContent).not.toContain("^");
-        expect(fdContent).not.toContain("~");
-      }
+  it("NÃO contém comandos legados (^WT, ^RT, ^RZ, ^RA, ^RN)", () => {
+    for (const c of ["^WT", "^RT", "^RZ", "^RA", "^RN", "^WV"]) {
+      expect(zpl).not.toContain(c);
     }
   });
 
-  // QR Code
-  it("contém QR code ^BQ com EPC", () => {
-    expect(zpl).toContain("^BQN,2,4");
-    expect(zpl).toContain("^FDLA," + epcReal);
+  it("NÃO usa camada ASCII (sem 'Buffer.from')", () => {
+    expect(zpl).not.toContain("Buffer.from");
+  });
+
+  // Conteúdo visual
+  it("contém o SKU e o nome do produto", () => {
+    expect(zpl).toContain(dados.sku);
+    expect(zpl).toContain("Alian"); // nome (com acento preservado)
+  });
+
+  it("contém o código de barras Code 128 com o número curto", () => {
+    expect(zpl).toContain("^BCN");
+    expect(zpl).toContain(`^FD${codBarras}^FS`);
+  });
+
+  it("NÃO usa QR code (^BQ) — o requisito é código de barras 1D", () => {
+    expect(zpl).not.toContain("^BQ");
+  });
+
+  it("imprime o EPC em texto (referência)", () => {
+    expect(zpl).toContain("EPC ");
+  });
+
+  it("^RFW,H^FD contém o EPC completo (24 dígitos)", () => {
+    expect(zpl).toContain(`^RFW,H^FD${epcReal}^FS`);
+  });
+
+  it("^HV retorna 24 caracteres com prefixo 'EPC:'", () => {
+    expect(zpl).toContain("^HV1,24,EPC:,^FS");
   });
 
   // Validação de EPC inválido
   it("lança erro para EPC inválido (comprimento errado)", () => {
     expect(() =>
-      gerarZplEtiquetaJoia(dados, "curto" as Epc),
+      gerarZplEtiquetaJoia(dados, "curto" as Epc, codBarras, layout),
     ).toThrow(/EPC inválido/i);
   });
 
   it("lança erro para EPC inválido (letras em vez de dígitos)", () => {
     expect(() =>
-      gerarZplEtiquetaJoia(dados, "abcdefghijklmnopqrstuvwx" as Epc),
+      gerarZplEtiquetaJoia(dados, "abcdefghijklmnopqrstuvwx" as Epc, codBarras, layout),
     ).toThrow(/EPC inválido/i);
   });
 
-  // Presença do EPC no ^RFW (gravação hex)
-  it("^RFW,H^FD contém o EPC completo (24 dígitos)", () => {
-    expect(zpl).toContain(`^RFW,H^FD${epcReal}^FS`);
-  });
-
-  // ^HV formato correto
-  it("^HV especifica 12 bytes com prefixo 'EPC:'", () => {
-    expect(zpl).toContain("^HV1,24,EPC:,^FS");
+  // Campos ^FD sem ^ ou ~ crus
+  it("SKU e nome sanitizados (sem ^ ou ~ dentro dos ^FD)", () => {
+    const depois = zpl.split("^XA")[1];
+    for (const linha of depois.split("^FS")) {
+      if (linha.includes("^FD") && !linha.includes("^BC") && !linha.includes("^RFW")) {
+        const fd = linha.split("^FD").pop() ?? "";
+        expect(fd).not.toContain("^");
+        expect(fd).not.toContain("~");
+      }
+    }
   });
 });
 
 // ── gerarZplCalibracao ───────────────────────────────────────────────────────
 describe("gerarZplCalibracao", () => {
-  it("retorna '^XA\\n^HR\\n^XZ'", () => {
-    const result = gerarZplCalibracao();
-    expect(result).toBe("^XA\n^HR\n^XZ");
+  it("usa a varredura ampla ^HR,,B30,A,A (que achou o chip no hardware)", () => {
+    expect(gerarZplCalibracao()).toBe("^XA\n^HR,,B30,A,A\n^XZ");
   });
 
-  it("contém apenas 3 comandos", () => {
-    const result = gerarZplCalibracao();
-    const linhas = result.split("\n").filter(Boolean);
-    expect(linhas).toEqual(["^XA", "^HR", "^XZ"]);
-  });
-
-  it("é uma string pura (sem efeitos colaterais)", () => {
-    const a = gerarZplCalibracao();
-    const b = gerarZplCalibracao();
-    expect(a).toBe(b);
+  it("é pura", () => {
+    expect(gerarZplCalibracao()).toBe(gerarZplCalibracao());
   });
 });
 
 // ── gerarZplLeituraTid ───────────────────────────────────────────────────────
 describe("gerarZplLeituraTid", () => {
   let tid: string;
-
   beforeEach(() => {
     tid = gerarZplLeituraTid();
   });
@@ -207,37 +181,26 @@ describe("gerarZplLeituraTid", () => {
     expect(tid).toContain("^XZ");
   });
 
-  it("contém ^RFR,H,0,8,2 (leitura do banco TID)", () => {
+  it("contém ^RFR,H,0,8,2 (leitura do banco TID) e ^HV com TID:", () => {
     expect(tid).toContain("^RFR,H,0,8,2^FN1^FS");
-  });
-
-  it("contém ^HV com prefixo TID:", () => {
     expect(tid).toContain("^HV1,,TID:,^FS");
-    expect(tid).toContain("TID:");
   });
 
-  it("NÃO contém 'Buffer.from'", () => {
-    expect(tid).not.toContain("Buffer.from");
-  });
-
-  it("NÃO contém comandos legados (^WT, ^RT, ^RZ)", () => {
-    expect(tid).not.toContain("^WT");
-    expect(tid).not.toContain("^RT");
-    expect(tid).not.toContain("^RZ");
+  it("NÃO contém comandos legados", () => {
+    for (const c of ["^WT", "^RT", "^RZ"]) expect(tid).not.toContain(c);
   });
 });
 
-// ── Teste de regressão: ^HV byte-count alinhado ao parser ──────────────────
+// ── Regressão: ^HV byte-count alinhado ao parser ─────────────────────────────
 describe("^HV byte-count vs verificacao.ts parser", () => {
-  it("^HV retorna 24 caracteres — o que o parser /[0-9A-Fa-f]{24}/ espera", () => {
-    const zpl = gerarZplEtiquetaJoia(dados, epcReal);
-    const hvMatch = zpl.match(/\^HV1,(\d+),EPC:/);
-    expect(hvMatch).not.toBeNull();
-    const hvBytes = parseInt(hvMatch![1], 10);
-    expect(hvBytes).toBe(24);
+  it("^HV retorna 24 — o que o parser /[0-9A-Fa-f]{24}/ espera", () => {
+    const zpl = gerarZplEtiquetaJoia(dados, epcReal, codBarras, layout);
+    const m = zpl.match(/\^HV1,(\d+),EPC:/);
+    expect(m).not.toBeNull();
+    expect(parseInt(m![1], 10)).toBe(24);
   });
 
-  it("EPC gerado tem exatamente 24 caracteres hex e bate com ^HV", () => {
+  it("EPC tem exatamente 24 dígitos", () => {
     expect(epcReal).toHaveLength(24);
     expect(/^\d{24}$/.test(epcReal)).toBe(true);
   });

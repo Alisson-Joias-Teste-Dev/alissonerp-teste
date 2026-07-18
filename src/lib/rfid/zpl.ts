@@ -18,8 +18,14 @@
  * - Sanitize nome/sku with sanitizeZpl before embedding in ^FD
  */
 
-import { type Epc, type DadosEtiqueta, EpcSchema } from "./tipos";
-import { formatEpc } from "./epc";
+import {
+  type Epc,
+  type DadosEtiqueta,
+  type EtiquetaModelo,
+  EpcSchema,
+  mmToDots,
+} from "./tipos";
+import { formatEpc, parseEpc } from "./epc";
 
 /**
  * Sanitiza uma string para uso seguro em comandos ZPL.
@@ -66,69 +72,89 @@ export function sanitizeZpl(input: string): string {
  * @returns String ZPL pronta para envio à impressora.
  * @throws Se o EPC não for um Epc válido (24 dígitos numéricos).
  */
-export function gerarZplEtiquetaJoia(dados: DadosEtiqueta, epc: Epc): string {
-  // Runtime validation — TypeScript branding is compile-time only.
+/** Layout físico da etiqueta — vem do modelo salvo (dimensões, offset, posição). */
+export interface LayoutEtiqueta {
+  larguraDots: number; // ^PW
+  alturaDots: number; // ^LL
+  offsetXDots: number; // ^LH x — deslocamento horizontal (ajuste da tela)
+  offsetYDots: number; // ^LH y — deslocamento vertical
+  posicaoRfid: string; // ^RS posição de programação calibrada, ex.: "F1"
+}
+
+/**
+ * Gera o ZPL da etiqueta de joia (dobrável): metade de cima = SKU + nome;
+ * metade de baixo = código de barras (número curto que o ERP resolve p/ o EPC)
+ * + o EPC em texto pequeno. O chip RFID guarda o EPC completo.
+ *
+ * O `layout` (dimensões, offset via ^LH, posição do chip) vem do modelo salvo,
+ * ajustado pela tela de calibração/layout — é o que faz a impressão cair
+ * certinho na cabeça da tag.
+ */
+export function gerarZplEtiquetaJoia(
+  dados: DadosEtiqueta,
+  epc: Epc,
+  codigoBarras: string,
+  layout: LayoutEtiqueta,
+): string {
   const parsed = EpcSchema.safeParse(epc);
   if (!parsed.success) {
-    throw new Error(
-      `EPC inválido: "${epc}" (esperado 24 dígitos numéricos)`,
-    );
+    throw new Error(`EPC inválido: "${epc}" (esperado 24 dígitos numéricos)`);
   }
 
-  const nomeLimpo = sanitizeZpl(dados.nome);
-  const skuLimpo = sanitizeZpl(dados.sku);
-  const epcFormatado = formatEpc(epc);
+  const nome = sanitizeZpl(dados.nome);
+  const sku = sanitizeZpl(dados.sku);
+  const cb = sanitizeZpl(codigoBarras);
+  const epcFmt = formatEpc(epc);
+  const pos = (layout.posicaoRfid || "F0").trim(); // ex.: F1 (calibrado)
+  const meio = Math.round(layout.alturaDots / 2); // linha do vinco (dobra)
 
-  // O EPC já é hex numérico (só dígitos 0-9).
-  // ^RFW,H interpreta cada par de caracteres como um byte hex direto.
-  // NÃO usar Buffer.from / epcToHex — isso introduziria uma camada
-  // ASCII indesejada (ex.: "1" → 0x31 em vez de nibble 0x1).
-  //
-  // Se o EPC interno mudar para tamanho diferente de 96 bits no futuro,
-  // usar ^RFW,H,,,A (auto-ajuste dos PC bits) em vez de ^RFW,H.
-  // [CONFIRMADO: Zebra-RFID3 p.48 — modo A atualiza os PC bits]
-  const epcHex = epc;
-
-  // Label 74×20mm @ 203dpi = 8 dots/mm:
-  //   ^PW592 = 592 dots = 74 mm
-  //   ^LL160 = 160 dots = 20 mm (> 16 mm mínimo de pitch RFID)
-  //   [CONFIRMADO: ZD500R spec sheet — min encode pitch 16 mm]
   return [
     "^XA",
-    // --- Setup da etiqueta ---
-    "^CI28", // codificação UTF-8 [Zebra-ZPL p.157]
-    "^PW592", // largura 592 dots = 74mm [Zebra-ZPL p.329]
-    "^LL160", // altura 160 dots = 20mm [Zebra-ZPL p.294]
-    "^MMF", // modo RFID (F = desktop RFID; A só para R110PAX4) [Zebra-ZPL p.305-306]
-    "^RS8,,,3,N", // Gen2 (t=8), posição calibrada (p=F0 default),
-    // 3 tentativas de encode (n=3), sem ação ao esgotar (e=N)
-    // [CONFIRMADO: Zebra-RFID3 p.54-56]
+    "^CI28", // UTF-8
+    `^PW${layout.larguraDots}`,
+    `^LL${layout.alturaDots}`,
+    // ^LH = label home: desloca TODA a etiqueta pelo X/Y do modelo (ajuste da tela).
+    `^LH${layout.offsetXDots},${layout.offsetYDots}`,
+    "^MMF", // modo RFID
+    `^RS8,${pos},,3,N`, // posição de programação calibrada (ex.: F1)
 
-    // --- Campos visuais ---
-    // Nome do produto (topo, fonte escalável 20×20 dots)
-    `^FO10,8^A0N,20,20^FD${nomeLimpo}^FS`,
-    // SKU (linha do meio, 16×16 dots)
-    `^FO10,36^A0N,16,16^FDSKU: ${skuLimpo}^FS`,
-    // EPC ID formatado com hífens (linha inferior, 13×13 dots)
-    `^FO10,58^A0N,13,13^FDID: ${epcFormatado}^FS`,
-    // QR Code: model 2 (enhanced), magnification 4, error correction L (high-density)
-    // ^FDLA, = error correction L + automatic data input [Zebra-ZPL p.129-131]
-    `^FO380,5^BQN,2,4^FDLA,${epcHex}^FS`,
+    // --- Metade de cima (frente): SKU + nome ---
+    `^FO8,10^A0N,24,24^FD${sku}^FS`,
+    `^FO8,40^A0N,20,20^FD${nome}^FS`,
 
-    // --- RFID: gravação + leitura de verificação + retorno ao host ---
-    // Grava EPC 96-bit: ^RFW,H → operação W (write), formato H (hex),
-    // banco E (EPC 96-bit, default). 24 dígitos hex = 12 bytes = 96 bits.
-    // [CONFIRMADO: Zebra-RFID3 p.46-49]
-    `^RFW,H^FD${epcHex}^FS`,
-    // Relê o EPC gravado: associa ao campo 1 para uso com ^HV.
-    // [CONFIRMADO: Zebra-RFID3 p.24-27, Format 5]
+    // --- Metade de baixo (verso): código de barras (número curto) + EPC ---
+    `^BY2^FO8,${meio + 6}^BCN,52,Y,N,N^FD${cb}^FS`,
+    `^FO8,${meio + 82}^A0N,14,14^FDEPC ${epcFmt}^FS`,
+
+    // --- RFID: grava (96 bits) → relê → devolve ao host p/ conferência ---
+    // [CONFIRMADO: Zebra-RFID3 p.46-49 + Format 5]
+    `^RFW,H^FD${epc}^FS`,
     "^RFR,H^FN1^FS",
-    // Devolve ao host: 12 bytes (96 bits) do campo 1, prefixados com "EPC:".
-    // [CONFIRMADO: Zebra-RFID3 p.43]
     "^HV1,24,EPC:,^FS",
 
     "^XZ",
   ].join("\n");
+}
+
+/**
+ * Monta o layout a partir de um modelo salvo e gera o ZPL da etiqueta de joia.
+ * O código de barras é o SERIAL do EPC (número curto, único, que o ERP resolve).
+ */
+export function gerarZplJoiaDoModelo(
+  dados: DadosEtiqueta,
+  epc: Epc,
+  modelo: EtiquetaModelo | null,
+): string {
+  const { serial } = parseEpc(epc);
+  // Sem modelo salvo → defaults seguros da tag de joia (25×38mm, sem offset, F0).
+  const layout: LayoutEtiqueta = {
+    larguraDots: mmToDots(modelo?.largura_mm ?? 25),
+    alturaDots: mmToDots(modelo?.altura_mm ?? 38),
+    offsetXDots: mmToDots(modelo?.offset_x_mm ?? 0),
+    offsetYDots: mmToDots(modelo?.offset_y_mm ?? 0),
+    posicaoRfid: modelo?.posicao_rfid ?? "F0",
+  };
+  return gerarZplEtiquetaJoia(dados, epc, String(serial), layout);
 }
 
 /**
@@ -146,7 +172,10 @@ export function gerarZplEtiquetaJoia(dados: DadosEtiqueta, epc: Epc): string {
  * [CONFIRMADO: Zebra-RFID3 p.37-42]
  */
 export function gerarZplCalibracao(): string {
-  return "^XA\n^HR\n^XZ";
+  // Varredura AMPLA: começa no recuo máximo (B30) e vai até achar (auto),
+  // com detecção automática de potência (A). O default (B20) não achou o chip
+  // de joia no hardware; B30→auto achou. [CONFIRMADO: Zebra-RFID3 p.37-42, ^HR c,d,e]
+  return "^XA\n^HR,,B30,A,A\n^XZ";
 }
 
 /**

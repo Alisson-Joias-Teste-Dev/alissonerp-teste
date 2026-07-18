@@ -11,7 +11,7 @@
  */
 
 import sql from "@/lib/db";
-import type { Epc } from "./tipos";
+import type { Epc, EtiquetaModelo, EtiquetaModeloInput } from "./tipos";
 
 // ---------------------------------------------------------------------------
 // Tipos internos do repositório
@@ -319,4 +319,100 @@ export async function gerarProximoSerial(): Promise<number> {
   }
 
   return serial;
+}
+
+// ---------------------------------------------------------------------------
+// Modelos de etiqueta (dimensões, offset, posição do chip)
+// ---------------------------------------------------------------------------
+
+const COLS_MODELO = sql`
+  id, nome, largura_mm::float8 AS largura_mm, altura_mm::float8 AS altura_mm,
+  offset_x_mm::float8 AS offset_x_mm, offset_y_mm::float8 AS offset_y_mm,
+  posicao_rfid, padrao, ativo
+`;
+
+/** Lista os modelos de etiqueta ativos (padrão primeiro). */
+export async function listarModelosEtiqueta(): Promise<EtiquetaModelo[]> {
+  const rows = await sql<EtiquetaModelo[]>`
+    SELECT ${COLS_MODELO}
+    FROM alissonerp.rfid_etiqueta_modelo
+    WHERE ativo = true
+    ORDER BY padrao DESC, nome ASC
+  `;
+  return rows;
+}
+
+/** Busca um modelo por id (ou null). */
+export async function buscarModeloEtiqueta(id: number): Promise<EtiquetaModelo | null> {
+  const [row] = await sql<EtiquetaModelo[]>`
+    SELECT ${COLS_MODELO} FROM alissonerp.rfid_etiqueta_modelo WHERE id = ${id}
+  `;
+  return row ?? null;
+}
+
+/** Retorna o modelo padrão (ou null se nenhum). */
+export async function modeloEtiquetaPadrao(): Promise<EtiquetaModelo | null> {
+  const [row] = await sql<EtiquetaModelo[]>`
+    SELECT ${COLS_MODELO}
+    FROM alissonerp.rfid_etiqueta_modelo
+    WHERE ativo = true AND padrao = true
+    LIMIT 1
+  `;
+  return row ?? null;
+}
+
+/**
+ * Cria ou atualiza um modelo de etiqueta (upsert por id).
+ * Se `padrao = true`, zera o padrão dos demais (o índice único garante 1 só).
+ * Tudo numa transação.
+ */
+export async function salvarModeloEtiqueta(
+  input: EtiquetaModeloInput,
+): Promise<EtiquetaModelo> {
+  const posicao = input.posicao_rfid ?? null;
+  const excluiId = input.id ?? -1; // ao criar (sem id), zera o padrão de todos
+  const modelo = await sql.begin(async (tx: any) => {
+    if (input.padrao) {
+      await tx`
+        UPDATE alissonerp.rfid_etiqueta_modelo
+        SET padrao = false, atualizado_em = now()
+        WHERE padrao = true AND id <> ${excluiId}
+      `;
+    }
+    if (input.id) {
+      const rows = await tx`
+        UPDATE alissonerp.rfid_etiqueta_modelo SET
+          nome = ${input.nome}, largura_mm = ${input.largura_mm},
+          altura_mm = ${input.altura_mm}, offset_x_mm = ${input.offset_x_mm},
+          offset_y_mm = ${input.offset_y_mm}, posicao_rfid = ${posicao},
+          padrao = ${input.padrao}, atualizado_em = now()
+        WHERE id = ${input.id}
+        RETURNING ${COLS_MODELO}
+      `;
+      const row = rows[0] as unknown as EtiquetaModelo | undefined;
+      if (!row) throw new RepoError(`Modelo ${input.id} nao encontrado`);
+      return row;
+    }
+    const rows = await tx`
+      INSERT INTO alissonerp.rfid_etiqueta_modelo
+        (nome, largura_mm, altura_mm, offset_x_mm, offset_y_mm, posicao_rfid, padrao)
+      VALUES
+        (${input.nome}, ${input.largura_mm}, ${input.altura_mm},
+         ${input.offset_x_mm}, ${input.offset_y_mm}, ${posicao}, ${input.padrao})
+      RETURNING ${COLS_MODELO}
+    `;
+    return rows[0] as unknown as EtiquetaModelo;
+  });
+  return modelo as unknown as EtiquetaModelo;
+}
+
+/** Desativa (soft-delete) um modelo. */
+export async function excluirModeloEtiqueta(id: number): Promise<boolean> {
+  const rows = await sql`
+    UPDATE alissonerp.rfid_etiqueta_modelo
+    SET ativo = false, padrao = false, atualizado_em = now()
+    WHERE id = ${id} AND ativo = true
+    RETURNING id
+  `;
+  return rows.length > 0;
 }

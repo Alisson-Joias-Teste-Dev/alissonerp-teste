@@ -75,3 +75,35 @@ export const RfidReimprimirSchema = z.object({
 export const RfidLookupSchema = z.object({
   epcs: z.array(z.string()).min(1),
 });
+
+// ---------------------------------------------------------------------------
+// Modelo de etiqueta — dimensões, offset de impressão e posição do chip.
+// Vários modelos coexistem (cada joia/mídia tem o seu). Medidas em mm.
+// ---------------------------------------------------------------------------
+export interface EtiquetaModelo {
+  id: number;
+  nome: string;
+  largura_mm: number;
+  altura_mm: number;
+  offset_x_mm: number;
+  offset_y_mm: number;
+  posicao_rfid: string | null; // ex.: "F1" (posição de programação calibrada)
+  padrao: boolean;
+  ativo: boolean;
+}
+
+export const EtiquetaModeloInputSchema = z.object({
+  id: z.coerce.number().int().positive().optional(),
+  nome: z.string().min(1, "nome obrigatório"),
+  largura_mm: z.coerce.number().positive(),
+  altura_mm: z.coerce.number().positive(),
+  offset_x_mm: z.coerce.number().default(0),
+  offset_y_mm: z.coerce.number().default(0),
+  posicao_rfid: z.string().trim().max(8).nullable().optional(),
+  padrao: z.boolean().default(false),
+});
+export type EtiquetaModeloInput = z.infer<typeof EtiquetaModeloInputSchema>;
+
+/** 203 dpi = 8 dots/mm. Converte mm → dots (ZPL). */
+export const DOTS_PER_MM = 8;
+export const mmToDots = (mm: number): number => Math.round(mm * DOTS_PER_MM);

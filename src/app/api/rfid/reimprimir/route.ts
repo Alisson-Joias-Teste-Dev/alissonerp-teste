@@ -4,9 +4,9 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, isFullAccess } from "@/lib/roles";
 import { ROLES_CADASTRAR_RFID } from "@/lib/rfid/roles";
 import { RfidReimprimirSchema } from "@/lib/rfid/tipos";
-import { buscarJoiaPorEpc, registrarReimpressao } from "@/lib/rfid/repo";
+import { buscarJoiaPorEpc, registrarReimpressao, modeloEtiquetaPadrao } from "@/lib/rfid/repo";
 import { validateEpc, extrairIdProduto } from "@/lib/rfid/epc";
-import { gerarZplEtiquetaJoia } from "@/lib/rfid/zpl";
+import { gerarZplJoiaDoModelo } from "@/lib/rfid/zpl";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 
@@ -114,9 +114,11 @@ export async function POST(req: NextRequest) {
     // -----------------------------------------------------------
     // 6. Gera ZPL
     // -----------------------------------------------------------
-    const zpl = gerarZplEtiquetaJoia(
+    const modelo = await modeloEtiquetaPadrao();
+    const zpl = gerarZplJoiaDoModelo(
       { id_produto: idProduto, sku: joia.sku, nome: joia.nome },
       epc,
+      modelo,
     );
 
     return NextResponse.json({ ok: true, epc, zpl });
