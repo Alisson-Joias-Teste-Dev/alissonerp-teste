@@ -18,13 +18,11 @@ const dados: DadosEtiqueta = {
 
 const layout: LayoutEtiqueta = {
   larguraDots: 200,
-  alturaDots: 304,
+  alturaDots: 280,
   offsetXDots: 16,
   offsetYDots: 24,
   posicaoRfid: "F1",
 };
-
-const codBarras = "100234";
 
 // ── sanitizeZpl (helper) ─────────────────────────────────────────────────────
 describe("sanitizeZpl", () => {
@@ -53,16 +51,23 @@ describe("gerarZplEtiquetaJoia", () => {
       sku: overrides?.dados?.sku ?? dados.sku,
       nome: overrides?.dados?.nome ?? dados.nome,
     };
-    return gerarZplEtiquetaJoia(d, e, codBarras, layout);
+    return gerarZplEtiquetaJoia(d, e, layout);
   }
 
   beforeEach(() => {
     zpl = makeZpl();
   });
 
-  it("começa com ^XA e termina com ^XZ", () => {
-    expect(zpl.startsWith("^XA")).toBe(true);
+  it("emite darkness ~SD11 pelo sistema e o formato ^XA…^XZ", () => {
+    expect(zpl.startsWith("~SD11")).toBe(true); // config no sistema, não só na impressora
+    expect(zpl).toContain("^XA");
     expect(zpl.endsWith("^XZ")).toBe(true);
+  });
+
+  it("usa ^PRB (velocidade) e o enquadramento fixo ^PW576/^LL568", () => {
+    expect(zpl).toContain("^PRB");
+    expect(zpl).toContain("^PW576");
+    expect(zpl).toContain("^LL568");
   });
 
   it("contém ^MMF (modo RFID) e ^CI28 (UTF-8)", () => {
@@ -74,14 +79,18 @@ describe("gerarZplEtiquetaJoia", () => {
     expect(zpl).toContain("^RS8,F1,,3,N");
   });
 
-  it("usa largura/altura do layout (^PW/^LL)", () => {
-    expect(zpl).toContain("^PW200");
-    expect(zpl).toContain("^LL304");
+  it("usa o enquadramento fixo ^PW576/^LL568 (único lever que funciona nessa firmware)", () => {
+    expect(zpl).toContain("^PW576");
+    expect(zpl).toContain("^LL568");
   });
 
-  it("aplica o offset — X via ^LS (aceita esquerda) e Y via ^LH", () => {
-    expect(zpl).toContain("^LS-16"); // -offsetXDots (X pra esquerda usa negativo no modelo)
-    expect(zpl).toContain("^LH0,24"); // offsetYDots (vertical)
+  it("não aplica shift de offset — usa ^LH0,0 e ^LS0 (firmware ignora ^LS/left_position)", () => {
+    expect(zpl).toContain("^LH0,0");
+    expect(zpl).toContain("^LS0");
+  });
+
+  it("usa ^PRB (3 ips) p/ bordas mais nítidas", () => {
+    expect(zpl).toContain("^PRB");
   });
 
   // Comandos RFID
@@ -107,17 +116,21 @@ describe("gerarZplEtiquetaJoia", () => {
   });
 
   // Conteúdo visual
-  it("contém o SKU e o nome do produto", () => {
+  it("contém o SKU em OCR-B (^AEN) e o nome em fonte D (^ADN)", () => {
+    expect(zpl).toContain("^AEN");
     expect(zpl).toContain(dados.sku);
+    expect(zpl).toContain("^ADN");
     expect(zpl).toContain("Alian"); // nome (com acento preservado)
   });
 
-  it("contém o código de barras Code 128 com o número curto", () => {
-    expect(zpl).toContain("^BCN");
-    expect(zpl).toContain(`^FD${codBarras}^FS`);
+  it("verso 180°: 'Alisson' (^ADI) + logo do leão (^GFA)", () => {
+    expect(zpl).toContain("^ADI");
+    expect(zpl).toContain("Alisson");
+    expect(zpl).toContain("^GFA,");
   });
 
-  it("NÃO usa QR code (^BQ) — o requisito é código de barras 1D", () => {
+  it("NÃO usa código de barras (^BC) nem QR (^BQ) — controle é pelo chip", () => {
+    expect(zpl).not.toContain("^BCN");
     expect(zpl).not.toContain("^BQ");
   });
 
@@ -135,14 +148,14 @@ describe("gerarZplEtiquetaJoia", () => {
 
   // Validação de EPC inválido
   it("lança erro para EPC inválido (comprimento errado)", () => {
-    expect(() =>
-      gerarZplEtiquetaJoia(dados, "curto" as Epc, codBarras, layout),
-    ).toThrow(/EPC inválido/i);
+    expect(() => gerarZplEtiquetaJoia(dados, "curto" as Epc, layout)).toThrow(
+      /EPC inválido/i,
+    );
   });
 
   it("lança erro para EPC inválido (letras em vez de dígitos)", () => {
     expect(() =>
-      gerarZplEtiquetaJoia(dados, "abcdefghijklmnopqrstuvwx" as Epc, codBarras, layout),
+      gerarZplEtiquetaJoia(dados, "abcdefghijklmnopqrstuvwx" as Epc, layout),
     ).toThrow(/EPC inválido/i);
   });
 
@@ -150,7 +163,7 @@ describe("gerarZplEtiquetaJoia", () => {
   it("SKU e nome sanitizados (sem ^ ou ~ dentro dos ^FD)", () => {
     const depois = zpl.split("^XA")[1];
     for (const linha of depois.split("^FS")) {
-      if (linha.includes("^FD") && !linha.includes("^BC") && !linha.includes("^RFW")) {
+      if (linha.includes("^FD") && !linha.includes("^RFW")) {
         const fd = linha.split("^FD").pop() ?? "";
         expect(fd).not.toContain("^");
         expect(fd).not.toContain("~");
@@ -195,7 +208,7 @@ describe("gerarZplLeituraTid", () => {
 // ── Regressão: ^HV byte-count alinhado ao parser ─────────────────────────────
 describe("^HV byte-count vs verificacao.ts parser", () => {
   it("^HV retorna 24 — o que o parser /[0-9A-Fa-f]{24}/ espera", () => {
-    const zpl = gerarZplEtiquetaJoia(dados, epcReal, codBarras, layout);
+    const zpl = gerarZplEtiquetaJoia(dados, epcReal, layout);
     const m = zpl.match(/\^HV1,(\d+),EPC:/);
     expect(m).not.toBeNull();
     expect(parseInt(m![1], 10)).toBe(24);

@@ -27,6 +27,7 @@ import AplicarTemplateModal from "@/components/produtos/AplicarTemplateModal";
 import { useAuth } from "@/hooks/useAuth";
 // REGRA DE NEGOCIO: helpers de rodio (Frente C — 30/05/2026)
 import { isServicoRodio } from "@/lib/servico-rodio";
+import { BotaoImprimirEtiqueta } from "@/components/rfid/BotaoImprimirEtiqueta";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1359,6 +1360,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                       {syncingTiny ? "Sincronizando..." : "Sync Tiny"}
                     </button>
                   )}
+                  {/* REGRA DE NEGOCIO: botao de etiqueta RFID (imprimir + gravar chip) do produto aberto no drawer */}
+                  {produto?.id_produto ? (
+                    <BotaoImprimirEtiqueta produtoId={produto.id_produto} variant="compact" />
+                  ) : null}
                 </div>
               </>
             ) : (

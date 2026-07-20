@@ -1,21 +1,33 @@
 /**
  * ZPL II generator for Zebra ZD500R RFID Printer.
  *
- * Label: 74×20mm @ 203dpi (592×160 dots)
- * RFID: UHF EPC Gen2 V2 / ISO 18000-63 / RAIN, ThingMagic encoder
- * EPC: 24-digit numeric hex (0-9 only), 96-bit format
+ * Etiqueta de joia "bandeira + rabo" (liner 70×35mm, 203dpi):
+ *  - Dois lobos à esquerda (frente + verso) que são COLADOS costas-com-costas
+ *    → dupla face. O rabo fino (à direita) fica em branco (só amarra).
+ *  - FRENTE (lobo de cima): SKU (OCR-B), nome do produto (fonte D), EPC em texto.
+ *  - VERSO (lobo de baixo, impresso 180° p/ ler certo depois de colar):
+ *    "Alisson" + logo do leão (bitmap ^GFA já girado 180°).
+ *  - Sem código de barras / sem QR: a peça é controlada pelo chip (EPC).
  *
- * Protocol: Zebra Browser Print v1.3+ (HTTPS localhost:9101).
+ * Enquadramento (validado no hardware, modo térmico, e mantido no chip):
+ *  - ^PW576 é o que joga o conteúdo pro lugar certo na largura (essa firmware
+ *    IGNORA ^LS e left_position; o ^PW é o único lever de posição horizontal).
+ *  - ^LL568 (o gap da mídia limita o comprimento real).
+ *  - Darkness fica em ~SD11, PERSISTIDO na impressora via `~SD11 ^XA^JUS^XZ`
+ *    (print.tone/media.darkness são espelho/legado nessa ZD500R — não queimam o
+ *    elemento). NÃO emitir ~SD/^MD por etiqueta p/ não somar em cima do salvo.
+ *  - ^PRB = 3 ips (bordas mais nítidas p/ texto pequeno).
  *
- * Each fact in this file is backed by:
- * - RFID Programming Guide 3, P1062165-05EN [Zebra-RFID3]
- * - ZPL II Programming Guide [Zebra-ZPL]
- * - ZD500R spec sheet + devtools KB
+ * RFID: UHF EPC Gen2 V2 / ISO 18000-63 / RAIN, ThingMagic encoder.
+ * EPC: 24-digit numeric hex (0-9), 96-bit.
  *
  * Golden rules:
  * - NEVER emit legacy commands: ^WT, ^RT, ^RZ, ^RA, ^RM, ^RN, ^RE, ^RQ, ^WV
  * - EPC IS valid hex directly — NO Buffer.from, NO ASCII layer, NO epcToHex
  * - Sanitize nome/sku with sanitizeZpl before embedding in ^FD
+ *
+ * Referências: RFID Programming Guide 3 [Zebra-RFID3], ZPL II Programming Guide
+ * [Zebra-ZPL], dossiês em .claude/zebra-zd500r-kb.
  */
 
 import {
@@ -25,7 +37,34 @@ import {
   EpcSchema,
   mmToDots,
 } from "./tipos";
-import { formatEpc, parseEpc } from "./epc";
+import { formatEpc } from "./epc";
+
+/**
+ * Logo do leão (logo.leaoverde.webp) convertida em bitmap monocromático 1-bit
+ * (threshold ~210, ~53×42 dots) e JÁ GIRADA 180° para o lobo do verso — o ^GFA
+ * imprime como está (não gira por orientação de campo). Constante embutida p/
+ * não depender de asset em runtime.
+ */
+const LOGO_LEAO_GFA =
+  "^GFA,294,294,7,0001FF1FE3FE000000FF0FE1FE0000007F07F0FE0001001F01F07E0003001F01F83E0007001F01FC7E000F003F01F8FE000F003F01F1FE0007FF3F01E3FE0007FF3FC0C7FE0003F83FF00FFE0001C0FFFE1FFE000007FFFFFFFC00001FFFFFFFFC0000FFFFFFFFF80001FFFFFFFFF80003FFFFFFFFF00007FFFFFFFFF00007FFFFFFFFFE000FFFFFFFFFFF801FFFFFFFFF03C00FFFFFFFFC00E00FFFFC000000700FFFFC000000307FFFF8000000387FFFE0000000187FFFC000000018FFFF8000000018FFFFC0000000187FFF80000000181FFF00000000300FFE00000001F00FF800000003E00FFC00000007C00FF00000000780046000000002000000000000000007F8000000000004E800000000000844000000000000C0000000000000000000000000";
+
+/**
+ * CONFIG DE IMPRESSÃO — single source of truth no sistema (NÃO PODE se perder).
+ * Valores descobertos/validados no hardware da ZD500R:
+ *  - DARKNESS: o lever REAL é `~SD` (absoluto, 0-30). `print.tone`/`media.darkness`
+ *    são espelho/legado (mexer neles NÃO clareia). Emitido pelo sistema em TODO
+ *    job (`~SD11`) p/ não depender do que está salvo na impressora — se a
+ *    impressora resetar/for trocada, a config continua vindo do código.
+ *    [CONFIRMADO: agente zebra-zd500r vs Zebra-ZPL p.331-332]
+ *  - ^PW576: enquadramento horizontal (essa firmware IGNORA ^LS/^LH/left_position;
+ *    ^PW é o único lever — ^PW maior empurra o conteúdo p/ a esquerda).
+ *  - ^LL568: gap da mídia limita o comprimento real.
+ *  - ^PRB: 3 ips (bordas mais nítidas p/ texto pequeno).
+ */
+const DARKNESS = "~SD11";
+const PRINT_WIDTH = "^PW576";
+const LABEL_LENGTH = "^LL568";
+const PRINT_SPEED = "^PRB";
 
 /**
  * Sanitiza uma string para uso seguro em comandos ZPL.
@@ -45,55 +84,32 @@ export function sanitizeZpl(input: string): string {
     .trim();
 }
 
-/**
- * Gera ZPL completo para etiqueta RFID de joia (74×20mm).
- *
- * Layout visual:
- *   ┌──────────────────────────────────────────────────────┐
- *   │  Nome do Produto                                    │
- *   │  SKU: 1470-6                  ┌──────────────────┐  │
- *   │  ID: 1001-000000123-...       │                  │  │
- *   │                               │     QR Code      │  │
- *   │                               │                  │  │
- *   │                               └──────────────────┘  │
- *   └──────────────────────────────────────────────────────┘
- *
- * Fluxo RFID (Zebra standard read-back verification):
- *   1. ^RFW,H  — grava EPC de 96 bits (12 bytes hex) no banco EPC
- *   2. ^RFR,H^FN1 — relê o EPC recém-gravado no campo 1
- *   3. ^HV1,24,EPC: — devolve ao host "EPC:" + 24 caracteres hex (96 bits)
- *
- *   [CONFIRMADO: Zebra-RFID3 p.24-27 — "RFID Label Format 5:
- *   Encode Tag, Read Tag, and Return Results to Host"]
- *
- * @param dados - Dados da etiqueta (nome, sku, id_produto)
- * @param epc   - Código EPC de 24 dígitos numéricos.
- *                Os dígitos SÃO o hex a ser gravado (ex.: "1001…" → 0x10 0x01 …).
- * @returns String ZPL pronta para envio à impressora.
- * @throws Se o EPC não for um Epc válido (24 dígitos numéricos).
- */
-/** Layout físico da etiqueta — vem do modelo salvo (dimensões, offset, posição). */
+/** Layout físico da etiqueta — vem do modelo salvo. Nesta ZD500R só a posição
+ * de programação do chip (^RS) é usada em runtime; as dimensões/offset ficam no
+ * modelo p/ referência (o enquadramento horizontal é fixo via ^PW576, porque a
+ * firmware ignora ^LS/^LH/left_position). */
 export interface LayoutEtiqueta {
-  larguraDots: number; // ^PW
-  alturaDots: number; // ^LL
-  offsetXDots: number; // ^LH x — deslocamento horizontal (ajuste da tela)
-  offsetYDots: number; // ^LH y — deslocamento vertical
+  larguraDots: number;
+  alturaDots: number;
+  offsetXDots: number;
+  offsetYDots: number;
   posicaoRfid: string; // ^RS posição de programação calibrada, ex.: "F1"
 }
 
 /**
- * Gera o ZPL da etiqueta de joia (dobrável): metade de cima = SKU + nome;
- * metade de baixo = código de barras (número curto que o ERP resolve p/ o EPC)
- * + o EPC em texto pequeno. O chip RFID guarda o EPC completo.
+ * Gera o ZPL da etiqueta de joia (dupla face colada, SEM dobra/barcode):
+ *   - FRENTE (lobo de cima): SKU em OCR-B, nome em fonte D, EPC em texto.
+ *   - VERSO (lobo de baixo, 180°): "Alisson" + logo do leão.
+ * O chip RFID guarda o EPC completo (grava → relê → devolve ao host).
  *
- * O `layout` (dimensões, offset via ^LH, posição do chip) vem do modelo salvo,
- * ajustado pela tela de calibração/layout — é o que faz a impressão cair
- * certinho na cabeça da tag.
+ * @param dados  - nome, sku, id_produto
+ * @param epc    - EPC de 24 dígitos numéricos (os dígitos SÃO o hex gravado)
+ * @param layout - modelo salvo; usa `posicaoRfid` no ^RS
+ * @throws Se o EPC não for um Epc válido (24 dígitos numéricos).
  */
 export function gerarZplEtiquetaJoia(
   dados: DadosEtiqueta,
   epc: Epc,
-  codigoBarras: string,
   layout: LayoutEtiqueta,
 ): string {
   const parsed = EpcSchema.safeParse(epc);
@@ -103,36 +119,29 @@ export function gerarZplEtiquetaJoia(
 
   const nome = sanitizeZpl(dados.nome);
   const sku = sanitizeZpl(dados.sku);
-  const cb = sanitizeZpl(codigoBarras);
   const epcFmt = formatEpc(epc);
   const pos = (layout.posicaoRfid || "F0").trim(); // ex.: F1 (calibrado)
-  const meio = Math.round(layout.alturaDots / 2); // linha do vinco (dobra)
 
   return [
+    DARKNESS, // ~SD11 — darkness setado pelo sistema (não depende da config salva na impressora)
     "^XA",
-    "^CI28", // UTF-8
-    `^PW${layout.larguraDots}`,
-    `^LL${layout.alturaDots}`,
-    // Deslocamento horizontal via ^LS (Label Shift): aceita -9999..9999 e move
-    // pra ESQUERDA — o ^LH não aceita negativo. [CONFIRMADO: Zebra-ZPL ^LS]
-    // Convenção do modelo: X negativo = esquerda → ^LS positivo desloca à esquerda.
-    `^LS${-layout.offsetXDots}`,
-    // Deslocamento vertical: BAIXO via ^LH (0..32000, faixa grande);
-    // CIMA via ^LT (Label Top, negativo = cima, limitado a -120 dots ~15mm).
-    // [CONFIRMADO: Zebra-ZPL ^LH p.293 e ^LT (±120 dots)]
-    layout.offsetYDots >= 0
-      ? `^LH0,${layout.offsetYDots}`
-      : `^LT${Math.max(-120, layout.offsetYDots)}`,
+    PRINT_SPEED, // ^PRB — 3 ips — bordas mais nítidas
     "^MMF", // modo RFID
+    PRINT_WIDTH, // ^PW576 — enquadramento horizontal (único lever que funciona nessa firmware)
+    LABEL_LENGTH, // ^LL568
+    "^LH0,0",
+    "^LS0",
+    "^CI28", // UTF-8
     `^RS8,${pos},,3,N`, // posição de programação calibrada (ex.: F1)
 
-    // --- Metade de cima (frente): SKU + nome ---
-    `^FO8,10^A0N,24,24^FD${sku}^FS`,
-    `^FO8,40^A0N,20,20^FD${nome}^FS`,
+    // --- FRENTE (lobo de cima): SKU (OCR-B) + nome (fonte D) + EPC ---
+    `^FO34,56^AEN,30,17^FD${sku}^FS`,
+    `^FO34,88^ADN,18,10^FB196,2,0,L,0^FD${nome}^FS`,
+    `^FO34,142^A0N,12,12^FDEPC ${epcFmt}^FS`,
 
-    // --- Metade de baixo (verso): código de barras (número curto) + EPC ---
-    `^BY2^FO8,${meio + 6}^BCN,52,Y,N,N^FD${cb}^FS`,
-    `^FO8,${meio + 82}^A0N,14,14^FDEPC ${epcFmt}^FS`,
+    // --- VERSO (lobo de baixo, 180°): Alisson + logo do leão (já girado) ---
+    "^FO86,190^ADI,20,11^FDAlisson^FS",
+    `^FO98,212${LOGO_LEAO_GFA}^FS`,
 
     // --- RFID: grava (96 bits) → relê → devolve ao host p/ conferência ---
     // [CONFIRMADO: Zebra-RFID3 p.46-49 + Format 5]
@@ -146,23 +155,20 @@ export function gerarZplEtiquetaJoia(
 
 /**
  * Monta o layout a partir de um modelo salvo e gera o ZPL da etiqueta de joia.
- * O código de barras é o SERIAL do EPC (número curto, único, que o ERP resolve).
  */
 export function gerarZplJoiaDoModelo(
   dados: DadosEtiqueta,
   epc: Epc,
   modelo: EtiquetaModelo | null,
 ): string {
-  const { serial } = parseEpc(epc);
-  // Sem modelo salvo → defaults seguros da tag de joia (25×38mm, sem offset, F0).
   const layout: LayoutEtiqueta = {
     larguraDots: mmToDots(modelo?.largura_mm ?? 25),
-    alturaDots: mmToDots(modelo?.altura_mm ?? 38),
+    alturaDots: mmToDots(modelo?.altura_mm ?? 35),
     offsetXDots: mmToDots(modelo?.offset_x_mm ?? 0),
     offsetYDots: mmToDots(modelo?.offset_y_mm ?? 0),
     posicaoRfid: modelo?.posicao_rfid ?? "F0",
   };
-  return gerarZplEtiquetaJoia(dados, epc, String(serial), layout);
+  return gerarZplEtiquetaJoia(dados, epc, layout);
 }
 
 /**

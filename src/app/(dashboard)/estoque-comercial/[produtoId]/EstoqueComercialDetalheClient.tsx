@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { BotaoImprimirEtiqueta } from "@/components/rfid/BotaoImprimirEtiqueta";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Consolidado {
@@ -550,6 +551,8 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
                 </button>
               </>
             )}
+            {/* REGRA DE NEGOCIO: botao de etiqueta RFID (imprimir + gravar chip) do produto desta tela */}
+            <BotaoImprimirEtiqueta produtoId={produtoId} variant="compact" />
             <button
               onClick={() => setTransferindo(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"

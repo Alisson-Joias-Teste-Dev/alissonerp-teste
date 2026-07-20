@@ -16,7 +16,6 @@ import { mmToDots, type EtiquetaModelo, type Epc } from "@/lib/rfid/tipos";
 
 // EPC de teste (24 dígitos válidos) só para o "imprimir teste".
 const EPC_TESTE = "100100000000000000000001" as Epc;
-const COD_BARRAS_TESTE = "100234";
 
 interface FormModelo {
   id?: number;
@@ -163,7 +162,6 @@ export function PainelLayoutEtiqueta() {
       const zpl = gerarZplEtiquetaJoia(
         { id_produto: 0, sku: "TESTE", nome: "Etiqueta de teste" },
         EPC_TESTE,
-        COD_BARRAS_TESTE,
         layoutAtual(),
       );
       await enviarEVerificar(device, zpl, 20_000);

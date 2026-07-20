@@ -99,6 +99,9 @@ export async function POST(req: NextRequest) {
     // -----------------------------------------------------------
     const serial = await gerarProximoSerial();
     const epc = buildEpc(produtoId, serial);
+    console.log(
+      `[RFID cadastrar] produto=${produtoId} sku=${produto.sku} nome="${produto.nome}" serial=${serial} epc=${epc}`,
+    );
 
     // -----------------------------------------------------------
     // 6. Cadastra joia pendente (transacao: joia + leitura)

@@ -186,6 +186,11 @@ export function usePrintFlow(): {
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  // EPC vivo, setado SÍNCRONO no cadastrar(). O stateRef só reflete o EPC no
+  // próximo render, e enviar() roda logo após `await cadastrar()` (antes do
+  // re-render) → ler o EPC do estado dá null. O ref elimina essa corrida.
+  const epcRef = useRef<string | null>(null);
+
   // -------------------------------------------------------------------------
   // cadastrar
   // -------------------------------------------------------------------------
@@ -211,6 +216,7 @@ export function usePrintFlow(): {
         const epc: string = data.epc;
         const zpl: string = data.zpl;
 
+        epcRef.current = epc;
         dispatch({ type: "CADASTRO_OK", epc, zpl });
         return { ok: true as const, epc, zpl };
       } catch (err: unknown) {
@@ -238,7 +244,7 @@ export function usePrintFlow(): {
   const enviar = useCallback(
     async (device: ZebraDevice, zpl: string): Promise<ResultadoGravacao> => {
       const currentState = stateRef.current;
-      const epc = extrairEpcDoEstado(currentState);
+      const epc = epcRef.current ?? extrairEpcDoEstado(currentState);
 
       if (!epc) {
         throw new Error(
@@ -356,6 +362,7 @@ export function usePrintFlow(): {
   // reset
   // -------------------------------------------------------------------------
   const reset = useCallback(() => {
+    epcRef.current = null;
     dispatch({ type: "RESET" });
   }, []);
 
