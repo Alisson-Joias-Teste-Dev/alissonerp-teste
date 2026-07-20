@@ -3,6 +3,7 @@ export const ROLES_CADASTRAR_RFID = [
   "desenvolvedor",
   "gerente_fabrica",
   "estoquista_fabrica",
+  "gerente_loja",
 ] as const;
 
 export const ROLES_CALIBRAR_RFID = [
