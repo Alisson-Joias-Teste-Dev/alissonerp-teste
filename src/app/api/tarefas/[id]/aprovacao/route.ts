@@ -25,6 +25,7 @@ import { zodError } from "@/lib/schemas/common";
 import { processarAprovacaoQuebraLimpeza } from "@/lib/limpeza-ouro-aprovacao";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } from "@/lib/entrega-sem-pagamento";
+import { liberarFreteAvulso, recusarFreteAvulso } from "@/lib/entrega-venda";
 import { podeDecidir, eventoDaTarefa } from "@/lib/aprovacoes";
 
 const AprovacaoTarefaPostSchema = z.object({
@@ -861,6 +862,73 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ ok: true, compra_metal: resultado });
     } catch (err) {
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] compra_metal`, err);
+    }
+  }
+
+  /**
+   * REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — migrado pra camada
+   * central de aprovações no merge com a main, 20/07): solicitação de frete
+   * avulso feita pela consultora vira tarefa (ver criarFreteAvulso em
+   * src/lib/entrega-venda.ts). Decidida pela camada config-first (evento
+   * "frete_avulso", chave `aprovadores_frete_avulso` — ver
+   * src/lib/aprovacoes/catalogo.ts), igual a compra_comercial/recebimento_metal
+   * acima — não mais pelo pool na unha (isPoolFreteAvulso/
+   * listarAprovadoresFreteAvulso) que esta branch tinha antes do merge. Ao
+   * APROVAR, libera a corrida (lança o saldo da gerente); ao REJEITAR, recusa
+   * (exige motivo). Reuso puro — as libs liberarFreteAvulso/recusarFreteAvulso
+   * já fazem saldo/FOR UPDATE/motivo; este bloco só autoriza, localiza a
+   * entrega pela tarefa e delega.
+   * IMPACTO SE ALTERADO: duplicar a lógica aqui arrisca lançar saldo em dobro
+   * ou divergir do que a lib já garante com FOR UPDATE.
+   */
+  if (tarefaInfo?.tipo === "frete_avulso") {
+    const decFreteAvulso = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "frete_avulso");
+    if (!decFreteAvulso.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
+    try {
+      const [entregaFrete] = await sql`
+        SELECT id FROM alissonerp.entregas_venda WHERE tarefa_aprovacao_id = ${Number(id)} LIMIT 1
+      `;
+      if (!entregaFrete) {
+        return NextResponse.json(
+          { error: "Entrega de frete avulso não encontrada para esta tarefa" }, { status: 404 },
+        );
+      }
+      if (body.decisao === "aprovado") {
+        await liberarFreteAvulso(Number(entregaFrete.id), user.id);
+      } else {
+        if (!body.motivo?.trim()) {
+          return NextResponse.json({ error: "Motivo é obrigatório para recusar o frete avulso" }, { status: 400 });
+        }
+        await recusarFreteAvulso(Number(entregaFrete.id), user.id, body.motivo);
+      }
+
+      // REGRA DE NEGÓCIO (V3): a consultora que solicitou precisa saber o
+      // resultado sem precisar abrir o módulo de Tarefas — espelha o mesmo
+      // padrão de notificação usado nos blocos cartao_desconto/desconto_acima
+      // acima (aprovacao.solicitante_id = quem pediu, já carregado no SELECT
+      // de aprovacao_tarefa no início do PATCH).
+      // IMPACTO SE REMOVIDO: a consultora só saberia da decisão entrando na
+      // tela de Tarefas — sem alarme nem confirmação.
+      await criarNotificacao({
+        usuarioId: String(aprovacao.solicitante_id),
+        tipo: "aprovacao",
+        titulo: body.decisao === "aprovado" ? "Frete avulso liberado" : "Frete avulso recusado",
+        mensagem: body.decisao === "aprovado"
+          ? "O frete avulso foi liberado e entrou no pool de motoboys."
+          : (body.motivo ?? "O frete avulso foi recusado."),
+        remetenteId: user.id,
+        link: tarefaInfo?.venda_id ? `/vendas/${tarefaInfo.venda_id}` : `/tarefas?abrir=${Number(id)}`,
+        vendaId: tarefaInfo?.venda_id ? Number(tarefaInfo.venda_id) : null,
+      }).catch(() => {});
+
+      return NextResponse.json({
+        ok: true,
+        frete_avulso: { entrega_id: Number(entregaFrete.id), decisao: body.decisao },
+      });
+    } catch (err) {
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] frete_avulso`, err);
     }
   }
 

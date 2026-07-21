@@ -145,6 +145,10 @@ describe("eventoDaTarefa — mapa tipo/tag → evento (espelha route.ts linha a 
     expect(eventoDaTarefa("conversao_reversa", [], {})).toBeNull();
   });
 
+  it("frete_avulso: pelo tipo (tarefa exclusiva, migration 353)", () => {
+    expect(eventoDaTarefa("frete_avulso", [], {})).toBe("frete_avulso");
+  });
+
   it("tipo/tags ausentes (undefined/vazio) e sem tarefaInfo → null, sem lançar erro", () => {
     expect(eventoDaTarefa(null, [], null)).toBeNull();
     expect(eventoDaTarefa(undefined, [])).toBeNull();

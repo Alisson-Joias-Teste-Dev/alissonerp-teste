@@ -201,6 +201,14 @@ const CONFIG_ITENS: ConfigItem[] = [
     icone: "🛡️",
     multi: true,
   },
+  {
+    chave: "aprovadores_frete_avulso",
+    titulo: "Frete avulso solicitado (pool)",
+    descricao: "Quem pode liberar ou recusar a solicitação de frete avulso feita pela consultora. Qualquer um da lista decide a mesma tarefa — pode marcar vários.",
+    usuariosKey: "todos_usuarios",
+    icone: "🛵",
+    multi: true,
+  },
 ];
 
 // ─── Componente ───────────────────────────────────────────────────────────────

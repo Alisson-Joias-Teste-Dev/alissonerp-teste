@@ -37,6 +37,7 @@ import {
   DollarSign,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
+import { useErrorStore } from "@/stores/errorStore";
 import Paginacao from "@/components/ui/Paginacao";
 import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
 import MotoboyDrawer from "@/components/entregas/MotoboyDrawer";
@@ -212,7 +213,7 @@ export default function EntregasVendaClient({
   buscaFiltro,
   dataInicioFiltro,
   dataFimFiltro,
-  userRole: _userRole, // prefixado com _: reservado para ações futuras (ex: permissões)
+  userRole,
 }: EntregasVendaClientProps) {
   const router = useRouter();
 
@@ -1002,7 +1003,7 @@ export default function EntregasVendaClient({
           entregaId={selectedEntregaId}
           isOpen={selectedEntregaId !== null}
           onClose={handleDrawerClose}
-          userRole={_userRole}
+          userRole={userRole}
         />
       )}
 
@@ -1024,6 +1025,7 @@ export default function EntregasVendaClient({
         isOpen={freteAvulsoOpen}
         onClose={() => setFreteAvulsoOpen(false)}
         onCriado={() => { setFreteAvulsoOpen(false); router.refresh(); }}
+        userRole={userRole}
       />
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

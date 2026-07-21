@@ -235,4 +235,22 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
     camposLock: ["solicitacoes_alteracao.status", "vendas_erp (campo varia por tipo)"],
     observacao: "Chave NOVA (ver conversao). Era ROLES_FINANCEIRO inline em solicitacoes-alteracao/[id]:26.",
   },
+  frete_avulso: {
+    evento: "frete_avulso",
+    rotulo: "Frete avulso solicitado",
+    configKeys: ["aprovadores_frete_avulso"],
+    configMulti: true,
+    camposLock: [
+      "entregas_venda.tarefa_aprovacao_id",
+      "entregas_venda.liberada_por",
+      "entregas_venda.liberada_em",
+    ],
+    observacao:
+      "Migração do frete-avulso-solicitacao (migration 353) pra camada central — decisão do " +
+      "Jonathan de trocar o pool na unha (isPoolFreteAvulso/listarAprovadoresFreteAvulso, 4 " +
+      "pontos do módulo Tarefas) pela política config-first já testada aqui. Tarefa tipo " +
+      "'frete_avulso' é exclusiva desse fluxo (não compartilha tipo com outro evento) — " +
+      "qualquer um da lista 'aprovadores_frete_avulso' decide a MESMA tarefa: aprovar libera a " +
+      "corrida (motoboy_id NULL, pool) e lança o saldo de frete; recusar exige motivo, sem custo.",
+  },
 };

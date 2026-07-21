@@ -1,16 +1,22 @@
 /**
  * GET /api/entregas-venda/motoboy/minhas
  *
- * REGRA DE NEGÓCIO: o motoboy logado vê apenas as entregas atribuídas a ele.
- * A role no sistema é "motoboy" (mesma dos protocolistas). O que diferencia
- * é a existência do registro em alissonerp.motoboys vinculado ao user_id.
+ * REGRA DE NEGÓCIO: o motoboy logado vê as entregas atribuídas a ele MAIS as
+ * avulsas do POOL ainda sem dono (patch A2 — liberadas pelo responsável,
+ * situacao='pendente', motoboy_id NULL: qualquer entregador pode ver e
+ * aceitar a primeira disponível). A role no sistema é "motoboy" (mesma dos
+ * protocolistas). O que diferencia é a existência do registro em
+ * alissonerp.motoboys vinculado ao user_id.
  *
  * O QUE: busca o user_id do motoboy logado na tabela motoboys e retorna
- * todas as entregas onde ev.motoboy_id = user_id, com filtros e cards.
+ * as entregas onde ev.motoboy_id = user_id OU (pool: avulsa pendente sem
+ * dono), com filtros e cards. Os CARDS (contadores/acerto) continuam só com
+ * o que já é do motoboy — ver comentário na query de cards mais abaixo.
  *
  * IMPACTO SE ALTERADO: se o filtro de motoboy_id for removido, o entregador
  * vê entregas de outros motoboys. Se a validação da tabela motoboys sumir,
- * protocolistas acessam essa rota indevidamente.
+ * protocolistas acessam essa rota indevidamente. Se o OR do pool for
+ * removido, corrida liberada nunca aparece pra ninguém aceitar.
  */
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
@@ -98,6 +104,11 @@ export async function GET(req: NextRequest) {
         ev.forma_entrega, ev.regiao, ev.frete_motoboy, ev.data_saida,
         ev.data_entrega_realizada, ev.created_at,
         ev.is_avulso, ev.descricao_avulso,
+        -- REGRA DE NEGÓCIO (migration 353): corrida avulsa liberada de uma
+        -- solicitação da consultora carrega endereço de entrega (a solicitação
+        -- parte de uma venda) e observações — o motoboy precisa ver pra onde ir.
+        ev.endereco_entrega, ev.observacoes,
+        ev.motoboy_id,
         (ev.created_by = ev.motoboy_id) AS auto_criado,
         ve.numero_venda, ve.total_venda,
         COALESCE(c.nome, ca.nome) AS cliente_nome,
@@ -109,8 +120,17 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = ev.venda_id
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
       LEFT JOIN public.contatos ca ON ca.id_contato = ev.contato_id
-      WHERE ev.motoboy_id = ${motoboyUserId}::uuid
-        AND ev.situacao <> 'cancelada'
+      -- REGRA DE NEGÓCIO (pool de motoboy — patch A2): além das corridas já
+      -- atribuídas a este motoboy, mostra também as avulsas de POOL
+      -- disponíveis (liberadas pelo responsável, ainda sem dono) — qualquer
+      -- entregador pode ver e aceitar a primeira. Uma vez aceita, motoboy_id
+      -- passa a ser deste motoboy e ela já cai no primeiro braço do OR.
+      WHERE (ev.motoboy_id = ${motoboyUserId}::uuid
+              OR (ev.is_avulso = true AND ev.situacao = 'pendente' AND ev.motoboy_id IS NULL))
+        -- REGRA DE NEGÓCIO (migration 353): 'solicitada' ainda não foi liberada
+        -- pelo responsável — o motoboy não deve ver/contar corrida que nem
+        -- entrou no fluxo de aceite ainda (some da lista dele até liberar).
+        AND ev.situacao NOT IN ('cancelada', 'solicitada')
         ${whereSituacao}
         ${whereDataInicio}
         ${whereDataFim}
@@ -120,8 +140,15 @@ export async function GET(req: NextRequest) {
     sql`
       SELECT COUNT(*)::integer AS total
       FROM alissonerp.entregas_venda ev
-      WHERE ev.motoboy_id = ${motoboyUserId}::uuid
-        AND ev.situacao <> 'cancelada'
+      -- REGRA DE NEGÓCIO (pool de motoboy — patch A2): mesmo critério da query
+      -- de itens acima — conta também as avulsas de pool disponíveis, senão a
+      -- paginação (totalPages) fica errada em relação à lista mostrada.
+      WHERE (ev.motoboy_id = ${motoboyUserId}::uuid
+              OR (ev.is_avulso = true AND ev.situacao = 'pendente' AND ev.motoboy_id IS NULL))
+        -- REGRA DE NEGÓCIO (migration 353): 'solicitada' ainda não foi liberada
+        -- pelo responsável — o motoboy não deve ver/contar corrida que nem
+        -- entrou no fluxo de aceite ainda (some da lista dele até liberar).
+        AND ev.situacao NOT IN ('cancelada', 'solicitada')
         ${whereSituacao}
         ${whereDataInicio}
         ${whereDataFim}
@@ -141,8 +168,17 @@ export async function GET(req: NextRequest) {
             AND EXISTS (SELECT 1 FROM alissonerp.pagamentos_motoboy_itens pmi WHERE pmi.entrega_id = ev.id)
         ), 0)::numeric AS ja_recebido
       FROM alissonerp.entregas_venda ev
+      -- REGRA DE NEGÓCIO (pool de motoboy — patch A2): os CARDS (contadores)
+      -- de propósito NÃO entram no OR de pool acima — continuam contando só o
+      -- que já é deste motoboy (ev.motoboy_id = motoboyUserId). Corrida de
+      -- pool ainda sem dono não pertence a ninguém e não tem acerto financeiro
+      -- vinculado a este motoboy; se contasse aqui, TODO entregador veria os
+      -- mesmos números inflados com corridas que talvez nunca peguem.
       WHERE ev.motoboy_id = ${motoboyUserId}::uuid
-        AND ev.situacao <> 'cancelada'
+        -- REGRA DE NEGÓCIO (migration 353): 'solicitada' ainda não foi liberada
+        -- pelo responsável — o motoboy não deve ver/contar corrida que nem
+        -- entrou no fluxo de aceite ainda (some da lista dele até liberar).
+        AND ev.situacao NOT IN ('cancelada', 'solicitada')
         ${dataInicio
           ? sql`AND ev.created_at >= ${dataInicio}::date`
           : sql`AND ev.created_at >= date_trunc('month', now())`}
@@ -171,6 +207,11 @@ export async function GET(req: NextRequest) {
       cliente_nome: r.cliente_nome,
       is_avulso: Boolean(r.is_avulso),
       descricao_avulso: r.descricao_avulso ? String(r.descricao_avulso) : null,
+      endereco_entrega: r.endereco_entrega ? String(r.endereco_entrega) : null,
+      observacoes: r.observacoes ? String(r.observacoes) : null,
+      // REGRA DE NEGÓCIO (pool — patch A2): motoboy_id null = corrida de pool
+      // ainda sem dono (o frontend usa isso pro selo "disponível").
+      motoboy_id: r.motoboy_id ? String(r.motoboy_id) : null,
       auto_criado: Boolean(r.auto_criado),
       foi_pago: Boolean(r.foi_pago),
     })),

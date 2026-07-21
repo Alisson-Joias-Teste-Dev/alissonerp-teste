@@ -59,6 +59,14 @@ const CHAVES = [
   // serviços não vitalícios (regra do Jonathan, 17/07 — docs/regras-negocio/ordens.md).
   // NÃO cobre venda não entregue: essa trava é seca, sem saída por aprovação.
   "aprovadores_garantia_fora_prazo",
+  // MULTI (vários UUIDs separados por vírgula): pool de quem pode liberar/recusar
+  // uma solicitação de frete avulso feita pela consultora (migration 353, modelo
+  // TAREFA/POOL, camada config-first — evento "frete_avulso" em
+  // src/lib/aprovacoes/catalogo.ts). Substitui a antiga tabela
+  // frete_avulso_liberadores — qualquer um da lista decide a MESMA tarefa de
+  // aprovação (ver módulo Tarefas, tipo 'frete_avulso'). Espelha exatamente o
+  // padrão de aprovadores_devolver_peca.
+  "aprovadores_frete_avulso",
 ] as const;
 
 // Chaves NUMÉRICAS (%) — não são UUID de aprovador, são o limiar que decide
@@ -182,6 +190,8 @@ export async function GET() {
       aprovador_alteracao_venda: configMap.get("aprovador_alteracao_venda") ?? "",
       aprovadores_conversao_reversa: configMap.get("aprovadores_conversao_reversa") ?? "",
       aprovadores_garantia_fora_prazo: configMap.get("aprovadores_garantia_fora_prazo") ?? "",
+      // MULTI: pool de liberadores do frete avulso solicitado (migration 353).
+      aprovadores_frete_avulso: configMap.get("aprovadores_frete_avulso") ?? "",
       // Fase 5 (15/07): limites numéricos (%), não são UUID de aprovador — ver CHAVES_NUMERICAS.
       desconto_fallback_sem_cadastro_pct: configMap.get("desconto_fallback_sem_cadastro_pct") ?? "0",
       limite_desconto_cartao_pct: configMap.get("limite_desconto_cartao_pct") ?? "20",
@@ -309,6 +319,14 @@ export async function PUT(req: NextRequest) {
         String(body.aprovadores_garantia_fora_prazo).split(",").map((s) => s.trim()).filter(Boolean)
       )).join(",");
       updates.push({ chave: "aprovadores_garantia_fora_prazo", valor: lista });
+    }
+    // MULTI: pool de liberadores do frete avulso (migration 353, modelo TAREFA/POOL).
+    // Normaliza igual ao bloco de aprovadores_devolver_peca acima.
+    if (body.aprovadores_frete_avulso !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_frete_avulso).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_frete_avulso", valor: lista });
     }
     // Fase 5 (15/07, tela adicionada 16/07): limites em % — valida 0-100, número.
     // Sem isso gravado errado, o fallback do código (0 / 20) nunca é sobrescrito

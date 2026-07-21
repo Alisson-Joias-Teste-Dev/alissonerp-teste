@@ -128,7 +128,40 @@ export async function GET(req: NextRequest) {
       SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovadores_garantia_fora_prazo' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
+    -- frete avulso solicitado (migration 353, camada central — evento 'frete_avulso'
+    -- em src/lib/aprovacoes/catalogo.ts): tarefa nasce com tipo 'frete_avulso' em
+    -- criarFreteAvulso (src/lib/entrega-venda.ts). Chave: 'aprovadores_frete_avulso'.
+    OR (t.tipo = 'frete_avulso' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovadores_frete_avulso' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
     -- credito_loja: tags = ['credito_loja', 'gerente'|'diretor'] (vendas-credito-aprovar.ts) — tipo NULL.
+    --
+    -- ASSIMETRIA CONHECIDA (20/07) entre este SQL e o TS (eventoDaTarefa,
+    -- src/lib/aprovacoes/evento-da-tarefa.ts):
+    -- O QUÊ: esta cláusula casa a tarefa de crédito SÓ pelas TAGS
+    --   ('credito_loja' + 'gerente'|'diretor'), porque vendas-credito-aprovar.ts
+    --   (~L162-170) cria a tarefa com tags=['credito_loja', tipo] e SEM gravar a
+    --   coluna tipo. Já o TS (eventoDaTarefa ~L90-101) exige, ALÉM das tags,
+    --   que a venda ligada esteja ATIVA (venda_situacao NÃO é cancelado/
+    --   entregue/aprovado) E que vendas_erp.aprovacao_credito_tipo esteja
+    --   preenchido — critérios que este SQL não tem como aplicar sem JOIN.
+    -- POR QUÊ: o SQL só resolve pode_decidir pra listagem/exibição de botão;
+    --   quem realmente autoriza a ação é o PATCH .../aprovacao, que chama
+    --   eventoDaTarefa com os dados da venda já resolvidos — os dois nunca
+    --   precisaram concordar 100% porque o PATCH é a fonte de verdade.
+    -- IMPACTO: numa tarefa de crédito ESTAGNADA (venda já entregue/aprovada/
+    --   cancelada, ou aprovacao_credito_tipo NULL), este SQL devolve
+    --   pode_decidir=true mas eventoDaTarefa devolve null → o 2º/3º aprovador
+    --   configurado VÊ o botão Aprovar/Rejeitar na tela e leva 403 ao clicar.
+    --   NÃO é falha de segurança — o PATCH nega corretamente (config-first
+    --   estrito) — é papercut de UX (botão fantasma numa tarefa velha).
+    -- POR QUE NÃO CORRIGIMOS AGORA: alinhar exigiria LEFT JOIN vendas_erp
+    --   nesta query inteira (usada tanto na listagem quanto no pode_decidir
+    --   por linha), num PR que já está grande (frete avulso). O efeito
+    --   negativo é só um 403 numa tarefa de crédito antiga — antes desta
+    --   correção (5fac3e5c) esses usuários não tinham botão NENHUM, então
+    --   isto não é uma regressão introduzida agora.
     OR ('credito_loja' = ANY(t.tags) AND 'gerente' = ANY(t.tags) AND EXISTS (
       SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovadora_credito_gerente' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
@@ -159,7 +192,21 @@ export async function GET(req: NextRequest) {
       t.responsavel_id, t.criado_por,
       ur.nome AS responsavel_nome,
       uc.nome AS criador_nome,
-      o.numero_ordem
+      o.numero_ordem,
+      -- REGRA DE NEGÓCIO (20/07 — correção do 2º/3º aprovador configurado): expõe
+      -- pra cada tarefa, SEM N+1 (reusa a mesma expressão SQL de multiAprovadorCond
+      -- já usada no WHERE acima), se ESTE usuário está configurado como aprovador
+      -- do evento da tarefa — mesmo critério que já libera a LISTAGEM (16/07).
+      -- O QUÊ: o front (TarefaDrawer) usa este flag pra mostrar os botões
+      --   Aprovar/Rejeitar pro 2º/3º aprovador, não só pro 1º (responsavel_id
+      --   gravado na criação, único que aparecia como aprovador_id na linha de
+      --   aprovacoes_tarefa).
+      -- POR QUÊ: sem isto, só o "sortudo" (1º da lista) vê o botão — o pool de
+      --   aprovadores configurados não funciona na prática mesmo já autorizado
+      --   pelo PATCH (podeDecidir, config-first).
+      -- IMPACTO SE REMOVIDO: volta o botão escondido pro 2º/3º aprovador, que
+      --   segue autorizado pela API mas sem jeito de clicar em nada na tela.
+      (${multiAprovadorCond}) AS pode_decidir
     FROM alissonerp.tarefas t
     LEFT JOIN alissonerp.usuarios ur ON ur.id = t.responsavel_id
     LEFT JOIN alissonerp.usuarios uc ON uc.id = t.criado_por

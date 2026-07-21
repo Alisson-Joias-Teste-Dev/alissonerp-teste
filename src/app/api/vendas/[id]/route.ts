@@ -238,6 +238,22 @@ export async function GET(
     ORDER BY id DESC
   `;
 
+  // REGRA DE NEGÓCIO (V3 — solicitação de frete avulso pela consultora): expõe
+  // a ÚLTIMA corrida avulsa vinculada a esta venda, para a tela mostrar o
+  // status no lugar do botão "Solicitar frete avulso" (aguardando decisão /
+  // liberada / recusada + motivo). Só entregas_venda com is_avulso=true E
+  // venda_id preenchido chegam aqui (nasce assim só pelo fluxo de solicitação
+  // da consultora — ver criarFreteAvulso em @/lib/entrega-venda).
+  // IMPACTO SE REMOVIDO: a tela não tem como saber se já existe solicitação
+  // sem abrir o módulo de Tarefas — o botão reapareceria sempre disponível.
+  const [freteAvulso] = await sql`
+    SELECT id, situacao, motivo_recusa, frete_cobrado, created_at
+    FROM alissonerp.entregas_venda
+    WHERE venda_id = ${vendaId} AND is_avulso = true
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+
   const [excecaoEntrega] = await sql`
     SELECT id
     FROM alissonerp.vendas_entrega_excecoes_pagamento
@@ -271,6 +287,13 @@ export async function GET(
       valor_total_devolvido: Number(d.valor_total_devolvido),
       valor_compensacao: Number(d.valor_compensacao),
     })),
+    frete_avulso: freteAvulso ? {
+      id: Number(freteAvulso.id),
+      situacao: String(freteAvulso.situacao),
+      motivo_recusa: freteAvulso.motivo_recusa ?? null,
+      frete_cobrado: Number(freteAvulso.frete_cobrado),
+      created_at: freteAvulso.created_at,
+    } : null,
     total_produtos: Number(venda.total_produtos),
     total_desconto: Number(venda.total_desconto),
     total_frete:    Number(venda.total_frete),

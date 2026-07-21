@@ -34,7 +34,11 @@
  *   9. compra_comercial
  *   10. recebimento_metal
  *   11. compra_metal
- *   12. qualquer outro (geral, sangria, inventario_solicitacao, conversao*) → null
+ *   12. garantia_fora_prazo
+ *   13. frete_avulso (tipo exclusivo, migration 353 — sem handler de efeito neste
+ *       PATCH; o handler de domínio, mais abaixo no route.ts, chama podeDecidir
+ *       direto — este mapeamento serve só pro portão genérico saber que existe evento)
+ *   14. qualquer outro (geral, sangria, inventario_solicitacao, conversao*) → null
  *
  * `inventario_solicitacao` devolve null DE PROPÓSITO: existe a chave
  *   aprovador_inventario no banco, mas o evento não foi modelado no CATALOGO —
@@ -122,6 +126,13 @@ export function eventoDaTarefa(
   // portão genérico saber que existe evento e delegar a decisão pra podeDecidir.
   if (tipo === "garantia_fora_prazo") {
     return "garantia_fora_prazo";
+  }
+
+  // Frete avulso solicitado (migration 353): tarefa nasce com tipo 'frete_avulso',
+  // exclusivo desse fluxo — não compete com nenhum outro tipo/tag acima, então a
+  // posição no final da cadeia é segura (não rouba tarefa de ninguém).
+  if (tipo === "frete_avulso") {
+    return "frete_avulso";
   }
 
   return null;

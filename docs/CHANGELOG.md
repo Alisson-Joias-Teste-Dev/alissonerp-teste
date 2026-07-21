@@ -2,6 +2,64 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(frete-avulso): solicitação da venda vira tarefa, pool de aprovadores e pool de motoboy (vX.Y.Z (a definir no merge))
+
+**O quê:** frete avulso (corrida de motoboy sem itens vinculados) ganha um passo de **solicitação**: a
+consultora pede a corrida **de dentro da própria venda** (`VendaDetalheClient`, visível só com a venda em
+`aprovado`/`em_rota`/`entregue`), herdando cliente/endereço, sem escolher motoboy nem responsável, e sem
+lançar custo. A solicitação vira uma **tarefa de aprovação** (tipo `frete_avulso`) para o **pool** configurado
+em Configurações › Aprovadores (chave `aprovadores_frete_avulso`) — **qualquer** um da lista decide pela
+tela de Tarefas: aprova (libera a corrida e só aí lança o saldo de frete na gerente) ou rejeita (exige
+motivo, sem custo). Corrida liberada cai num **pool sem dono** (`motoboy_id NULL`) e **qualquer** entregador
+ativo pode aceitar — o aceite é um claim atômico no banco (evita dois motoboys donos da mesma corrida).
+
+**Como:**
+- Novo estado `solicitada` no enum `enum_entrega_situacao` (antes de `pendente`).
+- Colunas novas em `entregas_venda`: `endereco_entrega`, `liberada_por`, `liberada_em`, `motivo_recusa`,
+  `tarefa_aprovacao_id` (vínculo com a tarefa criada na solicitação).
+- `chk_entrega_origem` recriada para aceitar `venda_id` em avulso (antes só entrega normal aceitava).
+- **Sem tabela própria de liberadores** — reusa a engrenagem existente do módulo Tarefas
+  (`tarefas` + `aprovacoes_tarefa`) e a chave de config MULTI `aprovadores_frete_avulso`
+  (`GET/PATCH /api/configuracoes/aprovadores`), mesmo padrão de `aprovadores_devolver_peca`.
+  **Decisão plugada na camada central de aprovações** (`src/lib/aprovacoes/` — merge com a
+  main, 20/07): evento `frete_avulso` no `CATALOGO`, mapeado em `eventoDaTarefa` e autorizado
+  por `podeDecidir` (política config-first estrita — só quem está em `aprovadores_frete_avulso`
+  decide, nem admin) no `PATCH /api/tarefas/[id]/aprovacao`; visibilidade na fila via a mesma
+  cláusula genérica `multiAprovadorCond` de `GET /api/tarefas`. Substituiu o pool "na unha"
+  (`isPoolFreteAvulso`/flag `pode_decidir_pool`) que a feature tinha antes do merge — mesmo
+  comportamento, menos código duplicado, herda os testes do módulo central. `criarFreteAvulso`
+  continua sendo a fonte única pra ESCOLHER o `responsavel_id` da tarefa e notificar o pool na
+  criação (`listarAprovadoresFreteAvulso`, uso legítimo — não é autorização).
+- Rotas: `POST /api/entregas-venda/frete-avulso` (criação/solicitação), `/[id]/aceitar-avulso`,
+  `/[id]/confirmar-avulso`. Decisão (aprovar/rejeitar) passa por `PATCH /api/tarefas/[id]/aprovacao`,
+  não por rota própria.
+- Tela de entregas **não ganha aba própria** — a decisão acontece em `/tarefas`, como qualquer outra
+  aprovação do sistema.
+- Blindagem: a listagem/contagem SSR de `/entregas-venda` (sem filtro), `GET /api/entregas-venda` e o
+  app do motoboy (`GET /motoboy/minhas`) **excluem `cancelada` e `solicitada`** por padrão — solicitações
+  pendentes de decisão não vazam para a lista operacional nem inflam o card "Total". O pagamento em lote
+  do motoboy (`motoboy/pagar`) só seleciona `situacao='confirmada'`, e uma corrida de pool (`motoboy_id
+  NULL`) nunca chega em `confirmada` sem antes passar pelo claim atômico do aceite (que sempre grava o
+  dono) — estrutural, não depende de filtro.
+- Blindagem (janela de entrega): o gate do botão "Solicitar frete avulso" existia só no client
+  (`aprovado`/`em_rota`/`entregue`); `criarFreteAvulso` passou a **revalidar a mesma janela no servidor**
+  quando é solicitação, fechando o bypass de chamar a API direto com a venda fora da janela.
+
+**Débitos técnicos conhecidos (ver `docs/regras-negocio/entregas.md` §8):** pool sem gating de
+região/loja (decisão de produto); card "Pendentes" não conta o pool separadamente; cancelar um avulso
+liberado não estorna o saldo já lançado; entregador aceita/registra sem exigir cadastro prévio em
+`alissonerp.motoboys`; diretor fora da lista de config não decide a tarefa (limitação pré-existente de
+todos os tipos de aprovação no dispatcher, não específica de frete avulso). **Achado no merge (20/07):**
+o 2º+ aprovador configurado no pool (que não seja o `aprovador_id` gravado na criação da tarefa) toma
+403 tentando ABRIR a tarefa (`GET /api/tarefas/[id]`, aba Comentários) e não vê o botão Aprovar/Rejeitar
+no `TarefaDrawer` — ele CONSEGUE decidir via API (`podeDecidir` autoriza certo), só falta acesso pela UI.
+Mesma limitação já existe hoje pra TODOS os outros tipos multi-aprovador (`compra_comercial`,
+`conversao_reversa`, `garantia_fora_prazo` etc.) — não é regressão específica de frete avulso, é gap
+pré-existente da camada central que precisa de decisão do Jonathan se/quando for endereçado.
+
+**Status:** migration 353 **já aplicada em homolog**. Produção ainda pendente. Ver
+`docs/regras-negocio/entregas.md` para o fluxo completo e a matriz de permissão a testar.
+
 ## feat(garantia): regras de abertura de ordem de garantia
 
 **O quê (regras aprovadas pelo Jonathan em 17/07/2026 — `docs/regras-negocio/ordens.md`):**

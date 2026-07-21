@@ -84,6 +84,10 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     WHERE id = ${user.id}::uuid LIMIT 1
   `;
 
+  // REGRA DE NEGÓCIO (migration 353 — REVERTIDO na virada V2): o portão
+  // especial para o liberador de frete avulso (aba "Solicitações") foi
+  // removido junto com a aba — volta a ser role-only. A V3 recria o acesso
+  // à solicitação/decisão de outra forma (tarefa, não uma aba própria aqui).
   if (!usuario || !ROLES_PERMITIDOS.includes(usuario.role as string)) {
     redirect("/");
   }
@@ -108,9 +112,16 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     ? sql`AND ve.vendedor_id = ${vendedorId}`
     : sql``;
 
+  // REGRA DE NEGÓCIO (frete avulso): a lista operacional NÃO mostra
+  // 'cancelada' nem 'solicitada' por padrão — 'solicitada' é a etapa
+  // "aguardando liberação" do avulso e não é uma entrega operável ainda
+  // (fix do vazamento SSR mantido da virada V2 — mesmo sem a aba própria de
+  // solicitações, o default continua excluindo os dois).
+  // IMPACTO SE REMOVIDO: solicitações pendentes de liberação vazam para a
+  // lista principal e inflam a contagem "total" para todo mundo.
   const whereSituacao = situacao
     ? sql`AND ev.situacao = ${situacao}`
-    : sql``;
+    : sql`AND ev.situacao NOT IN ('cancelada', 'solicitada')`;
 
   // Filtro de busca: código de entrega ou número da venda (case-insensitive)
   const whereBusca = busca
