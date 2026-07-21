@@ -699,6 +699,58 @@ export async function calcularBloqueioReposicao(
   };
 }
 
+/**
+ * Verifica se algum dos itens informados já está numa entrega ABERTA
+ * (situação `pendente` ou `em_rota` — ainda não confirmada nem cancelada).
+ *
+ * REGRA DE NEGÓCIO (bug pré-existente, fix 21/07 — "Marcar Entrega duplica
+ * linha"): `criarEntrega` grava a linha `entregas_venda` já em `pendente` no
+ * momento do clique — a confirmação (código A/B) acontece DEPOIS. Só que
+ * `vw_entregas_pendentes` (migration 285) desconta apenas entregas
+ * `situacao='confirmada'`. Resultado: enquanto a 1ª entrega não é confirmada
+ * (ou cancelada), o saldo pendente do item continua aparecendo CHEIO — se o
+ * operador abrir "Marcar Entrega" de novo para os MESMOS itens, o sistema
+ * deixa criar uma 2ª linha `entregas_venda` pendente para o mesmo item
+ * (evidência: venda 15500 em homolog, entregas 101/102, mesmos itens, ambas
+ * pendentes). Este guard fecha esse buraco.
+ *
+ * GRANULARIDADE — por ITEM (`item_venda_id`), não por venda inteira: uma
+ * venda pode ter uma entrega aberta para o item A e, ao mesmo tempo, montar
+ * uma entrega NOVA só com o item B (saldo de B ainda intocado) — isso é
+ * entrega PARCIAL legítima e não pode ser barrada. Barrar por venda inteira
+ * impediria exatamente esse fluxo (ex.: itens prontos saem hoje, o item em
+ * reposição sai depois — ver calcularBloqueioReposicao, mesmo princípio).
+ *
+ * ESCOPO — só entrega NORMAL: só existe linha em `entregas_venda_itens` para
+ * entregas criadas por `criarEntrega` (frete avulso — `criarFreteAvulso` —
+ * nunca insere itens, é outra função, ver docs/regras-negocio/entregas.md
+ * §7 chk_entrega_origem). Este guard não precisa (e não deve) filtrar
+ * `is_avulso` — a própria tabela de itens já restringe o universo.
+ *
+ * IMPACTO SE REMOVIDO: volta o bug — "Marcar Entrega" 2x nos mesmos itens
+ * sem confirmar/cancelar a 1ª cria uma 2ª linha pendente para o mesmo item
+ * (código de verificação e corrida duplicados para a mesma mercadoria).
+ */
+async function buscarItemJaEmEntregaAberta(
+  db: DbSql,
+  itemVendaIds: number[],
+): Promise<{ itemVendaId: number; codigoEntrega: string } | null> {
+  if (itemVendaIds.length === 0) return null;
+  const [row] = await db`
+    SELECT evi.item_venda_id, ev.codigo_entrega
+    FROM alissonerp.entregas_venda_itens evi
+    JOIN alissonerp.entregas_venda ev ON ev.id = evi.entrega_id
+    WHERE evi.item_venda_id = ANY(${itemVendaIds})
+      AND ev.situacao IN ('pendente', 'em_rota')
+    LIMIT 1
+  `;
+  if (!row) return null;
+  return {
+    itemVendaId: Number(row.item_venda_id),
+    codigoEntrega: String(row.codigo_entrega),
+  };
+}
+
 // ─── 4. Criação de Entrega ────────────────────────────────────────────────────
 
 /**
@@ -920,6 +972,21 @@ export async function criarEntrega(
   // (O bloqueio de reposição por item já foi aplicado acima, junto com a
   //  validação de saldo dos itens e da entrega 'total'.)
 
+  // 6. Trava de entrega duplicada em aberto (fix 21/07 — checagem "amigável",
+  // FORA da transação, para devolver o erro cedo com o código da entrega
+  // aberta. Não é a barreira final: dois cliques quase simultâneos passam
+  // os dois por aqui (sem lock) — a barreira que garante atomicidade de
+  // verdade é o re-check DENTRO da transação, com FOR UPDATE, logo abaixo.
+  // Ver buscarItemJaEmEntregaAberta para a regra de negócio completa.
+  const itemIds = params.itens.map((i) => i.itemVendaId);
+  const duplicadoAntesDaTx = await buscarItemJaEmEntregaAberta(sql, itemIds);
+  if (duplicadoAntesDaTx) {
+    throw new Error(
+      `Já existe uma entrega em aberto (${duplicadoAntesDaTx.codigoEntrega}) para esta venda. ` +
+        "Confirme ou cancele a entrega em aberto antes de criar outra.",
+    );
+  }
+
   // 7. Cálculo do frete
   const regiao = params.regiao ?? null;
   const freteMotoboyCalculado = regiao
@@ -933,6 +1000,38 @@ export async function criarEntrega(
   // ─── Transação atômica ────────────────────────────────────────────────────
 
   const entregaBase = await sql.begin(async (tx: DbSql) => {
+    // TRAVA ATÔMICA de entrega duplicada (fix 21/07 — fecha a corrida do
+    // duplo-clique que a checagem "amigável" acima não fecha sozinha):
+    // bloqueia (FOR UPDATE) as linhas dos itens da venda ANTES de reconferir
+    // se algum já está em entrega aberta. Duas requisições quase
+    // simultâneas para o MESMO item serializam aqui — a 2ª só adquire o lock
+    // depois que a 1ª confirma (COMMIT) ou desiste (ROLLBACK) a própria
+    // transação; quando a 2ª finalmente lê, já enxerga a linha
+    // entregas_venda_itens que a 1ª acabou de gravar (READ COMMITTED: cada
+    // comando dentro da transação vê o estado já commitado mais recente) e
+    // aborta. Mesmo princípio do CLAIM atômico de aceitarFreteAvulso (UPDATE
+    // condicional dentro da tx) — aqui não há linha para UPDATE ainda (a
+    // entrega nem existe), então o lock recai sobre o recurso que TODAS as
+    // tentativas concorrentes para o mesmo item têm em comum: a própria
+    // linha do item vendido.
+    // IMPACTO SE REMOVIDO: a checagem de fora da transação sozinha permite
+    // que duas requisições simultâneas passem as duas (nenhuma vê a linha da
+    // outra ainda, porque nenhuma foi commitada) e criem 2 entregas abertas
+    // para o mesmo item — exatamente o bug original, só que via duplo-clique
+    // em vez de reabrir o modal depois.
+    await tx`
+      SELECT id FROM alissonerp.itens_venda_erp
+      WHERE id = ANY(${itemIds})
+      FOR UPDATE
+    `;
+    const duplicadoNaTx = await buscarItemJaEmEntregaAberta(tx, itemIds);
+    if (duplicadoNaTx) {
+      throw new Error(
+        `Já existe uma entrega em aberto (${duplicadoNaTx.codigoEntrega}) para esta venda. ` +
+          "Confirme ou cancele a entrega em aberto antes de criar outra.",
+      );
+    }
+
     // Gerar códigos dentro da transação para atomicidade
     const codigoEntrega = await gerarCodigoEntrega(tx);
     const codigoCliente = await gerarCodigoVerificacao(tx);
