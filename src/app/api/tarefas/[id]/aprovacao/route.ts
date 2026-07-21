@@ -60,6 +60,27 @@ class ErroComStatus extends Error {
   }
 }
 
+/**
+ * REGRA DE NEGÓCIO (BLOCO 2, jul/2026 — mensagem clara de auto-aprovação):
+ * traduz o `motivo` de ResultadoDecisao (src/lib/aprovacoes/autoridade.ts) pra
+ * texto que o solicitante entende, SÓ pro caso "você é o único do pool e não
+ * pode aprovar o próprio pedido" (motivo "aprovador_e_o_proprio_solicitante").
+ * Os demais motivos (não configurado, não é aprovador) continuam com o "Sem
+ * permissão" genérico de sempre — não é o caso que precisa de explicação
+ * (o Jonathan pediu mensagem clara especificamente pro caso de segregação de
+ * função ficar sem ninguém pra decidir).
+ * IMPACTO SE REMOVIDO: quem solicita e é o único aprovador configurado vê
+ * "Sem permissão" sem entender que a solução é configurar mais um aprovador.
+ */
+function mensagemNegacaoAprovacao(motivo: string | undefined): string {
+  if (motivo === "aprovador_e_o_proprio_solicitante") {
+    return "Você solicitou este frete avulso — quem solicita não pode aprovar o próprio pedido. " +
+      "No momento não há outro aprovador configurado nesse pool; peça para adicionar mais alguém " +
+      "em Configurações › Aprovadores.";
+  }
+  return "Sem permissão";
+}
+
 const AprovacaoTarefaPostSchema = z.object({
   aprovador_id: z.string().min(1, "obrigatório"),
 }).passthrough();
@@ -408,12 +429,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // enxergava o UUID gravado em aprovacoes_tarefa.aprovador_id (BUG 1).
   // IMPACTO SE REMOVIDO/MOVIDO: o portão volta a decidir sem saber o evento —
   // mesmo bug do 2º aprovador configurado tomando 403.
+  // REGRA DE NEGÓCIO (BLOCO 2, jul/2026 — pool decidido pelo DADO, não pela tag):
+  // join com entregas_venda pelo mesmo vínculo tarefa_aprovacao_id (migration 353)
+  // que já é usado em tarefas/[id]/route.ts (GET) e listarAprovadoresFreteAvulso* —
+  // traz `pagante` (migration 354) pra dentro de tarefaInfo, com o MESMO alias
+  // `frete_pagante` do GET, pra alimentar eventoDaTarefa. Substitui a leitura da
+  // tag `frete_pagante:loja`, que o próprio solicitante podia editar via PATCH
+  // /api/tarefas/[id] (tags é array livre, sem validação) e assim escolher qual
+  // pool decidia a própria tarefa.
+  // IMPACTO SE REMOVIDO: eventoDaTarefa volta a decidir pela tag manipulável —
+  // reabre o caminho de trocar a tag pra mudar quem aprova o frete avulso.
   const [tarefaInfo] = await sql`
     SELECT t.venda_id, t.tags, t.tipo,
            ve.aprovacao_credito_tipo,
-           ve.situacao AS venda_situacao
+           ve.situacao AS venda_situacao,
+           evfa.pagante AS frete_pagante
     FROM alissonerp.tarefas t
     LEFT JOIN alissonerp.vendas_erp ve ON ve.id = t.venda_id
+    LEFT JOIN alissonerp.entregas_venda evfa ON evfa.tarefa_aprovacao_id = t.id
     WHERE t.id = ${Number(id)}
   `;
   const tagsRaw = tarefaInfo?.tags;
@@ -434,13 +467,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // tarefa 301 de desconto em homolog).
   // IMPACTO SE REMOVIDO: volta o 403 pro 2º/3º aprovador configurado.
   const evento = eventoDaTarefa(tarefaInfo?.tipo ?? null, tags, tarefaInfo);
-  const ehAprovadorGravado = String(aprovacao.aprovador_id) === user.id;
+
+  // REGRA DE NEGÓCIO (BLOCO 2, jul/2026 — sem auto-aprovação no frete avulso):
+  // `ehFreteAvulsoTipo` escopa as duas correções abaixo (exclusão do solicitante
+  // + ctx no podeDecidir) SÓ pra este tipo — os outros ~11 tipos deste portão
+  // genérico continuam exatamente como estavam (avaliado e reportado: mudar
+  // aqui de forma global arriscava dar 403 em fluxo já em produção onde o
+  // aprovador_id gravado hoje coincide com o solicitante por outro motivo —
+  // não investigado caso a caso; candidato a PR próprio).
+  // O BUG: `aprovacoes_tarefa.aprovador_id` é gravado, na criação, com o
+  // PRIMEIRO UUID do pool configurado (criarFreteAvulso: responsavelPrincipal =
+  // listaAprovadoresFrete[0]) — se quem está SOLICITANDO também está no pool E
+  // é o primeiro da lista, `aprovador_id` acaba sendo o próprio UUID do
+  // solicitante. Sem esta exclusão, `ehAprovadorGravado` (linha abaixo) dava
+  // bypass TOTAL no portão config-first: nem chegava a chamar podeDecidir.
+  // IMPACTO SE REMOVIDO: quem está no pool solicita e aprova o PRÓPRIO pedido
+  // de frete avulso sozinho, sem segregação de função nenhuma.
+  const ehFreteAvulsoTipo = tarefaInfo?.tipo === "frete_avulso";
+  const ehAprovadorGravado =
+    String(aprovacao.aprovador_id) === user.id &&
+    !(ehFreteAvulsoTipo && String(aprovacao.solicitante_id) === user.id);
   let autorizado = ehAprovadorGravado;
+  let motivoNegado: string | undefined;
   if (!autorizado && evento) {
-    autorizado = (await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, evento)).pode;
+    const ctxPodeDecidir = ehFreteAvulsoTipo ? { solicitanteId: String(aprovacao.solicitante_id) } : undefined;
+    const decisaoGenerica = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, evento, ctxPodeDecidir);
+    autorizado = decisaoGenerica.pode;
+    motivoNegado = decisaoGenerica.motivo;
   }
   if (!autorizado) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    return NextResponse.json({ error: mensagemNegacaoAprovacao(motivoNegado) }, { status: 403 });
   }
 
   // REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — frete avulso, pré-checagens ANTES de
@@ -458,12 +514,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // mais abaixo, dentro da transação).
   // IMPACTO SE REMOVIDO: volta o 403/400 com a tarefa já decidida no banco.
   if (tarefaInfo?.tipo === "frete_avulso") {
+    // REGRA DE NEGÓCIO (BLOCO 2, jul/2026): mesmo ctx.solicitanteId do portão
+    // genérico acima — esta chamada é redundante em condições normais (o portão
+    // já barrou quem não pode chegar até aqui), mas é mantida por defesa em
+    // profundidade (comentário original desta pré-checagem, logo abaixo) e
+    // porque é ELA quem produz o `motivo` usado na mensagem clara pro caso de
+    // auto-aprovação.
     const decFreteAvulsoPreCheck = await podeDecidir(
       { id: user.id, role: usuarioLogado?.role ?? null },
       evento ?? "frete_avulso",
+      { solicitanteId: String(aprovacao.solicitante_id) },
     );
     if (!decFreteAvulsoPreCheck.pode) {
-      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+      return NextResponse.json({ error: mensagemNegacaoAprovacao(decFreteAvulsoPreCheck.motivo) }, { status: 403 });
     }
     if (body.decisao === "rejeitado" && !body.motivo?.trim()) {
       return NextResponse.json({ error: "Motivo é obrigatório para recusar o frete avulso" }, { status: 400 });

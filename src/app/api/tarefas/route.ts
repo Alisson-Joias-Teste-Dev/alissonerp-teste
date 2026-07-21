@@ -133,15 +133,25 @@ export async function GET(req: NextRequest) {
     -- criarFreteAvulso (src/lib/entrega-venda.ts). Chave: 'aprovadores_frete_avulso'.
     -- REGRA "QUEM PAGA" (migration 354, 21/07): a MESMA tarefa (tipo='frete_avulso')
     -- espelha os 2 eventos do catálogo (frete_avulso / frete_avulso_loja, ver
-    -- eventoDaTarefa) pela tag 'frete_pagante:loja' — sem a tag = pagante='cliente'
-    -- (chave de sempre); com a tag = pagante='loja' (chave nova, autoriza o CUSTO).
+    -- eventoDaTarefa) por evfa.pagante (entregas_venda, join abaixo) — NULL/
+    -- 'cliente' = pagante='cliente' (chave de sempre); 'loja' = pagante='loja'
+    -- (chave nova, autoriza o CUSTO).
+    -- FIX (BLOCO 2, jul/2026): era pela tag 'frete_pagante:loja' em t.tags —
+    -- array que o PRÓPRIO solicitante podia editar via PATCH /api/tarefas/[id]
+    -- (isOwner inclui criado_por, sem validação de campo). Trocar a tag mudava
+    -- pra qual pool a tarefa aparecia na listagem SEM mudar o custo real —
+    -- agora casa pelo mesmo dado que eventoDaTarefa usa (evfa.pagante), que o
+    -- solicitante não edita. evfa é o LEFT JOIN com entregas_venda pelo
+    -- vínculo tarefa_aprovacao_id (migration 353), declarado no FROM abaixo.
     -- IMPACTO SE UMA DAS DUAS CLÁUSULAS FOR REMOVIDA: quem só está na lista da
     -- loja deixaria de ver o botão nas tarefas de custo da loja (ou vice-versa).
-    OR (t.tipo = 'frete_avulso' AND NOT ('frete_pagante:loja' = ANY(t.tags)) AND EXISTS (
+    -- IMPACTO SE VOLTAR A LER A TAG: reabre o caminho de o solicitante trocar
+    -- a tag e mudar pra qual pool a tarefa aparece na listagem.
+    OR (t.tipo = 'frete_avulso' AND COALESCE(evfa.pagante, 'cliente') <> 'loja' AND EXISTS (
       SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovadores_frete_avulso' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
-    OR (t.tipo = 'frete_avulso' AND 'frete_pagante:loja' = ANY(t.tags) AND EXISTS (
+    OR (t.tipo = 'frete_avulso' AND COALESCE(evfa.pagante = 'loja', false) AND EXISTS (
       SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovadores_frete_avulso_loja' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
@@ -221,6 +231,13 @@ export async function GET(req: NextRequest) {
     LEFT JOIN alissonerp.usuarios ur ON ur.id = t.responsavel_id
     LEFT JOIN alissonerp.usuarios uc ON uc.id = t.criado_por
     LEFT JOIN alissonerp.ordens o ON o.id = t.ordem_id
+    -- REGRA DE NEGÓCIO (BLOCO 2, jul/2026 — ver multiAprovadorCond acima): traz
+    -- entregas_venda.pagante pra resolver frete_avulso x frete_avulso_loja pelo
+    -- DADO (não pela tag). 1:1 por desenho (tarefa_aprovacao_id só é gravado
+    -- por criarFreteAvulso, uma vez, pra tarefas tipo='frete_avulso') — sem
+    -- risco de duplicar linha pras tarefas dos outros tipos (ev.pagante fica
+    -- NULL e as cláusulas acima já filtram por t.tipo = 'frete_avulso').
+    LEFT JOIN alissonerp.entregas_venda evfa ON evfa.tarefa_aprovacao_id = t.id
     WHERE 1=1
       -- REGRA DE NEGÓCIO (Fase 5, Jonathan 15/07): a tarefa de conversão reversa
       -- SÓ é visível pros aprovadores configurados em Configurações → Aprovadores —

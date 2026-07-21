@@ -36,7 +36,10 @@
  *   11. compra_metal
  *   12. garantia_fora_prazo
  *   13. frete_avulso / frete_avulso_loja (tipo exclusivo, migration 353; split por
- *       "quem paga" na migration 354 — sem handler de efeito neste PATCH; o handler
+ *       "quem paga" na migration 354, decidido por `tarefaInfo.frete_pagante`
+ *       — entregas_venda.pagante, NÃO mais pela tag `frete_pagante:loja`, que
+ *       era editável pelo solicitante — ver BLOCO 2, jul/2026, comentário no
+ *       próprio bloco abaixo). Sem handler de efeito neste PATCH; o handler
  *       de domínio, mais abaixo no route.ts, chama podeDecidir direto — este
  *       mapeamento serve só pro portão genérico saber que existe evento E qual
  *       dos dois — ver bloco próprio abaixo)
@@ -61,6 +64,18 @@ export interface TarefaInfoParaEvento {
   venda_id?: number | string | null;
   venda_situacao?: string | null;
   aprovacao_credito_tipo?: string | null;
+  // REGRA DE NEGÓCIO (BLOCO 2, jul/2026 — pool decidido pelo DADO, não pela tag):
+  // `entregas_venda.pagante` (migration 354) da entrega ligada a esta tarefa
+  // (join por tarefa_aprovacao_id, feito pelo caller — ver aprovacao/route.ts e
+  // tarefas/[id]/route.ts, que já espelham o padrão de aprovacao_credito_tipo
+  // abaixo). Substitui a tag `frete_pagante:loja`, que era editável pelo próprio
+  // solicitante via PATCH /api/tarefas/[id] (tags é array livre, sem validação)
+  // — trocar a tag mudava qual pool decidia (ou pool NENHUM, se a tag fosse
+  // removida por engano). O dado em entregas_venda é gravado uma única vez em
+  // criarFreteAvulso e não é editável por este endpoint.
+  // IMPACTO SE REMOVIDO: volta a fonte de verdade pra tag manipulável pelo
+  // próprio solicitante — quem pediu decide, na prática, qual pool aprova.
+  frete_pagante?: string | null;
 }
 
 export function eventoDaTarefa(
@@ -136,20 +151,30 @@ export function eventoDaTarefa(
   //
   // REGRA "QUEM PAGA" (migration 354, 21/07, decisão do Jonathan): a MESMA tarefa
   // (tipo='frete_avulso') tem 2 eventos possíveis no catálogo — a diferença é só
-  // QUEM decide, não o fluxo. criarFreteAvulso (entrega-venda.ts) grava a tag
-  // `frete_pagante:loja` na criação quando pagante='loja'; SEM essa tag (pagante
-  // 'cliente', ou tarefa antiga da migration 353 antes deste campo existir) cai
-  // no evento original 'frete_avulso' (chave aprovadores_frete_avulso) —
-  // preserva compatibilidade com o que já existia. Optei por 2 EVENTOS (em vez
-  // de 1 evento com 2 configKeys) porque configKeysEfetivas (autoridade.ts) já
-  // foi simplificada de propósito pra NUNCA depender de contexto pra escolher a
-  // chave (Fase 3e) — reintroduzir isso ali afetaria os outros ~20 eventos que
-  // usam a mesma função. 2 eventos é aditivo (só este arquivo + catálogo).
-  // IMPACTO SE ALTERADO: inverter a tag (ex.: marcar 'cliente' em vez de 'loja')
-  // sem atualizar aqui faz o aprovador errado decidir (ou nenhum, se a chave nova
-  // estiver vazia).
+  // QUEM decide, não o fluxo.
+  //
+  // FIX (BLOCO 2, jul/2026 — pool decidido pelo DADO, não pela tag): a escolha
+  // era feita pela tag `frete_pagante:loja`, gravada em criarFreteAvulso — mas
+  // essa tag vivia em `tarefas.tags`, um array livre que o PRÓPRIO solicitante
+  // podia editar via PATCH /api/tarefas/[id] (isOwner inclui criado_por, sem
+  // nenhuma validação de campo). Trocar/remover a tag mudava qual pool decidia
+  // (ou zerava os dois, se a tag sumisse). Agora usa `tarefaInfo.frete_pagante`
+  // — o valor de `entregas_venda.pagante` (migration 354), gravado UMA vez em
+  // criarFreteAvulso e nunca reexposto como editável por este endpoint. SEM o
+  // campo (pagante='cliente', ou tarefa antiga da migration 353 antes deste
+  // campo existir) cai no evento original 'frete_avulso' (chave
+  // aprovadores_frete_avulso) — preserva compatibilidade com o que já existia.
+  // Optei por 2 EVENTOS (em vez de 1 evento com 2 configKeys) porque
+  // configKeysEfetivas (autoridade.ts) já foi simplificada de propósito pra
+  // NUNCA depender de contexto pra escolher a chave (Fase 3e) — reintroduzir
+  // isso ali afetaria os outros ~20 eventos que usam a mesma função. 2 eventos
+  // é aditivo (só este arquivo + catálogo).
+  // IMPACTO SE ALTERADO/REMOVIDO: volta a fonte de verdade pra tag manipulável
+  // pelo solicitante — quem pediu escolhe, na prática, quem decide (inclusive
+  // mandando um frete pago pela LOJA pro pool do CLIENTE, ou travando a tarefa
+  // num pool vazio).
   if (tipo === "frete_avulso") {
-    return tags.includes("frete_pagante:loja") ? "frete_avulso_loja" : "frete_avulso";
+    return tarefaInfo?.frete_pagante === "loja" ? "frete_avulso_loja" : "frete_avulso";
   }
 
   return null;

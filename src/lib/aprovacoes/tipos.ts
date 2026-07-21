@@ -66,10 +66,24 @@ export interface UsuarioAprovacao {
 /**
  * Resultado da resolução: ou há aprovador(es) — configurado(s) ou a exceção da consultora —
  * ou NÃO há ninguém. A camada nunca "inventa" um aprovador por cargo ou por ser o dono.
+ *
+ * REGRA DE NEGÓCIO (BLOCO 2, jul/2026 — mensagem clara de auto-aprovação, frete avulso):
+ * `apenasSolicitante` distingue os DOIS motivos possíveis de "nao_configurado":
+ *   - config vazia/ausente desde sempre → `apenasSolicitante` fica ausente/false;
+ *   - havia gente configurada, mas SOBROU só quem está solicitando (o wrapper async
+ *     `resolverAprovadores` já removeu o solicitante da lista antes de chamar
+ *     `resolverPorConfig`) → `apenasSolicitante: true`.
+ * POR QUÊ: "ninguém decide porque não configuraram" e "ninguém decide porque só tem
+ *   você no pool e você não pode aprovar o próprio pedido" são erros operacionais
+ *   DIFERENTES — o segundo tem solução óbvia (pedir pra configurar mais um aprovador)
+ *   e não pode aparecer como "Sem permissão" genérico pro solicitante.
+ * IMPACTO SE REMOVIDO: `podeDecidir` volta a devolver o mesmo motivo genérico
+ *   ("aprovador_nao_configurado") pros dois casos — quem solicita e é o único do pool
+ *   vê uma mensagem que não explica a segregação de função.
  */
 export type ResolucaoAprovador =
   | { status: "ok"; aprovadores: string[]; origem: "config" | "auto_consultora" }
-  | { status: "nao_configurado"; evento: EventoAprovacao; configKeys: string[] };
+  | { status: "nao_configurado"; evento: EventoAprovacao; configKeys: string[]; apenasSolicitante?: boolean };
 
 export interface ResultadoDecisao {
   pode: boolean;

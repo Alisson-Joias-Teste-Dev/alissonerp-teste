@@ -79,7 +79,15 @@ describe("Simetria SQL (multiAprovadorCond) x TS (eventoDaTarefa)", () => {
     { nome: "aprovacao_quebra_metal (chave aprovador_limpeza)", tipo: "aprovacao_quebra_metal", tags: [] },
     { nome: "garantia_fora_prazo (chave aprovadores_garantia_fora_prazo)", tipo: "garantia_fora_prazo", tags: [] },
     { nome: "frete_avulso (chave aprovadores_frete_avulso, pagante='cliente')", tipo: "frete_avulso", tags: [] },
-    { nome: "frete_avulso_loja (chave aprovadores_frete_avulso_loja, migration 354, pagante='loja')", tipo: "frete_avulso", tags: ["frete_pagante:loja"] },
+    {
+      nome: "frete_avulso_loja (chave aprovadores_frete_avulso_loja, migration 354, pagante='loja')",
+      tipo: "frete_avulso",
+      tags: [],
+      // BLOCO 2 (jul/2026): o SQL (multiAprovadorCond) casa por evfa.pagante
+      // (join com entregas_venda) — o TS espelha isso via tarefaInfo.frete_pagante,
+      // NÃO mais pela tag. Ver evento-da-tarefa.ts.
+      tarefaInfo: { frete_pagante: "loja" },
+    },
     {
       nome: "credito_loja + tag gerente (chave aprovadora_credito_gerente) — venda ATIVA",
       tipo: null,

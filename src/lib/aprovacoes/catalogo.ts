@@ -256,9 +256,12 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
       "REGRA 'QUEM PAGA' (migration 354, 21/07): este evento agora cobre só o pagante='cliente' " +
       "(a lista serve para ACOMPANHAR a entrega, já paga pelo cliente) — quando pagante='loja' o " +
       "evento é 'frete_avulso_loja' (autoriza o CUSTO). A escolha do evento é feita em " +
-      "eventoDaTarefa (src/lib/aprovacoes/evento-da-tarefa.ts) pela tag `frete_pagante:loja` " +
-      "gravada na tarefa em criarFreteAvulso — SEM a tag (tarefas antigas, migration 353, ou " +
-      "solicitação com pagante='cliente') cai aqui, mantendo compatibilidade com o que já existia.",
+      "eventoDaTarefa (src/lib/aprovacoes/evento-da-tarefa.ts) por `tarefaInfo.frete_pagante` " +
+      "(entregas_venda.pagante, join por tarefa_aprovacao_id feito pelo caller) — NÃO mais pela " +
+      "tag `frete_pagante:loja` (BLOCO 2, jul/2026: a tag era editável pelo próprio solicitante " +
+      "via PATCH /api/tarefas/[id] e deixava de ser fonte de verdade confiável). SEM pagante='loja' " +
+      "(tarefas antigas, migration 353, ou solicitação com pagante='cliente') cai aqui, mantendo " +
+      "compatibilidade com o que já existia.",
   },
   frete_avulso_loja: {
     evento: "frete_avulso_loja",
@@ -279,6 +282,8 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
       "UMA etapa só de aprovação (não duas): o que muda é exclusivamente QUEM decide. Evento " +
       "irmão de 'frete_avulso' — mesma tarefa (tipo='frete_avulso'), mesmo fluxo de liberar/" +
       "recusar (liberarFreteAvulso/recusarFreteAvulso em entrega-venda.ts); eventoDaTarefa escolhe " +
-      "entre os dois pela tag `frete_pagante:loja` gravada na criação (criarFreteAvulso).",
+      "entre os dois por `tarefaInfo.frete_pagante` (entregas_venda.pagante) — NÃO mais pela tag " +
+      "`frete_pagante:loja` gravada na criação (BLOCO 2, jul/2026: tag editável pelo solicitante " +
+      "via PATCH /api/tarefas/[id], deixou de ser fonte de verdade).",
   },
 };

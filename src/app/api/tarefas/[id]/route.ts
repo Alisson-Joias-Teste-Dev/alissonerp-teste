@@ -149,7 +149,7 @@ export async function PATCH(
   if (isNaN(tarefaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [tarefaPatch] = await sql`
-    SELECT responsavel_id, criado_por, status, titulo
+    SELECT responsavel_id, criado_por, status, titulo, tipo
     FROM alissonerp.tarefas WHERE id = ${tarefaId} LIMIT 1
   `;
   if (!tarefaPatch) return NextResponse.json({ error: "Tarefa não encontrada" }, { status: 404 });
@@ -187,6 +187,34 @@ export async function PATCH(
   const parsed = TarefaPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;
+
+  // REGRA DE NEGÓCIO (BLOCO 2, jul/2026 — trava tags/tipo do frete avulso com
+  // aprovação pendente): `isOwner` (acima) inclui `criado_por` — o PRÓPRIO
+  // solicitante do frete avulso — e este PATCH deixava `tags`/`tipo` livres,
+  // sem nenhuma validação de conteúdo (COALESCE simples, ver UPDATE abaixo).
+  // eventoDaTarefa (BLOCO 2) já parou de ler a tag `frete_pagante:loja` pra
+  // decidir o pool (usa entregas_venda.pagante agora — ver evento-da-tarefa.ts),
+  // mas o CAMPO `tipo` ainda decide SE existe evento nenhum: trocar
+  // tipo='frete_avulso' por outra coisa faz eventoDaTarefa devolver null e
+  // `ehAprovadorGravado` (aprovacao/route.ts) deixar de excluir o solicitante
+  // — reabrindo, por outra porta, o mesmo auto-aprovação do P1. Trava aqui:
+  // com aprovação pendente e tipo ATUAL (no banco) = 'frete_avulso', PATCH que
+  // tenta mexer em `tags` OU `tipo` é recusado.
+  // ESCOPO: só frete_avulso — mesmo raciocínio de não generalizar sem avaliar
+  // os outros ~11 tipos (ver aprovacao/route.ts, BLOCO 2).
+  // IMPACTO SE REMOVIDO: reabre o caminho de driblar a exclusão de
+  // auto-aprovação editando tags/tipo antes de decidir a própria tarefa.
+  if (tarefaPatch.tipo === "frete_avulso" && (body.tags !== undefined || body.tipo !== undefined)) {
+    const [aprovPendente] = await sql`
+      SELECT 1 FROM alissonerp.aprovacoes_tarefa WHERE tarefa_id = ${tarefaId} AND status = 'pendente' LIMIT 1
+    `;
+    if (aprovPendente) {
+      return NextResponse.json(
+        { error: "Esta tarefa tem aprovação de frete avulso pendente — tags e tipo não podem ser alterados até a decisão." },
+        { status: 409 },
+      );
+    }
+  }
 
   const novoResponsavel = body.responsavel_id;
   const responsavelAnterior = tarefaPatch.responsavel_id;
