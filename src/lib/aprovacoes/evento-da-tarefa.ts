@@ -35,9 +35,11 @@
  *   10. recebimento_metal
  *   11. compra_metal
  *   12. garantia_fora_prazo
- *   13. frete_avulso (tipo exclusivo, migration 353 — sem handler de efeito neste
- *       PATCH; o handler de domínio, mais abaixo no route.ts, chama podeDecidir
- *       direto — este mapeamento serve só pro portão genérico saber que existe evento)
+ *   13. frete_avulso / frete_avulso_loja (tipo exclusivo, migration 353; split por
+ *       "quem paga" na migration 354 — sem handler de efeito neste PATCH; o handler
+ *       de domínio, mais abaixo no route.ts, chama podeDecidir direto — este
+ *       mapeamento serve só pro portão genérico saber que existe evento E qual
+ *       dos dois — ver bloco próprio abaixo)
  *   14. qualquer outro (geral, sangria, inventario_solicitacao, conversao*) → null
  *
  * `inventario_solicitacao` devolve null DE PROPÓSITO: existe a chave
@@ -131,8 +133,23 @@ export function eventoDaTarefa(
   // Frete avulso solicitado (migration 353): tarefa nasce com tipo 'frete_avulso',
   // exclusivo desse fluxo — não compete com nenhum outro tipo/tag acima, então a
   // posição no final da cadeia é segura (não rouba tarefa de ninguém).
+  //
+  // REGRA "QUEM PAGA" (migration 354, 21/07, decisão do Jonathan): a MESMA tarefa
+  // (tipo='frete_avulso') tem 2 eventos possíveis no catálogo — a diferença é só
+  // QUEM decide, não o fluxo. criarFreteAvulso (entrega-venda.ts) grava a tag
+  // `frete_pagante:loja` na criação quando pagante='loja'; SEM essa tag (pagante
+  // 'cliente', ou tarefa antiga da migration 353 antes deste campo existir) cai
+  // no evento original 'frete_avulso' (chave aprovadores_frete_avulso) —
+  // preserva compatibilidade com o que já existia. Optei por 2 EVENTOS (em vez
+  // de 1 evento com 2 configKeys) porque configKeysEfetivas (autoridade.ts) já
+  // foi simplificada de propósito pra NUNCA depender de contexto pra escolher a
+  // chave (Fase 3e) — reintroduzir isso ali afetaria os outros ~20 eventos que
+  // usam a mesma função. 2 eventos é aditivo (só este arquivo + catálogo).
+  // IMPACTO SE ALTERADO: inverter a tag (ex.: marcar 'cliente' em vez de 'loja')
+  // sem atualizar aqui faz o aprovador errado decidir (ou nenhum, se a chave nova
+  // estiver vazia).
   if (tipo === "frete_avulso") {
-    return "frete_avulso";
+    return tags.includes("frete_pagante:loja") ? "frete_avulso_loja" : "frete_avulso";
   }
 
   return null;

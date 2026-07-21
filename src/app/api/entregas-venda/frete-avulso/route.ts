@@ -19,6 +19,7 @@ import { criarFreteAvulso, calcularValorMotoboy } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { AuthError, ForbiddenError, type AuthUser } from "@/lib/auth-server";
+import { LIMITS, checkBase64Length, payloadTooLargeResponse } from "@/lib/payload-limits";
 
 // REGRA DE NEGÓCIO: quem PODE chamar esta rota (loja) — não muda com a
 // intenção explícita (`solicitar`, ver FreteAvulsoSchema abaixo). O que o
@@ -58,6 +59,15 @@ const FreteAvulsoSchema = z.object({
   // em @/lib/entrega-venda).
   vendaId: z.number().int().positive().optional(),
   enderecoEntrega: z.string().max(1000).optional(),
+  // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): obrigatório junto
+  // com solicitar=true (validado abaixo, não no schema, porque só se aplica
+  // ao modo solicitação). Decide comprovante obrigatório e o pool de
+  // aprovador — ver criarFreteAvulso em @/lib/entrega-venda.
+  pagante: z.enum(["loja", "cliente"]).optional(),
+  // Comprovante de pagamento (base64/data URL) — OBRIGATÓRIO quando
+  // pagante='cliente'. Tamanho limitado (checkBase64Length abaixo) antes de
+  // chegar no upload.
+  comprovanteBase64: z.string().optional(),
 });
 
 // REGRA DE NEGÓCIO: o entregador registra a PRÓPRIA corrida pelo app.
@@ -139,6 +149,31 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+    // REGRA DE NEGÓCIO (migration 354 — "quem paga"): validado no SERVIDOR,
+    // não só no front (FreteAvulsoModal). "loja" não exige comprovante;
+    // "cliente" exige — criarFreteAvulso valida de novo (defesa em
+    // profundidade, mesmo padrão de requireVendaOwnership abaixo).
+    if (parsed.data.pagante !== "loja" && parsed.data.pagante !== "cliente") {
+      return NextResponse.json(
+        { error: "Informe quem paga o frete avulso: loja ou cliente" },
+        { status: 400 },
+      );
+    }
+    if (parsed.data.pagante === "cliente" && !parsed.data.comprovanteBase64) {
+      return NextResponse.json(
+        { error: "Comprovante de pagamento é obrigatório quando o frete é pago pelo cliente" },
+        { status: 400 },
+      );
+    }
+    if (parsed.data.comprovanteBase64) {
+      try {
+        checkBase64Length("comprovanteBase64", parsed.data.comprovanteBase64, LIMITS.IMAGE_BASE64_MAX);
+      } catch (e) {
+        const r = payloadTooLargeResponse(e);
+        if (r) return r;
+        throw e;
+      }
+    }
     // REGRA DE NEGÓCIO: quem solicita só pode fazê-lo para as PRÓPRIAS
     // vendas — reusa requireVendaOwnership (mesma checagem usada em
     // /api/vendas) para não duplicar a regra de ownership por vendedor_id.
@@ -160,7 +195,13 @@ export async function POST(req: NextRequest) {
 
   try {
     const avulso = await criarFreteAvulso(
-      { ...parsed.data, modoSolicitacao: ehSolicitacao },
+      {
+        ...parsed.data,
+        modoSolicitacao: ehSolicitacao,
+        // Só faz sentido no modo solicitação — criação direta ignora (undefined).
+        pagante: ehSolicitacao ? parsed.data.pagante : undefined,
+        comprovanteBase64: ehSolicitacao ? parsed.data.comprovanteBase64 : undefined,
+      },
       user.id,
     );
     return NextResponse.json({ avulso });

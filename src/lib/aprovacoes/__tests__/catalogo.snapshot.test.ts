@@ -45,7 +45,11 @@ const SNAPSHOT_ESPERADO: Record<
   garantia_fora_prazo: { configKeys: ["aprovadores_garantia_fora_prazo"], configMulti: true },
   // Migração do frete-avulso-solicitacao (migration 353) pra camada central —
   // substitui o pool na unha (isPoolFreteAvulso/listarAprovadoresFreteAvulso).
+  // Migration 354 (21/07): "quem paga" — frete_avulso cobre só pagante='cliente'.
   frete_avulso: { configKeys: ["aprovadores_frete_avulso"], configMulti: true },
+  // Migration 354 (21/07): irmão de frete_avulso pra pagante='loja' — chave
+  // própria (aprovadores_frete_avulso_loja), autoriza o CUSTO da loja.
+  frete_avulso_loja: { configKeys: ["aprovadores_frete_avulso_loja"], configMulti: true },
 };
 
 describe("snapshot do CATALOGO — trava a política; qualquer mudança quebra este teste", () => {
@@ -65,7 +69,7 @@ describe("snapshot do CATALOGO — trava a política; qualquer mudança quebra e
     },
   );
 
-  it("cobre exatamente os 21 eventos do catálogo, sem sobra nem falta", () => {
+  it("cobre exatamente os 22 eventos do catálogo, sem sobra nem falta", () => {
     expect(Object.keys(CATALOGO).sort()).toEqual(Object.keys(SNAPSHOT_ESPERADO).sort());
   });
 

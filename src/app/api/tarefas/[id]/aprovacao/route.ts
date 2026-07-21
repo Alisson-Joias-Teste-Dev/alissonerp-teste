@@ -880,9 +880,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
    * entrega pela tarefa e delega.
    * IMPACTO SE ALTERADO: duplicar a lógica aqui arrisca lançar saldo em dobro
    * ou divergir do que a lib já garante com FOR UPDATE.
+   *
+   * REGRA "QUEM PAGA" (migration 354, 21/07): `evento` (já resolvido acima por
+   * eventoDaTarefa, linha ~404) é 'frete_avulso' OU 'frete_avulso_loja' —
+   * conforme a tag `frete_pagante:loja` da tarefa. NÃO hardcodear
+   * "frete_avulso" aqui de novo: quem está só na lista nova (loja) tomaria 403
+   * mesmo já autorizado pelo portão genérico acima, porque esta 2ª checagem
+   * consultaria a chave errada (cliente) para uma tarefa de custo da loja.
    */
   if (tarefaInfo?.tipo === "frete_avulso") {
-    const decFreteAvulso = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "frete_avulso");
+    const decFreteAvulso = await podeDecidir(
+      { id: user.id, role: usuarioLogado?.role ?? null },
+      evento ?? "frete_avulso",
+    );
     if (!decFreteAvulso.pode) {
       return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
     }

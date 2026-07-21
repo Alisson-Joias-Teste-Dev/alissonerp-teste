@@ -41,12 +41,22 @@
  * o mesmo modal, aberto do mesmo lugar, mudando de comportamento conforme
  * quem está logado.
  *
+ * REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga", só no modo
+ * solicitação): a consultora informa QUEM PAGA o frete — 'loja' ou 'cliente'.
+ * Se 'cliente', o comprovante de pagamento (foto) é OBRIGATÓRIO (validado
+ * aqui E no backend, criarFreteAvulso). O aprovador muda conforme a escolha
+ * (cliente -> pool de sempre, `aprovadores_frete_avulso`; loja -> lista nova
+ * `aprovadores_frete_avulso_loja`) mas isso é resolvido no servidor — o modal
+ * só manda `pagante` + `comprovanteBase64`.
+ * IMPACTO SE ALTERADO: sem o campo, o backend rejeita a solicitação (400);
+ * sem o comprovante quando pagante='cliente', idem.
+ *
  * IMPACTO SE ALTERADO: delegar a criação para POST /api/entregas-venda/frete-avulso.
  * Não fazer INSERT direto.
  */
 
-import { useState, useEffect, useCallback } from "react";
-import { X, Loader2, CheckCircle, Bike, MapPin, AlignLeft, User, Search, DollarSign } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { X, Loader2, CheckCircle, Bike, MapPin, AlignLeft, User, Search, DollarSign, Store, Camera } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import { useErrorStore } from "@/stores/errorStore";
 
@@ -184,6 +194,12 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   const [carregandoEndereco, setCarregandoEndereco] = useState(false);
   const [freteCobradoConsultora, setFreteCobradoConsultora] = useState("");
 
+  // REGRA DE NEGÓCIO (migration 354 — "quem paga"): só existe no modo
+  // solicitação. `comprovanteBase64` só é exigido quando pagante='cliente'.
+  const [pagante, setPagante] = useState<"loja" | "cliente" | "">("");
+  const [comprovanteBase64, setComprovanteBase64] = useState("");
+  const comprovanteInputRef = useRef<HTMLInputElement>(null);
+
   const [freteNegociado, setFreteNegociado] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
@@ -284,6 +300,15 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     }
   }
 
+  /** Lê o comprovante de pagamento como base64 (mesmo padrão de ConfirmarEntregaModal). */
+  function handleComprovanteSelecionado(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => setComprovanteBase64(reader.result as string);
+    reader.readAsDataURL(file);
+  }
+
   function resetar() {
     setMotoboyId("");
     setRegiao("fortaleza");
@@ -298,6 +323,8 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     setVendaSelecionada(null);
     setEnderecoEntrega("");
     setFreteCobradoConsultora("");
+    setPagante("");
+    setComprovanteBase64("");
     setErro("");
     setSucesso(false);
   }
@@ -325,6 +352,15 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
         if (!vendaIdEfetivo || !enderecoEntrega.trim() || freteCobradoConsultora === "") {
           throw new Error("Preencha a venda, o endereço de entrega e o valor cobrado.");
         }
+        // REGRA DE NEGÓCIO (migration 354 — "quem paga"): validado aqui
+        // (front) E no backend (defesa em profundidade — ver
+        // criarFreteAvulso). Comprovante só é exigido quando pagante='cliente'.
+        if (!pagante) {
+          throw new Error("Selecione quem paga o frete avulso.");
+        }
+        if (pagante === "cliente" && !comprovanteBase64) {
+          throw new Error("Anexe o comprovante de pagamento do cliente.");
+        }
         await apiFetch("/api/entregas-venda/frete-avulso", {
           method: "POST",
           body: JSON.stringify({
@@ -341,6 +377,8 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
             freteMotoboyOverride: freteNegociadoNum && freteNegociadoNum > 0 ? freteNegociadoNum : undefined,
             descricaoAvulso: descricao.trim(),
             observacoes: observacoes.trim() || undefined,
+            pagante,
+            comprovanteBase64: pagante === "cliente" ? comprovanteBase64 : undefined,
           }),
         });
       } else {
@@ -374,7 +412,8 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
 
   // Validação de submit — cada modo tem seus próprios campos obrigatórios
   const disabledSolicitacao =
-    enviando || !(vendaId ?? vendaSelecionada) || !enderecoEntrega.trim() || freteCobradoConsultora === "" || !descricao.trim();
+    enviando || !(vendaId ?? vendaSelecionada) || !enderecoEntrega.trim() || freteCobradoConsultora === "" || !descricao.trim() ||
+    !pagante || (pagante === "cliente" && !comprovanteBase64);
   const disabledPadrao =
     enviando || !motoboyId || !descricao.trim() ||
     (freteCalculado === 0 && !(freteNegociado && parseFloat(freteNegociado.replace(",", ".")) > 0));
@@ -566,6 +605,82 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                     }}
                   />
                 </div>
+
+                {/* Quem paga (migration 354) — define comprovante obrigatório e o aprovador no backend */}
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
+                    <Store size={13} /> Quem paga *
+                  </label>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {(["loja", "cliente"] as const).map(op => (
+                      <button
+                        type="button"
+                        key={op}
+                        onClick={() => { setPagante(op); if (op === "loja") setComprovanteBase64(""); }}
+                        style={{
+                          flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+                          border: `1px solid ${pagante === op ? C.esmeralda : C.cremeBorder}`,
+                          background: pagante === op ? C.esmeralda : "#fff",
+                          color: pagante === op ? "#fff" : C.cinza,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {op === "loja" ? "Loja" : "Cliente"}
+                      </button>
+                    ))}
+                  </div>
+                  <p style={{ fontSize: 11, color: C.cinza, marginTop: 6 }}>
+                    {pagante === "cliente"
+                      ? "Cliente pagou — anexe o comprovante abaixo. A tarefa vai para quem acompanha as entregas avulsas."
+                      : pagante === "loja"
+                        ? "Custo da loja — sem comprovante. A tarefa vai para quem autoriza esse custo."
+                        : "Define o comprovante e quem decide a solicitação."}
+                  </p>
+                </div>
+
+                {/* Comprovante de pagamento — obrigatório só quando o cliente paga */}
+                {pagante === "cliente" && (
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
+                      <Camera size={13} /> Comprovante de pagamento *
+                    </label>
+                    <input
+                      ref={comprovanteInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleComprovanteSelecionado}
+                      style={{ display: "none" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => comprovanteInputRef.current?.click()}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 6,
+                        padding: "8px 12px", borderRadius: 8,
+                        border: `1px solid ${C.cremeBorder}`,
+                        background: comprovanteBase64 ? C.verdeLt : "#fff",
+                        color: comprovanteBase64 ? C.verde : C.cinza,
+                        fontSize: 12, fontWeight: 600, cursor: "pointer",
+                      }}
+                    >
+                      <Camera size={14} />
+                      {comprovanteBase64 ? "Comprovante anexado" : "Anexar comprovante"}
+                    </button>
+                    {comprovanteBase64 && (
+                      <div style={{ marginTop: 8 }}>
+                        <img
+                          src={comprovanteBase64}
+                          alt="Comprovante de pagamento"
+                          style={{
+                            width: "100%", maxWidth: 200, borderRadius: 8,
+                            border: `1px solid ${C.cremeBorder}`,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               /* Motoboy (criação direta — loja/admin/estoquista) */

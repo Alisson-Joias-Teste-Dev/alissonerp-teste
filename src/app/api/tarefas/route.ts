@@ -131,9 +131,19 @@ export async function GET(req: NextRequest) {
     -- frete avulso solicitado (migration 353, camada central — evento 'frete_avulso'
     -- em src/lib/aprovacoes/catalogo.ts): tarefa nasce com tipo 'frete_avulso' em
     -- criarFreteAvulso (src/lib/entrega-venda.ts). Chave: 'aprovadores_frete_avulso'.
-    OR (t.tipo = 'frete_avulso' AND EXISTS (
+    -- REGRA "QUEM PAGA" (migration 354, 21/07): a MESMA tarefa (tipo='frete_avulso')
+    -- espelha os 2 eventos do catálogo (frete_avulso / frete_avulso_loja, ver
+    -- eventoDaTarefa) pela tag 'frete_pagante:loja' — sem a tag = pagante='cliente'
+    -- (chave de sempre); com a tag = pagante='loja' (chave nova, autoriza o CUSTO).
+    -- IMPACTO SE UMA DAS DUAS CLÁUSULAS FOR REMOVIDA: quem só está na lista da
+    -- loja deixaria de ver o botão nas tarefas de custo da loja (ou vice-versa).
+    OR (t.tipo = 'frete_avulso' AND NOT ('frete_pagante:loja' = ANY(t.tags)) AND EXISTS (
       SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovadores_frete_avulso' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR (t.tipo = 'frete_avulso' AND 'frete_pagante:loja' = ANY(t.tags) AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovadores_frete_avulso_loja' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     -- credito_loja: tags = ['credito_loja', 'gerente'|'diretor'] (vendas-credito-aprovar.ts) — tipo NULL.
     --

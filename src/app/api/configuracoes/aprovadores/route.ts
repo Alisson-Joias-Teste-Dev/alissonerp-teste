@@ -67,6 +67,12 @@ const CHAVES = [
   // aprovação (ver módulo Tarefas, tipo 'frete_avulso'). Espelha exatamente o
   // padrão de aprovadores_devolver_peca.
   "aprovadores_frete_avulso",
+  // MULTI (migration 354, 21/07 — regra "quem paga"): lista SEPARADA de quem
+  // autoriza o CUSTO quando o frete avulso solicitado é pago pela LOJA (não
+  // pelo cliente) — evento 'frete_avulso_loja' em
+  // src/lib/aprovacoes/catalogo.ts. Espelha exatamente o padrão de
+  // aprovadores_frete_avulso (mesma tarefa, chave diferente conforme quem paga).
+  "aprovadores_frete_avulso_loja",
 ] as const;
 
 // Chaves NUMÉRICAS (%) — não são UUID de aprovador, são o limiar que decide
@@ -192,6 +198,8 @@ export async function GET() {
       aprovadores_garantia_fora_prazo: configMap.get("aprovadores_garantia_fora_prazo") ?? "",
       // MULTI: pool de liberadores do frete avulso solicitado (migration 353).
       aprovadores_frete_avulso: configMap.get("aprovadores_frete_avulso") ?? "",
+      // MULTI (migration 354): pool de quem autoriza o CUSTO quando pagante='loja'.
+      aprovadores_frete_avulso_loja: configMap.get("aprovadores_frete_avulso_loja") ?? "",
       // Fase 5 (15/07): limites numéricos (%), não são UUID de aprovador — ver CHAVES_NUMERICAS.
       desconto_fallback_sem_cadastro_pct: configMap.get("desconto_fallback_sem_cadastro_pct") ?? "0",
       limite_desconto_cartao_pct: configMap.get("limite_desconto_cartao_pct") ?? "20",
@@ -327,6 +335,14 @@ export async function PUT(req: NextRequest) {
         String(body.aprovadores_frete_avulso).split(",").map((s) => s.trim()).filter(Boolean)
       )).join(",");
       updates.push({ chave: "aprovadores_frete_avulso", valor: lista });
+    }
+    // MULTI (migration 354, regra "quem paga"): pool separado de quem autoriza
+    // o custo do frete avulso quando pagante='loja'. Normaliza igual ao bloco acima.
+    if (body.aprovadores_frete_avulso_loja !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_frete_avulso_loja).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_frete_avulso_loja", valor: lista });
     }
     // Fase 5 (15/07, tela adicionada 16/07): limites em % — valida 0-100, número.
     // Sem isso gravado errado, o fallback do código (0 / 20) nunca é sobrescrito

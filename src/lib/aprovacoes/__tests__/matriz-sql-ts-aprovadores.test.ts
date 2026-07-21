@@ -78,7 +78,8 @@ describe("Simetria SQL (multiAprovadorCond) x TS (eventoDaTarefa)", () => {
     { nome: "recebimento_metal (chave metal_aprovador_id)", tipo: "recebimento_metal", tags: [] },
     { nome: "aprovacao_quebra_metal (chave aprovador_limpeza)", tipo: "aprovacao_quebra_metal", tags: [] },
     { nome: "garantia_fora_prazo (chave aprovadores_garantia_fora_prazo)", tipo: "garantia_fora_prazo", tags: [] },
-    { nome: "frete_avulso (chave aprovadores_frete_avulso)", tipo: "frete_avulso", tags: [] },
+    { nome: "frete_avulso (chave aprovadores_frete_avulso, pagante='cliente')", tipo: "frete_avulso", tags: [] },
+    { nome: "frete_avulso_loja (chave aprovadores_frete_avulso_loja, migration 354, pagante='loja')", tipo: "frete_avulso", tags: ["frete_pagante:loja"] },
     {
       nome: "credito_loja + tag gerente (chave aprovadora_credito_gerente) — venda ATIVA",
       tipo: null,

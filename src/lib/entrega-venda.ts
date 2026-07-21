@@ -1994,6 +1994,26 @@ export async function listarAprovadoresFreteAvulso(): Promise<string[]> {
 }
 
 /**
+ * Lê o pool de aprovadores do frete avulso pago pela LOJA (chave MULTI
+ * `aprovadores_frete_avulso_loja`, Config › Aprovadores).
+ *
+ * REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): irmã de
+ * listarAprovadoresFreteAvulso — mesma FONTE ÚNICA da lista, só que para o
+ * pool que autoriza o CUSTO quando a solicitação é paga pela loja (pagante
+ * ='loja'), não o que acompanha a corrida já paga pelo cliente.
+ *
+ * IMPACTO SE ALTERADO: divergência entre criação (responsavel_id/notificação)
+ * e decisão (podeDecidir) para as solicitações pagas pela loja.
+ */
+export async function listarAprovadoresFreteAvulsoLoja(): Promise<string[]> {
+  const [cfg] = await sql`
+    SELECT valor FROM alissonerp.configuracoes_sistema
+    WHERE chave = 'aprovadores_frete_avulso_loja'
+  `;
+  return String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+/**
  * Parâmetros para criação de frete avulso (corrida sem venda vinculada).
  * REGRA DE NEGÓCIO: avulso não tem venda, itens ou código de verificação.
  * Motoboy e frete_cobrado são obrigatórios. Cliente e descrição são opcionais.
@@ -2023,6 +2043,25 @@ export interface CriarFreteAvulsoParams {
   vendaId?: number;
   enderecoEntrega?: string;
   modoSolicitacao?: boolean;
+  // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): obrigatório quando
+  // modoSolicitacao=true. Decide o comprovante e o aprovador:
+  //   'cliente' -> exige comprovanteBase64; aprovador = aprovadores_frete_avulso
+  //     (evento 'frete_avulso' — lista serve para ACOMPANHAR, dinheiro já com a loja).
+  //   'loja'    -> comprovante NÃO exigido; aprovador = aprovadores_frete_avulso_loja
+  //     (evento 'frete_avulso_loja' — autoriza o CUSTO assumido pela loja).
+  // Sempre UMA etapa de aprovação — só muda quem decide (ver eventoDaTarefa).
+  // IMPACTO SE REMOVIDO: sem saber quem paga não dá para escolher comprovante
+  // obrigatório nem o pool certo de aprovadores.
+  pagante?: "loja" | "cliente";
+  // REGRA DE NEGÓCIO (migration 354): comprovante de pagamento do frete,
+  // OBRIGATÓRIO quando pagante='cliente'. Base64 (data URL ou puro — uploadFile
+  // remove o prefixo data:...;base64, se existir). Reusa o bucket
+  // `pagamento-fotos` (mesmo de foto_entrega_path e compras de metal) — coluna
+  // própria (comprovante_pagante_path) porque é um momento diferente do
+  // ciclo de vida (solicitação, não confirmação de entrega).
+  // IMPACTO SE REMOVIDO: solicitação paga pelo cliente ficaria sem
+  // comprovante, quebrando a exigência de auditoria do pagamento.
+  comprovanteBase64?: string;
 }
 
 /** Resultado da criação de frete avulso */
@@ -2045,6 +2084,9 @@ export interface FreteAvulso {
   motoboyTelefone: string | null;
   vendaId: number | null;
   enderecoEntrega: string | null;
+  // migration 354 — "quem paga" a solicitação (null nas criações diretas, que
+  // continuam sem esse campo — ver criarFreteAvulso).
+  pagante: "loja" | "cliente" | null;
 }
 
 /**
@@ -2188,25 +2230,64 @@ export async function criarFreteAvulso(
         "Já existe uma solicitação de frete avulso aguardando decisão para esta venda.",
       );
     }
+
+    // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): obrigatório no
+    // modo solicitação. Decide comprovante (cliente) e pool de aprovador
+    // (ver bloco de listaAprovadoresFrete logo abaixo). Validado no SERVIDOR
+    // (não só no front) — mesma autoridade real de sempre.
+    // IMPACTO SE REMOVIDO: reabre o caminho de solicitar sem informar quem
+    // paga, e a exigência de comprovante para 'cliente' não teria como ser
+    // aplicada.
+    if (params.pagante !== "loja" && params.pagante !== "cliente") {
+      throw new Error("Informe quem paga o frete avulso: loja ou cliente.");
+    }
+    if (params.pagante === "cliente" && !params.comprovanteBase64) {
+      throw new Error("Comprovante de pagamento é obrigatório quando o frete é pago pelo cliente.");
+    }
   }
 
-  // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL): a solicitação vira
-  // TAREFA DE APROVAÇÃO para a lista configurada em `aprovadores_frete_avulso`
-  // (Config › Aprovadores) — mesma engrenagem de compra comercial e
+  // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — migration 354
+  // acrescenta o split por "quem paga"): a solicitação vira TAREFA DE
+  // APROVAÇÃO para o pool configurado — mesma engrenagem de compra comercial e
   // solicitações de inventário (ver src/lib/inventario-solicitacoes.ts).
-  // Lê a config (fonte única: listarAprovadoresFreteAvulso) e falha cedo
-  // (ANTES de abrir a transação) se ninguém estiver configurado — igual ao
-  // padrão de criarSolicitacaoInventario.
+  // QUAL pool depende de pagante: 'cliente' -> aprovadores_frete_avulso
+  // (acompanha a entrega, já paga); 'loja' -> aprovadores_frete_avulso_loja
+  // (autoriza o custo). Lê a config (fonte única: listarAprovadoresFreteAvulso/
+  // listarAprovadoresFreteAvulsoLoja) e falha cedo (ANTES de abrir a
+  // transação) se ninguém estiver configurado — igual ao padrão de
+  // criarSolicitacaoInventario.
   // IMPACTO SE REMOVIDO: a solicitação ficaria 'solicitada' para sempre, sem
   // tarefa e sem ninguém no pool para decidir.
   let listaAprovadoresFrete: string[] = [];
   if (params.modoSolicitacao) {
-    listaAprovadoresFrete = await listarAprovadoresFreteAvulso();
+    const ehPagoPelaLoja = params.pagante === "loja";
+    listaAprovadoresFrete = ehPagoPelaLoja
+      ? await listarAprovadoresFreteAvulsoLoja()
+      : await listarAprovadoresFreteAvulso();
     if (listaAprovadoresFrete.length === 0) {
       throw new Error(
-        "Nenhum aprovador de frete avulso configurado (Config › Aprovadores — chave aprovadores_frete_avulso).",
+        ehPagoPelaLoja
+          ? "Nenhum aprovador de frete avulso (loja) configurado (Config › Aprovadores — chave aprovadores_frete_avulso_loja)."
+          : "Nenhum aprovador de frete avulso configurado (Config › Aprovadores — chave aprovadores_frete_avulso).",
       );
     }
+  }
+
+  // REGRA DE NEGÓCIO (migration 354): upload do comprovante ANTES de abrir a
+  // transação — se o Storage falhar, nada é gravado no banco (fail-fast, sem
+  // linha órfã "solicitada" sem comprovante). Reusa o bucket `pagamento-fotos`
+  // (mesmo de foto_entrega_path e compras de metal) via o helper server-side
+  // padrão (src/lib/storage.ts) — NÃO é upload direto do client.
+  // IMPACTO SE ALTERADO: fazer o upload depois do INSERT arrisca deixar uma
+  // solicitação 'solicitada' sem comprovante se o Storage falhar no meio.
+  let comprovantePath: string | null = null;
+  if (params.modoSolicitacao && params.pagante === "cliente") {
+    const caminho = `frete-avulso/comprovantes/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const upload = await uploadFile("pagamento-fotos", caminho, params.comprovanteBase64!, "image/jpeg");
+    if (!("url" in upload)) {
+      throw new Error("Falha ao enviar o comprovante de pagamento. Tente novamente.");
+    }
+    comprovantePath = upload.path;
   }
 
   const freteBase = calcularValorMotoboy(params.regiao);
@@ -2234,6 +2315,7 @@ export async function criarFreteAvulso(
         motoboy_id, frete_cobrado, frete_motoboy,
         aprovacao_frete_necessaria, observacoes,
         endereco_entrega,
+        pagante, comprovante_pagante_path,
         created_by
       ) VALUES (
         true, ${params.vendaId ?? null},
@@ -2243,6 +2325,7 @@ export async function criarFreteAvulso(
         ${params.motoboyId ?? null}::uuid, ${freteCobrado}, ${freteMotoboy},
         false, ${params.observacoes ?? null},
         ${params.enderecoEntrega ?? null},
+        ${params.modoSolicitacao ? params.pagante! : null}, ${comprovantePath},
         ${userId}::uuid
       )
       RETURNING *
@@ -2270,6 +2353,19 @@ export async function criarFreteAvulso(
         params.descricaoAvulso ? `Obs: ${params.descricaoAvulso}.` : null,
       ].filter(Boolean).join(" ");
 
+      // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): a tag
+      // `frete_pagante:loja` é o que eventoDaTarefa (src/lib/aprovacoes/
+      // evento-da-tarefa.ts) lê para escolher entre os eventos 'frete_avulso'
+      // (cliente, sem tag) e 'frete_avulso_loja' (loja, com tag) — mesma tarefa
+      // (tipo='frete_avulso'), aprovador diferente. Espelhado também em
+      // multiAprovadorCond (src/app/api/tarefas/route.ts).
+      // IMPACTO SE REMOVIDO: toda solicitação pagante='loja' cairia no evento
+      // 'frete_avulso' (chave errada) — quem está só na lista nova não veria
+      // nem poderia decidir a tarefa.
+      const tagsTarefa = params.pagante === "loja"
+        ? ["aprovacao_frete_avulso", `frete_avulso:${entregaId}`, "frete_pagante:loja"]
+        : ["aprovacao_frete_avulso", `frete_avulso:${entregaId}`];
+
       const [tarefa] = await tx`
         INSERT INTO alissonerp.tarefas
           (titulo, descricao, responsavel_id, criado_por, prioridade, status, tipo, venda_id, tags)
@@ -2282,7 +2378,7 @@ export async function criarFreteAvulso(
           'aguardando_aprovacao',
           'frete_avulso',
           ${params.vendaId ?? null},
-          ${tx.array(["aprovacao_frete_avulso", `frete_avulso:${entregaId}`])}
+          ${tx.array(tagsTarefa)}
         )
         RETURNING id
       `;
@@ -2324,6 +2420,7 @@ export async function criarFreteAvulso(
         descricao_avulso: params.descricaoAvulso ?? null,
         situacao: situacaoInicial,
         venda_id: params.vendaId ?? null,
+        pagante: params.modoSolicitacao ? params.pagante : null,
       },
     });
 
@@ -2390,6 +2487,7 @@ export async function criarFreteAvulso(
     motoboyTelefone: motoboy?.telefone ? String(motoboy.telefone) : null,
     vendaId: resultado.venda_id != null ? Number(resultado.venda_id) : null,
     enderecoEntrega: resultado.endereco_entrega ? String(resultado.endereco_entrega) : null,
+    pagante: (resultado.pagante as "loja" | "cliente" | null) ?? null,
   };
 }
 

@@ -237,13 +237,14 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
   },
   frete_avulso: {
     evento: "frete_avulso",
-    rotulo: "Frete avulso solicitado",
+    rotulo: "Frete avulso solicitado (pago pelo cliente)",
     configKeys: ["aprovadores_frete_avulso"],
     configMulti: true,
     camposLock: [
       "entregas_venda.tarefa_aprovacao_id",
       "entregas_venda.liberada_por",
       "entregas_venda.liberada_em",
+      "entregas_venda.pagante",
     ],
     observacao:
       "Migração do frete-avulso-solicitacao (migration 353) pra camada central — decisão do " +
@@ -251,6 +252,33 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
       "pontos do módulo Tarefas) pela política config-first já testada aqui. Tarefa tipo " +
       "'frete_avulso' é exclusiva desse fluxo (não compartilha tipo com outro evento) — " +
       "qualquer um da lista 'aprovadores_frete_avulso' decide a MESMA tarefa: aprovar libera a " +
-      "corrida (motoboy_id NULL, pool) e lança o saldo de frete; recusar exige motivo, sem custo.",
+      "corrida (motoboy_id NULL, pool) e lança o saldo de frete; recusar exige motivo, sem custo. " +
+      "REGRA 'QUEM PAGA' (migration 354, 21/07): este evento agora cobre só o pagante='cliente' " +
+      "(a lista serve para ACOMPANHAR a entrega, já paga pelo cliente) — quando pagante='loja' o " +
+      "evento é 'frete_avulso_loja' (autoriza o CUSTO). A escolha do evento é feita em " +
+      "eventoDaTarefa (src/lib/aprovacoes/evento-da-tarefa.ts) pela tag `frete_pagante:loja` " +
+      "gravada na tarefa em criarFreteAvulso — SEM a tag (tarefas antigas, migration 353, ou " +
+      "solicitação com pagante='cliente') cai aqui, mantendo compatibilidade com o que já existia.",
+  },
+  frete_avulso_loja: {
+    evento: "frete_avulso_loja",
+    rotulo: "Frete avulso solicitado (custo da loja)",
+    configKeys: ["aprovadores_frete_avulso_loja"],
+    configMulti: true,
+    camposLock: [
+      "entregas_venda.tarefa_aprovacao_id",
+      "entregas_venda.liberada_por",
+      "entregas_venda.liberada_em",
+      "entregas_venda.pagante",
+    ],
+    observacao:
+      "Regra 'QUEM PAGA' (migration 354, 21/07, decisão do Jonathan): quando a solicitação de " +
+      "frete avulso é paga pela LOJA (pagante='loja', sem comprovante obrigatório), a decisão " +
+      "some para uma lista PRÓPRIA e separada da usada em 'frete_avulso' (pagante='cliente') — " +
+      "esta lista autoriza o CUSTO que a loja assume, não só acompanha a corrida. Continua sendo " +
+      "UMA etapa só de aprovação (não duas): o que muda é exclusivamente QUEM decide. Evento " +
+      "irmão de 'frete_avulso' — mesma tarefa (tipo='frete_avulso'), mesmo fluxo de liberar/" +
+      "recusar (liberarFreteAvulso/recusarFreteAvulso em entrega-venda.ts); eventoDaTarefa escolhe " +
+      "entre os dois pela tag `frete_pagante:loja` gravada na criação (criarFreteAvulso).",
   },
 };

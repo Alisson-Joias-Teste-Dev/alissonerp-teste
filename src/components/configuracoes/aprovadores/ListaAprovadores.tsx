@@ -203,10 +203,18 @@ const CONFIG_ITENS: ConfigItem[] = [
   },
   {
     chave: "aprovadores_frete_avulso",
-    titulo: "Frete avulso solicitado (pool)",
-    descricao: "Quem pode liberar ou recusar a solicitação de frete avulso feita pela consultora. Qualquer um da lista decide a mesma tarefa — pode marcar vários.",
+    titulo: "Frete avulso solicitado — pago pelo cliente",
+    descricao: "Quem pode liberar ou recusar a solicitação de frete avulso quando o CLIENTE paga (com comprovante anexado) — serve para acompanhar a entrega. Qualquer um da lista decide a mesma tarefa — pode marcar vários.",
     usuariosKey: "todos_usuarios",
     icone: "🛵",
+    multi: true,
+  },
+  {
+    chave: "aprovadores_frete_avulso_loja",
+    titulo: "Frete avulso solicitado — custo da loja",
+    descricao: "Quem autoriza o CUSTO quando a LOJA paga o frete avulso (sem comprovante). Lista separada da acima — qualquer um da lista decide a mesma tarefa — pode marcar vários.",
+    usuariosKey: "todos_usuarios",
+    icone: "🏪",
     multi: true,
   },
 ];

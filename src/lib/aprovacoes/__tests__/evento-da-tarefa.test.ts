@@ -145,8 +145,12 @@ describe("eventoDaTarefa — mapa tipo/tag → evento (espelha route.ts linha a 
     expect(eventoDaTarefa("conversao_reversa", [], {})).toBeNull();
   });
 
-  it("frete_avulso: pelo tipo (tarefa exclusiva, migration 353)", () => {
+  it("frete_avulso: pelo tipo, SEM a tag frete_pagante:loja (pagante='cliente', migration 353/354)", () => {
     expect(eventoDaTarefa("frete_avulso", [], {})).toBe("frete_avulso");
+  });
+
+  it("frete_avulso_loja: mesmo tipo, COM a tag frete_pagante:loja (pagante='loja', migration 354)", () => {
+    expect(eventoDaTarefa("frete_avulso", ["frete_pagante:loja"], {})).toBe("frete_avulso_loja");
   });
 
   it("tipo/tags ausentes (undefined/vazio) e sem tarefaInfo → null, sem lançar erro", () => {
