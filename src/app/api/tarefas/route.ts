@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isFullAccess } from "@/lib/roles";
+import { isFullAccess, podeGerenciarTarefas } from "@/lib/roles";
 import {
   LIMITS,
   checkArrayLength,
@@ -46,6 +46,27 @@ export async function GET(req: NextRequest) {
 
   const isAdmin = isFullAccess(usuario?.role);
   const userId = user.id;
+
+  // REGRA DE NEGÓCIO (fecha buraco de autorização, 21/07): "visao=time" é a
+  // visão de SUPERVISÃO GERAL — devolve tarefas de QUALQUER usuário, sem
+  // filtro de dono (ver WHERE abaixo: visao==="time" gera fragmento VAZIO).
+  // O front já esconde a aba pra quem não é gerência (TarefasClient.tsx,
+  // podeGerenciar), mas a API não validava nada — qualquer autenticado
+  // conseguia chamar GET /api/tarefas?visao=time direto e ler a lista
+  // completa (inclusive dados sensíveis, como endereço de cliente em
+  // descrição de tarefa de frete avulso). Reusa a MESMA constante do front
+  // (src/lib/roles.ts ROLES_TAREFAS_GERENCIAR) — fonte única.
+  // POR QUE 403 (e não degradar pra visão padrão): decisão do Jonathan —
+  // prefere erro explícito a um resultado silenciosamente diferente do
+  // pedido pelo front.
+  // IMPACTO SE REMOVIDO: reabre o vazamento de tarefas de todo o time pra
+  // qualquer role autenticada (motoboy, consultora, estoquista...).
+  if (visao === "time" && !podeGerenciarTarefas(usuario?.role)) {
+    return NextResponse.json(
+      { error: "Sem permissão para ver tarefas do time" },
+      { status: 403 },
+    );
+  }
 
   // REGRA DE NEGÓCIO (Fase 5 conversão reversa): a tarefa de aprovação de
   // conversão reversa deve aparecer pra TODOS os aprovadores configurados em

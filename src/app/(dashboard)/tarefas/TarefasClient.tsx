@@ -22,6 +22,7 @@ import AutomacoesTab from "./AutomacoesTab";
 import ConfigTab from "./ConfigTab";
 import { useErrorStore } from "@/stores/errorStore";
 import { EvidenciasLimpeza, extrairBaixaIdLimpeza } from "@/components/EvidenciasLimpeza";
+import { podeGerenciarTarefas } from "@/lib/roles";
 
 export interface Tarefa {
   id: number;
@@ -568,7 +569,11 @@ export default function TarefasClient() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  const podeGerenciar = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"].includes(role ?? "");
+  // Fonte única com a API (src/lib/roles.ts) — ver ROLES_TAREFAS_GERENCIAR.
+  // Era hardcoded aqui e SEM espelho na API (GET /api/tarefas?visao=time
+  // ficava aberto pra qualquer autenticado); extraído pra constante
+  // compartilhada em 21/07 pra fechar essa divergência.
+  const podeGerenciar = podeGerenciarTarefas(role);
 
   const carregar = useCallback(async () => {
     setLoading(true);

@@ -83,8 +83,26 @@ const CHAVES_NUMERICAS = [
 
 // GET /api/configuracoes/aprovadores
 // Retorna a config atual + lista de usuários elegíveis por role
+//
+// REGRA DE NEGÓCIO (fecha buraco de autorização, 21/07): esta rota NÃO tinha
+// NENHUMA checagem de auth (nem sessão) — qualquer requisição, autenticada ou
+// não, lia todas as chaves de aprovadores configurados E o roster completo de
+// usuários (nome, UUID, role) via os SELECTs de "usuários elegíveis" abaixo.
+// O QUE: exige sessão válida (requireAuth) + mesma trava do PUT (isFullAccess:
+// admin/desenvolvedor/diretor) — espelha o gate que o PUT já usava (linha
+// ~224), único consumidor real é TabAprovadores.tsx, que só é alcançável pela
+// página /configuracoes (já redireciona quem não é isFullAccess em page.tsx).
+// POR QUE: config de aprovador é dado de governança (quem decide o quê) +
+// roster de usuários — nada disso deveria vazar pra role sem alçada nenhuma.
+// IMPACTO SE REMOVIDO: volta a vazar as chaves de aprovadores e o roster de
+// usuários (nome/UUID/role) pra qualquer requisição, autenticada ou não.
 export async function GET() {
   try {
+    const user = await requireAuth();
+    if (!isFullAccess(user.role)) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
+
     // Ler valores atuais — busca TODAS as chaves, incluindo a já existente
     const configs = await sql`
       SELECT chave, valor FROM alissonerp.configuracoes_sistema
@@ -211,7 +229,8 @@ export async function GET() {
         devolucao_aprovadores: aprovadoresDevolucao,
       },
     });
-  } catch {
+  } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
 }
