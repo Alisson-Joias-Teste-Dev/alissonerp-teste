@@ -330,7 +330,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const isAdminOuDev = ["admin", "desenvolvedor"].includes(usuarioLogado?.role ?? "");
 
   /**
-   * REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL — ADITIVO, escopado
+   * REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — ADITIVO, escopado
    * SÓ para tipo='frete_avulso'): além do aprovador_id fixo da linha (gravado
    * na criação com o 1º da lista) e do admin/dev, QUALQUER usuário da chave de
    * config `aprovadores_frete_avulso` pode decidir a MESMA tarefa — não existe
@@ -664,7 +664,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   /**
-   * REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL): solicitação de
+   * REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL): solicitação de
    * frete avulso feita pela consultora vira tarefa (ver criarFreteAvulso em
    * src/lib/entrega-venda.ts). Ao APROVAR, libera a corrida (lança o saldo da
    * gerente); ao REJEITAR, recusa (exige motivo). Reuso puro — as libs

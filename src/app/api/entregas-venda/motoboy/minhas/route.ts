@@ -104,7 +104,7 @@ export async function GET(req: NextRequest) {
         ev.forma_entrega, ev.regiao, ev.frete_motoboy, ev.data_saida,
         ev.data_entrega_realizada, ev.created_at,
         ev.is_avulso, ev.descricao_avulso,
-        -- REGRA DE NEGÓCIO (migration 346): corrida avulsa liberada de uma
+        -- REGRA DE NEGÓCIO (migration 353): corrida avulsa liberada de uma
         -- solicitação da consultora carrega endereço de entrega (a solicitação
         -- parte de uma venda) e observações — o motoboy precisa ver pra onde ir.
         ev.endereco_entrega, ev.observacoes,
@@ -127,7 +127,7 @@ export async function GET(req: NextRequest) {
       -- passa a ser deste motoboy e ela já cai no primeiro braço do OR.
       WHERE (ev.motoboy_id = ${motoboyUserId}::uuid
               OR (ev.is_avulso = true AND ev.situacao = 'pendente' AND ev.motoboy_id IS NULL))
-        -- REGRA DE NEGÓCIO (migration 346): 'solicitada' ainda não foi liberada
+        -- REGRA DE NEGÓCIO (migration 353): 'solicitada' ainda não foi liberada
         -- pelo responsável — o motoboy não deve ver/contar corrida que nem
         -- entrou no fluxo de aceite ainda (some da lista dele até liberar).
         AND ev.situacao NOT IN ('cancelada', 'solicitada')
@@ -145,7 +145,7 @@ export async function GET(req: NextRequest) {
       -- paginação (totalPages) fica errada em relação à lista mostrada.
       WHERE (ev.motoboy_id = ${motoboyUserId}::uuid
               OR (ev.is_avulso = true AND ev.situacao = 'pendente' AND ev.motoboy_id IS NULL))
-        -- REGRA DE NEGÓCIO (migration 346): 'solicitada' ainda não foi liberada
+        -- REGRA DE NEGÓCIO (migration 353): 'solicitada' ainda não foi liberada
         -- pelo responsável — o motoboy não deve ver/contar corrida que nem
         -- entrou no fluxo de aceite ainda (some da lista dele até liberar).
         AND ev.situacao NOT IN ('cancelada', 'solicitada')
@@ -175,7 +175,7 @@ export async function GET(req: NextRequest) {
       -- vinculado a este motoboy; se contasse aqui, TODO entregador veria os
       -- mesmos números inflados com corridas que talvez nunca peguem.
       WHERE ev.motoboy_id = ${motoboyUserId}::uuid
-        -- REGRA DE NEGÓCIO (migration 346): 'solicitada' ainda não foi liberada
+        -- REGRA DE NEGÓCIO (migration 353): 'solicitada' ainda não foi liberada
         -- pelo responsável — o motoboy não deve ver/contar corrida que nem
         -- entrou no fluxo de aceite ainda (some da lista dele até liberar).
         AND ev.situacao NOT IN ('cancelada', 'solicitada')

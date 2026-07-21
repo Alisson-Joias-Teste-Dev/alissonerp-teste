@@ -20,7 +20,7 @@ import { zodError } from "@/lib/schemas/common";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { AuthError, ForbiddenError, type AuthUser } from "@/lib/auth-server";
 
-// REGRA DE NEGÓCIO (migration 346): "estoquista" cria avulso já liberado,
+// REGRA DE NEGÓCIO (migration 353): "estoquista" cria avulso já liberado,
 // igual admin/gerente — não passa pelo fluxo de solicitação/liberação.
 const ROLES_LOJA = ["desenvolvedor", "admin", "gerente_loja", "consultora", "estoquista"];
 
@@ -37,7 +37,7 @@ const FreteAvulsoSchema = z.object({
   descricaoAvulso: z.string().min(1, "Descrição da corrida é obrigatória").max(500),
   contatoId: z.number().int().positive().optional(),
   observacoes: z.string().max(2000).optional(),
-  // REGRA DE NEGÓCIO (solicitação da consultora — migration 346, modelo POOL):
+  // REGRA DE NEGÓCIO (solicitação da consultora — migration 353, modelo POOL):
   // campos só usados quando quem cria é a consultora (vira modoSolicitacao=true
   // na lib). Não existe mais escolha de responsável — a solicitação cai no
   // pool de liberadores (ver listarAprovadoresFreteAvulso em @/lib/entrega-venda).
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
   const parsed = FreteAvulsoSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
 
-  // REGRA DE NEGÓCIO (migration 346, modelo POOL): consultora não libera
+  // REGRA DE NEGÓCIO (migration 353, modelo POOL): consultora não libera
   // custo de frete sozinha — ela apenas SOLICITA, a partir de uma venda
   // própria, com o endereço de entrega. NÃO escolhe mais um responsável: o
   // avulso nasce 'solicitada' (criarFreteAvulso com modoSolicitacao=true) e

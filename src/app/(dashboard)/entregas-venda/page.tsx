@@ -84,7 +84,7 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     WHERE id = ${user.id}::uuid LIMIT 1
   `;
 
-  // REGRA DE NEGÓCIO (migration 346 — REVERTIDO na virada V2): o portão
+  // REGRA DE NEGÓCIO (migration 353 — REVERTIDO na virada V2): o portão
   // especial para o liberador de frete avulso (aba "Solicitações") foi
   // removido junto com a aba — volta a ser role-only. A V3 recria o acesso
   // à solicitação/decisão de outra forma (tarefa, não uma aba própria aqui).

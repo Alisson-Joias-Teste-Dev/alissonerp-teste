@@ -2013,7 +2013,7 @@ export interface CriarFreteAvulsoParams {
   descricaoAvulso?: string;
   contatoId?: number;
   observacoes?: string;
-  // REGRA DE NEGÓCIO (solicitação da consultora — migration 346, modelo POOL):
+  // REGRA DE NEGÓCIO (solicitação da consultora — migration 353, modelo POOL):
   // quando modoSolicitacao=true, o avulso nasce 'solicitada' (sem lançar
   // saldo) e fica vinculado a uma venda (para herdar cliente/endereço) até
   // que QUALQUER aprovador do pool (chave de config aprovadores_frete_avulso) ou
@@ -2136,7 +2136,7 @@ export async function criarFreteAvulso(
     throw new Error("Valor do frete não pode ser negativo.");
   }
 
-  // REGRA DE NEGÓCIO (solicitação — migration 346, modelo TAREFA/POOL): no modo
+  // REGRA DE NEGÓCIO (solicitação — migration 353, modelo TAREFA/POOL): no modo
   // solicitação a consultora precisa informar DE QUAL VENDA o frete parte
   // (herda cliente/endereço). NÃO escolhe mais um responsável — a solicitação
   // vira uma tarefa de aprovação para o pool configurado (ver abaixo) e
@@ -2190,7 +2190,7 @@ export async function criarFreteAvulso(
     }
   }
 
-  // REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL): a solicitação vira
+  // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL): a solicitação vira
   // TAREFA DE APROVAÇÃO para a lista configurada em `aprovadores_frete_avulso`
   // (Config › Aprovadores) — mesma engrenagem de compra comercial e
   // solicitações de inventário (ver src/lib/inventario-solicitacoes.ts).
@@ -2250,7 +2250,7 @@ export async function criarFreteAvulso(
 
     const entregaId = Number(row.id);
 
-    // REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL): grava a solicitação
+    // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL): grava a solicitação
     // como tarefa de aprovação, na MESMA transação da entrega — espelha
     // criarSolicitacaoInventario (src/lib/inventario-solicitacoes.ts):
     // INSERT tarefas -> INSERT aprovacoes_tarefa -> UPDATE do domínio com o
@@ -2330,7 +2330,7 @@ export async function criarFreteAvulso(
     return row;
   }) as Record<string, unknown>;
 
-  // REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL): notifica TODOS os
+  // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL): notifica TODOS os
   // aprovadores da lista (não só o responsavel_id da tarefa) — qualquer um
   // pode decidir, então todos precisam saber que há uma solicitação nova.
   // Espelha criarSolicitacaoInventario; roda FORA da transação (best-effort —
@@ -2628,7 +2628,7 @@ export async function aceitarFreteAvulso(entregaId: number, usuarioId: string): 
  * O QUE: valida que a entrega é avulsa e está confirmável, depois atualiza
  * situacao='confirmada' e data_entrega_realizada=now().
  *
- * REGRA DE NEGÓCIO (solicitação/liberação — migration 346): corrida
+ * REGRA DE NEGÓCIO (solicitação/liberação — migration 353): corrida
  * AUTO-REGISTRADA pelo próprio motoboy (created_by === motoboy_id) já
  * aconteceu fisicamente — a loja confirma direto do estado 'pendente', sem
  * passar por aceite (isso preserva o comportamento do PR #75). Corrida

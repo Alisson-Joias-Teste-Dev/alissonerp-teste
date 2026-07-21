@@ -56,7 +56,7 @@ export async function GET(
     const isOwner = tarefa.responsavel_id === user.id || tarefa.criado_por === user.id;
     const isAdminOuDev = isFullAccess(usuario?.role);
 
-    // REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL — ADITIVO, escopado
+    // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — ADITIVO, escopado
     // SÓ para tipo='frete_avulso'): mesmo padrão aditivo/escopado usado em
     // GET /api/tarefas e PATCH /api/tarefas/[id]/aprovacao — qualquer membro
     // do pool (chave de config aprovadores_frete_avulso) também pode ABRIR a

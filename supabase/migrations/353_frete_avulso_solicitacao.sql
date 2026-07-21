@@ -1,4 +1,7 @@
--- Migration 346: frete avulso com solicitação e liberação (modelo TAREFA/POOL)
+-- Migration 353: frete avulso com solicitação e liberação (modelo TAREFA/POOL)
+-- NOTA: esta migration nasceu numerada como 346 e foi RENUMERADA para 353 antes
+-- do PR — o número 346 já pertencia a `346_conversao_reversa.sql`, que subiu para
+-- produção enquanto esta feature estava parada. O conteúdo não mudou.
 -- REGRA DE NEGÓCIO:
 --   O que faz: adiciona o passo "solicitada" ao frete avulso. A consultora
 --     solicita a corrida a partir de uma VENDA (para puxar cliente+endereço)

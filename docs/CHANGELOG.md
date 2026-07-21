@@ -45,7 +45,7 @@ liberado não estorna o saldo já lançado; entregador aceita/registra sem exigi
 `alissonerp.motoboys`; diretor fora da lista de config não decide a tarefa (limitação pré-existente de
 todos os tipos de aprovação no dispatcher, não específica de frete avulso).
 
-**Status:** migration 346 **já aplicada em homolog**. Produção ainda pendente. Ver
+**Status:** migration 353 **já aplicada em homolog**. Produção ainda pendente. Ver
 `docs/regras-negocio/entregas.md` para o fluxo completo e a matriz de permissão a testar.
 
 ## feat(estoque-comercial): localização das peças + ferramenta de importação (v2.84.0)

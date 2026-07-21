@@ -51,7 +51,7 @@ interface EntregaMotoboy {
   is_avulso: boolean;
   descricao_avulso: string | null;
   auto_criado: boolean;
-  /** REGRA DE NEGÓCIO (modelo POOL — migration 346): endereço de entrega da
+  /** REGRA DE NEGÓCIO (modelo POOL — migration 353): endereço de entrega da
    * solicitação de frete avulso (herdado da venda no momento da solicitação).
    * Exibido no card pro motoboy saber pra onde ir. */
   endereco_entrega: string | null;
@@ -103,7 +103,7 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
 
   // Confirmação de avulso (finalizar entrega — POST /confirmar-avulso)
   const [confirmandoAvulso, setConfirmandoAvulso] = useState<number | null>(null);
-  // REGRA DE NEGÓCIO (modelo POOL — migration 346): "Aceitar corrida" é o
+  // REGRA DE NEGÓCIO (modelo POOL — migration 353): "Aceitar corrida" é o
   // passo novo entre a liberação (situacao='pendente') e a finalização —
   // espelha confirmandoAvulso, mas chama /aceitar-avulso (pendente → em_rota).
   const [aceitandoAvulso, setAceitandoAvulso] = useState<number | null>(null);

@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
   const tagsList = tagsParam ? tagsParam.split(",").map(t => t.trim()).filter(Boolean) : [];
 
   /**
-   * REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL — ADITIVO, escopado
+   * REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — ADITIVO, escopado
    * SÓ para tipo='frete_avulso'): além de responsavel_id/criado_por, quem está
    * na chave de config `aprovadores_frete_avulso` também enxerga as tarefas de
    * frete avulso — é o pool que decide (qualquer um, não só o 1º gravado como
@@ -114,7 +114,7 @@ export async function GET(req: NextRequest) {
   `;
 
   /**
-   * REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL — ADITIVO, escopado
+   * REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — ADITIVO, escopado
    * SÓ para tipo='frete_avulso'): expõe um flag calculado no servidor (em vez
    * de mandar a lista de UUIDs do pool pro client) para o TarefaDrawer decidir
    * se mostra os botões Aprovar/Rejeitar a um usuário que NÃO é o

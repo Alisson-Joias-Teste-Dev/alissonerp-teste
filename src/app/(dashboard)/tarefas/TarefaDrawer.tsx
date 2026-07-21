@@ -733,7 +733,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
                         {a.respondido_em && <p className="text-[10px] mt-1" style={{ color: "#9CA3AF" }}>Respondido em {fmtHora(a.respondido_em)}</p>}
 
                         {/*
-                          REGRA DE NEGÓCIO (migration 346, modelo TAREFA/POOL —
+                          REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL —
                           ADITIVO, escopado SÓ para tipo='frete_avulso'): além do
                           aprovador_id fixo da linha, mostra os botões também para
                           quem o backend marcou como pode_decidir_pool (pool de

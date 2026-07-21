@@ -20,7 +20,7 @@ Ciclo de vida: **solicitada → pendente → em_rota → confirmada** (+ **cance
 | `confirmada` | Entregue/confirmado. Entra no acerto financeiro do motoboy (pagamento em lote). | Motoboy ou admin/gerente (código de verificação para entrega normal; botão simples, sem código, para avulso — `confirmarFreteAvulso`). |
 | `cancelada` | Cancelada (entrega normal pendente) ou recusada pelo pool (avulso solicitado). Não é apagada — fica para auditoria. | Quem tem permissão de cancelar, ou o pool ao recusar (`recusarFreteAvulso`). |
 
-Ordem do enum: `solicitada` foi inserida **antes** de `pendente` (migration 346, `ALTER TYPE ... ADD VALUE ... BEFORE 'pendente'`).
+Ordem do enum: `solicitada` foi inserida **antes** de `pendente` (migration 353, `ALTER TYPE ... ADD VALUE ... BEFORE 'pendente'`).
 
 ---
 
@@ -42,7 +42,7 @@ Frete avulso = corrida de motoboy **sem itens vinculados** (`entregas_venda.is_a
 
 ## 3. Pool de aprovadores — solicitação vira TAREFA
 
-Modelo **TAREFA/POOL** (migration 346, consolidado nas fases V1-V3): não existe mais um "liberador designado" nem tabela própria de liberadores — a solicitação é uma tarefa comum do módulo Tarefas, tipo `frete_avulso`, e **qualquer usuário da lista configurada decide**.
+Modelo **TAREFA/POOL** (migration 353, consolidado nas fases V1-V3): não existe mais um "liberador designado" nem tabela própria de liberadores — a solicitação é uma tarefa comum do módulo Tarefas, tipo `frete_avulso`, e **qualquer usuário da lista configurada decide**.
 
 - **Fonte da lista**: chave de configuração **MULTI** `aprovadores_frete_avulso` (`alissonerp.configuracoes_sistema`, vários UUIDs separados por vírgula), editável em **Configurações › Aprovadores** (`TabAprovadores.tsx` + `GET/PATCH /api/configuracoes/aprovadores`). Mesmo padrão de `aprovadores_devolver_peca`.
 - **Fonte única de leitura**: `listarAprovadoresFreteAvulso()` (`src/lib/entrega-venda.ts`) — usada por `criarFreteAvulso` (quem é notificado), `GET /api/tarefas`, `GET /api/tarefas/[id]` e `PATCH /api/tarefas/[id]/aprovacao` (quem decide). Antes essa mesma query estava duplicada em 4 lugares; centralizar evita divergência entre "quem vê" e "quem pode decidir".
@@ -92,7 +92,7 @@ O próprio motoboy registra a própria corrida pelo app (`MotoboyAppClient` → 
 
 ## 7. Constraints
 
-- **`chk_entrega_origem`** (recriada na migration 346): entrega normal (`is_avulso=false`) continua exigindo `venda_id IS NOT NULL`; avulso (`is_avulso=true`) aceita `venda_id` preenchido (solicitação, para herdar cliente/endereço) **ou** nulo (avulso sem venda).
+- **`chk_entrega_origem`** (recriada na migration 353): entrega normal (`is_avulso=false`) continua exigindo `venda_id IS NOT NULL`; avulso (`is_avulso=true`) aceita `venda_id` preenchido (solicitação, para herdar cliente/endereço) **ou** nulo (avulso sem venda).
 - **`chk_codigos_obrigatorios`** (migration 294, ajustada na 298): avulso dispensa `codigo_cliente`/`codigo_motoboy` (não usa o fluxo de dois códigos da entrega normal).
 - **Saldo lançado UMA vez, nunca duas**: `lancarSaldoFreteAvulsoNoTx` é a **única** função que grava em `saldo_frete_gratis` para avulso — chamada em exatamente um dos dois pontos por corrida: criação direta (`criarFreteAvulso` quando `!modoSolicitacao`) **ou** liberação (`liberarFreteAvulso`), nunca os dois para a mesma entrega (mutuamente exclusivos pela própria lógica: solicitação nasce sem lançar, criação direta lança na hora).
 - **Listas operacionais nunca mostram `solicitada`/`cancelada` por padrão**: `/entregas-venda` (SSR e `GET /api/entregas-venda`), o app do motoboy (`GET /motoboy/minhas`, 3 queries) e o pagamento em lote (`motoboy/pagar`, exige `situacao='confirmada'`) filtram por padrão `situacao NOT IN ('cancelada','solicitada')` ou `= 'confirmada'`. As views `vw_entregas_pendentes`/`vw_motoboy_entregas` (migration 285) já eram hardcoded para `situacao='confirmada'`, não precisaram mudar.
@@ -113,7 +113,7 @@ O próprio motoboy registra a própria corrida pelo app (`MotoboyAppClient` → 
 
 - Migration base do módulo: `285_modulo_entrega.sql` (tabelas `entregas_venda`, `entregas_venda_itens`, `saldo_frete_gratis`, `fechamentos_frete`, `motoboys`; views `vw_entregas_pendentes` e `vw_motoboy_entregas`, ambas hardcoded para `situacao='confirmada'`).
 - Migration do frete avulso original: `293_frete_avulso.sql` (+ `294`/`295`/`298` para nullable de códigos e blindagem).
-- Migration da solicitação/pool: **`346_frete_avulso_solicitacao.sql`** — enum `solicitada` (inserido antes de `pendente`), colunas `endereco_entrega`/`liberada_por`/`liberada_em`/`motivo_recusa`/`tarefa_aprovacao_id`, constraint `chk_entrega_origem` recriada. **Já aplicada em homolog; produção pendente.**
+- Migration da solicitação/pool: **`353_frete_avulso_solicitacao.sql`** — enum `solicitada` (inserido antes de `pendente`), colunas `endereco_entrega`/`liberada_por`/`liberada_em`/`motivo_recusa`/`tarefa_aprovacao_id`, constraint `chk_entrega_origem` recriada. **Já aplicada em homolog; produção pendente.**
 - Lib principal: `src/lib/entrega-venda.ts` (`criarFreteAvulso`, `liberarFreteAvulso`, `recusarFreteAvulso`, `aceitarFreteAvulso`, `confirmarFreteAvulso`, `listarAprovadoresFreteAvulso`, `lancarSaldoFreteAvulsoNoTx`).
 - Rotas: `src/app/api/entregas-venda/frete-avulso/route.ts` (criação/solicitação), `[id]/aceitar-avulso`, `[id]/confirmar-avulso`, `src/app/api/configuracoes/aprovadores/route.ts` (chave `aprovadores_frete_avulso`), `src/app/api/tarefas/route.ts` + `[id]/route.ts` + `[id]/aprovacao/route.ts` (pool aditivo, ver §3).
 - Tela: `src/app/(dashboard)/entregas-venda/page.tsx` (SSR, sem aba própria de solicitações — decisão acontece em `/tarefas`), `EntregasVendaClient.tsx`, `src/app/(dashboard)/vendas/[id]/VendaDetalheClient.tsx` (botão "Solicitar frete avulso"), `src/components/entregas/FreteAvulsoModal.tsx` (criação/solicitação), `MotoboyAppClient.tsx` (app do entregador), `src/app/(dashboard)/tarefas/TarefaDrawer.tsx` (decisão da tarefa pelo pool).

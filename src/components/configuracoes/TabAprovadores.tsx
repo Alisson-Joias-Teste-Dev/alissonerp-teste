@@ -19,7 +19,7 @@ interface AprovadorConfig {
   aprovador_devolucao_estoque?: string;
   aprovador_vale_troca_excecao?: string;
   aprovadores_devolver_peca?: string; // MULTI: UUIDs separados por vírgula
-  aprovadores_frete_avulso?: string; // MULTI: UUIDs separados por vírgula (pool frete avulso — migration 346)
+  aprovadores_frete_avulso?: string; // MULTI: UUIDs separados por vírgula (pool frete avulso — migration 353)
 }
 
 interface Usuario {

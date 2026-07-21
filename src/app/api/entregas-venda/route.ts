@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
     WHERE id = ${user.id}::uuid LIMIT 1
   `;
 
-  // REGRA DE NEGÓCIO (migration 346 — REVERTIDO na virada V2): o portão
+  // REGRA DE NEGÓCIO (migration 353 — REVERTIDO na virada V2): o portão
   // especial para o liberador de frete avulso (aba "Solicitações") foi
   // removido junto com a aba — volta a ser role-only.
   if (!usuario || !ROLES_ENTREGAS.includes(usuario.role as string)) {
@@ -231,7 +231,7 @@ export async function GET(req: NextRequest) {
       aprovacao_frete_necessaria: Boolean(r.aprovacao_frete_necessaria),
       is_avulso: Boolean(r.is_avulso),
       descricao_avulso: r.descricao_avulso ? String(r.descricao_avulso) : null,
-      // REGRA DE NEGÓCIO (migration 346, modelo POOL): campos da solicitação/
+      // REGRA DE NEGÓCIO (migration 353, modelo POOL): campos da solicitação/
       // liberação de frete avulso — usados pela aba "Solicitações" (endereço
       // pedido, quem liberou/quando, ou motivo se foi recusada). Não há mais
       // "responsável" fixo — qualquer liberador do pool decide.

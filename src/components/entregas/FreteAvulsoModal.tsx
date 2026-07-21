@@ -8,7 +8,7 @@
  * material, etc.) e confirma no app com um botão. Sem código de verificação,
  * sem WhatsApp.
  *
- * REGRA DE NEGÓCIO (solicitação da consultora — migration 346, modelo POOL):
+ * REGRA DE NEGÓCIO (solicitação da consultora — migration 353, modelo POOL):
  * quando quem abre o modal é a consultora, ela não cria o avulso já liberado
  * — apenas SOLICITA a partir de uma venda própria, informando o endereço de
  * entrega (editável aqui, NÃO altera o cadastro do cliente/venda) e o valor
