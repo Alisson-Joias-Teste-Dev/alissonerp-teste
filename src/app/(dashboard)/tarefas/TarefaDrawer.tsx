@@ -58,6 +58,23 @@ interface Anexo {
   created_at: string;
 }
 
+/**
+ * REGRA DE NEGÓCIO (21/07 — decisão do Jonathan): dados de "quem paga" e do
+ * comprovante do frete avulso solicitado, vindos do GET singular de tarefa
+ * (join com entregas_venda por tarefa_aprovacao_id — ver src/app/api/tarefas/[id]/route.ts).
+ * O QUÊ: representa o subset de campos que o bloco de frete avulso na aba
+ *   Aprovação precisa pra mostrar quem paga e (se cliente) a foto do
+ *   comprovante ANTES do aprovador clicar Aprovar/Rejeitar.
+ * POR QUÊ: sem isso o comprovante (obrigatório desde a migration 354) fica
+ *   salvo mas nunca conferido por ninguém — esvazia a regra de negócio.
+ * IMPACTO SE REMOVIDO: aprovador volta a decidir "às cegas" sobre quem
+ *   assume o custo do frete.
+ */
+interface FreteAvulsoInfo {
+  frete_pagante: "loja" | "cliente" | null;
+  frete_comprovante_pagante_path: string | null;
+}
+
 interface EvidenciaLimpeza {
   id: number;
   gramas: number;
@@ -126,6 +143,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
   const [historico, setHistorico] = useState<HistoricoEntry[]>([]);
   const [anexos, setAnexos] = useState<Anexo[]>([]);
   const [evidenciaLimpeza, setEvidenciaLimpeza] = useState<EvidenciaLimpeza | null>(null);
+  const [freteInfo, setFreteInfo] = useState<FreteAvulsoInfo | null>(null);
   const [novoComentario, setNovoComentario] = useState("");
   const [sendingComment, setSendingComment] = useState(false);
   const [aba, setAba] = useState<"detalhes" | "comentarios" | "aprovacao" | "historico" | "anexos">("detalhes");
@@ -158,8 +176,17 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
 
   const carregarComentarios = useCallback(async () => {
     try {
-      const data = await apiFetch<Tarefa & { comentarios?: Comentario[] }>(`/api/tarefas/${tarefa.id}`);
+      // REGRA DE NEGÓCIO (21/07): este GET singular já traz frete_pagante e
+      // frete_comprovante_pagante_path (join com entregas_venda no backend) —
+      // reaproveita a MESMA chamada em vez de criar um fetch novo só pra isso.
+      // IMPACTO SE REMOVIDO: o bloco de comprovante do frete avulso não
+      // teria dado nenhum pra exibir.
+      const data = await apiFetch<Tarefa & Partial<FreteAvulsoInfo> & { comentarios?: Comentario[] }>(`/api/tarefas/${tarefa.id}`);
       setComentarios(data.comentarios ?? []);
+      setFreteInfo({
+        frete_pagante: data.frete_pagante ?? null,
+        frete_comprovante_pagante_path: data.frete_comprovante_pagante_path ?? null,
+      });
     } catch { /* silencioso */ }
   }, [tarefa.id]);
 
@@ -648,6 +675,59 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
           {/* ─── Aprovação ─── */}
           {aba === "aprovacao" && (
             <div className="p-5 space-y-4">
+              {/*
+                REGRA DE NEGÓCIO (21/07 — decisão do Jonathan): o aprovador da
+                tarefa de frete avulso (tipo 'frete_avulso'/'frete_avulso_loja')
+                precisa VER quem paga e, se for o cliente, a FOTO do
+                comprovante ANTES de decidir — senão a exigência de comprovante
+                (migration 354) vira arquivo morto que ninguém confere.
+                O QUÊ: bloco condicional, mesmo padrão visual do card de
+                  "Evidências da Limpeza" logo abaixo (foto em <a target="_blank">
+                  pra ampliar + <img> de preview), servida pelo MESMO proxy
+                  autenticado /api/storage/pagamento-fotos/... já usado pela
+                  foto de entrega (getPublicUrl, src/lib/storage-url.ts).
+                POR QUÊ: reusa o mecanismo de imagem privada existente — não
+                  inventa signed URL nem expõe o bucket.
+                IMPACTO SE REMOVIDO: comprovante fica salvo mas invisível na
+                  decisão; tarefa antiga com pagante NULL (migration 353,
+                  antes da 354) não mostra nada — não quebra a tela.
+              */}
+              {tarefa.tipo === "frete_avulso" && freteInfo?.frete_pagante && (
+                <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={16} style={{ color: C.esmeralda }} />
+                    <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>Pagamento do Frete Avulso</p>
+                  </div>
+                  <p className="text-xs" style={{ color: "#6B7280" }}>
+                    Quem paga:{" "}
+                    <span className="font-semibold" style={{ color: "#1A1A1A" }}>
+                      {freteInfo.frete_pagante === "cliente" ? "Cliente" : "Loja"}
+                    </span>
+                  </p>
+                  {freteInfo.frete_pagante === "cliente" && (
+                    freteInfo.frete_comprovante_pagante_path ? (
+                      <a
+                        href={getPublicUrl("pagamento-fotos", freteInfo.frete_comprovante_pagante_path)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block rounded-xl overflow-hidden border bg-white w-40"
+                        style={{ borderColor: C.cremeBorder }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={getPublicUrl("pagamento-fotos", freteInfo.frete_comprovante_pagante_path)}
+                          alt="Comprovante de pagamento do cliente"
+                          className="w-full h-32 object-cover"
+                        />
+                        <p className="text-[11px] font-semibold px-2 py-1" style={{ color: C.esmeralda }}>Ver comprovante</p>
+                      </a>
+                    ) : (
+                      <p className="text-xs italic" style={{ color: "#DC2626" }}>Comprovante não encontrado.</p>
+                    )
+                  )}
+                </div>
+              )}
+
               {isLimpezaOuro && evidenciaLimpeza && (
                 <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "#7C3AED33", backgroundColor: "#F5F3FF" }}>
                   <div className="flex items-center gap-2">

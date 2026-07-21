@@ -44,12 +44,26 @@ export async function GET(
         t.responsavel_id, t.criado_por,
         t.created_at, t.updated_at, t.concluida_em,
         ur.nome AS responsavel_nome, uc.nome AS criador_nome, o.numero_ordem,
-        ve.aprovacao_credito_tipo, ve.situacao AS venda_situacao
+        ve.aprovacao_credito_tipo, ve.situacao AS venda_situacao,
+        -- REGRA DE NEGÓCIO (21/07 — aprovador precisa VER o comprovante antes
+        -- de decidir, migration 354): entregas_venda.tarefa_aprovacao_id
+        -- (migration 353) é o vínculo tarefa→entrega gravado por
+        -- criarFreteAvulso (src/lib/entrega-venda.ts) — join reverso pelo
+        -- índice idx_entregas_tarefa_aprovacao (já existe, mig 353). Só
+        -- exposto aqui no GET SINGULAR (aberto 1x por tarefa, ao abrir o
+        -- drawer) — não na listagem (GET /api/tarefas), pra não somar mais um
+        -- LEFT JOIN numa query já rodada em massa (até 200 linhas).
+        -- IMPACTO SE REMOVIDO: aprovador decide (Aprovar/Rejeitar) sem ver
+        -- quem paga nem a foto do comprovante — regra do comprovante vira
+        -- letra morta (arquivo salvo que ninguém confere).
+        ev.pagante AS frete_pagante,
+        ev.comprovante_pagante_path AS frete_comprovante_pagante_path
       FROM alissonerp.tarefas t
       LEFT JOIN alissonerp.usuarios ur ON ur.id = t.responsavel_id
       LEFT JOIN alissonerp.usuarios uc ON uc.id = t.criado_por
       LEFT JOIN alissonerp.ordens o ON o.id = t.ordem_id
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = t.venda_id
+      LEFT JOIN alissonerp.entregas_venda ev ON ev.tarefa_aprovacao_id = t.id
       WHERE t.id = ${tarefaId}
     `;
     if (!tarefa) return NextResponse.json({ error: "Tarefa não encontrada" }, { status: 404 });
