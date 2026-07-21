@@ -20,9 +20,13 @@
  * `vendaId` é informada (aberto pelo botão "Solicitar frete avulso" da própria
  * tela da venda — ver VendaDetalheClient), a venda já é conhecida e o modal
  * NÃO mostra o buscador de venda — só o endereço (pré-preenchido via
- * `enderecoInicial`, ainda editável) e o valor cobrado. O modo de busca de
- * venda (ehConsultora sem vendaId) continua existindo para quem abre o modal
- * pela tela de Entregas.
+ * `enderecoInicial`, ainda editável) e o valor cobrado.
+ *
+ * REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): o módulo Tarefas é o lugar
+ * ÚNICO das solicitações — abre este modal SEM `vendaId` (ver TarefasClient),
+ * então cai no modo de busca de venda abaixo (ehConsultora sem vendaId). O
+ * mesmo modo de busca também continua servindo quem abre o modal pela tela
+ * de Entregas.
  *
  * IMPACTO SE ALTERADO: delegar a criação para POST /api/entregas-venda/frete-avulso.
  * Não fazer INSERT direto.

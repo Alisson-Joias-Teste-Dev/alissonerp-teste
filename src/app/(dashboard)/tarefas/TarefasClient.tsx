@@ -13,7 +13,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   Plus, Circle, Clock, CheckCircle2, XCircle, ShieldCheck,
   Search, Loader2, Zap, ListTodo, Users, AlertTriangle, Settings,
-  SlidersHorizontal, ChevronRight, LayoutGrid,
+  SlidersHorizontal, ChevronRight, LayoutGrid, Bike,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { apiFetch } from "@/lib/apiFetch";
@@ -22,6 +22,10 @@ import AutomacoesTab from "./AutomacoesTab";
 import ConfigTab from "./ConfigTab";
 import { useErrorStore } from "@/stores/errorStore";
 import { EvidenciasLimpeza, extrairBaixaIdLimpeza } from "@/components/EvidenciasLimpeza";
+// REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): Tarefas passa a ser TAMBÉM
+// ponto de entrada da solicitação de frete avulso (além do atalho na própria
+// venda) — ver uso mais abaixo (botão/FAB "Frete avulso", só consultora).
+import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
 
 export interface Tarefa {
   id: number;
@@ -550,6 +554,17 @@ export default function TarefasClient() {
 
   const [drawerTarefa, setDrawerTarefa] = useState<Tarefa | null>(null);
   const [showNova, setShowNova] = useState(false);
+  // REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): Tarefas é o lugar ÚNICO das
+  // solicitações de frete avulso — a venda mantém só o atalho contextual
+  // (botão na própria tela, venda já definida). Aqui a consultora escolhe a
+  // venda DENTRO do modal (FreteAvulsoModal sem vendaId mostra o buscador).
+  // Só consultora vê isto: pra qualquer outro papel a MESMA rota POST
+  // /api/entregas-venda/frete-avulso cria o avulso JÁ LIBERADO (sem passar
+  // pelo pool) — não é o fluxo de solicitação que essa entrada representa.
+  // IMPACTO SE REMOVIDO: consultora fica dependente do atalho de dentro da
+  // venda — e nem toda venda tem frete avulso, então esse atalho sozinho não
+  // cobre quem ainda não abriu a venda certa.
+  const [showFreteAvulso, setShowFreteAvulso] = useState(false);
   const [novaForm, setNovaForm] = useState({ titulo: "", descricao: "", prioridade: "media", data_limite: "", tags: "", tipo: "" });
   const [responsavelId, setResponsavelId] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -1083,6 +1098,17 @@ export default function TarefasClient() {
               )}
             </div>
 
+            {/* Solicitar frete avulso — entrada exclusiva da consultora (ver
+                comentário no state showFreteAvulso). Só desktop; mobile usa o
+                2º FAB, empilhado sobre o FAB "Nova tarefa". */}
+            {role === "consultora" && (
+              <button onClick={() => setShowFreteAvulso(true)}
+                className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold"
+                style={{ backgroundColor: C.cremeBg, color: C.esmeralda, borderColor: C.cremeBorder }}>
+                <Bike size={13} /> Frete avulso
+              </button>
+            )}
+
             {/* Botão Nova: só desktop; mobile usa FAB */}
             <button onClick={() => setShowNova(true)}
               className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
@@ -1428,6 +1454,19 @@ export default function TarefasClient() {
         </div>
       )}
 
+      {/* FAB Solicitar frete avulso — só mobile, só consultora (ver comentário
+          no state showFreteAvulso). Empilhado ACIMA do FAB "Nova tarefa"
+          (bottom-24) pra não sobrepor o outro botão. */}
+      {role === "consultora" && aba !== "config" && aba !== "automacoes" && (
+        <button
+          onClick={() => setShowFreteAvulso(true)}
+          aria-label="Solicitar frete avulso"
+          className="md:hidden fixed bottom-24 right-6 z-40 w-14 h-14 rounded-full shadow-xl border flex items-center justify-center active:scale-95 transition-transform"
+          style={{ backgroundColor: "#fff", color: C.esmeralda, borderColor: C.cremeBorder }}>
+          <Bike size={22} />
+        </button>
+      )}
+
       {/* FAB Nova Tarefa — só mobile, escondido nas abas config/automacoes (que têm botão próprio) */}
       {aba !== "config" && aba !== "automacoes" && (
         <button
@@ -1585,6 +1624,24 @@ export default function TarefasClient() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal Solicitar Frete Avulso (sem venda pré-definida — mostra o
+       * buscador de venda dentro do próprio modal). REGRA DE NEGÓCIO: ao
+       * concluir, a solicitação vira tarefa tipo 'frete_avulso' e precisa
+       * aparecer pro pool de aprovadores — por isso recarrega a lista
+       * (carregar) e as estatísticas (carregarStats), igual ao criarTarefa(). */}
+      {showFreteAvulso && (
+        <FreteAvulsoModal
+          isOpen={showFreteAvulso}
+          onClose={() => setShowFreteAvulso(false)}
+          onCriado={() => {
+            setShowFreteAvulso(false);
+            carregar();
+            carregarStats();
+          }}
+          userRole={role ?? ""}
+        />
       )}
     </div>
   );

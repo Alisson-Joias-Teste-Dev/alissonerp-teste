@@ -132,11 +132,6 @@ interface Venda {
   endereco_entrega_complemento?: string | null; endereco_entrega_bairro?: string | null;
   endereco_entrega_cidade?: string | null; endereco_entrega_cep?: string | null;
   endereco_entrega_uf?: string | null;
-  /** Última corrida avulsa solicitada pela consultora desta venda (V3) — null se nunca solicitou. */
-  frete_avulso?: {
-    id: number; situacao: string; motivo_recusa: string | null;
-    frete_cobrado: number; created_at: string;
-  } | null;
   cliente_endereco?: string | null; cliente_numero?: string | null;
   cliente_complemento?: string | null; cliente_bairro?: string | null;
   cliente_municipio?: string | null; cliente_cep?: string | null; cliente_uf?: string | null;
@@ -2672,54 +2667,27 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         )
       )}
 
-      {/* ── Frete avulso solicitado pela consultora (V3) ──
-          REGRA DE NEGÓCIO: mostra o botão de solicitar OU (se já existe uma
-          corrida avulsa vinculada a esta venda) o status no lugar do botão —
-          aguardando decisão do pool / liberada / recusada (com motivo).
-          IMPACTO SE REMOVIDO: a consultora só teria acesso pelo menu Entregas
-          (perderia o atalho de dentro da própria venda) e não veria o motivo
-          de uma recusa sem abrir o módulo de Tarefas. */}
+      {/* ── Solicitar frete avulso (atalho contextual da venda) ──
+          REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): a venda deixou de
+          acompanhar o STATUS da solicitação (aguardando/liberada/recusada) —
+          esse acompanhamento agora é só no módulo Tarefas, que passou a ser o
+          lugar único das solicitações. Aqui fica só o atalho: a venda já é
+          conhecida, então abrir o modal direto poupa a consultora de buscar a
+          venda de novo. Tentar solicitar de novo pra uma venda que já tem
+          solicitação em aberto é barrado pelo backend (POST
+          /api/entregas-venda/frete-avulso), que devolve mensagem clara — não
+          duplicar essa checagem aqui.
+          IMPACTO SE REMOVIDO: a consultora perde o atalho de dentro da própria
+          venda e passa a depender só da busca de venda dentro do Tarefas. */}
       {podeSolicitarFreteAvulso && (
-        venda.frete_avulso?.situacao === "solicitada" ? (
-          <div className="mb-3 px-4 py-2 rounded-lg border flex items-center gap-2"
-            style={{ backgroundColor: "#EFF6FF", borderColor: "#93C5FD", color: "#1E40AF" }}>
-            <Bike size={14} className="shrink-0" />
-            <p className="text-xs font-medium">Frete avulso solicitado — aguardando decisão do pool de aprovadores.</p>
-          </div>
-        ) : venda.frete_avulso?.situacao === "cancelada" ? (
-          <div className="mb-3 px-4 py-2 rounded-lg border flex items-center justify-between gap-2 flex-wrap"
-            style={{ backgroundColor: "#FEF2F2", borderColor: "#FCA5A5", color: "#991B1B" }}>
-            <div className="flex items-center gap-2">
-              <XCircle size={14} className="shrink-0" />
-              <p className="text-xs font-medium">
-                Frete avulso recusado{venda.frete_avulso.motivo_recusa ? `: ${venda.frete_avulso.motivo_recusa}` : "."}
-              </p>
-            </div>
-            <button
-              onClick={() => setShowFreteAvulsoModal(true)}
-              className="text-xs font-semibold underline shrink-0"
-              style={{ color: "#991B1B" }}
-            >
-              Solicitar novamente
-            </button>
-          </div>
-        ) : venda.frete_avulso ? (
-          // 'pendente' (liberado, ainda sem motoboy) / 'em_rota' / 'confirmada'
-          <div className="mb-3 px-4 py-2 rounded-lg border flex items-center gap-2"
-            style={{ backgroundColor: "#ECFDF5", borderColor: "#A7F3D0", color: "#065F46" }}>
-            <CheckCircle size={14} className="shrink-0" />
-            <p className="text-xs font-medium">Frete avulso liberado.</p>
-          </div>
-        ) : (
-          <button
-            onClick={() => setShowFreteAvulsoModal(true)}
-            className="mb-3 w-full px-4 py-2.5 rounded-lg border flex items-center gap-2 text-left transition-all hover:brightness-95"
-            style={{ backgroundColor: "#FAFAF7", borderColor: C.cremeBorder, color: C.esmeralda }}
-          >
-            <Bike size={15} className="shrink-0" />
-            <span className="text-sm font-medium">Solicitar frete avulso</span>
-          </button>
-        )
+        <button
+          onClick={() => setShowFreteAvulsoModal(true)}
+          className="mb-3 w-full px-4 py-2.5 rounded-lg border flex items-center gap-2 text-left transition-all hover:brightness-95"
+          style={{ backgroundColor: "#FAFAF7", borderColor: C.cremeBorder, color: C.esmeralda }}
+        >
+          <Bike size={15} className="shrink-0" />
+          <span className="text-sm font-medium">Solicitar frete avulso</span>
+        </button>
       )}
 
       {/* ── Alerta: concluir bloqueado por pagamentos pendentes ── */}
@@ -4739,17 +4707,18 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         }}
       />
     )}
-    {/* REGRA DE NEGÓCIO (V3): Modal de Solicitar Frete Avulso — aberto pelo
-     * botão/banner acima. vendaId fixo esconde o buscador de venda do modal;
-     * enderecoInicial pré-preenche o textarea editável. onSolicitado recarrega
-     * a venda (silencioso) assim que o POST confirma, para o banner de status
-     * trocar sem esperar o fechamento do modal. */}
+    {/* REGRA DE NEGÓCIO (atalho contextual — ver comentário do botão acima):
+     * Modal de Solicitar Frete Avulso aberto com a venda já definida.
+     * vendaId fixo esconde o buscador de venda do modal; enderecoInicial
+     * pré-preenche o textarea editável. Não recarrega mais a venda ao
+     * solicitar (onSolicitado) — desde que o acompanhamento de status saiu
+     * da tela da venda (passou pro Tarefas), não há mais nada aqui que
+     * dependa desse refresh. */}
     {showFreteAvulsoModal && venda && (
       <FreteAvulsoModal
         isOpen={showFreteAvulsoModal}
         onClose={() => setShowFreteAvulsoModal(false)}
         onCriado={() => setShowFreteAvulsoModal(false)}
-        onSolicitado={() => load(true)}
         userRole={role}
         vendaId={venda.id}
         enderecoInicial={enderecoInicialFreteAvulso}
