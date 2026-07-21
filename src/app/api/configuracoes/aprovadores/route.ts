@@ -73,6 +73,14 @@ const CHAVES = [
   // src/lib/aprovacoes/catalogo.ts. Espelha exatamente o padrão de
   // aprovadores_frete_avulso (mesma tarefa, chave diferente conforme quem paga).
   "aprovadores_frete_avulso_loja",
+  // SINGLE (UUID único — não é MULTI): gerente dona do saldo de frete grátis
+  // (verba de 0,1% do faturamento mensal). Antes escolhida arbitrariamente
+  // por `WHERE role='gerente_loja' AND ativo=true ORDER BY created_at LIMIT
+  // 1` em 2 lugares (bug latente com múltiplas gerentes ativas) — agora
+  // configurável aqui. Fonte única de leitura: resolverGerenteFreteGratisId
+  // (src/lib/entrega-venda.ts), com fallback ao comportamento antigo quando
+  // vazia (zero impacto até o Jonathan configurar).
+  "gerente_frete_gratis",
 ] as const;
 
 // Chaves NUMÉRICAS (%) — não são UUID de aprovador, são o limiar que decide
@@ -200,6 +208,8 @@ export async function GET() {
       aprovadores_frete_avulso: configMap.get("aprovadores_frete_avulso") ?? "",
       // MULTI (migration 354): pool de quem autoriza o CUSTO quando pagante='loja'.
       aprovadores_frete_avulso_loja: configMap.get("aprovadores_frete_avulso_loja") ?? "",
+      // SINGLE: gerente dona do saldo de frete grátis (verba mensal 0,1% do faturamento).
+      gerente_frete_gratis: configMap.get("gerente_frete_gratis") ?? "",
       // Fase 5 (15/07): limites numéricos (%), não são UUID de aprovador — ver CHAVES_NUMERICAS.
       desconto_fallback_sem_cadastro_pct: configMap.get("desconto_fallback_sem_cadastro_pct") ?? "0",
       limite_desconto_cartao_pct: configMap.get("limite_desconto_cartao_pct") ?? "20",
@@ -343,6 +353,12 @@ export async function PUT(req: NextRequest) {
         String(body.aprovadores_frete_avulso_loja).split(",").map((s) => s.trim()).filter(Boolean)
       )).join(",");
       updates.push({ chave: "aprovadores_frete_avulso_loja", valor: lista });
+    }
+    // SINGLE (BLOCO 1, 21/07): gerente do saldo de frete grátis — 1 UUID só,
+    // sem normalização de lista (não é MULTI). Vazio = fallback antigo
+    // (ORDER BY created_at) em resolverGerenteFreteGratisId.
+    if (body.gerente_frete_gratis !== undefined) {
+      updates.push({ chave: "gerente_frete_gratis", valor: body.gerente_frete_gratis });
     }
     // Fase 5 (15/07, tela adicionada 16/07): limites em % — valida 0-100, número.
     // Sem isso gravado errado, o fallback do código (0 / 20) nunca é sobrescrito

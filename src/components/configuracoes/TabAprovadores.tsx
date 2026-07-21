@@ -29,6 +29,7 @@ interface AprovadorConfig {
   limite_desconto_cartao_pct?: string; // Fase 5: acima disso, cartão de crédito exige aprovação
   aprovadores_frete_avulso?: string; // MULTI: UUIDs separados por vírgula (pool frete avulso — migration 353)
   aprovadores_frete_avulso_loja?: string; // MULTI: custo do frete avulso quando pagante='loja' (migration 354)
+  gerente_frete_gratis?: string; // SINGLE: gerente do saldo de frete grátis (BLOCO 1, 21/07) — vazio = fallback antigo
 }
 
 interface Usuario {
@@ -86,6 +87,7 @@ export default function TabAprovadores() {
     limite_desconto_cartao_pct: "20",
     aprovadores_frete_avulso: "",
     aprovadores_frete_avulso_loja: "",
+    gerente_frete_gratis: "",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
     gerentes: [],
@@ -130,6 +132,7 @@ export default function TabAprovadores() {
           limite_desconto_cartao_pct: d.limite_desconto_cartao_pct ?? "20",
           aprovadores_frete_avulso: d.aprovadores_frete_avulso ?? "",
           aprovadores_frete_avulso_loja: d.aprovadores_frete_avulso_loja ?? "",
+          gerente_frete_gratis: d.gerente_frete_gratis ?? "",
         });
         setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [], conversao_aprovadores: [], precificacao_aprovadores: [], devolucao_aprovadores: [] });
       })

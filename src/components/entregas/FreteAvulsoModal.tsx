@@ -94,10 +94,22 @@
  *
  * IMPACTO SE ALTERADO: delegar a criação para POST /api/entregas-venda/frete-avulso.
  * Não fazer INSERT direto.
+ *
+ * LIMPEZA (código morto, 21/07): o formulário ENXUTO antigo (motoboy
+ * escolhido na hora + busca de cliente avulso, sem endereço/pagante/
+ * comprovante) foi REMOVIDO. O QUÊ: existia um 3º modo — criação direta SEM
+ * `formularioCompleto` — que só era alcançado quando NENHUM caller passava
+ * `modoSolicitacao` nem `formularioCompleto`. POR QUÊ: desde o commit
+ * ab4ee47a (reforma da tela Entregas) os 3 pontos de entrada reais
+ * (EntregasVendaClient, VendaDetalheClient, TarefasClient) sempre passam um
+ * dos dois — confirmado via grep, zero chamadores restantes para o enxuto.
+ * IMPACTO SE REINTRODUZIDO: qualquer novo caller que abrir este modal sem
+ * `modoSolicitacao`/`formularioCompleto` agora cai no formulário COMPLETO
+ * (não existe mais fallback enxuto) — é a única forma suportada.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Loader2, CheckCircle, Bike, MapPin, AlignLeft, User, Search, DollarSign, Store, Camera } from "lucide-react";
+import { X, Loader2, CheckCircle, Bike, MapPin, AlignLeft, Search, DollarSign, Store, Camera } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import { useErrorStore } from "@/stores/errorStore";
 import EnderecoForm, { type EnderecoValue, ENDERECO_VAZIO, enderecoDaVenda, type EnderecoVendaFields } from "@/components/endereco/EnderecoForm";
@@ -116,19 +128,6 @@ const C = {
   cinza: "#6B7280",
   cinzaBorder: "#E5E7EB",
 };
-
-interface Motoboy {
-  id: number;
-  user_id: string | null;
-  nome: string;
-  telefone: string | null;
-  veiculo: string | null;
-}
-
-interface Contato {
-  id_contato: number;
-  nome: string;
-}
 
 /** Resultado da busca de venda (consultora) — subconjunto de /api/vendas?q= */
 interface VendaBusca {
@@ -208,17 +207,9 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   // buscador de venda mesmo quando o caller já sabe qual é.
   const vendaFixada = mostrarFormularioCompleto && vendaId != null;
 
-  const [motoboys, setMotoboys] = useState<Motoboy[]>([]);
-  const [motoboyId, setMotoboyId] = useState("");
   const [regiao, setRegiao] = useState<Regiao>("fortaleza");
   const [descricao, setDescricao] = useState("");
   const [observacoes, setObservacoes] = useState("");
-
-  // Busca de contato (opcional) — só usada fora do modo consultora
-  const [buscaContato, setBuscaContato] = useState("");
-  const [contatos, setContatos] = useState<Contato[]>([]);
-  const [contatoSelecionado, setContatoSelecionado] = useState<Contato | null>(null);
-  const [buscandoContato, setBuscandoContato] = useState(false);
 
   // Busca de venda + endereço editável (só modo consultora)
   const [vendaBusca, setVendaBusca] = useState("");
@@ -243,37 +234,6 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   const [sucesso, setSucesso] = useState(false);
 
   const freteCalculado = REGIOES.find(r => r.value === regiao)?.frete ?? 0;
-
-  // Carregar motoboys ao abrir — só necessário no formulário ENXUTO (loja
-  // escolhendo motoboy na hora). O formulário COMPLETO (solicitação OU
-  // direto-completo) não escolhe motoboy — a corrida cai no pool.
-  useEffect(() => {
-    if (!isOpen || mostrarFormularioCompleto) return;
-    apiFetch<Motoboy[]>("/api/entregas-venda/motoboys")
-      .then(d => setMotoboys(Array.isArray(d) ? d : []))
-      // Pitfall §3: sem a lista de motoboys o frete avulso não pode ser criado
-      .catch(() => useErrorStore.getState().push("Erro ao carregar lista de motoboys", { level: "warning" }));
-  }, [isOpen, mostrarFormularioCompleto]);
-
-  // Busca de contato com debounce — só no formulário ENXUTO.
-  const buscarContatos = useCallback(async (q: string) => {
-    if (q.length < 2) { setContatos([]); return; }
-    setBuscandoContato(true);
-    try {
-      const data = await apiFetch<Contato[]>(`/api/contatos/busca?q=${encodeURIComponent(q)}&limit=8`);
-      setContatos(Array.isArray(data) ? data : []);
-    } catch {
-      setContatos([]);
-    } finally {
-      setBuscandoContato(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (mostrarFormularioCompleto) return;
-    const t = setTimeout(() => buscarContatos(buscaContato), 300);
-    return () => clearTimeout(t);
-  }, [buscaContato, buscarContatos, mostrarFormularioCompleto]);
 
   // ── Busca de venda com debounce (consultora) ──────────────────────────────
   // REGRA DE NEGÓCIO: reusa GET /api/vendas?q= (mesma listagem paginada usada
@@ -349,14 +309,10 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   }
 
   function resetar() {
-    setMotoboyId("");
     setRegiao("fortaleza");
     setDescricao("");
     setObservacoes("");
     setFreteNegociado("");
-    setBuscaContato("");
-    setContatos([]);
-    setContatoSelecionado(null);
     setVendaBusca("");
     setVendasResultado([]);
     setVendaSelecionada(null);
@@ -381,7 +337,13 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     try {
       const freteNegociadoNum = freteNegociado ? parseFloat(freteNegociado.replace(",", ".")) : undefined;
 
-      if (mostrarFormularioCompleto) {
+      // REGRA DE NEGÓCIO (LIMPEZA código morto, 21/07): antes havia um `if
+      // (mostrarFormularioCompleto) {...} else {...}` — o else criava o
+      // avulso pelo formulário ENXUTO (motoboyId/contatoId direto, sem
+      // endereço/pagante). Removido: nenhum caller real chega mais com
+      // `mostrarFormularioCompleto === false` (ver comentário no topo do
+      // arquivo). O corpo abaixo é o único caminho de submit que resta.
+      {
         // REGRA DE NEGÓCIO (modelo POOL; fix 21/07 — venda deixa de ser
         // obrigatória; reforma da tela Entregas — mesmo corpo serve o modo
         // DIRETO com formulário completo, só muda `solicitar`): body NÃO
@@ -455,19 +417,6 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
             comprovanteBase64: pagante === "cliente" ? comprovanteBase64 : undefined,
           }),
         });
-      } else {
-        await apiFetch("/api/entregas-venda/frete-avulso", {
-          method: "POST",
-          body: JSON.stringify({
-            motoboyId,
-            regiao,
-            freteCobrado: 0,
-            freteMotoboyOverride: freteNegociadoNum && freteNegociadoNum > 0 ? freteNegociadoNum : undefined,
-            descricaoAvulso: descricao.trim(),
-            contatoId: contatoSelecionado?.id_contato,
-            observacoes: observacoes.trim() || undefined,
-          }),
-        });
       }
       setSucesso(true);
       setTimeout(() => {
@@ -498,10 +447,11 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     !enderecoEntrega.logradouro.trim() || !enderecoEntrega.numero.trim() || !enderecoEntrega.cidade.trim() ||
     (precisaValorCobradoDoCliente(pagante) && freteCobradoConsultora === "") || !descricao.trim() ||
     !pagante || (pagante === "cliente" && !comprovanteBase64);
-  const disabledPadrao =
-    enviando || !motoboyId || !descricao.trim() ||
-    (freteCalculado === 0 && !(freteNegociado && parseFloat(freteNegociado.replace(",", ".")) > 0));
-  const disabledSubmit = mostrarFormularioCompleto ? disabledFormularioCompleto : disabledPadrao;
+  // LIMPEZA (código morto, 21/07): existia um `disabledPadrao` (formulário
+  // ENXUTO, exigia motoboyId) e um ternário `mostrarFormularioCompleto ?
+  // disabledFormularioCompleto : disabledPadrao`. Removido junto com o
+  // formulário enxuto — não há mais um 2º layout para alternar.
+  const disabledSubmit = disabledFormularioCompleto;
 
   /**
    * REGRA DE LAYOUT (responsividade, 21/07 — layout aprovado pelo Jonathan):
@@ -710,7 +660,16 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                 </div>
               )}
 
-              {mostrarFormularioCompleto ? (
+              {/* LIMPEZA (código morto, 21/07): existia um ternário
+                  `mostrarFormularioCompleto ? (completo) : (enxuto)` — o
+                  formulário ENXUTO (motoboy selecionado na hora + busca de
+                  cliente avulso, sem endereço/pagante/comprovante) foi
+                  removido por não ter mais chamador (ver comentário no topo
+                  do arquivo). Só o formulário COMPLETO permanece; a var
+                  `mostrarFormularioCompleto` continua existindo (documenta a
+                  regra ehSolicitacao||formularioCompleto) mas hoje é sempre
+                  true nos 3 pontos de entrada reais. */}
+              {(
                 // REGRA DE LAYOUT (responsividade, 21/07 — layout aprovado
                 // pelo Jonathan; reforma da tela Entregas — mesmo layout para
                 // solicitação E direto-com-formulário-completo): 2 colunas no
@@ -963,106 +922,6 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                     {campoObservacoes}
                   </div>
                 </div>
-              ) : (
-                <>
-                  {campoDescricao}
-
-                  {/* Motoboy (criação direta — loja/admin/estoquista) */}
-                  <div style={{ marginBottom: 14 }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                      <Bike size={13} /> Motoboy *
-                    </label>
-                    <select
-                      required
-                      value={motoboyId}
-                      onChange={e => setMotoboyId(e.target.value)}
-                      style={{
-                        width: "100%", padding: "9px 12px", borderRadius: 8,
-                        border: `1px solid ${C.cremeBorder}`, fontSize: 13,
-                        boxSizing: "border-box", background: "#fff",
-                      }}
-                    >
-                      <option value="">Selecionar motoboy...</option>
-                      {motoboys.map(m => (
-                        <option key={m.id} value={m.user_id ?? String(m.id)}>{m.nome}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {campoRegiao}
-
-                  {/* Cliente (opcional) — só no modo criação direta; no modo consultora o cliente vem da venda */}
-                  <div style={{ marginBottom: 14 }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                      <User size={13} /> Cliente (opcional)
-                    </label>
-                    {contatoSelecionado ? (
-                      <div style={{
-                        padding: "8px 12px", borderRadius: 8,
-                        border: `1px solid ${C.esmeralda}`,
-                        background: C.esmeraldaLt,
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                      }}>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: C.esmeralda }}>
-                          {contatoSelecionado.nome}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => { setContatoSelecionado(null); setBuscaContato(""); }}
-                          style={{ background: "none", border: "none", cursor: "pointer", color: C.cinza }}
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ position: "relative" }}>
-                        <input
-                          type="text"
-                          placeholder="Buscar por nome..."
-                          value={buscaContato}
-                          onChange={e => setBuscaContato(e.target.value)}
-                          style={{
-                            width: "100%", padding: "9px 12px", borderRadius: 8,
-                            border: `1px solid ${C.cremeBorder}`, fontSize: 13,
-                            boxSizing: "border-box",
-                          }}
-                        />
-                        {buscandoContato && (
-                          <div style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)" }}>
-                            <Loader2 size={14} color={C.cinza} style={{ animation: "spin 1s linear infinite" }} />
-                          </div>
-                        )}
-                        {contatos.length > 0 && (
-                          <div style={{
-                            position: "absolute", top: "100%", left: 0, right: 0,
-                            background: "#fff", border: `1px solid ${C.cremeBorder}`,
-                            borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                            zIndex: 100, maxHeight: 200, overflowY: "auto",
-                          }}>
-                            {contatos.map(c => (
-                              <button
-                                key={c.id_contato}
-                                type="button"
-                                onClick={() => { setContatoSelecionado(c); setBuscaContato(""); setContatos([]); }}
-                                style={{
-                                  display: "block", width: "100%", textAlign: "left",
-                                  padding: "8px 12px", border: "none",
-                                  background: "none", cursor: "pointer", fontSize: 13,
-                                }}
-                                onMouseEnter={e => e.currentTarget.style.background = C.cremeBg}
-                                onMouseLeave={e => e.currentTarget.style.background = "none"}
-                              >
-                                {c.nome}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {campoObservacoes}
-                </>
               )}
             </div>
 

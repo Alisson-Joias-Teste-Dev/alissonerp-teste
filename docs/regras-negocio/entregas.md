@@ -4,7 +4,7 @@
 > Fonte de schema (colunas/tabelas) = `docs/schema/` (auto-gerado). Aqui é o **porquê** e o **como** do negócio.
 > ⚠️ Existe uma nota mais antiga e parcial sobre frete avulso registrado pelo motoboy em `docs/regras-negocio/comercial.md` §8 (PR#75). Este arquivo é o documento completo do módulo — considerar migrar/mesclar aquele trecho para cá numa limpeza futura.
 
-Última atualização: 2026-07-21 (BLOCO 6 — reforma visual da tela `/entregas-venda`: 3 abas, filtros em select, paginação de 10, componentização, e o botão "Frete Avulso" da tela passa a usar o formulário COMPLETO — endereço/quem paga/comprovante — continuando a criar DIRETO; branch `feat/frete-avulso-solicitacao`). Blocos anteriores: BLOCO 5 — estoque acompanha TODAS as entregas avulsas; quem solicita enxerga o próprio pedido, inclusive recusado; link de notificação para de ser morto; BLOCO 4 — drawer da entrega mostra o endereço CONFIRMADO na solicitação (não o da venda), aprovador vê o valor do frete antes de decidir (aviso acima de R$ 200); BLOCO 3 — validações viram INVARIANTES independentes do modo, cargos alinhados ao banco e fonte única de permissão; BLOCO 2 — autorização não-manipulável: sem auto-aprovação, pool decidido pelo dado "quem paga" e não pela tag.
+Última atualização: 2026-07-21 (VERBA DE FRETE GRÁTIS — Blocos 0-3, fundação: formulário ENXUTO órfão removido de `FreteAvulsoModal.tsx`; gerente do saldo passa a ser configurável (`gerente_frete_gratis`, com fallback ao comportamento antigo); migration 356 reaproveita `fechamentos_frete` (nunca usada) para o fechamento mensal — positivo ZERA, negativo vira conta a pagar (não mais desconto em folha); `src/lib/frete-verba.ts` calcula o faturamento-base a partir da MESMA consulta da dashboard comercial. Ver §10. Migration não executada). Blocos anteriores do módulo de frete avulso (mesma branch `feat/frete-avulso-solicitacao`): BLOCO 6 — reforma visual da tela `/entregas-venda`: 3 abas, filtros em select, paginação de 10, componentização, e o botão "Frete Avulso" da tela passa a usar o formulário COMPLETO — endereço/quem paga/comprovante — continuando a criar DIRETO; BLOCO 5 — estoque acompanha TODAS as entregas avulsas; quem solicita enxerga o próprio pedido, inclusive recusado; link de notificação para de ser morto; BLOCO 4 — drawer da entrega mostra o endereço CONFIRMADO na solicitação (não o da venda), aprovador vê o valor do frete antes de decidir (aviso acima de R$ 200); BLOCO 3 — validações viram INVARIANTES independentes do modo, cargos alinhados ao banco e fonte única de permissão; BLOCO 2 — autorização não-manipulável: sem auto-aprovação, pool decidido pelo dado "quem paga" e não pela tag.
 
 ---
 
@@ -216,7 +216,7 @@ O próprio motoboy registra a própria corrida pelo app (`MotoboyAppClient` → 
 
 ## 9. Referência
 
-- Migration base do módulo: `285_modulo_entrega.sql` (tabelas `entregas_venda`, `entregas_venda_itens`, `saldo_frete_gratis`, `fechamentos_frete`, `motoboys`; views `vw_entregas_pendentes` e `vw_motoboy_entregas`, ambas hardcoded para `situacao='confirmada'`).
+- Migration base do módulo: `285_modulo_entrega.sql` (tabelas `entregas_venda`, `entregas_venda_itens`, `saldo_frete_gratis`, `fechamentos_frete`, `motoboys`; views `vw_entregas_pendentes` e `vw_motoboy_entregas`, ambas hardcoded para `situacao='confirmada'`). `fechamentos_frete` ficou sem nenhum código usá-la até ser reaproveitada pela migration 356 (ver §10.2).
 - Migration do frete avulso original: `293_frete_avulso.sql` (+ `294`/`295`/`298` para nullable de códigos e blindagem).
 - Migration da solicitação/pool: **`353_frete_avulso_solicitacao.sql`** — enum `solicitada` (inserido antes de `pendente`), colunas `endereco_entrega`/`liberada_por`/`liberada_em`/`motivo_recusa`/`tarefa_aprovacao_id`, constraint `chk_entrega_origem` recriada. **Já aplicada em homolog; produção pendente.**
 - Migration "quem paga": **`354_frete_avulso_pagante.sql`** — colunas `pagante` (`'loja'`|`'cliente'`, `chk_entrega_frete_avulso_pagante`) e `comprovante_pagante_path` em `entregas_venda`. Só arquivo criado nesta branch — **banco (local/homolog/produção) ainda não rodou esta migration.**
@@ -230,3 +230,56 @@ O próprio motoboy registra a própria corrida pelo app (`MotoboyAppClient` → 
 - Testes (BLOCO 3): `src/__tests__/frete-avulso-invariantes-route.test.ts`, `src/__tests__/frete-avulso-invariantes-lib.test.ts`, `src/lib/permissoes/__tests__/frete-avulso.test.ts`.
 - Testes (BLOCO 4): `src/__tests__/entrega-detalhe-endereco-resolvido.test.ts`, `src/__tests__/tarefas-frete-avulso-valor.test.ts`, `src/__tests__/frete-avulso-alerta-limite.test.ts`.
 - Testes (BLOCO 5): `src/__tests__/entregas-venda-estoquista-acesso.test.ts`, `src/__tests__/tarefas-solicitadas-visao.test.ts`, `src/__tests__/notificacoes-drawer-decidivel.test.ts`.
+
+---
+
+## 10. Verba de Frete Grátis — fundação (Blocos 0-3, 21/07)
+
+Regra de negócio **definida pelo Jonathan** (não reabrir): a loja recebe todo mês uma verba para **dar frete grátis de cortesia** (o normal é o cliente pagar). Verba = **0,1% do faturamento do mês anterior**. Dia 01, automático: fecha o mês, saldo **positivo ZERA** (não é cumulativo); **negativo** gera **TAREFA de aprovação** → se aprovada, vira **conta a pagar da gerente** com vencimento no dia 10; se rejeitada, não lança (motivo obrigatório). A verba do mês novo entra **SEMPRE**, independente da tarefa. Esta sessão (Blocos 0-3) é só a **fundação** — o fechamento automático do dia 01 (cron) e a config de "quem aprova o negativo" ficam para um bloco futuro.
+
+### 10.0. BLOCO 0 — limpeza: formulário ENXUTO órfão removido
+
+`src/components/entregas/FreteAvulsoModal.tsx` tinha um 3º modo — o formulário ENXUTO (motoboy escolhido na hora + busca de cliente avulso, sem endereço/pagante/comprovante) — alcançado só quando o modal era aberto SEM `modoSolicitacao` **e** SEM `formularioCompleto`. Desde o BLOCO 6 (commit `ab4ee47a`), os 3 pontos de entrada reais (`EntregasVendaClient.tsx` → `formularioCompleto`; `VendaDetalheClient.tsx` → `modoSolicitacao` + `vendaId`; `TarefasClient.tsx` → `modoSolicitacao`) sempre passam um dos dois — confirmado via grep, **zero chamadores** para o modo enxuto.
+
+- **Removido**: `interface Motoboy`/`Contato`, estados `motoboys`/`motoboyId`/`buscaContato`/`contatos`/`contatoSelecionado`/`buscandoContato`, os `useEffect` que carregavam motoboys/buscavam contato, o branch `else` de `handleSubmit` (POST com `motoboyId`/`contatoId`), `disabledPadrao`, e o branch JSX do formulário enxuto (select de motoboy + busca de cliente). Import não usado (`User` do lucide-react) removido junto.
+- **Mantido**: os dois modos atuais — solicitação (`modoSolicitacao`) e criação direta com formulário completo (`formularioCompleto`) continuam idênticos, sem alteração de comportamento.
+- **Se precisar reintroduzir um modo "enxuto" no futuro**: não existe mais fallback — qualquer novo caller sem `modoSolicitacao`/`formularioCompleto` cai no formulário completo (única opção que resta).
+
+### 10.1. BLOCO 1 — gerente do saldo de frete grátis, configurável
+
+Antes, "a gerente" do saldo de frete grátis (avulso) era escolhida por `SELECT ... WHERE role='gerente_loja' AND ativo=true ORDER BY created_at LIMIT 1` — arbitrário (o primeiro gerente_loja cadastrado), duplicado em 2 lugares: `lancarSaldoFreteAvulsoNoTx` (`src/lib/entrega-venda.ts`) e `GET /api/entregas-venda/saldo-frete` (`route.ts`).
+
+- **Fix**: chave de config **`gerente_frete_gratis`** (UUID único, não é MULTI) em **Config › Aprovadores** — mesmo padrão de `aprovador_limpeza`/`metal_aprovador_id` (CHAVES + GET + PUT em `src/app/api/configuracoes/aprovadores/route.ts`, entrada em `ListaAprovadores.tsx` com `usuariosKey: "gerentes"` sem `multi`, estado em `TabAprovadores.tsx`).
+- **Fonte única de leitura**: `resolverGerenteFreteGratisId(db, fallbackUserId)` (`src/lib/entrega-venda.ts`) — usada pelos 2 lugares acima. Recebe `db` como parâmetro (funciona tanto com `sql` direto quanto com `tx` de uma transação).
+- **⚠️ Fallback obrigatório**: chave vazia → mantém EXATAMENTE o comportamento antigo (`ORDER BY created_at LIMIT 1`, fallback final = usuário logado/autor da ação) — zero impacto em produção até o Jonathan configurar a chave.
+- **NÃO cobre `criarEntrega`** (entrega normal, não-avulso) — esse fluxo tem sua PRÓPRIA busca arbitrária de `gerente_loja` (mesmo padrão antigo, `src/lib/entrega-venda.ts` ~linha 878) para o saldo de frete grátis das entregas normais (sobra/falta de frete cobrado vs motoboy). **Reportado ao Jonathan, não alterado** — fora do escopo combinado (só os 2 lugares do frete AVULSO). Se um dia for unificado, usar a mesma `resolverGerenteFreteGratisId`.
+- **Teste anti-volta**: `src/__tests__/frete-gerente-configuravel.test.ts` — chave preenchida usa o UUID configurado (sem nem consultar o fallback); chave vazia/em branco cai no fallback antigo; sem config e sem gerente_loja ativo usa o `fallbackUserId`.
+
+### 10.2. BLOCO 2 — migration 356 (arquivo criado, NÃO executada)
+
+`supabase/migrations/356_verba_frete_gratis_fechamento.sql` reaproveita `alissonerp.fechamentos_frete` (criada na migration 285, **nunca usada por nenhum código** até esta sessão — 0 linhas em produção). Já tinha `UNIQUE(gerente_id, mes_referencia)` (idempotência) e `saldo_frete_gratis.fechamento_id` já era FK pra ela.
+
+- **Colunas novas** (`ADD COLUMN IF NOT EXISTS`): `verba_creditada NUMERIC(12,2)`, `faturamento_base NUMERIC(14,2)`, `percentual_verba NUMERIC(6,4)` (auditoria do cálculo — ver §10.3), `tarefa_aprovacao_id INTEGER REFERENCES alissonerp.tarefas(id)`, `conta_pagar_id INTEGER REFERENCES alissonerp.contas_pagar(id)` (tabela/PK confirmadas em `024_financeiro.sql` — `contas_pagar.id SERIAL`).
+- **`valor_descontado_folha` NÃO removida** (regra do repo: nunca remover coluna) — marcada LEGADO via `COMMENT ON COLUMN`: pertencia à regra ANTIGA (nunca implementada — positivo carregava, negativo descontava em folha). A regra ATUAL usa `conta_pagar_id`.
+- **Domínio de `status` redefinido** (tabela nunca usada, sem linha para violar constraint nova): `CHECK (status IN ('fechado', 'aguardando_aprovacao', 'pago', 'recusado'))`. `'fechado'` = positivo/zero, sem aprovação (também virou o novo `DEFAULT`, no lugar do antigo `'aberto'`, que não pertence ao domínio novo). `'aguardando_aprovacao'` = negativo, tarefa criada. `'pago'` = negativo aprovado, `conta_pagar_id` preenchido. `'recusado'` = negativo recusado.
+- **COMMENTs reescritos**: `COMMENT ON TABLE alissonerp.fechamentos_frete` (nunca tinha — migration 285 não incluiu) e `COMMENT ON TABLE alissonerp.saldo_frete_gratis` (tinha um comment descrevendo a regra ANTIGA — corrigido, mesmo assunto).
+- **⚠️ Config de "quem aprova o negativo"** (chave própria, "um usuário configurado") **não foi criada nesta sessão** — só a fundação (Blocos 0-3). Fica para o bloco que implementa o fechamento automático do dia 01.
+
+### 10.3. BLOCO 3 — cálculo da verba, fonte única (`src/lib/frete-verba.ts`)
+
+`calcularFaturamentoMes(inicio, fim)` usa **EXATAMENTE** a mesma consulta da dashboard comercial (`src/app/api/dashboard-comercial/vendas-dashboard/route.ts`, campo `visaoGeral.alcancado_bruto`): `FROM alissonerp.vw_dash_vendas_todas WHERE data_venda BETWEEN ... AND status IS NOT NULL AND status != 4`, somando `total_venda` (soma BRUTA, sem descontar vale-troca — mesmo número que a tela do Jonathan já mostra e confere).
+
+- **`obterPercentualVerbaFrete()`**: lê `percentual_verba_frete` em `alissonerp.configuracoes_sistema` (valor "0.1" = 0,1%), default `0.1` se a chave não existir — mesmo padrão de leitura direta (sem cache) de `desconto_fallback_sem_cadastro_pct`/`limite_desconto_cartao_pct`. Percentual NÃO fica hardcoded no meio do código.
+- **`calcularVerbaFreteGratis(mesReferencia)`**: compõe faturamento do MÊS ANTERIOR + percentual → `{ verba, faturamentoBase, percentual, inicioMesAnterior, fimMesAnterior }` — os 3 primeiros campos alimentam `fechamentos_frete.verba_creditada`/`faturamento_base`/`percentual_verba` (migration 356) quando o fechamento automático for implementado.
+- **🔒 Teste anti-volta**: `src/__tests__/frete-verba-equivalente-dashboard.test.ts`. O setup de teste do projeto roda com vitest `environment:"node"`, **sem banco disponível** — não dá para rodar as duas consultas de verdade e comparar o RESULTADO. Em vez disso, o teste lê o **texto-fonte** dos dois arquivos (`frete-verba.ts` e `vendas-dashboard/route.ts`), extrai por regex o filtro WHERE (view + condição de data + condição de status) de cada um, normaliza (remove aliases de tabela como `v.`, troca nomes de variável interpolados por um token fixo) e afirma que os dois filtros são **idênticos** — se alguém mudar o filtro só de um lado (`!= 4` por outro valor, remover o `IS NOT NULL`, trocar a view), a extração captura textos diferentes e o teste quebra apontando qual lado mudou. **Limitação reconhecida**: não pega uma condição NOVA adicionada depois do trecho capturado em só um dos lados (ex.: um `AND` extra no fim) — não é uma prova de equivalência em runtime, é a garantia possível neste setup de teste (mesma string de filtro nos dois arquivos).
+- **Percentual esperado (conferido pelo Jonathan em homolog, jul/26)**: 17 vendas, R$ 217.867,00 de faturamento — bate com a tela do dashboard comercial.
+
+### 10.4. Referência (Blocos 0-3)
+
+- Migration: `supabase/migrations/356_verba_frete_gratis_fechamento.sql` (arquivo criado, **NÃO executada** em nenhum ambiente).
+- Lib: `src/lib/frete-verba.ts` (`calcularFaturamentoMes`, `obterPercentualVerbaFrete`, `calcularVerbaFreteGratis`); `resolverGerenteFreteGratisId` em `src/lib/entrega-venda.ts` (junto de `lancarSaldoFreteAvulsoNoTx`/`obterSaldoFreteGerenteNoTx`, §9 acima).
+- Rotas: `src/app/api/entregas-venda/saldo-frete/route.ts` (usa `resolverGerenteFreteGratisId`), `src/app/api/configuracoes/aprovadores/route.ts` (chave `gerente_frete_gratis`).
+- Front: `src/components/configuracoes/aprovadores/ListaAprovadores.tsx` (card "Gerente do saldo de frete grátis"), `src/components/configuracoes/TabAprovadores.tsx`.
+- Componente limpo (BLOCO 0): `src/components/entregas/FreteAvulsoModal.tsx` (formulário enxuto removido — ver comentário "LIMPEZA" no topo do arquivo).
+- Testes: `src/__tests__/frete-gerente-configuravel.test.ts` (BLOCO 1), `src/__tests__/frete-verba-equivalente-dashboard.test.ts` (BLOCO 3).
+- **Fora do escopo desta sessão (fundação apenas)**: fechamento automático do dia 01 (cron), config de "quem aprova o negativo", geração da tarefa/conta a pagar em si, e a busca arbitrária de `gerente_loja` ainda existente em `criarEntrega` (entrega normal — ver §10.1).

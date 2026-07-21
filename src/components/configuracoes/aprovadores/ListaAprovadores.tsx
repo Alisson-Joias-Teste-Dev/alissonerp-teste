@@ -217,6 +217,13 @@ const CONFIG_ITENS: ConfigItem[] = [
     icone: "🏪",
     multi: true,
   },
+  {
+    chave: "gerente_frete_gratis",
+    titulo: "Gerente do saldo de frete grátis",
+    descricao: "Dona da verba mensal de frete grátis (0,1% do faturamento do mês anterior) — 1 pessoa só. Vazio = usa o gerente_loja mais antigo cadastrado (comportamento antigo, mantido por compatibilidade).",
+    usuariosKey: "gerentes",
+    icone: "🚚",
+  },
 ];
 
 // ─── Componente ───────────────────────────────────────────────────────────────

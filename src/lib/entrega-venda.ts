@@ -1888,6 +1888,50 @@ export interface MovimentacaoFrete {
   createdAt: string;
 }
 
+/**
+ * Resolve o id da gerente dona do saldo de frete grátis do FRETE AVULSO —
+ * FONTE ÚNICA de leitura, usada por `lancarSaldoFreteAvulsoNoTx` (grava o
+ * saldo) E por GET /api/entregas-venda/saldo-frete (consulta o saldo).
+ *
+ * O QUE: lê a chave de config `gerente_frete_gratis` (UUID único, tela
+ * Config › Aprovadores — mesmo padrão de aprovador_limpeza/metal_aprovador_id).
+ *
+ * POR QUE: antes a gerente era escolhida por
+ * `WHERE role='gerente_loja' AND ativo=true ORDER BY created_at LIMIT 1` —
+ * arbitrário (o primeiro gerente_loja cadastrado, sem relação com quem de
+ * fato é a gerente configurada para receber a verba). Virou bug latente em
+ * produção com múltiplas gerentes ativas.
+ *
+ * ⚠️ FALLBACK OBRIGATÓRIO: com a chave VAZIA (ninguém configurou ainda),
+ * mantém EXATAMENTE o comportamento antigo (`ORDER BY created_at LIMIT 1`) —
+ * zero impacto em produção até o Jonathan configurar `gerente_frete_gratis`.
+ *
+ * IMPACTO SE DUPLICADA (função copiada em vez de importada): os 2 pontos
+ * (lançamento do saldo e consulta do saldo) podem divergir sobre QUEM é a
+ * gerente — saldo gravado para uma pessoa, exibido para outra.
+ *
+ * NÃO usada por `criarEntrega` (entrega normal, não-avulso) — aquele fluxo
+ * tem sua PRÓPRIA busca arbitrária de gerente_loja (linha ~878 deste
+ * arquivo), fora do escopo desta mudança (reportado ao Jonathan, não
+ * alterado).
+ */
+export async function resolverGerenteFreteGratisId(db: DbSql, fallbackUserId: string): Promise<string> {
+  const [config] = await db`
+    SELECT valor FROM alissonerp.configuracoes_sistema
+    WHERE chave = 'gerente_frete_gratis'
+  `;
+  const configurado = typeof config?.valor === "string" ? config.valor.trim() : "";
+  if (configurado) return configurado;
+
+  // Fallback antigo (arbitrário, mantido por compatibilidade — ver comentário acima).
+  const [gerente] = await db`
+    SELECT id FROM alissonerp.usuarios
+    WHERE role = 'gerente_loja' AND ativo = true
+    ORDER BY created_at LIMIT 1
+  `;
+  return (gerente?.id as string | undefined) ?? fallbackUserId;
+}
+
 async function obterSaldoFreteGerenteNoTx(tx: DbSql, gerenteId: string): Promise<number> {
   const [row] = await tx`
     SELECT
@@ -2212,8 +2256,10 @@ export interface FreteAvulso {
  * Lança a diferença entre frete cobrado e frete do motoboy no saldo_frete_gratis
  * (conta-corrente da gerente) para um frete avulso.
  *
- * O QUE: busca a gerente_loja ativa, calcula saldo antes/depois e insere
- * crédito (cobrado > motoboy) ou débito (cobrado < motoboy) vinculado à entrega.
+ * O QUE: resolve a gerente via resolverGerenteFreteGratisId (config
+ * `gerente_frete_gratis`, com fallback ao antigo gerente_loja mais antigo —
+ * ver BLOCO 1, 21/07), calcula saldo antes/depois e insere crédito (cobrado
+ * > motoboy) ou débito (cobrado < motoboy) vinculado à entrega.
  *
  * POR QUE: avulso é sempre custo da loja — o frete_motoboy sai do saldo da
  * gerente, e o que foi cobrado a mais do cliente volta como crédito.
@@ -2234,12 +2280,10 @@ async function lancarSaldoFreteAvulsoNoTx(
   const diff = money(freteCobrado - freteMotoboy);
   if (diff === 0) return;
 
-  const [gerente] = await tx`
-    SELECT id FROM alissonerp.usuarios
-    WHERE role = 'gerente_loja' AND ativo = true
-    ORDER BY created_at LIMIT 1
-  `;
-  const gerenteId = (gerente?.id as string) ?? userId;
+  // BLOCO 1 (gerente configurável, 21/07): fonte única — ver comentário
+  // completo em resolverGerenteFreteGratisId. Fallback idêntico ao antigo
+  // ORDER BY created_at quando a chave gerente_frete_gratis está vazia.
+  const gerenteId = await resolverGerenteFreteGratisId(tx, userId);
   const saldoAntes = await obterSaldoFreteGerenteNoTx(tx, gerenteId);
 
   if (diff > 0) {
