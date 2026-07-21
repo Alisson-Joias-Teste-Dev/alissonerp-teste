@@ -28,6 +28,9 @@ Havia 7 admins e 3 devs na base — permissão por role daria a chave para 10 pe
   e `chk_voucher_for_outgoing` **rejeitava a baixa no banco** (descoberto testando no banco local).
 - Constantes compartilhadas em `src/lib/perda-extravio.ts` (`MOTIVO_PERDA`, `CONFIRMACAO_PERDA`).
 
+**Limpeza junto:** o botão "Baixa Manual" saiu do detalhe do produto — a API já recusava qualquer
+saída manual (403 desde a v2.81.3), então ele só servia para dar erro. Ficou só a Entrada Manual.
+
 **Não muda:** o desfecho `perda` do **inventário** continua só registro, SEM baixa (§7 de comercial.md).
 Não há tela consolidada de perdas — decisão explícita do Jonathan.
 

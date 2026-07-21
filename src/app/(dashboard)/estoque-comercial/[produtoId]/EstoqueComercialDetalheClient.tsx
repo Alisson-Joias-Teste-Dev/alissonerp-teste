@@ -512,7 +512,10 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
   const [perdaAberta, setPerdaAberta] = useState(false);
 
   // Ajuste manual (entrada ou saída)
-  const [ajusteTipo,    setAjusteTipo]    = useState<"entrada" | "saida" | null>(null);
+  // Ajuste manual e SO DE ENTRADA. A saida manual foi removida da tela: a API
+  // devolve 403 para qualquer saida desde a v2.81.3 (o botao era morto) e a unica
+  // baixa que existe hoje e a de perda/extravio, exclusiva do master admin.
+  const [ajusteAberto, setAjusteAberto] = useState(false);
   const [ajusteQtd,     setAjusteQtd]     = useState("1");
   const [ajusteDesc,    setAjusteDesc]    = useState("");
   const [ajusteErr,     setAjusteErr]     = useState("");
@@ -625,15 +628,14 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
     }
   }
 
-  function abrirAjuste(tipo: "entrada" | "saida") {
-    setAjusteTipo(tipo);
+  function abrirAjuste() {
+    setAjusteAberto(true);
     setAjusteQtd("1");
     setAjusteDesc("");
     setAjusteErr("");
   }
 
   async function handleAjusteManual() {
-    if (!ajusteTipo) return;
     const qtd = parseInt(ajusteQtd, 10);
     if (!qtd || qtd < 1) { setAjusteErr("Quantidade inválida"); return; }
     if (!ajusteDesc.trim()) { setAjusteErr("Descrição obrigatória"); return; }
@@ -644,15 +646,15 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           produto_id: produtoId,
-          tipo: ajusteTipo,
-          motivo: ajusteTipo === "entrada" ? "ajuste_entrada" : "ajuste_saida",
+          tipo: "entrada",
+          motivo: "ajuste_entrada",
           quantidade: qtd,
           observacao: ajusteDesc.trim(),
           local_estoque_id: 2,
         }),
       });
       if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? "Erro");
-      setAjusteTipo(null);
+      setAjusteAberto(false);
       await fetchData();
     } catch (e) {
       setAjusteErr(e instanceof Error ? e.message : "Erro");
@@ -757,27 +759,23 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
+            {/* REGRA DE NEGOCIO: so ENTRADA manual. O botao "Baixa Manual" foi
+                removido em 21/07/2026 — a API recusa qualquer saida manual desde
+                a v2.81.3 (403 para todos), entao ele so servia para dar erro. A
+                unica baixa que existe e a de perda/extravio, logo abaixo, e e
+                exclusiva do master admin.
+                IMPACTO SE VOLTAR: botao que nunca funciona e induz a operacao a
+                achar que da para "acertar" o estoque na mao. */}
             {podeAdminDev && (
-              <>
-                <button
-                  onClick={() => abrirAjuste("entrada")}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-                  style={{ background: "#D1FAE5", color: "#065F46", border: "1px solid #6EE7B7" }}
-                  title="Registrar entrada manual no estoque"
-                >
-                  <ArrowUpCircle size={15} />
-                  Entrada Manual
-                </button>
-                <button
-                  onClick={() => abrirAjuste("saida")}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-                  style={{ background: "#FEE2E2", color: "#991B1B", border: "1px solid #FECACA" }}
-                  title="Registrar baixa manual no estoque"
-                >
-                  <TrendingDown size={15} />
-                  Baixa Manual
-                </button>
-              </>
+              <button
+                onClick={abrirAjuste}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                style={{ background: "#D1FAE5", color: "#065F46", border: "1px solid #6EE7B7" }}
+                title="Registrar entrada manual no estoque"
+              >
+                <ArrowUpCircle size={15} />
+                Entrada Manual
+              </button>
             )}
             {/* REGRA DE NEGOCIO: baixa por peca sumida. Botao SO existe para o
                 master admin (o dono) — nem admin, nem desenvolvedor, nem gerente.
@@ -1150,20 +1148,18 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
         />
       )}
 
-      {/* Ajuste Manual Modal (entrada ou saída) */}
-      {ajusteTipo && (
+      {/* Ajuste Manual Modal — SO ENTRADA (ver comentario no botao) */}
+      {ajusteAberto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                {ajusteTipo === "entrada"
-                  ? <ArrowUpCircle size={18} style={{ color: "#059669" }} />
-                  : <TrendingDown size={18} style={{ color: "#DC2626" }} />}
+                <ArrowUpCircle size={18} style={{ color: "#059669" }} />
                 <h2 className="font-bold text-lg" style={{ color: "#184036" }}>
-                  {ajusteTipo === "entrada" ? "Entrada Manual" : "Baixa Manual"}
+                  Entrada Manual
                 </h2>
               </div>
-              <button onClick={() => setAjusteTipo(null)}><X size={18} className="text-gray-400" /></button>
+              <button onClick={() => setAjusteAberto(false)}><X size={18} className="text-gray-400" /></button>
             </div>
 
             <p className="text-sm text-gray-500 mb-4">{c?.nome_produto}</p>
@@ -1188,7 +1184,7 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
                   rows={3}
                   className="w-full border rounded-lg px-3 py-2 text-sm outline-none resize-none"
                   style={{ borderColor: "#E8DCC8" }}
-                  placeholder={ajusteTipo === "entrada" ? "Motivo da entrada manual..." : "Motivo da baixa manual..."}
+                  placeholder="Motivo da entrada manual..."
                   value={ajusteDesc}
                   onChange={e => setAjusteDesc(e.target.value)}
                 />
@@ -1205,26 +1201,21 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
               <button
                 className="flex-1 py-2.5 rounded-xl text-sm font-medium border"
                 style={{ color: "#6B7280", borderColor: "#E5E7EB" }}
-                onClick={() => setAjusteTipo(null)}
+                onClick={() => setAjusteAberto(false)}
                 disabled={ajusteLoading}
               >
                 Cancelar
               </button>
               <button
                 className="flex-1 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
-                style={{
-                  background: ajusteTipo === "entrada" ? "#059669" : "#DC2626",
-                  color: "#fff",
-                }}
+                style={{ background: "#059669", color: "#fff" }}
                 onClick={handleAjusteManual}
                 disabled={ajusteLoading}
               >
                 {ajusteLoading
                   ? <Loader2 size={14} className="animate-spin" />
-                  : ajusteTipo === "entrada"
-                    ? <ArrowUpCircle size={14} />
-                    : <TrendingDown size={14} />}
-                {ajusteTipo === "entrada" ? "Confirmar Entrada" : "Confirmar Baixa"}
+                  : <ArrowUpCircle size={14} />}
+                Confirmar Entrada
               </button>
             </div>
           </div>
