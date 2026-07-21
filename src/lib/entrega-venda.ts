@@ -2073,13 +2073,18 @@ export interface CriarFreteAvulsoParams {
   descricaoAvulso?: string;
   contatoId?: number;
   observacoes?: string;
-  // REGRA DE NEGÓCIO (solicitação da consultora — migration 353, modelo POOL):
-  // quando modoSolicitacao=true, o avulso nasce 'solicitada' (sem lançar
-  // saldo) e fica vinculado a uma venda (para herdar cliente/endereço) até
-  // que QUALQUER aprovador do pool (chave de config aprovadores_frete_avulso) ou
-  // admin/dev/diretor libere ou recuse — não há mais responsável designado.
-  // vendaId e o endereço estruturado são obrigatórios nesse modo — validado
-  // em criarFreteAvulso().
+  // REGRA DE NEGÓCIO (solicitação da consultora — migration 353, modelo POOL;
+  // fix 21/07 — venda deixa de ser obrigatória): quando modoSolicitacao=true,
+  // o avulso nasce 'solicitada' (sem lançar saldo) até que QUALQUER aprovador
+  // do pool (chave de config aprovadores_frete_avulso) ou admin/dev/diretor
+  // libere ou recuse — não há mais responsável designado. vendaId é OPCIONAL
+  // nesse modo: a corrida por natureza pode não partir de uma venda (ex.:
+  // "levar material à loja", "buscar peça") — quando informado, herda
+  // cliente/endereço e passa pelas checagens de ownership/janela/duplicata
+  // (ver criarFreteAvulso); só o endereço estruturado continua obrigatório
+  // (validado em criarFreteAvulso()).
+  // IMPACTO SE VOLTAR A EXIGIR: reabre o erro original — bloqueia corridas
+  // avulsas legítimas sem venda.
   vendaId?: number;
   // REGRA DE NEGÓCIO (migration 355 — endereço estruturado, 21/07): antes um
   // único campo de texto livre (`enderecoEntrega`, concatenado no client) —
@@ -2234,63 +2239,70 @@ export async function criarFreteAvulso(
     throw new Error("Valor do frete não pode ser negativo.");
   }
 
-  // REGRA DE NEGÓCIO (solicitação — migration 353, modelo TAREFA/POOL): no modo
-  // solicitação a consultora precisa informar DE QUAL VENDA o frete parte
-  // (herda cliente/endereço). NÃO escolhe mais um responsável — a solicitação
+  // REGRA DE NEGÓCIO (solicitação — migration 353, modelo TAREFA/POOL; fix
+  // 21/07 — venda deixa de ser obrigatória): frete avulso É POR NATUREZA uma
+  // corrida que pode não ter venda (ex.: "levar material à loja", "buscar
+  // peça"). Quando o fluxo nascia dentro da tela da venda, vendaId sempre
+  // existia; a entrada mudou para o módulo Tarefas (busca de venda OPCIONAL)
+  // e a obrigatoriedade tinha ficado represada aqui. Agora só valida
+  // venda/janela/duplicata QUANDO vendaId foi informado (herda cliente/
+  // endereço da venda) — sem venda, a solicitação segue só com o endereço
+  // informado no formulário. NÃO escolhe mais um responsável — a solicitação
   // vira uma tarefa de aprovação para o pool configurado (ver abaixo) e
   // qualquer um decide.
-  // IMPACTO SE REMOVIDO: sem venda_id perde-se o vínculo que justifica o
-  // endereço de entrega.
+  // IMPACTO SE VOLTAR A EXIGIR: reabre o erro original — trava a solicitação
+  // de corridas legítimas sem venda (a maioria dos casos reais).
   let numeroVendaSolicitacao: string | null = null;
   if (params.modoSolicitacao) {
-    if (!params.vendaId) {
-      throw new Error("Venda é obrigatória para solicitar frete avulso.");
-    }
-    const [venda] = await sql`
-      SELECT id, numero_venda, situacao FROM alissonerp.vendas_erp WHERE id = ${params.vendaId} LIMIT 1
-    `;
-    if (!venda) {
-      throw new Error(`Venda ${params.vendaId} não encontrada.`);
-    }
-    numeroVendaSolicitacao = venda.numero_venda ? String(venda.numero_venda) : null;
+    if (params.vendaId) {
+      const [venda] = await sql`
+        SELECT id, numero_venda, situacao FROM alissonerp.vendas_erp WHERE id = ${params.vendaId} LIMIT 1
+      `;
+      if (!venda) {
+        throw new Error(`Venda ${params.vendaId} não encontrada.`);
+      }
+      numeroVendaSolicitacao = venda.numero_venda ? String(venda.numero_venda) : null;
 
-    // REGRA DE NEGÓCIO (blindagem V4 — janela de entrega, decisão Jonathan no
-    // commit 291b029a): o front só mostra o botão "Solicitar frete avulso"
-    // com a venda em aprovado/em_rota/entregue, mas essa checagem existia SÓ
-    // no client (VendaDetalheClient) — quem chamasse a API direto (curl, bug
-    // de outro client) driblava a janela e solicitava frete de uma venda
-    // rascunho/cancelada/virou_credito. Espelha a MESMA lista aqui, no server,
-    // que é a autoridade real.
-    // IMPACTO SE REMOVIDO: reabre o bypass — solicitação de frete avulso para
-    // venda fora da janela de entrega (ex.: ainda rascunho, já cancelada).
-    const JANELA_SOLICITACAO_FRETE_AVULSO = ["aprovado", "em_rota", "entregue"];
-    if (!JANELA_SOLICITACAO_FRETE_AVULSO.includes(String(venda.situacao))) {
-      throw new Error(
-        `Venda ${numeroVendaSolicitacao ?? params.vendaId} não está numa situação que permite solicitar frete avulso (situação atual: ${venda.situacao}).`,
-      );
-    }
+      // REGRA DE NEGÓCIO (blindagem V4 — janela de entrega, decisão Jonathan no
+      // commit 291b029a): o front só mostra o botão "Solicitar frete avulso"
+      // com a venda em aprovado/em_rota/entregue, mas essa checagem existia SÓ
+      // no client (VendaDetalheClient) — quem chamasse a API direto (curl, bug
+      // de outro client) driblava a janela e solicitava frete de uma venda
+      // rascunho/cancelada/virou_credito. Espelha a MESMA lista aqui, no server,
+      // que é a autoridade real. Só se aplica quando há venda informada.
+      // IMPACTO SE REMOVIDO: reabre o bypass — solicitação de frete avulso para
+      // venda fora da janela de entrega (ex.: ainda rascunho, já cancelada).
+      const JANELA_SOLICITACAO_FRETE_AVULSO = ["aprovado", "em_rota", "entregue"];
+      if (!JANELA_SOLICITACAO_FRETE_AVULSO.includes(String(venda.situacao))) {
+        throw new Error(
+          `Venda ${numeroVendaSolicitacao ?? params.vendaId} não está numa situação que permite solicitar frete avulso (situação atual: ${venda.situacao}).`,
+        );
+      }
 
-    // REGRA DE NEGÓCIO (guard de solicitação duplicada — V3): espelha o guard
-    // de src/lib/inventario-solicitacoes.ts (criarSolicitacaoInventario) — não
-    // deixa abrir uma 2ª solicitação de frete avulso para a MESMA venda
-    // enquanto a 1ª ainda está 'solicitada' (aguardando decisão do pool).
-    // IMPACTO SE REMOVIDO: a consultora clica de novo (ou dá duplo-clique) e
-    // duas tarefas idênticas nascem para a mesma venda, confundindo o pool.
-    const [jaSolicitada] = await sql`
-      SELECT id FROM alissonerp.entregas_venda
-      WHERE is_avulso = true AND venda_id = ${params.vendaId} AND situacao = 'solicitada'
-      LIMIT 1
-    `;
-    if (jaSolicitada) {
-      throw new Error(
-        "Já existe uma solicitação de frete avulso aguardando decisão para esta venda.",
-      );
+      // REGRA DE NEGÓCIO (guard de solicitação duplicada — V3): espelha o guard
+      // de src/lib/inventario-solicitacoes.ts (criarSolicitacaoInventario) — não
+      // deixa abrir uma 2ª solicitação de frete avulso para a MESMA venda
+      // enquanto a 1ª ainda está 'solicitada' (aguardando decisão do pool). É
+      // um guard POR VENDA — sem venda não há como duplicar por este critério
+      // (cada solicitação sem venda é uma corrida independente).
+      // IMPACTO SE REMOVIDO: a consultora clica de novo (ou dá duplo-clique) e
+      // duas tarefas idênticas nascem para a mesma venda, confundindo o pool.
+      const [jaSolicitada] = await sql`
+        SELECT id FROM alissonerp.entregas_venda
+        WHERE is_avulso = true AND venda_id = ${params.vendaId} AND situacao = 'solicitada'
+        LIMIT 1
+      `;
+      if (jaSolicitada) {
+        throw new Error(
+          "Já existe uma solicitação de frete avulso aguardando decisão para esta venda.",
+        );
+      }
     }
 
     // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): obrigatório no
-    // modo solicitação. Decide comprovante (cliente) e pool de aprovador
-    // (ver bloco de listaAprovadoresFrete logo abaixo). Validado no SERVIDOR
-    // (não só no front) — mesma autoridade real de sempre.
+    // modo solicitação, COM ou SEM venda. Decide comprovante (cliente) e pool
+    // de aprovador (ver bloco de listaAprovadoresFrete logo abaixo). Validado
+    // no SERVIDOR (não só no front) — mesma autoridade real de sempre.
     // IMPACTO SE REMOVIDO: reabre o caminho de solicitar sem informar quem
     // paga, e a exigência de comprovante para 'cliente' não teria como ser
     // aplicada.
@@ -2305,7 +2317,9 @@ export async function criarFreteAvulso(
     // motoboy conseguir localizar o endereço: logradouro + número + cidade.
     // Complemento/bairro/UF/CEP ajudam mas não bloqueiam. Validado no
     // SERVIDOR (defesa em profundidade, mesmo padrão do campo `pagante`
-    // acima) além do front (FreteAvulsoModal + EnderecoForm).
+    // acima) além do front (FreteAvulsoModal + EnderecoForm). CONTINUA
+    // obrigatório COM ou SEM venda — é o endereço quem diz para onde ir
+    // quando não há venda para herdar o endereço de entrega dela.
     // IMPACTO SE REMOVIDO: reabre o caminho de solicitar frete avulso sem
     // endereço utilizável — motoboy recebe a corrida sem saber pra onde ir.
     if (

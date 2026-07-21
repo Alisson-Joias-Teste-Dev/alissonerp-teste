@@ -127,9 +127,13 @@ const TIPO_LABEL: Record<string, string> = {
   conversao_sku: "Conversão de SKU",
   conversao_reversa: "Conversão reversa (ouro → joia)",
   // 21/07: faltava — a tarefa nasce com tipo 'frete_avulso' (criarFreteAvulso,
-  // src/lib/entrega-venda.ts) e sempre tem venda_id, então aparece agrupada
-  // no card da venda (aba "Aguard. Aprovação"); sem esta entrada, a linha da
-  // aprovação mostrava o texto cru "frete_avulso" em vez do nome amigável.
+  // src/lib/entrega-venda.ts); sem esta entrada, a linha da aprovação
+  // mostrava o texto cru "frete_avulso" em vez do nome amigável.
+  // ATUALIZAÇÃO (fix 21/07 — venda deixa de ser obrigatória): venda_id NÃO é
+  // mais garantido — a corrida pode não ter venda (ex.: "levar material à
+  // loja"). Quando tem, entra agrupada no card da venda (aba "Aguard.
+  // Aprovação"); sem venda_id, cai no grupo "semVenda" (card próprio, título
+  // vindo de cabecalhoAprovacao) — ver listaAprovacoes mais abaixo.
   frete_avulso: "Frete avulso",
 };
 

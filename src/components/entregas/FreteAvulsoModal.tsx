@@ -8,12 +8,15 @@
  * material, etc.) e confirma no app com um botão. Sem código de verificação,
  * sem WhatsApp.
  *
- * REGRA DE NEGÓCIO (solicitação da consultora — migration 353, modelo POOL):
- * quando quem abre o modal é a consultora, ela não cria o avulso já liberado
- * — apenas SOLICITA a partir de uma venda própria, informando o endereço de
- * entrega (editável aqui, NÃO altera o cadastro do cliente/venda) e o valor
- * cobrado do cliente. Não escolhe motoboy nem responsável: a solicitação cai
- * no pool de aprovadores da chave de config `aprovadores_frete_avulso`
+ * REGRA DE NEGÓCIO (solicitação da consultora — migration 353, modelo POOL;
+ * fix 21/07 — venda deixa de ser obrigatória): quando quem abre o modal é a
+ * consultora, ela não cria o avulso já liberado — apenas SOLICITA,
+ * informando o endereço de entrega (editável aqui, NÃO altera o cadastro do
+ * cliente/venda) e o valor cobrado do cliente. A venda é OPCIONAL — a
+ * corrida pode não partir de uma venda (ex.: "levar material à loja",
+ * "buscar peça"); quando buscada/selecionada, pré-preenche o endereço a
+ * partir dela. Não escolhe motoboy nem responsável: a solicitação cai no
+ * pool de aprovadores da chave de config `aprovadores_frete_avulso`
  * (Config › Aprovadores; qualquer um decide via módulo Tarefas).
  *
  * REGRA DE NEGÓCIO (V3 — solicitar DE DENTRO da venda): quando a prop
@@ -330,23 +333,25 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
       const freteNegociadoNum = freteNegociado ? parseFloat(freteNegociado.replace(",", ".")) : undefined;
 
       if (ehSolicitacao) {
-        // REGRA DE NEGÓCIO (modelo POOL): body da solicitação NÃO inclui
-        // motoboyId/contatoId/liberacaoResponsavelId — quem solicita só
-        // informa a venda, o endereço confirmado e o valor cobrado do
-        // cliente. Com venda fixada (V3), o id vem da prop; sem ela, do
-        // buscador.
+        // REGRA DE NEGÓCIO (modelo POOL; fix 21/07 — venda deixa de ser
+        // obrigatória): body da solicitação NÃO inclui motoboyId/contatoId/
+        // liberacaoResponsavelId — quem solicita informa o endereço
+        // confirmado e o valor cobrado do cliente; a venda é OPCIONAL (frete
+        // avulso pode não partir de uma venda, ex.: "levar material à
+        // loja"). Com venda fixada (V3), o id vem da prop; sem ela, do
+        // buscador (pode ficar undefined se nada foi buscado/selecionado).
         const vendaIdEfetivo = vendaId ?? vendaSelecionada?.id;
         // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): mínimo
         // exigido é logradouro + número + cidade (validado aqui E no
-        // backend, criarFreteAvulso — defesa em profundidade).
+        // backend, criarFreteAvulso — defesa em profundidade). `vendaId` NÃO
+        // entra mais nesta validação — é o endereço quem diz para onde ir.
         if (
-          !vendaIdEfetivo ||
           !enderecoEntrega.logradouro.trim() ||
           !enderecoEntrega.numero.trim() ||
           !enderecoEntrega.cidade.trim() ||
           freteCobradoConsultora === ""
         ) {
-          throw new Error("Preencha a venda, o endereço completo (logradouro, número e cidade) e o valor cobrado.");
+          throw new Error("Preencha o endereço completo (logradouro, número e cidade) e o valor cobrado.");
         }
         // REGRA DE NEGÓCIO (migration 354 — "quem paga"): validado aqui
         // (front) E no backend (defesa em profundidade — ver
@@ -416,11 +421,12 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   if (!isOpen) return null;
 
   // Validação de submit — cada modo tem seus próprios campos obrigatórios
-  // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): mínimo exigido
-  // é logradouro + número + cidade, mesmo padrão validado no handleSubmit e
-  // no backend (criarFreteAvulso).
+  // REGRA DE NEGÓCIO (migration 355 — endereço estruturado; fix 21/07 —
+  // venda deixa de ser obrigatória): mínimo exigido é logradouro + número +
+  // cidade, mesmo padrão validado no handleSubmit e no backend
+  // (criarFreteAvulso). Venda NÃO trava mais o botão — é opcional.
   const disabledSolicitacao =
-    enviando || !(vendaId ?? vendaSelecionada) ||
+    enviando ||
     !enderecoEntrega.logradouro.trim() || !enderecoEntrega.numero.trim() || !enderecoEntrega.cidade.trim() ||
     freteCobradoConsultora === "" || !descricao.trim() ||
     !pagante || (pagante === "cliente" && !comprovanteBase64);
@@ -638,12 +644,18 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                     <div style={tituloSecao}>A CORRIDA</div>
                     {campoDescricao}
 
-                    {/* Venda (consultora) — escondido quando a venda já vem fixada (V3, aberto de dentro da venda) */}
+                    {/* Venda (consultora) — escondido quando a venda já vem fixada (V3, aberto de dentro da venda).
+                        REGRA DE NEGÓCIO (fix 21/07 — venda deixa de ser obrigatória): frete avulso pode
+                        não ter venda (ex.: "levar material à loja", "buscar peça") — por isso o rótulo
+                        diz "(opcional)" e a dica explica quando vale a pena buscar. */}
                     {!vendaFixada && (
                     <div style={{ marginBottom: 14 }}>
                       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                        <Search size={13} /> Venda *
+                        <Search size={13} /> Venda (opcional)
                       </label>
+                      <div style={{ fontSize: 11, color: C.cinza, marginBottom: 6 }}>
+                        Se a corrida for de uma venda, busque aqui — o endereço vem preenchido.
+                      </div>
                       {vendaSelecionada ? (
                         <div style={{
                           padding: "8px 12px", borderRadius: 8,

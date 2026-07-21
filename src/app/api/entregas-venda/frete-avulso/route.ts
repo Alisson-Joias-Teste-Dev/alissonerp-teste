@@ -53,10 +53,15 @@ const FreteAvulsoSchema = z.object({
   // IMPACTO SE VOLTAR A INFERIR POR CARGO: volta o comportamento fantasma —
   // o mesmo clique podendo gerar solicitação OU avulso liberado sem aviso.
   solicitar: z.boolean().optional(),
-  // Campos abaixo só são obrigatórios quando `solicitar=true` (ver validação
-  // logo após o parse). Não existe mais escolha de responsável: a
-  // solicitação cai no pool de liberadores (ver listarAprovadoresFreteAvulso
-  // em @/lib/entrega-venda).
+  // REGRA DE NEGÓCIO (fix 21/07 — venda deixa de ser obrigatória): frete
+  // avulso é POR NATUREZA uma corrida que pode não ter venda (ex.: "levar
+  // material à loja", "buscar peça"). Continua opcional MESMO com
+  // `solicitar=true` — quando informado, ownership + janela de situações +
+  // guard de duplicata são checados (ver bloco `ehSolicitacao` abaixo); sem
+  // ele, a solicitação nasce só com o endereço informado (obrigatório, ver
+  // enderecoEntrega* abaixo).
+  // IMPACTO SE VOLTAR A EXIGIR: reabre o erro original — travava a
+  // solicitação de corridas legítimas sem venda (a maioria dos casos reais).
   vendaId: z.number().int().positive().optional(),
   // REGRA DE NEGÓCIO (migration 355 — endereço estruturado, 21/07): antes um
   // único texto livre (`enderecoEntrega`, concatenado no client) — agora
@@ -155,18 +160,20 @@ export async function POST(req: NextRequest) {
   // o fluxo de solicitação.
   const ehSolicitacao = parsed.data.solicitar === true;
   if (ehSolicitacao) {
-    // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): mínimo
-    // exigido é logradouro + número + cidade (mesmo padrão validado de novo
-    // em criarFreteAvulso — defesa em profundidade). Complemento/bairro/
-    // UF/CEP ajudam mas não bloqueiam a solicitação.
+    // REGRA DE NEGÓCIO (migration 355 — endereço estruturado; fix 21/07 —
+    // venda deixa de ser obrigatória): mínimo exigido é logradouro + número +
+    // cidade (mesmo padrão validado de novo em criarFreteAvulso — defesa em
+    // profundidade). Complemento/bairro/UF/CEP ajudam mas não bloqueiam a
+    // solicitação. `vendaId` NÃO entra mais aqui — é opcional (frete avulso
+    // pode não ter venda, ex.: "levar material à loja"); é o endereço quem
+    // diz para onde a corrida vai.
     if (
-      !parsed.data.vendaId ||
       !parsed.data.enderecoEntregaLogradouro?.trim() ||
       !parsed.data.enderecoEntregaNumero?.trim() ||
       !parsed.data.enderecoEntregaCidade?.trim()
     ) {
       return NextResponse.json(
-        { error: "Venda, logradouro, número e cidade são obrigatórios para solicitar frete avulso" },
+        { error: "Logradouro, número e cidade são obrigatórios para solicitar frete avulso" },
         { status: 400 },
       );
     }
@@ -195,22 +202,27 @@ export async function POST(req: NextRequest) {
         throw e;
       }
     }
-    // REGRA DE NEGÓCIO: quem solicita só pode fazê-lo para as PRÓPRIAS
-    // vendas — reusa requireVendaOwnership (mesma checagem usada em
-    // /api/vendas) para não duplicar a regra de ownership por vendedor_id.
-    // Roles full-access (admin/dev/diretor/gerente_loja/gerente_fabrica)
-    // passam validando só a existência da venda; os demais (ex: consultora,
-    // estoquista) precisam ser donos (vendedor_id) — MANTIDO como estava.
+    // REGRA DE NEGÓCIO (fix 21/07 — venda deixa de ser obrigatória): quem
+    // solicita só pode fazê-lo para as PRÓPRIAS vendas — reusa
+    // requireVendaOwnership (mesma checagem usada em /api/vendas) para não
+    // duplicar a regra de ownership por vendedor_id. Roles full-access
+    // (admin/dev/diretor/gerente_loja/gerente_fabrica) passam validando só a
+    // existência da venda; os demais (ex: consultora, estoquista) precisam
+    // ser donos (vendedor_id) — MANTIDO como estava. Só roda QUANDO a venda
+    // foi informada — sem venda não há "dono" para checar (o requestId é o
+    // próprio usuário autenticado que já passou pelo gate de ROLES_LOJA).
     // IMPACTO SE REMOVIDO: reabre IDOR — alguém solicitaria frete em nome de
     // venda de colega, gerando custo de frete indevido para a loja.
-    const authUser: AuthUser = { id: user.id, role, email: user.email ?? "" };
-    try {
-      await requireVendaOwnership(authUser, parsed.data.vendaId);
-    } catch (e) {
-      if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
-      if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
-      if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: 401 });
-      throw e;
+    if (parsed.data.vendaId) {
+      const authUser: AuthUser = { id: user.id, role, email: user.email ?? "" };
+      try {
+        await requireVendaOwnership(authUser, parsed.data.vendaId);
+      } catch (e) {
+        if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+        if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+        if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: 401 });
+        throw e;
+      }
     }
   }
 
