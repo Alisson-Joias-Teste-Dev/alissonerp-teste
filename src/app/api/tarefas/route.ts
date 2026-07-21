@@ -136,6 +136,32 @@ export async function GET(req: NextRequest) {
       WHERE cs.chave = 'aprovadores_frete_avulso' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     -- credito_loja: tags = ['credito_loja', 'gerente'|'diretor'] (vendas-credito-aprovar.ts) — tipo NULL.
+    --
+    -- ASSIMETRIA CONHECIDA (20/07) entre este SQL e o TS (eventoDaTarefa,
+    -- src/lib/aprovacoes/evento-da-tarefa.ts):
+    -- O QUÊ: esta cláusula casa a tarefa de crédito SÓ pelas TAGS
+    --   ('credito_loja' + 'gerente'|'diretor'), porque vendas-credito-aprovar.ts
+    --   (~L162-170) cria a tarefa com tags=['credito_loja', tipo] e SEM gravar a
+    --   coluna tipo. Já o TS (eventoDaTarefa ~L90-101) exige, ALÉM das tags,
+    --   que a venda ligada esteja ATIVA (venda_situacao NÃO é cancelado/
+    --   entregue/aprovado) E que vendas_erp.aprovacao_credito_tipo esteja
+    --   preenchido — critérios que este SQL não tem como aplicar sem JOIN.
+    -- POR QUÊ: o SQL só resolve pode_decidir pra listagem/exibição de botão;
+    --   quem realmente autoriza a ação é o PATCH .../aprovacao, que chama
+    --   eventoDaTarefa com os dados da venda já resolvidos — os dois nunca
+    --   precisaram concordar 100% porque o PATCH é a fonte de verdade.
+    -- IMPACTO: numa tarefa de crédito ESTAGNADA (venda já entregue/aprovada/
+    --   cancelada, ou aprovacao_credito_tipo NULL), este SQL devolve
+    --   pode_decidir=true mas eventoDaTarefa devolve null → o 2º/3º aprovador
+    --   configurado VÊ o botão Aprovar/Rejeitar na tela e leva 403 ao clicar.
+    --   NÃO é falha de segurança — o PATCH nega corretamente (config-first
+    --   estrito) — é papercut de UX (botão fantasma numa tarefa velha).
+    -- POR QUE NÃO CORRIGIMOS AGORA: alinhar exigiria LEFT JOIN vendas_erp
+    --   nesta query inteira (usada tanto na listagem quanto no pode_decidir
+    --   por linha), num PR que já está grande (frete avulso). O efeito
+    --   negativo é só um 403 numa tarefa de crédito antiga — antes desta
+    --   correção (5fac3e5c) esses usuários não tinham botão NENHUM, então
+    --   isto não é uma regressão introduzida agora.
     OR ('credito_loja' = ANY(t.tags) AND 'gerente' = ANY(t.tags) AND EXISTS (
       SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovadora_credito_gerente' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))

@@ -64,7 +64,7 @@ export async function GET(
     // /api/tarefas/[id]/aprovacao (podeDecidir, config-first — ver comentário
     // do "BUG 1" em aprovacao/route.ts). Resultado: o 2º/3º aprovador de uma
     // chave com múltiplos UUIDs (cartao_desconto, entrega_sem_pagamento,
-    // compra_comercial, vale_troca_excecao, desconto_padrao, credito_diretor,
+    // compra_comercial, desconto_padrao, credito_diretor,
     // conversao_reversa) via a tarefa na fila (multiAprovadorCond já liberava
     // a LISTAGEM, 16/07) mas tomava 403 ao abrir a aba Comentários.
     // O QUÊ: refaz aqui o MESMO cálculo do PATCH — busca tipo/tags/venda,

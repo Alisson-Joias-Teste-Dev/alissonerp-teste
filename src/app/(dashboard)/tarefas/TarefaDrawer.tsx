@@ -339,15 +339,6 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
   const pri = PRIORIDADE_BADGE[tarefa.prioridade] ?? PRIORIDADE_BADGE.media;
   const statusCol = STATUS_COLS.find(c => c.key === tarefa.status);
   const pendingAprovacao = aprovacoes.find(a => a.status === "pendente");
-  // REGRA DE NEGÓCIO (20/07 — 2º/3º aprovador configurado): antes, só quem
-  // era o aprovador_id GRAVADO na linha (o 1º da lista, resolvido na
-  // criação) contava como aprovador aqui — o PATCH .../aprovacao já
-  // autorizava qualquer aprovador configurado no evento (podeDecidir,
-  // config-first), mas a UI não sabia disso. `tarefa.pode_decidir` vem de
-  // GET /api/tarefas (lista) e GET /api/tarefas/[id] (detalhe) e espelha
-  // essa MESMA autoridade. IMPACTO SE REMOVIDO: só o 1º aprovador da chave
-  // consegue decidir pela tela — o 2º/3º autorizado pela API fica sem botão.
-  const isAprovador = pendingAprovacao?.aprovador_id === currentUserId || !!tarefa.pode_decidir;
   const isLimpezaOuro = baixaIdLimpeza > 0;
 
   return (
@@ -752,7 +743,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
                           multi-aprovador (compra_comercial, conversao_reversa,
                           garantia_fora_prazo, cartao_desconto,
                           entrega_sem_pagamento, desconto_padrao,
-                          credito_diretor, vale_troca_excecao, frete_avulso).
+                          credito_diretor, frete_avulso).
                           O QUÊ: mostra Aprovar/Rejeitar pra qualquer aprovador
                             configurado, não só pro 1º.
                           POR QUÊ: o PATCH já autorizava desde o BUGFIX de
