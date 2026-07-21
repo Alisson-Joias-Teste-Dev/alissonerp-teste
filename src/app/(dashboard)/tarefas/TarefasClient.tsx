@@ -570,6 +570,11 @@ export default function TarefasClient() {
   // venda — e nem toda venda tem frete avulso, então esse atalho sozinho não
   // cobre quem ainda não abriu a venda certa.
   const [showFreteAvulso, setShowFreteAvulso] = useState(false);
+  // REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): o botão "+ Nova" do topo
+  // (desktop) e o FAB (mobile) viraram MENU único — este estado controla se
+  // o menu está aberto. Unifica o que antes eram 2 botões/FABs separados
+  // (Nova Tarefa + Frete avulso).
+  const [novoMenuOpen, setNovoMenuOpen] = useState(false);
   const [novaForm, setNovaForm] = useState({ titulo: "", descricao: "", prioridade: "media", data_limite: "", tags: "", tipo: "" });
   const [responsavelId, setResponsavelId] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -956,6 +961,65 @@ export default function TarefasClient() {
   const porStatus = (s: string) => tarefasFiltradas.filter(t => t.status === s);
   const activeTarefa = activeId ? tarefaById(activeId) : null;
 
+  /**
+   * REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): catálogo dos tipos de
+   * SOLICITAÇÃO que nascem aqui em Tarefas — hoje só "Frete avulso", mas a
+   * lista vai CRESCER (o Jonathan pediu explicitamente extensível).
+   * O QUÊ: cada entrada descreve um tipo — rótulo, descrição curta, ícone,
+   *   quem pode ver (podeVer, por role) e o que abrir ao escolher (abrir).
+   * O PORQUÊ: adicionar um tipo novo deve ser 1 ENTRADA NESTA LISTA, sem
+   *   mexer no menu/dropdown em si (desktop ou mobile).
+   * IMPACTO SE VIRAR CÓDIGO ESPALHADO: cada tipo novo vira retrabalho (achar
+   *   o botão certo, o FAB, o gate de papel — um por um, em vários lugares).
+   * Fica DENTRO do componente (não no topo do arquivo) porque "abrir" precisa
+   * fechar sobre os setters de estado (ex.: setShowFreteAvulso) — se a lista
+   * crescer e isso virar um problema, extrair pra um módulo próprio que
+   * recebe os callbacks via parâmetro.
+   */
+  const TIPOS_SOLICITACAO = [
+    {
+      key: "frete_avulso",
+      label: "Frete avulso",
+      descricao: "Solicitar frete fora do fluxo normal da venda",
+      Icon: Bike,
+      podeVer: (r: string | null) => r === "consultora",
+      abrir: () => { setShowFreteAvulso(true); setNovoMenuOpen(false); },
+    },
+  ];
+  const solicitacoesVisiveis = TIPOS_SOLICITACAO.filter(t => t.podeVer(role));
+
+  /** Conteúdo do menu "+ Nova" (Solicitações + Tarefa avulsa) — usado tanto no
+   *  dropdown desktop quanto no painel do FAB mobile, pra não duplicar a
+   *  lista em dois lugares. Seção "Solicitações" some inteira (sem cabeçalho
+   *  vazio) quando ninguém do papel atual tem tipo visível. */
+  const menuNovoConteudo = (
+    <>
+      {solicitacoesVisiveis.length > 0 && (
+        <>
+          <p className="text-[10px] font-bold uppercase tracking-wide px-2 pt-1 pb-1" style={{ color: "#9CA3AF" }}>
+            Solicitações
+          </p>
+          {solicitacoesVisiveis.map(tipo => (
+            <button key={tipo.key} onClick={tipo.abrir}
+              className="w-full flex items-start gap-2 px-2.5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 text-left transition-colors">
+              <tipo.Icon size={14} className="flex-shrink-0 mt-0.5" style={{ color: C.esmeralda }} />
+              <span className="min-w-0">
+                <span className="block" style={{ color: "#1A1A1A" }}>{tipo.label}</span>
+                <span className="block text-[11px] font-normal" style={{ color: "#9CA3AF" }}>{tipo.descricao}</span>
+              </span>
+            </button>
+          ))}
+          <div className="border-t my-1" style={{ borderColor: C.cremeBorder }} />
+        </>
+      )}
+      <button onClick={() => { setShowNova(true); setNovoMenuOpen(false); }}
+        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 text-left transition-colors">
+        <Plus size={14} className="flex-shrink-0" style={{ color: C.esmeralda }} />
+        <span style={{ color: "#1A1A1A" }}>Tarefa avulsa</span>
+      </button>
+    </>
+  );
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -1103,23 +1167,29 @@ export default function TarefasClient() {
               )}
             </div>
 
-            {/* Solicitar frete avulso — entrada exclusiva da consultora (ver
-                comentário no state showFreteAvulso). Só desktop; mobile usa o
-                2º FAB, empilhado sobre o FAB "Nova tarefa". */}
-            {role === "consultora" && (
-              <button onClick={() => setShowFreteAvulso(true)}
-                className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold"
-                style={{ backgroundColor: C.cremeBg, color: C.esmeralda, borderColor: C.cremeBorder }}>
-                <Bike size={13} /> Frete avulso
+            {/* Menu "+ Nova": Solicitações (extensível via TIPOS_SOLICITACAO,
+                hoje só Frete avulso p/ consultora) + Tarefa avulsa (criação
+                manual — preservada, ~74/mês em produção). Unifica os 2
+                botões antigos (Nova + Frete avulso). Só desktop; mobile usa
+                o FAB único abaixo. Reusa o padrão visual do dropdown
+                "Filtros" (relative + overlay fixed + painel absolute). */}
+            <div className="relative hidden md:block">
+              <button onClick={() => setNovoMenuOpen(v => !v)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                <Plus size={13} /> Nova
               </button>
-            )}
 
-            {/* Botão Nova: só desktop; mobile usa FAB */}
-            <button onClick={() => setShowNova(true)}
-              className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
-              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-              <Plus size={13} /> Nova
-            </button>
+              {novoMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setNovoMenuOpen(false)} />
+                  <div className="absolute right-0 top-full mt-2 z-40 w-64 bg-white rounded-xl shadow-xl border p-2 space-y-1"
+                    style={{ borderColor: C.cremeBorder }}>
+                    {menuNovoConteudo}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1459,28 +1529,30 @@ export default function TarefasClient() {
         </div>
       )}
 
-      {/* FAB Solicitar frete avulso — só mobile, só consultora (ver comentário
-          no state showFreteAvulso). Empilhado ACIMA do FAB "Nova tarefa"
-          (bottom-24) pra não sobrepor o outro botão. */}
-      {role === "consultora" && aba !== "config" && aba !== "automacoes" && (
-        <button
-          onClick={() => setShowFreteAvulso(true)}
-          aria-label="Solicitar frete avulso"
-          className="md:hidden fixed bottom-24 right-6 z-40 w-14 h-14 rounded-full shadow-xl border flex items-center justify-center active:scale-95 transition-transform"
-          style={{ backgroundColor: "#fff", color: C.esmeralda, borderColor: C.cremeBorder }}>
-          <Bike size={22} />
-        </button>
-      )}
-
-      {/* FAB Nova Tarefa — só mobile, escondido nas abas config/automacoes (que têm botão próprio) */}
+      {/* FAB único (mobile): abre o MESMO menu do dropdown desktop
+          (Solicitações + Tarefa avulsa) — unifica os 2 FABs antigos (Nova
+          tarefa + Frete avulso). Escondido nas abas config/automacoes (que
+          têm botão próprio no header). Painel abre PRA CIMA do botão
+          (bottom-24), mesmo padrão overlay+painel do dropdown desktop. */}
       {aba !== "config" && aba !== "automacoes" && (
-        <button
-          onClick={() => setShowNova(true)}
-          aria-label="Nova tarefa"
-          className="md:hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full shadow-xl flex items-center justify-center active:scale-95 transition-transform"
-          style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-          <Plus size={26} />
-        </button>
+        <div className="md:hidden">
+          {novoMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setNovoMenuOpen(false)} />
+              <div className="fixed bottom-24 right-6 z-40 w-64 bg-white rounded-xl shadow-xl border p-2 space-y-1"
+                style={{ borderColor: C.cremeBorder }}>
+                {menuNovoConteudo}
+              </div>
+            </>
+          )}
+          <button
+            onClick={() => setNovoMenuOpen(v => !v)}
+            aria-label="Nova"
+            className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+            <Plus size={26} />
+          </button>
+        </div>
       )}
 
       {/* Drawer de detalhe */}
