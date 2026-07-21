@@ -220,6 +220,46 @@ export async function buscarFotosEntrega(entregaId: number): Promise<string[]> {
 }
 
 /**
+ * Versão EM LOTE de `buscarFotosEntrega` — mesma unificação (tabela nova +
+ * fallback pra `foto_entrega_path`), mas para N entregas em UMA única
+ * consulta (`WHERE ev.id = ANY(...)`), em vez de uma consulta por entrega.
+ *
+ * REGRA DE NEGÓCIO: usada pelo relatório de pagamento do motoboy (aba
+ * "Pagamento do motoboy" — ver docs/regras-negocio/entregas.md §11 e
+ * `src/app/api/entregas-venda/motoboy/relatorio-pagamento/route.ts`), que
+ * lista dezenas de corridas de uma vez — chamar `buscarFotosEntrega` em loop
+ * (N+1) faria uma query por linha do relatório.
+ *
+ * IMPACTO SE REMOVIDO (voltar a chamar `buscarFotosEntrega` em loop): a rota
+ * do relatório passaria a fazer 1 query de fotos POR corrida do período,
+ * degradando com o volume (o requisito explícito da task é "sem N+1").
+ */
+export async function buscarFotosEntregaEmLote(
+  entregaIds: number[],
+): Promise<Map<number, string[]>> {
+  const mapa = new Map<number, string[]>();
+  if (entregaIds.length === 0) return mapa;
+
+  const rows = await sql`
+    SELECT
+      ev.id AS entrega_id,
+      COALESCE(
+        (SELECT array_agg(fev.foto_path ORDER BY fev.criado_em, fev.id)
+         FROM alissonerp.entregas_venda_fotos fev WHERE fev.entrega_id = ev.id),
+        (SELECT CASE WHEN NULLIF(btrim(ev.foto_entrega_path), '') IS NOT NULL
+                THEN ARRAY[ev.foto_entrega_path] ELSE '{}'::text[] END)
+      ) AS fotos
+    FROM alissonerp.entregas_venda ev
+    WHERE ev.id = ANY(${entregaIds})
+  `;
+
+  for (const r of rows as Record<string, unknown>[]) {
+    mapa.set(Number(r.entrega_id), (r.fotos ?? []) as string[]);
+  }
+  return mapa;
+}
+
+/**
  * Faz upload de N fotos (base64) pro bucket pagamento-fotos, best-effort.
  *
  * REGRA DE NEGÓCIO: fotos são OPCIONAIS e NUNCA podem bloquear a finalização

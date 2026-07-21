@@ -4,7 +4,9 @@
 > Fonte de schema (colunas/tabelas) = `docs/schema/` (auto-gerado). Aqui é o **porquê** e o **como** do negócio.
 > ⚠️ Existe uma nota mais antiga e parcial sobre frete avulso registrado pelo motoboy em `docs/regras-negocio/comercial.md` §8 (PR#75). Este arquivo é o documento completo do módulo — considerar migrar/mesclar aquele trecho para cá numa limpeza futura.
 
-Última atualização: 2026-07-21 (MULTIFOTO na confirmação — migration 357, arquivo criado, NÃO executada: motoboy pode anexar VÁRIAS fotos, sempre OPCIONAL, ao finalizar QUALQUER corrida dele — avulsa (`confirmar-avulso`) e entrega de pedido (`confirmar`, código A/B). Tabela filha `entregas_venda_fotos` (mesmo padrão de `solicitacao_peca_fotos`, migration 349); `foto_entrega_path` (migration 287) fica CONGELADA; helper único `buscarFotosEntrega` unifica leitura antiga+nova. ⚠️ ORDEM INVIOLÁVEL: o código A/B de `confirmarEntrega` é validado ANTES de qualquer foto — fotos nunca condicionam, antecipam ou substituem essa checagem; upload é best-effort (nunca bloqueia a finalização). Ver §11).
+Última atualização: 2026-07-21 (RELATÓRIO DE PAGAMENTO DO MOTOBOY — AJUSTE: a classificação Pagar/Revisar/Não pagar virou SUGESTÃO editável, não decisão travada. Duplicidade deixou de ser "Não pagar" automático — vira "Revisar" (suspeita, não certeza); "Não pagar" fica só para venda cancelada. Cada linha do relatório ganhou um toggle Pagar/Não pagar que o financeiro ajusta; o total do rodapé reflete o ajuste, não a sugestão crua. "Confirmar pagamento" reusa a rota JÁ EXISTENTE `POST /api/entregas-venda/motoboy/pagar` (mesmo mecanismo do `PagamentoMotoboyPainel.tsx`) — nenhuma persistência nova, o ajuste é efêmero até esse clique. Ver §12.6).
+Atualização anterior: 2026-07-21 (RELATÓRIO DE PAGAMENTO DO MOTOBOY — nova rota `GET /api/entregas-venda/motoboy/relatorio-pagamento` + subcomponente `RelatorioPagamentoMotoboy.tsx` dentro da aba "Pagamento do motoboy": seleciona entregador+período, traz TODAS as corridas confirmadas dele (avulsas e de pedido) já classificadas em Pagar/Revisar/Não pagar, com fotos por link e total a pagar. Ver §12).
+Atualização anterior: 2026-07-21 (MULTIFOTO na confirmação — migration 357, arquivo criado, NÃO executada: motoboy pode anexar VÁRIAS fotos, sempre OPCIONAL, ao finalizar QUALQUER corrida dele — avulsa (`confirmar-avulso`) e entrega de pedido (`confirmar`, código A/B). Tabela filha `entregas_venda_fotos` (mesmo padrão de `solicitacao_peca_fotos`, migration 349); `foto_entrega_path` (migration 287) fica CONGELADA; helper único `buscarFotosEntrega` unifica leitura antiga+nova. ⚠️ ORDEM INVIOLÁVEL: o código A/B de `confirmarEntrega` é validado ANTES de qualquer foto — fotos nunca condicionam, antecipam ou substituem essa checagem; upload é best-effort (nunca bloqueia a finalização). Ver §11).
 Atualização anterior: 2026-07-21 (VERBA DE FRETE GRÁTIS — Blocos 0-3, fundação: formulário ENXUTO órfão removido de `FreteAvulsoModal.tsx`; gerente do saldo passa a ser configurável (`gerente_frete_gratis`, com fallback ao comportamento antigo); migration 356 reaproveita `fechamentos_frete` (nunca usada) para o fechamento mensal — positivo ZERA, negativo vira conta a pagar (não mais desconto em folha); `src/lib/frete-verba.ts` calcula o faturamento-base a partir da MESMA consulta da dashboard comercial. Ver §10. Migration não executada). Blocos anteriores do módulo de frete avulso (mesma branch `feat/frete-avulso-solicitacao`): BLOCO 6 — reforma visual da tela `/entregas-venda`: 3 abas, filtros em select, paginação de 10, componentização, e o botão "Frete Avulso" da tela passa a usar o formulário COMPLETO — endereço/quem paga/comprovante — continuando a criar DIRETO; BLOCO 5 — estoque acompanha TODAS as entregas avulsas; quem solicita enxerga o próprio pedido, inclusive recusado; link de notificação para de ser morto; BLOCO 4 — drawer da entrega mostra o endereço CONFIRMADO na solicitação (não o da venda), aprovador vê o valor do frete antes de decidir (aviso acima de R$ 200); BLOCO 3 — validações viram INVARIANTES independentes do modo, cargos alinhados ao banco e fonte única de permissão; BLOCO 2 — autorização não-manipulável: sem auto-aprovação, pool decidido pelo dado "quem paga" e não pela tag.
 
 ---
@@ -341,3 +343,64 @@ A coluna existente `entregas_venda.foto_entrega_path` (migration 287) só guarda
 - Rotas: `src/app/api/entregas-venda/[id]/confirmar/route.ts` (`fotos_base64` no body, código intocado), `src/app/api/entregas-venda/[id]/confirmar-avulso/route.ts` (passou a ler o body — antes ignorava), `src/app/api/entregas-venda/[id]/route.ts` (expõe `fotos_entrega`).
 - Front: `src/components/entregas/ConfirmarEntregaModal.tsx` (multifoto), `src/components/entregas/FinalizarAvulsoModal.tsx` (NOVO), `src/app/(dashboard)/entregas-venda/motoboy/MotoboyAppClient.tsx`, `src/components/entregas/EntregaDetalheDrawer.tsx` (galeria + modal de finalizar avulso).
 - Testes: `src/__tests__/entrega-fotos-multiplas.test.ts` (sem foto / N fotos / ordem código-antes-de-foto / helper de leitura); `src/__tests__/entrega-detalhe-endereco-resolvido.test.ts` ajustado (nova query de fotos no mock do GET, sem mudança de comportamento testado).
+
+---
+
+## 12. Relatório de pagamento do motoboy por entregador + período (21/07/2026)
+
+Decisão do Jonathan (ver memória `reference_relatorio_corridas_motoboy.md`): a aba "Pagamento do motoboy" ganha, além do painel de pagamento em LOTE já existente (`PagamentoMotoboyPainel.tsx`, §5.2), um **RELATÓRIO** que substitui o processo manual — hoje o Jonathan gera um PDF (script Python, reportlab) com a tabela de corridas + foto de cada uma e manda ao financeiro pagar o entregador (Kaio Nikollas).
+
+### 12.1. Fonte: SÓ o módulo novo, com marco de corte
+
+**Decisão explícita do Jonathan**: a fonte é **exclusivamente** `alissonerp.entregas_venda` (`forma_entrega='motoboy'`, `situacao='confirmada'`) — **NUNCA** a tabela legada `public.controle_entregas` (usada pelo script Python antigo). Isso só é seguro porque **o pagamento manual cobriu tudo até 19/07/2026** — "começando do zero" a partir do módulo novo.
+
+- **`MARCO_RELATORIO_PAGAMENTO_MOTOBOY = '2026-07-20'`** (`src/lib/relatorio-pagamento-motoboy.ts`) — o período do relatório NÃO pode começar antes desta data. Violar isso arrisca pagar 2x a mesma corrida (uma vez no PDF manual antigo, outra vez neste relatório).
+- **Defesa em profundidade, dois níveis**: o campo "Início" do front tem `min={MARCO}` (não deixa nem escolher no seletor de data); a rota faz a MESMA checagem no servidor (`periodoAntesDoMarco`) e devolve **400** se for violada — o front nunca é a única barreira.
+- **Aviso permanente e visível** na tela (não condicional a nada): *"Corridas anteriores a 20/07/2026 já foram pagas e não entram neste relatório."*
+
+### 12.2. Classificação Pagar / Revisar / Não pagar — SUGESTÃO, não decisão travada
+
+**Mudança 21/07/2026 (decisão do Jonathan: "o usuário pode revisar e ajustar os pagamentos no relatório")**: a classificação computada é uma **SUGESTÃO** do sistema — o financeiro revê e AJUSTA a decisão de cada corrida antes de fechar o pagamento (ver §12.6). "Não pagar" automático foi restrito ao ÚNICO caso onde não há dúvida nenhuma (venda cancelada); duplicidade virou **suspeita** (Revisar), porque o motoboy pode ter feito 2 viagens reais para a mesma venda — não é certeza de que ele não trabalhou.
+
+Fonte única da sugestão: `classificarCorridaMotoboy` (`src/lib/relatorio-pagamento-motoboy.ts`) — função PURA, chamada pela rota depois de uma única consulta SQL (nunca recalculada no front). Ordem de prioridade (a primeira regra que bater decide):
+
+1. **Não pagar** (única certeza automática) — venda vinculada com `vendas_erp.situacao = 'cancelado'`.
+2. **Revisar** — corrida **duplicada** (suspeita): mais de uma corrida confirmada para a MESMA venda dentro do período (a partir da 2ª, calculado via `ROW_NUMBER() OVER (PARTITION BY venda_id ORDER BY data_entrega_realizada, id)` na própria consulta SQL).
+3. **Revisar** — entrega de **pedido** (`is_avulso=false`) cuja venda ainda **não está fechada/entregue no ERP** (`vendas_erp.situacao NOT IN ('entregue', 'concluido')`) — confirmado em `marcarVendaEntregueSeCompleta` (`src/lib/entrega-venda.ts`): a venda só vira `'entregue'` quando TODOS os itens foram confirmados E não há pagamento "Na Entrega" pendente.
+4. **Revisar** — corrida **avulsa** sem `venda_id` e sem `descricao_avulso` preenchida (não dá pra saber o que o motoboy foi fazer). Avulsa **com** `venda_id` (corrida complementar solicitada de dentro de uma venda, ver §2) **não** precisa da venda estar fechada — a janela normal do frete avulso (`aprovado`/`em_rota`/`entregue`) já vale.
+5. **Revisar** — `motoboy_id` sem linha correspondente em `alissonerp.motoboys` (débito técnico §8: é possível aceitar/registrar corrida sem cadastro formal).
+6. **Pagar** — o resto.
+
+⚠️ **Ponto reportado ao Jonathan, ainda não resolvido**: a regra "no máximo 1 corrida por venda é custeada pelo cliente; a 2ª/avulsas/garantia é frete da loja" (memória do Jonathan) fala sobre **quem paga o frete** (cliente vs. loja), não necessariamente sobre se o **motoboy** deve ou não receber pela 2ª corrida que ele de fato fez. Como a classificação agora é só sugestão (o financeiro decide de verdade — §12.6), esse ponto ficou menos crítico do que na primeira versão (onde "Não pagar" travava a decisão), mas a nomenclatura/fluxo financeiro por trás da 2ª corrida ("quem cobre o custo" vs. "o motoboy recebe ou não") ainda não foi esclarecido — **fora do escopo combinado desta sessão**.
+
+### 12.3. Fotos — link, nunca embutida; sem N+1
+
+`buscarFotosEntregaEmLote(entregaIds)` (NOVO, `src/lib/entrega-venda.ts`) — mesma unificação de `buscarFotosEntrega` (tabela `entregas_venda_fotos` + fallback `foto_entrega_path`), mas em **UMA única consulta** (`WHERE ev.id = ANY(...)`) para todas as corridas do relatório, evitando 1 query por linha. As fotos voltam como **link** via `getPublicUrl("pagamento-fotos", path)` (proxy autenticado `/api/storage/pagamento-fotos/...`) — a imagem NUNCA é embutida (base64) na resposta, para o relatório não ficar pesado.
+
+### 12.4. Acesso
+
+Mesma lista de papéis que já paga o motoboy hoje (`motoboy/pagar`, `motoboy/pagamentos`): `desenvolvedor`, `admin`, `gerente_loja`. Quem confirma o pagamento em lote é quem também confere o relatório que justifica o valor — lista idêntica, não duplicada em um lugar novo.
+
+### 12.6. Decisão editável e conexão com o pagamento em lote existente (21/07/2026)
+
+**Investigado ANTES de criar qualquer persistência nova**: o pagamento do motoboy JÁ TEM um mecanismo de "marcar como pago em lote" — `POST /api/entregas-venda/motoboy/pagar` (usado por `PagamentoMotoboyPainel.tsx`), que recebe `motoboy_id` + `entrega_ids[]`, valida que cada entrega é `confirmada`, pertence ao motoboy e **ainda não foi paga** (`NOT EXISTS ... pagamentos_motoboy_itens`), e grava em `pagamentos_motoboy` + `pagamentos_motoboy_itens` (mais a conta a pagar correspondente) — a UNIQUE de fato existente impede pagar a mesma entrega 2x.
+
+Decisão: **o relatório NÃO ganhou persistência nova**. Ele é a etapa de CONFERÊNCIA antes do lote:
+
+- Cada corrida do relatório tem uma **decisão FINAL editável** (toggle "Pagar"/"Não pagar" por linha, em `RelatorioPagamentoMotoboy.tsx`), inicializada pela sugestão (`decisaoInicialFinanceiro` — só "pagar" começa marcado "pagar"; "revisar" e "nao_pagar" começam "não pagar", postura conservadora que exige ação ativa do financeiro para incluir algo suspeito).
+- Esse ajuste é **EFÊMERO** — vive só no estado React do componente (`decisoes`), não é gravado em nenhuma tabela/coluna nova. Se a página for recarregada antes de confirmar, o ajuste se perde e o financeiro reveria do zero.
+- O "Total a pagar" do rodapé reflete a decisão FINAL ajustada (`calcularTotalAjustado`), não a sugestão bruta (`calcularTotalPagar`, que a rota ainda expõe em `total_pagar` só como referência informativa).
+- **Persistência de verdade**: o botão "Confirmar pagamento de N corrida(s)" chama a MESMA rota `POST /api/entregas-venda/motoboy/pagar` já existente, mandando `entrega_ids` = as corridas com decisão final "pagar" e ainda não pagas (`foi_pago=false`). É essa chamada — não um mecanismo novo — que grava o pagamento. Depois do sucesso, o relatório é RE-BUSCADO (não atualizado otimisticamente) para refletir `foi_pago=true` vindo do banco (fonte da verdade).
+- `foi_pago` (novo campo por corrida, mesmo critério EXISTS já usado em `motoboy/minhas`) marca corridas já liquidadas num lote anterior — elas aparecem no relatório para auditoria (histórico completo do período), mas SEM toggle editável (badge "Já paga") e excluídas de qualquer soma de "falta pagar".
+- **Por que não criar uma tabela/coluna de "decisão do financeiro por corrida"**: duplicaria o que `pagamentos_motoboy_itens` já resolve (pago ou não pago). Uma decisão "vou pagar essa" que ainda não virou pagamento não é um fato que precise sobreviver a um reload — o financeiro que fechar o relatório em uma sessão só e confirmar no final.
+
+⚠️ **Se o Jonathan preferir persistir o rascunho de decisão** (ex.: financeiro reviu 40 corridas ao longo do dia, quer continuar depois sem perder o que já decidiu) isso exigiria uma tabela nova (ex.: `relatorio_pagamento_motoboy_decisoes`) — **não implementado nesta sessão**, decisão explicitamente reservada ao Jonathan.
+
+### 12.7. Referência (§12)
+
+- Lib de regra pura: `src/lib/relatorio-pagamento-motoboy.ts` (`MARCO_RELATORIO_PAGAMENTO_MOTOBOY`, `periodoAntesDoMarco`, `classificarCorridaMotoboy`, `decisaoInicialFinanceiro`, `calcularTotalPagar`, `calcularTotalAjustado`).
+- Lib de fotos em lote: `src/lib/entrega-venda.ts` (`buscarFotosEntregaEmLote`, novo, ao lado de `buscarFotosEntrega`).
+- Rota do relatório: `src/app/api/entregas-venda/motoboy/relatorio-pagamento/route.ts` (`GET`, query `entregadorId`/`inicio`/`fim`, expõe `foi_pago` por corrida).
+- Rota de pagamento (JÁ EXISTIA, reusada sem alteração): `src/app/api/entregas-venda/motoboy/pagar/route.ts` (`POST`).
+- Front: `src/components/entregas/RelatorioPagamentoMotoboy.tsx` (NOVO — subcomponente próprio, não inchou `PagamentoMotoboyPainel.tsx`; toggle por linha + botão "Confirmar pagamento"), renderizado dentro da aba "Pagamento do motoboy" em `EntregasVendaClient.tsx`, logo abaixo do painel de pagamento em lote.
+- Testes: `src/__tests__/relatorio-pagamento-motoboy.test.ts` (classificação pura — Pagar/Revisar/Não pagar com duplicidade como Revisar, `decisaoInicialFinanceiro`, `calcularTotalPagar` excluindo já pagas, `calcularTotalAjustado`); `src/__tests__/motoboy-relatorio-pagamento-route.test.ts` (gate de papel, marco 20/07 bloqueando 400, lista vazia não quebra, classificação fim-a-fim com SQL mockado incluindo `foi_pago`, prova de que fotos é 1 única query em lote).

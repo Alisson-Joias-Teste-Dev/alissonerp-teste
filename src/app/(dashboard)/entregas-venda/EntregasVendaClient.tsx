@@ -37,6 +37,7 @@ import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
 import MotoboyDrawer from "@/components/entregas/MotoboyDrawer";
 import PagarMotoboyModal from "@/components/entregas/PagarMotoboyModal";
 import PagamentoMotoboyPainel from "@/components/entregas/PagamentoMotoboyPainel";
+import RelatorioPagamentoMotoboy from "@/components/entregas/RelatorioPagamentoMotoboy";
 import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
 // REGRA DE NEGÓCIO (BLOCO 3 — fonte única de permissão): quem pode CRIAR
 // frete avulso DIRETO (o botão desta tela) vem de
@@ -393,14 +394,29 @@ export default function EntregasVendaClient({
           /* ── Aba: Pagamento do motoboy ───────────────────────────────────────
              REGRA DE NEGÓCIO: reusa o MESMO painel do modal PagarMotoboyModal
              (aberto pelo drawer de Motoboys) — sem moldura de modal, ocupando
-             o espaço da aba. Nenhuma lógica duplicada (ver relato). */
-          <div style={{
-            background: "#fff", borderRadius: 10,
-            border: `1px solid ${C.cremeBorder}`, padding: 20,
-            maxWidth: 560,
-          }}>
-            <PagamentoMotoboyPainel />
-          </div>
+             o espaço da aba. Nenhuma lógica duplicada (ver relato).
+             Abaixo, o RELATÓRIO de pagamento por entregador+período (21/07 —
+             decisão do Jonathan, ver docs/regras-negocio/entregas.md §11):
+             SUBCOMPONENTE PRÓPRIO (RelatorioPagamentoMotoboy) para não inchar
+             o painel de pagamento em lote — os dois convivem na mesma aba. */
+          <>
+            <div style={{
+              background: "#fff", borderRadius: 10,
+              border: `1px solid ${C.cremeBorder}`, padding: 20,
+              maxWidth: 560, marginBottom: 20,
+            }}>
+              <PagamentoMotoboyPainel />
+            </div>
+            <div style={{
+              background: "#fff", borderRadius: 10,
+              border: `1px solid ${C.cremeBorder}`, padding: 20,
+            }}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: C.esmeralda, marginBottom: 16 }}>
+                Relatório de pagamento por período
+              </h3>
+              <RelatorioPagamentoMotoboy />
+            </div>
+          </>
         ) : (
           <>
             {/* ── Cards de Stats ───────────────────────────────────────────────
