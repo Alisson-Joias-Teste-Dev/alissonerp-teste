@@ -435,6 +435,14 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
    * diferentes (coluna A/B na solicitação vs. sequência única no direto).
    * Viram JSX reaproveitável aqui para não duplicar o markup entre os dois
    * layouts abaixo. NENHUMA regra/validação muda — só a ORGANIZAÇÃO visual.
+   *
+   * REGRA DE LAYOUT (ajuste 21/07 — eliminar rolagem no modo solicitação):
+   * no modo solicitação, Observações fica na Coluna B (junto de pagamento/
+   * região), NÃO na Coluna A (descrição/venda/endereço) — o endereço
+   * estruturado (EnderecoForm) deixou a Coluna A bem mais alta, e colocar
+   * Observações nela só pioraria o desequilíbrio. No modo direto,
+   * Observações continua no mesmo lugar de sempre (sequência única, sem
+   * colunas) — este bloco reaproveitável não muda para esse modo.
    */
   const campoDescricao = (
     <div style={{ marginBottom: 14 }}>
@@ -719,8 +727,6 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                         <EnderecoForm value={enderecoEntrega} onChange={setEnderecoEntrega} />
                       )}
                     </div>
-
-                    {campoObservacoes}
                   </div>
 
                   {/* Coluna B — Pagamento */}
@@ -828,6 +834,16 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                     </div>
 
                     {campoRegiao}
+
+                    {/* Observações — movida da Coluna A para cá (21/07, ajuste
+                        de layout pedido pelo Jonathan): o endereço estruturado
+                        (EnderecoForm, migration 355) deixou a Coluna A bem mais
+                        alta que a Coluna B, e o formulário passou a rolar no
+                        modo solicitação. Mover Observações para a Coluna B
+                        rebalanceia as duas colunas sem remover/alterar nenhum
+                        campo. IMPACTO SE VOLTAR PARA A COLUNA A: o desequilíbrio
+                        de altura volta e a rolagem reaparece no desktop. */}
+                    {campoObservacoes}
                   </div>
                 </div>
               ) : (
