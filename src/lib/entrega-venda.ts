@@ -2153,15 +2153,24 @@ export interface CriarFreteAvulsoParams {
   enderecoEntregaCep?: string;
   enderecoEntregaUf?: string;
   modoSolicitacao?: boolean;
-  // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): obrigatório quando
-  // modoSolicitacao=true. Decide o comprovante e o aprovador:
-  //   'cliente' -> exige comprovanteBase64; aprovador = aprovadores_frete_avulso
-  //     (evento 'frete_avulso' — lista serve para ACOMPANHAR, dinheiro já com a loja).
-  //   'loja'    -> comprovante NÃO exigido; aprovador = aprovadores_frete_avulso_loja
-  //     (evento 'frete_avulso_loja' — autoriza o CUSTO assumido pela loja).
-  // Sempre UMA etapa de aprovação — só muda quem decide (ver eventoDaTarefa).
+  // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"; estendido na
+  // reforma da tela Entregas para o modo DIRETO com formulário completo):
+  // obrigatório sempre que `usaFormularioCompleto` for true (modoSolicitacao=
+  // true OU o caller mandou este campo — ver `usaFormularioCompleto` em
+  // criarFreteAvulso). Decide o comprovante SEMPRE; decide o aprovador SÓ no
+  // modo solicitação (criação direta não tem pool/tarefa, mas continua
+  // gravando `pagante` para fins de acompanhamento/relatório):
+  //   'cliente' -> exige comprovanteBase64; no modo solicitação, aprovador =
+  //     aprovadores_frete_avulso (evento 'frete_avulso' — lista serve para
+  //     ACOMPANHAR, dinheiro já com a loja).
+  //   'loja'    -> comprovante NÃO exigido; no modo solicitação, aprovador =
+  //     aprovadores_frete_avulso_loja (evento 'frete_avulso_loja' — autoriza
+  //     o CUSTO assumido pela loja).
+  // Sempre UMA etapa de aprovação (só na solicitação) — só muda quem decide
+  // (ver eventoDaTarefa). No modo direto não há aprovação nenhuma; `pagante`
+  // só registra quem bancou o custo.
   // IMPACTO SE REMOVIDO: sem saber quem paga não dá para escolher comprovante
-  // obrigatório nem o pool certo de aprovadores.
+  // obrigatório nem (na solicitação) o pool certo de aprovadores.
   pagante?: "loja" | "cliente";
   // REGRA DE NEGÓCIO (migration 354): comprovante de pagamento do frete,
   // OBRIGATÓRIO quando pagante='cliente'. Base64 (data URL ou puro — uploadFile
@@ -2278,6 +2287,27 @@ export async function criarFreteAvulso(
   params: CriarFreteAvulsoParams,
   userId: string,
 ): Promise<FreteAvulso> {
+  // REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07 — decisão do Jonathan:
+  // "mesmo formulário da tarefa, mas criação DIRETA"): o botão "Frete Avulso"
+  // da tela de Entregas passou a usar o MESMO formulário completo da
+  // solicitação (venda opcional, endereço estruturado, quem paga +
+  // comprovante, valor cobrado, região, observação) — só que sem enviar
+  // `solicitar`, então continua nascendo 'pendente' (sem tarefa/pool). O QUE:
+  // `usaFormularioCompleto` é `true` tanto na solicitação real
+  // (`modoSolicitacao=true`) quanto nesse novo modo direto-com-formulário-
+  // completo (detectado pela PRESENÇA de `pagante` no payload — só o
+  // formulário completo manda esse campo; o formulário enxuto antigo, o
+  // auto-registro do entregador e chamadas legadas nunca mandam `pagante`).
+  // POR QUE: as validações de endereço/pagante/comprovante (abaixo) e a
+  // gravação de `pagante`/comprovante no INSERT fazem sentido nos dois casos
+  // — a única coisa que distingue solicitação de direto é `situacaoInicial`
+  // (sempre ligado a `modoSolicitacao`, nunca a `usaFormularioCompleto`) e a
+  // criação (ou não) da tarefa de aprovação.
+  // IMPACTO SE REMOVIDO: o modo direto completo voltaria a descartar
+  // pagante/comprovante (como antes desta reforma) mesmo o front exigindo e
+  // enviando os dois campos — perda silenciosa de dado.
+  const usaFormularioCompleto = params.modoSolicitacao === true || params.pagante !== undefined;
+
   // REGRA DE NEGÓCIO (pool de motoboy — patch A2): motoboy é OPCIONAL aqui.
   // Solicitação da consultora e criação direta sem motoboy caem no POOL (a
   // corrida nasce sem dono); quando informado (criação direta com motoboy, ou
@@ -2380,14 +2410,18 @@ export async function criarFreteAvulso(
     }
   }
 
-  if (params.modoSolicitacao) {
-    // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): obrigatório no
-    // modo solicitação, COM ou SEM venda. Decide comprovante (cliente) e pool
-    // de aprovador (ver bloco de listaAprovadoresFrete logo abaixo). Validado
+  if (usaFormularioCompleto) {
+    // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"; estendido na
+    // reforma da tela Entregas para o modo DIRETO com formulário completo):
+    // obrigatório sempre que `usaFormularioCompleto`, COM ou SEM venda, e
+    // independente de `modoSolicitacao` — o campo é o mesmo formulário nos
+    // dois casos. Decide comprovante (cliente) e, SÓ no modo solicitação,
+    // também decide o pool de aprovador (ver bloco de listaAprovadoresFrete
+    // logo abaixo, que continua checando `params.modoSolicitacao`). Validado
     // no SERVIDOR (não só no front) — mesma autoridade real de sempre.
-    // IMPACTO SE REMOVIDO: reabre o caminho de solicitar sem informar quem
-    // paga, e a exigência de comprovante para 'cliente' não teria como ser
-    // aplicada.
+    // IMPACTO SE REMOVIDO: reabre o caminho de solicitar/criar direto com
+    // formulário completo sem informar quem paga, e a exigência de
+    // comprovante para 'cliente' não teria como ser aplicada.
     if (params.pagante !== "loja" && params.pagante !== "cliente") {
       throw new Error("Informe quem paga o frete avulso: loja ou cliente.");
     }
@@ -2395,15 +2429,17 @@ export async function criarFreteAvulso(
       throw new Error("Comprovante de pagamento é obrigatório quando o frete é pago pelo cliente.");
     }
 
-    // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): mínimo para o
-    // motoboy conseguir localizar o endereço: logradouro + número + cidade.
+    // REGRA DE NEGÓCIO (migration 355 — endereço estruturado; estendido para
+    // o modo DIRETO com formulário completo): mínimo para o motoboy
+    // conseguir localizar o endereço: logradouro + número + cidade.
     // Complemento/bairro/UF/CEP ajudam mas não bloqueiam. Validado no
     // SERVIDOR (defesa em profundidade, mesmo padrão do campo `pagante`
     // acima) além do front (FreteAvulsoModal + EnderecoForm). CONTINUA
     // obrigatório COM ou SEM venda — é o endereço quem diz para onde ir
     // quando não há venda para herdar o endereço de entrega dela.
-    // IMPACTO SE REMOVIDO: reabre o caminho de solicitar frete avulso sem
-    // endereço utilizável — motoboy recebe a corrida sem saber pra onde ir.
+    // IMPACTO SE REMOVIDO: reabre o caminho de criar frete avulso (solicitado
+    // ou direto, com formulário completo) sem endereço utilizável — motoboy
+    // recebe a corrida sem saber pra onde ir.
     if (
       !params.enderecoEntregaLogradouro?.trim() ||
       !params.enderecoEntregaNumero?.trim() ||
@@ -2440,15 +2476,17 @@ export async function criarFreteAvulso(
     }
   }
 
-  // REGRA DE NEGÓCIO (migration 354): upload do comprovante ANTES de abrir a
-  // transação — se o Storage falhar, nada é gravado no banco (fail-fast, sem
-  // linha órfã "solicitada" sem comprovante). Reusa o bucket `pagamento-fotos`
-  // (mesmo de foto_entrega_path e compras de metal) via o helper server-side
-  // padrão (src/lib/storage.ts) — NÃO é upload direto do client.
+  // REGRA DE NEGÓCIO (migration 354; estendido para o modo DIRETO com
+  // formulário completo): upload do comprovante ANTES de abrir a transação —
+  // se o Storage falhar, nada é gravado no banco (fail-fast, sem linha órfã
+  // sem comprovante, seja 'solicitada' ou 'pendente'). Reusa o bucket
+  // `pagamento-fotos` (mesmo de foto_entrega_path e compras de metal) via o
+  // helper server-side padrão (src/lib/storage.ts) — NÃO é upload direto do
+  // client.
   // IMPACTO SE ALTERADO: fazer o upload depois do INSERT arrisca deixar uma
-  // solicitação 'solicitada' sem comprovante se o Storage falhar no meio.
+  // entrega (solicitada OU pendente) sem comprovante se o Storage falhar no meio.
   let comprovantePath: string | null = null;
-  if (params.modoSolicitacao && params.pagante === "cliente") {
+  if (usaFormularioCompleto && params.pagante === "cliente") {
     const caminho = `frete-avulso/comprovantes/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
     const upload = await uploadFile("pagamento-fotos", caminho, params.comprovanteBase64!, "image/jpeg");
     if (!("url" in upload)) {
@@ -2497,7 +2535,7 @@ export async function criarFreteAvulso(
         ${params.enderecoEntregaComplemento ?? null}, ${params.enderecoEntregaBairro ?? null},
         ${params.enderecoEntregaCidade ?? null}, ${params.enderecoEntregaCep ?? null},
         ${params.enderecoEntregaUf ?? null},
-        ${params.modoSolicitacao ? params.pagante! : null}, ${comprovantePath},
+        ${params.pagante ?? null}, ${comprovantePath},
         ${userId}::uuid
       )
       RETURNING *
@@ -2606,7 +2644,7 @@ export async function criarFreteAvulso(
         descricao_avulso: params.descricaoAvulso ?? null,
         situacao: situacaoInicial,
         venda_id: params.vendaId ?? null,
-        pagante: params.modoSolicitacao ? params.pagante : null,
+        pagante: params.pagante ?? null,
       },
     });
 

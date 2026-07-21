@@ -78,6 +78,26 @@ export interface ContagensEntregas {
   confirmada: number;
 }
 
+/**
+ * REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07 — mockup aprovado pelo
+ * Jonathan): a lista única com chips virou 3 ABAS, separando o que hoje se
+ * misturava na mesma tabela:
+ *   - `retirada`  -> forma_entrega='retirada' (colunas Motoboy/Frete e o
+ *     card de saldo de frete não se aplicam, ficam ocultos).
+ *   - `motoboy`   -> forma_entrega='motoboy' (colunas completas). `correios`
+ *     é uma REGIÃO (entregas_venda.regiao), não uma forma_entrega — uma
+ *     corrida "Correios" já é forma_entrega='motoboy' com regiao='correios',
+ *     então cai nesta aba naturalmente (nenhum registro fica sem aba).
+ *   - `pagamento` -> não lista entregas nenhuma; é o relatório/acerto de
+ *     motoboy (PagamentoMotoboyPainel, reaproveitado do que já existia em
+ *     PagarMotoboyModal). Não precisa dos dados desta página (busca os
+ *     próprios via API client-side) — a SSR pula as duas queries.
+ * IMPACTO SE REMOVIDO: as abas "Retirada"/"Motoboy" voltam a mostrar tudo
+ * misturado; qualquer valor de aba diferente destes 3 cai no default
+ * ('retirada') — nunca em SQL livre.
+ */
+export type AbaEntrega = "retirada" | "motoboy" | "pagamento";
+
 // ── Props da página (searchParams do Next.js) ─────────────────────────────────
 interface PageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -107,12 +127,24 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
   // ── Parâmetros de URL ─────────────────────────────────────────────────────
   const params = await searchParams;
   const page = Math.max(1, Number(params.page) || 1);
-  const limit = 50;
+  // REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07 — mockup aprovado):
+  // paginação de 10 por página (era 50) — rodapé "1–10 de N" com navegação,
+  // sem rolagem infinita. IMPACTO SE ALTERADO: recarregar() em
+  // EntregasVendaClient.tsx usa este mesmo valor via prop `pageSize` — mudar
+  // aqui sem mudar lá desalinha a paginação client-side.
+  const limit = 10;
   const offset = (page - 1) * limit;
   const situacao = typeof params.situacao === "string" ? params.situacao : "";
   const busca = typeof params.busca === "string" ? params.busca : "";
   const dataInicio = typeof params.data_inicio === "string" ? params.data_inicio : "";
   const dataFim = typeof params.data_fim === "string" ? params.data_fim : "";
+  // REGRA DE NEGÓCIO (reforma da tela Entregas — 3 abas, ver AbaEntrega
+  // acima): valor inválido/ausente cai no default 'retirada'. Nunca usado em
+  // SQL livre — só decide qual filtro fixo de forma_entrega aplicar.
+  const abaParam = typeof params.aba === "string" ? params.aba : "";
+  const aba: AbaEntrega = (["retirada", "motoboy", "pagamento"] as const).includes(abaParam as AbaEntrega)
+    ? (abaParam as AbaEntrega)
+    : "retirada";
 
   const isConsultora = usuario.role === "consultora";
   const vendedorId = usuario.vendedor_id as number | null;
@@ -150,11 +182,24 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     ? sql`AND ev.created_at < (${dataFim}::date + interval '1 day')`
     : sql``;
 
+  // REGRA DE NEGÓCIO (reforma da tela Entregas — 3 abas): 'retirada' e
+  // 'motoboy' filtram por forma_entrega igual ao nome da aba; 'pagamento'
+  // não lista entregas (ver AbaEntrega acima) — as duas queries abaixo nem
+  // rodam nesse caso.
+  // IMPACTO SE REMOVIDO: as abas voltam a mostrar retirada+motoboy misturados.
+  const whereFormaEntrega = aba !== "pagamento"
+    ? sql`AND ev.forma_entrega = ${aba}`
+    : sql``;
+
   // ── Queries em paralelo: dados + contagens ─────────────────────────────────
   // REGRA DE NEGÓCIO: duas queries separadas em Promise.all para performance.
   // A contagem usa a mesma condição WHERE para consistência com os dados listados.
+  // Pulam inteiramente na aba 'pagamento' — ela não lista entregas (é o
+  // relatório de acerto de motoboy, dados próprios via PagamentoMotoboyPainel).
   // IMPACTO SE ALTERADO: se as condições divergirem, totalPages fica errado.
-  const [itemsResult, countResult] = await Promise.all([
+  const [itemsResult, countResult]: [Record<string, unknown>[], Record<string, unknown>[]] = aba === "pagamento"
+    ? [[], [{ total: 0, pendente: 0, em_andamento: 0, confirmada: 0 }]]
+    : await Promise.all([
     sql`
       SELECT
         ev.id,
@@ -186,6 +231,7 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
       LEFT JOIN alissonerp.motoboys mb ON mb.user_id = ev.motoboy_id
       WHERE 1=1
         ${whereVendedor}
+        ${whereFormaEntrega}
         ${whereSituacao}
         ${whereBusca}
         ${whereDataInicio}
@@ -205,6 +251,7 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = ev.venda_id
       WHERE 1=1
         ${whereVendedor}
+        ${whereFormaEntrega}
         ${whereSituacao}
         ${whereBusca}
         ${whereDataInicio}
@@ -264,6 +311,7 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
       dataInicioFiltro={dataInicio}
       dataFimFiltro={dataFim}
       userRole={usuario.role as string}
+      aba={aba}
     />
   );
 }

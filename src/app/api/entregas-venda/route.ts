@@ -97,6 +97,17 @@ export async function GET(req: NextRequest) {
   const motoboyId = url.searchParams.get("motoboy_id");
   const dataInicio = url.searchParams.get("data_inicio") ?? "";
   const dataFim = url.searchParams.get("data_fim") ?? "";
+  // REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07 — 3 abas: Retirada em
+  // loja / Entregas motoboy / Pagamento do motoboy): filtro opcional por
+  // forma_entrega, usado pelo recarregar() client-side de
+  // EntregasVendaClient.tsx para manter a aba atual ao atualizar a lista
+  // depois de uma ação no drawer (mesmo filtro já aplicado no SSR de
+  // page.tsx). Só aceita os 2 valores reais da coluna — qualquer outra coisa
+  // é ignorada (sem filtro), nunca vira SQL livre.
+  // IMPACTO SE REMOVIDO: recarregar() voltaria a misturar retirada+motoboy
+  // na aba errada depois de fechar o drawer.
+  const formaEntregaParam = url.searchParams.get("forma_entrega") ?? "";
+  const formaEntrega = ["retirada", "motoboy"].includes(formaEntregaParam) ? formaEntregaParam : "";
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 50));
   const offset = (page - 1) * limit;
@@ -135,6 +146,10 @@ export async function GET(req: NextRequest) {
 
   const whereMotoboy = motoboyId
     ? sql`AND ev.motoboy_id = ${Number(motoboyId)}`
+    : sql``;
+
+  const whereFormaEntrega = formaEntrega
+    ? sql`AND ev.forma_entrega = ${formaEntrega}`
     : sql``;
 
   const whereDataInicio = dataInicio
@@ -195,6 +210,7 @@ export async function GET(req: NextRequest) {
         ${whereVenda}
         ${whereSituacao}
         ${whereMotoboy}
+        ${whereFormaEntrega}
         ${whereDataInicio}
         ${whereDataFim}
       ORDER BY ev.created_at DESC, ev.id DESC
@@ -209,6 +225,7 @@ export async function GET(req: NextRequest) {
         ${whereVenda}
         ${whereSituacao}
         ${whereMotoboy}
+        ${whereFormaEntrega}
         ${whereDataInicio}
         ${whereDataFim}
     `,

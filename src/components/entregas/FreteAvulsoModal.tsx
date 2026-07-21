@@ -75,6 +75,23 @@
  * IMPACTO SE ALTERADO: campo sem sentido volta a ser exigido com loja
  * pagando, travando a solicitação por um valor que não existe nesse caso.
  *
+ * REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07 — decisão do Jonathan:
+ * "mesmo formulário da tarefa, mas criação DIRETA"): o botão "Frete Avulso"
+ * da tela de Entregas (EntregasVendaClient.tsx) passou a abrir este modal com
+ * a nova prop `formularioCompleto` (SEM `modoSolicitacao`) — mostra o MESMO
+ * formulário de 2 colunas da solicitação (venda opcional, endereço
+ * estruturado, quem paga + comprovante, valor cobrado, região, observação),
+ * mas continua criando DIRETO (`solicitar` não é enviado — nasce 'pendente',
+ * sem tarefa/pool). `mostrarFormularioCompleto` (= `modoSolicitacao ||
+ * formularioCompleto`) controla SÓ o LAYOUT (quais campos aparecem);
+ * `ehSolicitacao` (= `modoSolicitacao`, inalterado) continua controlando o
+ * MODO DE ENVIO (se manda `solicitar: true` e os textos "Solicitar"/
+ * "Solicitação enviada"). Isso permite o par (completo, direto) que não
+ * existia antes — só (enxuto, direto) e (completo, solicitação).
+ * IMPACTO SE MISTURADO: usar `ehSolicitacao` para decidir o LAYOUT faria o
+ * modo direto voltar ao formulário enxuto (motoboy+região+cliente, sem
+ * endereço/pagante/comprovante) mesmo com `formularioCompleto=true`.
+ *
  * IMPACTO SE ALTERADO: delegar a criação para POST /api/entregas-venda/frete-avulso.
  * Não fazer INSERT direto.
  */
@@ -150,6 +167,18 @@ interface Props {
    *  mais concatenado) para pré-preencher o EnderecoForm quando `vendaId` é
    *  informado. Ignorado sem vendaId. Montar com enderecoDaVenda(). */
   enderecoInicial?: EnderecoValue;
+  /**
+   * REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07): mostra o formulário
+   * COMPLETO (2 colunas — venda opcional, endereço estruturado, quem paga +
+   * comprovante, valor cobrado, região, observação) mesmo em criação DIRETA
+   * (`modoSolicitacao` omitido/false). Usado pelo botão "Frete Avulso" da
+   * tela de Entregas — decisão do Jonathan: mesmo formulário da solicitação,
+   * mas continua nascendo 'pendente' (sem tarefa). Ignorado quando
+   * `modoSolicitacao=true` (a solicitação já sempre mostra o completo).
+   * IMPACTO SE REMOVIDO: o botão volta a abrir o formulário enxuto antigo
+   * (sem endereço/pagante/comprovante).
+   */
+  formularioCompleto?: boolean;
 }
 
 const REGIOES = [
@@ -161,16 +190,23 @@ const REGIOES = [
 
 type Regiao = "fortaleza" | "fora_fortaleza" | "longe" | "correios";
 
-export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolicitacao = false, vendaId, enderecoInicial }: Props) {
+export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolicitacao = false, vendaId, enderecoInicial, formularioCompleto = false }: Props) {
   // REGRA DE NEGÓCIO (intenção explícita — ponto de entrada decide, não o
   // cargo): no modo solicitação, quem abriu o modal só SOLICITA — não cria o
   // avulso já liberado e não escolhe motoboy/responsável. Vem da prop, não
   // mais de userRole === "consultora" (ver comentário no topo do arquivo).
+  // Controla o MODO DE ENVIO (solicitar:true vs criação direta) e os textos
+  // do modal — NÃO controla mais sozinho o layout (ver mostrarFormularioCompleto).
   const ehSolicitacao = modoSolicitacao;
+  // REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07): controla o LAYOUT
+  // (quais campos aparecem) — true na solicitação real E no novo modo
+  // direto-com-formulário-completo (botão "Frete Avulso" de Entregas). Ver
+  // comentário completo no topo do arquivo.
+  const mostrarFormularioCompleto = ehSolicitacao || formularioCompleto;
   // REGRA DE NEGÓCIO (V3): quando aberto de dentro da venda, a venda já é
   // conhecida — não precisa buscar. IMPACTO SE REMOVIDO: reaparece o
   // buscador de venda mesmo quando o caller já sabe qual é.
-  const vendaFixada = ehSolicitacao && vendaId != null;
+  const vendaFixada = mostrarFormularioCompleto && vendaId != null;
 
   const [motoboys, setMotoboys] = useState<Motoboy[]>([]);
   const [motoboyId, setMotoboyId] = useState("");
@@ -208,17 +244,18 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
 
   const freteCalculado = REGIOES.find(r => r.value === regiao)?.frete ?? 0;
 
-  // Carregar motoboys ao abrir — só necessário no modo criação direta (loja).
-  // Consultora não escolhe motoboy (a corrida cai no pool de liberadores).
+  // Carregar motoboys ao abrir — só necessário no formulário ENXUTO (loja
+  // escolhendo motoboy na hora). O formulário COMPLETO (solicitação OU
+  // direto-completo) não escolhe motoboy — a corrida cai no pool.
   useEffect(() => {
-    if (!isOpen || ehSolicitacao) return;
+    if (!isOpen || mostrarFormularioCompleto) return;
     apiFetch<Motoboy[]>("/api/entregas-venda/motoboys")
       .then(d => setMotoboys(Array.isArray(d) ? d : []))
       // Pitfall §3: sem a lista de motoboys o frete avulso não pode ser criado
       .catch(() => useErrorStore.getState().push("Erro ao carregar lista de motoboys", { level: "warning" }));
-  }, [isOpen, ehSolicitacao]);
+  }, [isOpen, mostrarFormularioCompleto]);
 
-  // Busca de contato com debounce (não-consultora)
+  // Busca de contato com debounce — só no formulário ENXUTO.
   const buscarContatos = useCallback(async (q: string) => {
     if (q.length < 2) { setContatos([]); return; }
     setBuscandoContato(true);
@@ -233,10 +270,10 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   }, []);
 
   useEffect(() => {
-    if (ehSolicitacao) return;
+    if (mostrarFormularioCompleto) return;
     const t = setTimeout(() => buscarContatos(buscaContato), 300);
     return () => clearTimeout(t);
-  }, [buscaContato, buscarContatos, ehSolicitacao]);
+  }, [buscaContato, buscarContatos, mostrarFormularioCompleto]);
 
   // ── Busca de venda com debounce (consultora) ──────────────────────────────
   // REGRA DE NEGÓCIO: reusa GET /api/vendas?q= (mesma listagem paginada usada
@@ -269,10 +306,10 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   }, []);
 
   useEffect(() => {
-    if (!ehSolicitacao || vendaFixada) return;
+    if (!mostrarFormularioCompleto || vendaFixada) return;
     const t = setTimeout(() => buscarVendas(vendaBusca), 300);
     return () => clearTimeout(t);
-  }, [vendaBusca, buscarVendas, ehSolicitacao, vendaFixada]);
+  }, [vendaBusca, buscarVendas, mostrarFormularioCompleto, vendaFixada]);
 
   // REGRA DE NEGÓCIO (V3): venda fixada (aberto de dentro da tela da venda) —
   // pré-preenche o endereço editável com o que o caller já calculou (cadastro
@@ -344,14 +381,16 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     try {
       const freteNegociadoNum = freteNegociado ? parseFloat(freteNegociado.replace(",", ".")) : undefined;
 
-      if (ehSolicitacao) {
+      if (mostrarFormularioCompleto) {
         // REGRA DE NEGÓCIO (modelo POOL; fix 21/07 — venda deixa de ser
-        // obrigatória): body da solicitação NÃO inclui motoboyId/contatoId/
-        // liberacaoResponsavelId — quem solicita informa o endereço
-        // confirmado e o valor cobrado do cliente; a venda é OPCIONAL (frete
-        // avulso pode não partir de uma venda, ex.: "levar material à
-        // loja"). Com venda fixada (V3), o id vem da prop; sem ela, do
-        // buscador (pode ficar undefined se nada foi buscado/selecionado).
+        // obrigatória; reforma da tela Entregas — mesmo corpo serve o modo
+        // DIRETO com formulário completo, só muda `solicitar`): body NÃO
+        // inclui motoboyId/contatoId/liberacaoResponsavelId — quem preenche
+        // informa o endereço confirmado e o valor cobrado do cliente; a
+        // venda é OPCIONAL (frete avulso pode não partir de uma venda, ex.:
+        // "levar material à loja"). Com venda fixada (V3), o id vem da prop;
+        // sem ela, do buscador (pode ficar undefined se nada foi buscado/
+        // selecionado).
         const vendaIdEfetivo = vendaId ?? vendaSelecionada?.id;
         // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): mínimo
         // exigido é logradouro + número + cidade (validado aqui E no
@@ -385,12 +424,17 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
         await apiFetch("/api/entregas-venda/frete-avulso", {
           method: "POST",
           body: JSON.stringify({
-            // REGRA DE NEGÓCIO (intenção explícita): `solicitar: true` é o
-            // que faz o backend tratar esta chamada como SOLICITAÇÃO,
-            // independente do cargo de quem está logado — ver route.ts.
-            // IMPACTO SE REMOVIDO: a rota trataria como criação direta
-            // ('pendente', já liberado) mesmo vindo do fluxo de solicitação.
-            solicitar: true,
+            // REGRA DE NEGÓCIO (intenção explícita; reforma da tela Entregas):
+            // `solicitar: true` só é enviado quando `ehSolicitacao` (=
+            // modoSolicitacao) — é o que faz o backend tratar a chamada como
+            // SOLICITAÇÃO (nasce 'solicitada', cria tarefa no pool). O modo
+            // direto-com-formulário-completo (mostrarFormularioCompleto=true,
+            // ehSolicitacao=false) usa este MESMO corpo mas omite `solicitar`
+            // — a rota trata como criação direta ('pendente', sem tarefa),
+            // igual ao formulário enxuto de sempre.
+            // IMPACTO SE SEMPRE MANDAR true: o modo direto-completo passaria
+            // a gerar solicitação/tarefa em vez de criar liberado na hora.
+            solicitar: ehSolicitacao ? true : undefined,
             vendaId: vendaIdEfetivo,
             // REGRA DE NEGÓCIO (migration 355): campo a campo, espelhando os
             // nomes aceitos pelo Zod schema de route.ts (enderecoEntregaLogradouro
@@ -440,12 +484,16 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
 
   if (!isOpen) return null;
 
-  // Validação de submit — cada modo tem seus próprios campos obrigatórios
+  // Validação de submit — cada LAYOUT tem seus próprios campos obrigatórios
+  // (formulário completo vs enxuto — não depende de ehSolicitacao/modo de
+  // envio, só de quais campos estão na tela).
   // REGRA DE NEGÓCIO (migration 355 — endereço estruturado; fix 21/07 —
-  // venda deixa de ser obrigatória): mínimo exigido é logradouro + número +
-  // cidade, mesmo padrão validado no handleSubmit e no backend
-  // (criarFreteAvulso). Venda NÃO trava mais o botão — é opcional.
-  const disabledSolicitacao =
+  // venda deixa de ser obrigatória; reforma da tela Entregas — vale para
+  // solicitação E para o modo direto-com-formulário-completo): mínimo
+  // exigido é logradouro + número + cidade, mesmo padrão validado no
+  // handleSubmit e no backend (criarFreteAvulso). Venda NÃO trava mais o
+  // botão — é opcional.
+  const disabledFormularioCompleto =
     enviando ||
     !enderecoEntrega.logradouro.trim() || !enderecoEntrega.numero.trim() || !enderecoEntrega.cidade.trim() ||
     (precisaValorCobradoDoCliente(pagante) && freteCobradoConsultora === "") || !descricao.trim() ||
@@ -453,7 +501,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   const disabledPadrao =
     enviando || !motoboyId || !descricao.trim() ||
     (freteCalculado === 0 && !(freteNegociado && parseFloat(freteNegociado.replace(",", ".")) > 0));
-  const disabledSubmit = ehSolicitacao ? disabledSolicitacao : disabledPadrao;
+  const disabledSubmit = mostrarFormularioCompleto ? disabledFormularioCompleto : disabledPadrao;
 
   /**
    * REGRA DE LAYOUT (responsividade, 21/07 — layout aprovado pelo Jonathan):
@@ -549,8 +597,14 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
       )}
       {freteCalculado === 0 && (
         <div style={{ marginTop: 8 }}>
+          {/* REGRA DE NEGÓCIO: o "*" só faz sentido no formulário ENXUTO —
+              é o único layout que BLOQUEIA o submit sem este valor
+              (disabledPadrao). No formulário COMPLETO (solicitação ou
+              direto-completo, disabledFormularioCompleto) o campo é
+              opcional — por isso o indicador segue mostrarFormularioCompleto,
+              não ehSolicitacao (que só decide o texto/modo de envio). */}
           <label style={{ fontSize: 11, fontWeight: 600, color: C.cinza, display: "block", marginBottom: 4 }}>
-            Valor negociado com o motoboy (R$) {ehSolicitacao ? "" : "*"}
+            Valor negociado com o motoboy (R$) {mostrarFormularioCompleto ? "" : "*"}
           </label>
           <input
             type="number"
@@ -592,12 +646,13 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
         background: "#fff", borderRadius: 16,
         width: "100%",
         // REGRA DE LAYOUT (responsividade, 21/07 — layout aprovado pelo
-        // Jonathan): modo solicitação tem mais campos (venda, endereço,
-        // pagamento, comprovante, região) — modal mais largo (~820px) libera
-        // as 2 colunas abaixo. Modo direto (motoboy, região, cliente) fica
-        // com coluna quase vazia em 2 colunas — mantido em 480px/1 coluna.
-        // IMPACTO SE IGUALAR: modo direto ganha espaço vazio sem uso.
-        maxWidth: ehSolicitacao ? 820 : 480,
+        // Jonathan): formulário COMPLETO (solicitação OU direto-completo)
+        // tem mais campos (venda, endereço, pagamento, comprovante, região)
+        // — modal mais largo (~820px) libera as 2 colunas abaixo. Formulário
+        // ENXUTO (motoboy, região, cliente) fica com coluna quase vazia em 2
+        // colunas — mantido em 480px/1 coluna.
+        // IMPACTO SE IGUALAR: modo enxuto ganha espaço vazio sem uso.
+        maxWidth: mostrarFormularioCompleto ? 820 : 480,
         maxHeight: "90vh",
         display: "flex", flexDirection: "column",
         boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
@@ -655,9 +710,11 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                 </div>
               )}
 
-              {ehSolicitacao ? (
+              {mostrarFormularioCompleto ? (
                 // REGRA DE LAYOUT (responsividade, 21/07 — layout aprovado
-                // pelo Jonathan): 2 colunas no desktop, 1 coluna no celular,
+                // pelo Jonathan; reforma da tela Entregas — mesmo layout para
+                // solicitação E direto-com-formulário-completo): 2 colunas no
+                // desktop, 1 coluna no celular,
                 // via auto-fit/minmax — SEM media query manual. Uso
                 // minmax(min(300px,100%), 1fr) em vez de minmax(300px, 1fr)
                 // puro: com só 1 coluna (celular estreito, ~360px) o grid
