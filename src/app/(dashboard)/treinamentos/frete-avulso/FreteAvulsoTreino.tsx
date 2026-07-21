@@ -43,11 +43,13 @@ import {
  *     pagamento *" (obrigatório só quando Cliente), textos de apoio ("Cliente
  *     pagou — anexe o comprovante abaixo...", "Custo da loja — sem
  *     comprovante..."): `FreteAvulsoModal.tsx` (~L748-826, migration 354).
- *   - "Descrição da corrida *", "Valor cobrado do cliente (R$) *", "Região *"
- *     (Fortaleza R$20 / Fora de Fortaleza R$50 / Longe (negociar) / Correios),
- *     botão "Solicitar frete avulso" e sucesso "Solicitação enviada —
- *     aguardando liberação": `FreteAvulsoModal.tsx` (`REGIOES` ~L143-148,
- *     rodapé ~L986-1002, sucesso ~L599).
+ *   - "Descrição da corrida *", "Valor cobrado do cliente (R$) *" (só quando
+ *     pagante === 'cliente' — some com 'loja', ajuste 21/07,
+ *     `precisaValorCobradoDoCliente` em `lib/frete-avulso-valor-cobrado.ts`),
+ *     "Região *" (Fortaleza R$20 / Fora de Fortaleza R$50 / Longe (negociar) /
+ *     Correios), botão "Solicitar frete avulso" e sucesso "Solicitação
+ *     enviada — aguardando liberação": `FreteAvulsoModal.tsx` (`REGIOES`
+ *     ~L143-148, rodapé ~L1013, sucesso ~L630).
  *   - guarda de solicitação duplicada ("Já existe uma solicitação de frete
  *     avulso aguardando decisão para esta venda."): `lib/entrega-venda.ts`
  *     (`criarFreteAvulso`, guard ~L2175-2188 na versão anterior — mesma
@@ -254,7 +256,7 @@ const PASSOS: PassoTreino[] = [
     quem: "Consultora",
     titulo: "Preencher valor, região e descrição — e enviar",
     narracao: <>Informe a {nb("Descrição da corrida")}, o {nb("Valor cobrado do cliente (R$)")} e a {nb("Região")} (Fortaleza / Fora de Fortaleza / Longe / Correios). Observações é opcional. Depois clique em {nb("Solicitar frete avulso")}.</>,
-    porque: "A consultora não escolhe motoboy nem responsável — a solicitação cai no pool certo, definido pelo passo anterior (quem paga). Um novo pedido pra MESMA venda é barrado enquanto o anterior não for decidido: \"Já existe uma solicitação de frete avulso aguardando decisão para esta venda.\" Depois de enviar, dá pra acompanhar em \"Minhas solicitações\" (próximo passo).",
+    porque: "A consultora não escolhe motoboy nem responsável — a solicitação cai no pool certo, definido pelo passo anterior (quem paga). Um novo pedido pra MESMA venda é barrado enquanto o anterior não for decidido: \"Já existe uma solicitação de frete avulso aguardando decisão para esta venda.\" Depois de enviar, dá pra acompanhar em \"Minhas solicitações\" (próximo passo). Este exemplo segue o caminho \"Cliente paga\" (passo anterior) — se a escolha tivesse sido \"Loja\", este campo \"Valor cobrado do cliente\" nem apareceria: a loja assume o custo integral, sem cobrança ao cliente (ajuste 21/07, pedido do Jonathan).",
     resultado: <StatusChip s="solicitada" />,
     tela: (
       <div className="space-y-2">

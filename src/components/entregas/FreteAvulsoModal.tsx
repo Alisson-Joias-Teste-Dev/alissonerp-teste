@@ -64,6 +64,17 @@
  * backend, criarFreteAvulso — defesa em profundidade).
  * IMPACTO SE ALTERADO: o backend rejeita (400) sem logradouro/número/cidade.
  *
+ * REGRA DE NEGÓCIO (ajuste 21/07 — "se for loja não precisa colocar o valor
+ * cobrado do cliente", pedido do Jonathan): o campo "Valor cobrado do
+ * cliente" só aparece/é exigido quando pagante === 'cliente' (ver
+ * precisaValorCobradoDoCliente(), src/lib/frete-avulso-valor-cobrado.ts).
+ * Com pagante === 'loja' o campo some, não bloqueia o submit e o valor
+ * enviado ao backend é 0 (freteCobrado) — a loja assume o custo integral da
+ * corrida. Sem migration nova: é só front + validação, o backend
+ * (`z.number().nonnegative()`, criarFreteAvulso) já aceitava 0.
+ * IMPACTO SE ALTERADO: campo sem sentido volta a ser exigido com loja
+ * pagando, travando a solicitação por um valor que não existe nesse caso.
+ *
  * IMPACTO SE ALTERADO: delegar a criação para POST /api/entregas-venda/frete-avulso.
  * Não fazer INSERT direto.
  */
@@ -73,6 +84,7 @@ import { X, Loader2, CheckCircle, Bike, MapPin, AlignLeft, User, Search, DollarS
 import { apiFetch } from "@/lib/apiFetch";
 import { useErrorStore } from "@/stores/errorStore";
 import EnderecoForm, { type EnderecoValue, ENDERECO_VAZIO, enderecoDaVenda, type EnderecoVendaFields } from "@/components/endereco/EnderecoForm";
+import { precisaValorCobradoDoCliente } from "@/lib/frete-avulso-valor-cobrado";
 
 const C = {
   esmeralda: "#184036",
@@ -348,10 +360,18 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
         if (
           !enderecoEntrega.logradouro.trim() ||
           !enderecoEntrega.numero.trim() ||
-          !enderecoEntrega.cidade.trim() ||
-          freteCobradoConsultora === ""
+          !enderecoEntrega.cidade.trim()
         ) {
-          throw new Error("Preencha o endereço completo (logradouro, número e cidade) e o valor cobrado.");
+          throw new Error("Preencha o endereço completo (logradouro, número e cidade).");
+        }
+        // REGRA DE NEGÓCIO (ajuste 21/07 — "loja não pede valor cobrado do
+        // cliente"): só exige o campo quando pagante === 'cliente'. Com
+        // pagante === 'loja' o campo fica escondido e o valor enviado é 0 (a
+        // loja assume o custo) — ver src/lib/frete-avulso-valor-cobrado.ts.
+        // IMPACTO SE REMOVIDO: solicitação com loja pagando fica bloqueada
+        // pedindo um valor que não faz sentido nesse caso.
+        if (precisaValorCobradoDoCliente(pagante) && freteCobradoConsultora === "") {
+          throw new Error("Informe o valor cobrado do cliente.");
         }
         // REGRA DE NEGÓCIO (migration 354 — "quem paga"): validado aqui
         // (front) E no backend (defesa em profundidade — ver
@@ -428,7 +448,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   const disabledSolicitacao =
     enviando ||
     !enderecoEntrega.logradouro.trim() || !enderecoEntrega.numero.trim() || !enderecoEntrega.cidade.trim() ||
-    freteCobradoConsultora === "" || !descricao.trim() ||
+    (precisaValorCobradoDoCliente(pagante) && freteCobradoConsultora === "") || !descricao.trim() ||
     !pagante || (pagante === "cliente" && !comprovanteBase64);
   const disabledPadrao =
     enviando || !motoboyId || !descricao.trim() ||
@@ -768,7 +788,17 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                             <button
                               type="button"
                               key={op}
-                              onClick={() => { setPagante(op); if (op === "loja") setComprovanteBase64(""); }}
+                              // REGRA DE NEGÓCIO (ajuste 21/07): trocar para "Loja" limpa
+                              // freteCobradoConsultora junto com o comprovante — mesmo cuidado
+                              // já aplicado ao freteNegociado ao trocar de região (campo
+                              // "fantasma" que fica preenchido mas nunca é enviado/some da
+                              // tela). IMPACTO SE REMOVIDO: valor digitado com "Cliente"
+                              // reaparece se a pessoa voltar para "Cliente" depois de já ter
+                              // trocado para "Loja" e o campo ter sido reexibido.
+                              onClick={() => {
+                                setPagante(op);
+                                if (op === "loja") { setComprovanteBase64(""); setFreteCobradoConsultora(""); }
+                              }}
                               style={{
                                 flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: 13, fontWeight: 600,
                                 border: `1px solid ${pagante === op ? C.esmeralda : C.cremeBorder}`,
@@ -835,7 +865,14 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                       )}
                     </div>
 
-                    {/* Valor cobrado do cliente */}
+                    {/* Valor cobrado do cliente — REGRA DE NEGÓCIO (ajuste 21/07,
+                        pedido do Jonathan: "se for loja não precisa colocar o valor
+                        cobrado do cliente"): só existe quando pagante === 'cliente'.
+                        Com pagante === 'loja' o campo some (a loja assume o custo
+                        integral, freteCobrado enviado = 0 — ver handleSubmit).
+                        IMPACTO SE MOSTRADO SEMPRE: campo sem sentido pra loja
+                        (não há "cobrança do cliente" quando é a loja quem paga). */}
+                    {precisaValorCobradoDoCliente(pagante) && (
                     <div style={{ marginTop: 14, marginBottom: 14 }}>
                       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
                         <DollarSign size={13} /> Valor cobrado do cliente (R$) *
@@ -854,6 +891,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                         }}
                       />
                     </div>
+                    )}
 
                     {campoRegiao}
 
