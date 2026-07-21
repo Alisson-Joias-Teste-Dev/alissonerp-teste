@@ -22,6 +22,11 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
+import {
+  listarRelatoriosPagamentoMotoboy,
+  PAGE_SIZE_RELATORIOS_PAGAMENTO_MOTOBOY,
+  type RelatorioPagamentoMotoboyListItem,
+} from "@/lib/pagamento-motoboy";
 import EntregasVendaClient from "./EntregasVendaClient";
 
 export const dynamic = "force-dynamic";
@@ -88,10 +93,13 @@ export interface ContagensEntregas {
  *     é uma REGIÃO (entregas_venda.regiao), não uma forma_entrega — uma
  *     corrida "Correios" já é forma_entrega='motoboy' com regiao='correios',
  *     então cai nesta aba naturalmente (nenhum registro fica sem aba).
- *   - `pagamento` -> não lista entregas nenhuma; é o relatório/acerto de
- *     motoboy (PagamentoMotoboyPainel, reaproveitado do que já existia em
- *     PagarMotoboyModal). Não precisa dos dados desta página (busca os
- *     próprios via API client-side) — a SSR pula as duas queries.
+ *   - `pagamento` -> não lista entregas de venda (colunas normais ficam
+ *     ocultas); em vez disso, esta página faz SSR da LISTA PAGINADA de
+ *     relatórios de pagamento do motoboy já criados (21/07/2026 — relatórios
+ *     PERSISTIDOS, ver migration 358 e docs/regras-negocio/entregas.md
+ *     §12.8), reusando `page`/`limit` do MESMO jeito que as outras abas
+ *     (Paginacao/Link) — só a fonte muda
+ *     (`relatorios_pagamento_motoboy` em vez de `entregas_venda`).
  * IMPACTO SE REMOVIDO: as abas "Retirada"/"Motoboy" voltam a mostrar tudo
  * misturado; qualquer valor de aba diferente destes 3 cai no default
  * ('retirada') — nunca em SQL livre.
@@ -266,7 +274,30 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     confirmada:   Number(countResult[0].confirmada ?? 0),
   };
 
-  const totalItems = contagens.total;
+  // ── Aba "pagamento": relatórios de pagamento do motoboy (SSR paginado) ────
+  // REGRA DE NEGÓCIO (21/07/2026 — relatórios PERSISTIDOS): reusa a MESMA
+  // função (`listarRelatoriosPagamentoMotoboy`) que a rota
+  // `GET /api/entregas-venda/motoboy/relatorio-pagamento` usa para o
+  // refresh client-side (após criar/confirmar), evitando duas cópias da
+  // consulta. `page`/`limit` são os MESMOS da URL — Paginacao (reusado,
+  // ver PagamentoMotoboyPainel.tsx) navega trocando `?page=N&aba=pagamento`
+  // exatamente como as outras abas.
+  const relatoriosPagamento: RelatorioPagamentoMotoboyListItem[] = [];
+  let relatoriosTotalItems = 0;
+  if (aba === "pagamento") {
+    const { items: itensRelatorios, total } = await listarRelatoriosPagamentoMotoboy(sql, {
+      page,
+      limit: PAGE_SIZE_RELATORIOS_PAGAMENTO_MOTOBOY,
+    });
+    relatoriosPagamento.push(...itensRelatorios);
+    relatoriosTotalItems = total;
+  }
+
+  // REGRA DE NEGÓCIO: `totalItems`/`totalPages` alimentam o `Paginacao`
+  // renderizado na aba ativa — na aba "pagamento" eles descrevem a lista de
+  // RELATÓRIOS (não entregas); nas demais abas, continuam descrevendo
+  // `contagens.total` (entregas), como sempre.
+  const totalItems = aba === "pagamento" ? relatoriosTotalItems : contagens.total;
   const totalPages = Math.ceil(totalItems / limit);
 
   // ── Serialização ───────────────────────────────────────────────────────────
@@ -312,6 +343,7 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
       dataFimFiltro={dataFim}
       userRole={usuario.role as string}
       aba={aba}
+      relatoriosPagamento={relatoriosPagamento}
     />
   );
 }

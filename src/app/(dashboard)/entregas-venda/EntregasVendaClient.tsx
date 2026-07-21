@@ -37,7 +37,7 @@ import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
 import MotoboyDrawer from "@/components/entregas/MotoboyDrawer";
 import PagarMotoboyModal from "@/components/entregas/PagarMotoboyModal";
 import PagamentoMotoboyPainel from "@/components/entregas/PagamentoMotoboyPainel";
-import RelatorioPagamentoMotoboy from "@/components/entregas/RelatorioPagamentoMotoboy";
+import type { RelatorioPagamentoMotoboyListItem } from "@/lib/pagamento-motoboy";
 import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
 // REGRA DE NEGÓCIO (BLOCO 3 — fonte única de permissão): quem pode CRIAR
 // frete avulso DIRETO (o botão desta tela) vem de
@@ -78,6 +78,12 @@ interface EntregasVendaClientProps {
   userRole: string;
   /** Aba ativa (retirada | motoboy | pagamento) — vinda da URL (?aba=) */
   aba: AbaEntrega;
+  /**
+   * Relatórios de pagamento do motoboy (aba "pagamento") — SSR paginado,
+   * MESMO padrão de `items` para as outras abas. [] nas demais abas.
+   * Ver docs/regras-negocio/entregas.md §12.8 (relatórios PERSISTIDOS).
+   */
+  relatoriosPagamento: RelatorioPagamentoMotoboyListItem[];
 }
 
 /** Formato de resposta da API de listagem de entregas */
@@ -104,6 +110,7 @@ export default function EntregasVendaClient({
   dataFimFiltro,
   userRole,
   aba,
+  relatoriosPagamento,
 }: EntregasVendaClientProps) {
   const router = useRouter();
 
@@ -392,31 +399,22 @@ export default function EntregasVendaClient({
 
         {aba === "pagamento" ? (
           /* ── Aba: Pagamento do motoboy ───────────────────────────────────────
-             REGRA DE NEGÓCIO: reusa o MESMO painel do modal PagarMotoboyModal
-             (aberto pelo drawer de Motoboys) — sem moldura de modal, ocupando
-             o espaço da aba. Nenhuma lógica duplicada (ver relato).
-             Abaixo, o RELATÓRIO de pagamento por entregador+período (21/07 —
-             decisão do Jonathan, ver docs/regras-negocio/entregas.md §11):
-             SUBCOMPONENTE PRÓPRIO (RelatorioPagamentoMotoboy) para não inchar
-             o painel de pagamento em lote — os dois convivem na mesma aba. */
-          <>
-            <div style={{
-              background: "#fff", borderRadius: 10,
-              border: `1px solid ${C.cremeBorder}`, padding: 20,
-              maxWidth: 560, marginBottom: 20,
-            }}>
-              <PagamentoMotoboyPainel />
-            </div>
-            <div style={{
-              background: "#fff", borderRadius: 10,
-              border: `1px solid ${C.cremeBorder}`, padding: 20,
-            }}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: C.esmeralda, marginBottom: 16 }}>
-                Relatório de pagamento por período
-              </h3>
-              <RelatorioPagamentoMotoboy />
-            </div>
-          </>
+             REGRA DE NEGÓCIO (reforma 21/07/2026 — relatórios PERSISTIDOS,
+             mockup aprovado pelo Jonathan; ver
+             docs/regras-negocio/entregas.md §12.8): o seletor de motoboy
+             solto + pagamento em lote por checkbox SAIU desta aba (voltou a
+             morar só no modal `PagarMotoboyModal.tsx`, aberto pelo drawer de
+             Motoboys). Esta aba agora é SÓ `PagamentoMotoboyPainel`: form
+             "Criar relatório" (entregador+período) + lista paginada (10/pg,
+             SSR via `relatoriosPagamento`) que NUNCA some (aguardando E
+             pagos) + "Abrir"/"Confirmar pagamento" por linha. */
+          <PagamentoMotoboyPainel
+            relatoriosSSR={relatoriosPagamento}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            pageSize={pageSize}
+          />
         ) : (
           <>
             {/* ── Cards de Stats ───────────────────────────────────────────────

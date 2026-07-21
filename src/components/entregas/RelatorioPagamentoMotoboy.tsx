@@ -1,63 +1,50 @@
 "use client";
 
 /**
- * RelatorioPagamentoMotoboy — relatório de pagamento do motoboy por
- * ENTREGADOR + PERÍODO, dentro da aba "Pagamento do motoboy".
+ * RelatorioPagamentoMotoboy — detalhe de UM relatório de pagamento SALVO
+ * (tabela de corridas com fotos e ajuste por linha), dentro da aba
+ * "Pagamento do motoboy".
  *
- * REGRA DE NEGÓCIO (decisão do Jonathan, 21/07/2026 — ver
- * docs/regras-negocio/entregas.md §11-§12 e a memória
- * reference_relatorio_corridas_motoboy.md): substitui o processo manual
- * (PDF gerado por script Python que o Jonathan mandava ao financeiro). A
- * pessoa escolhe entregador + período, o sistema traz TODAS as corridas
- * confirmadas dele no período (avulsas e de pedido) já classificadas em
- * Pagar/Revisar/Não pagar — mas essa classificação é só uma SUGESTÃO.
+ * REGRA DE NEGÓCIO (reforma 21/07/2026 — relatórios PERSISTIDOS, mockup
+ * aprovado pelo Jonathan; ver docs/regras-negocio/entregas.md §12.8): até
+ * aqui este componente TINHA o formulário (entregador+período+"Gerar
+ * relatório") e calculava em tempo real. Agora esse formulário mudou de
+ * lugar — mora em `PagamentoMotoboyPainel.tsx` (que virou "criar relatório +
+ * lista paginada"). Este componente passou a ser SÓ o "Abrir": recebe
+ * `relatorioId` de um relatório JÁ CRIADO, carrega o detalhe
+ * (`GET /motoboy/relatorio-pagamento/[id]`) e mostra a tabela de corridas —
+ * REUSADO tal como pedido na task ("REUSE RelatorioPagamentoMotoboy.tsx que
+ * já existe"), só a fonte de dados mudou (de "calcular por período" para
+ * "carregar relatório salvo").
  *
- * REGRA DE NEGÓCIO (mudança 21/07/2026, "o usuário pode revisar e ajustar os
- * pagamentos no relatório"): cada linha tem uma DECISÃO FINAL editável
- * (toggle Pagar/Não pagar), inicializada pela sugestão do sistema
- * (`decisaoInicialFinanceiro`) mas sobreponível pelo financeiro. O "Total a
- * pagar" do rodapé reflete a decisão FINAL (ajustada), não a sugestão crua.
- * Esse ajuste é EFÊMERO (fica só no estado deste componente, não é
- * persistido em nenhuma tabela nova) — a persistência de verdade acontece
- * quando o financeiro clica "Confirmar pagamento", que reusa a rota JÁ
- * EXISTENTE `POST /api/entregas-venda/motoboy/pagar` (mesmo mecanismo do
- * `PagamentoMotoboyPainel.tsx` acima na mesma aba) para as corridas
- * marcadas "pagar" e ainda não pagas — é ALI que vira fato gravado em
- * `pagamentos_motoboy`/`pagamentos_motoboy_itens`. Criar uma tabela nova só
- * para guardar o ajuste "ainda não pago" duplicaria o mecanismo que já
- * existe e decide exatamente isso (pago ou não pago).
+ * REGRA DE NEGÓCIO: cada corrida (ainda não paga) tem uma DECISÃO editável
+ * (toggle Pagar/Não pagar), inicializada pela decisão PERSISTIDA na criação
+ * do relatório (`decisaoInicialFinanceiro`, gravada em
+ * `relatorios_pagamento_motoboy_itens.decisao`). O ajuste enquanto a tela
+ * está aberta continua sendo efêmero no estado React (igual antes) — vira
+ * fato gravado só quando "Confirmar pagamento" é clicado AQUI DENTRO (o
+ * body da confirmação manda a decisão atual de cada linha).
  *
- * O QUE: SUBCOMPONENTE próprio (não inchar `PagamentoMotoboyPainel.tsx`,
- * que já cobre o pagamento em LOTE por checkbox, sem período/classificação)
- * — os dois convivem na mesma aba. Reusa `fmtBRL`/`fmtData`/`C` de
- * `./lista/formatters.tsx` e `getPublicUrl` para as fotos (proxy
- * autenticado, nunca embutir imagem).
+ * PAGO = HISTÓRICO TRAVADO: quando `status === 'pago'`, nenhuma linha tem
+ * toggle (só o badge "Paga"/"Não paga" fixo) e não há botão de confirmar —
+ * o relatório não reedita, não paga de novo.
  *
- * IMPACTO SE ALTERADO: a SUGESTÃO mora no BACKEND
- * (`classificarCorridaMotoboy`, src/lib/relatorio-pagamento-motoboy.ts) —
- * este componente exibe a sugestão e gerencia a decisão final ajustável,
- * nunca recalcula a sugestão em si.
+ * IMPACTO SE ALTERADO: a SUGESTÃO (classificação) mora no BACKEND, snapshot
+ * gravado na criação do relatório — este componente exibe e gerencia o
+ * ajuste da decisão FINAL, nunca recalcula a sugestão em si.
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Loader2, AlertTriangle, ImageOff, CheckCircle } from "lucide-react";
+import { Loader2, AlertTriangle, ImageOff, CheckCircle, X, Lock } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import {
-  MARCO_RELATORIO_PAGAMENTO_MOTOBOY,
-  decisaoInicialFinanceiro,
   calcularTotalAjustado,
   type DecisaoPagamentoMotoboy,
 } from "@/lib/relatorio-pagamento-motoboy";
 import { fmtBRL, fmtData, C } from "./lista/formatters";
 
-interface MotoboyOption {
-  id: number;
-  user_id: string;
-  nome: string;
-  ativo: boolean;
-}
-
 type Classificacao = "pagar" | "revisar" | "nao_pagar";
+type StatusRelatorio = "aguardando" | "pago";
 
 interface CorridaRelatorio {
   id: number;
@@ -71,29 +58,22 @@ interface CorridaRelatorio {
   frete_motoboy: number;
   data_entrega_realizada: string | null;
   classificacao: Classificacao;
-  motivo: string | null;
+  decisao: DecisaoPagamentoMotoboy;
   foi_pago: boolean;
   fotos: string[];
 }
 
-interface RelatorioResponse {
-  marco: string;
+interface RelatorioDetalhe {
+  id: number;
+  motoboy_id: string;
+  motoboy_nome: string;
+  data_inicio: string;
+  data_fim: string;
+  status: StatusRelatorio;
+  total_sugerido: number;
+  created_at: string;
+  pago_em: string | null;
   corridas: CorridaRelatorio[];
-  total_pagar: number;
-  quantidade_pagar: number;
-  quantidade_revisar: number;
-  quantidade_nao_pagar: number;
-}
-
-/** Data (AAAA-MM-DD) de hoje, para default do campo "fim"/vencimento. */
-function hojeISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-/** dd/mm/aaaa a partir de 'AAAA-MM-DD' — mesmo formato do aviso do marco. */
-function fmtMarco(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  return `${d}/${m}/${y}`;
 }
 
 /** Badge da SUGESTÃO do sistema — mesmo espírito de statusBadge (formatters.tsx). */
@@ -108,20 +88,22 @@ function badgeSugestao(classificacao: Classificacao) {
   }
 }
 
-export default function RelatorioPagamentoMotoboy() {
-  const [motoboys, setMotoboys] = useState<MotoboyOption[]>([]);
-  const [entregadorId, setEntregadorId] = useState("");
-  const [inicio, setInicio] = useState(MARCO_RELATORIO_PAGAMENTO_MOTOBOY);
-  const [fim, setFim] = useState(hojeISO());
+interface RelatorioPagamentoMotoboyProps {
+  /** ID do relatório salvo a abrir (nunca calcula por período aqui). */
+  relatorioId: number;
+  /** Fecha o painel de detalhe (volta só pra lista). */
+  onFechar: () => void;
+  /** Chamado após confirmar pagamento com sucesso — pai re-busca a lista (status muda para "pago"). */
+  onConfirmado: () => void;
+}
 
-  const [carregando, setCarregando] = useState(false);
+export default function RelatorioPagamentoMotoboy({ relatorioId, onFechar, onConfirmado }: RelatorioPagamentoMotoboyProps) {
+  const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
-  const [dados, setDados] = useState<RelatorioResponse | null>(null);
+  const [dados, setDados] = useState<RelatorioDetalhe | null>(null);
 
-  // REGRA DE NEGÓCIO: decisão FINAL editável por corrida — inicializada pela
-  // sugestão (`decisaoInicialFinanceiro`), mas o financeiro pode sobrepor
-  // clicando no toggle da linha. Vive só neste estado (efêmero) até o
-  // "Confirmar pagamento" persistir de verdade via motoboy/pagar.
+  // Decisão FINAL editável por corrida — só existe entrada para corridas
+  // ainda não pagas (foi_pago=false); inicializada pela decisão persistida.
   const [decisoes, setDecisoes] = useState<Record<number, DecisaoPagamentoMotoboy>>({});
 
   const [dataVencimento, setDataVencimento] = useState(() => {
@@ -132,49 +114,30 @@ export default function RelatorioPagamentoMotoboy() {
   const [confirmando, setConfirmando] = useState(false);
   const [sucessoPagamento, setSucessoPagamento] = useState("");
 
-  const carregarMotoboys = useCallback(async () => {
-    try {
-      const data = await apiFetch<MotoboyOption[]>("/api/entregas-venda/motoboys?todos=true");
-      setMotoboys(data.filter((m) => m.ativo));
-    } catch {
-      // ignora — mesmo padrão de PagamentoMotoboyPainel (select fica vazio)
-    }
-  }, []);
-
-  useEffect(() => {
-    carregarMotoboys();
-  }, [carregarMotoboys]);
-
-  /** Busca (ou re-busca, após confirmar pagamento) o relatório do período. */
-  const buscarRelatorio = useCallback(async () => {
-    if (!entregadorId) {
-      setErro("Selecione um entregador.");
-      return;
-    }
+  const buscarDetalhe = useCallback(async () => {
     setCarregando(true);
     setErro("");
-    setSucessoPagamento("");
     try {
-      const params = new URLSearchParams({ entregadorId, inicio, fim });
-      const resultado = await apiFetch<RelatorioResponse>(
-        `/api/entregas-venda/motoboy/relatorio-pagamento?${params.toString()}`,
+      const resultado = await apiFetch<RelatorioDetalhe>(
+        `/api/entregas-venda/motoboy/relatorio-pagamento/${relatorioId}`,
       );
       setDados(resultado);
-      // REGRA DE NEGÓCIO: (re)inicializa a decisão de cada linha pela
-      // sugestão do sistema — corridas já pagas não têm decisão (não são
-      // editáveis, o toggle nem aparece pra elas).
       const novasDecisoes: Record<number, DecisaoPagamentoMotoboy> = {};
       for (const c of resultado.corridas) {
-        if (!c.foi_pago) novasDecisoes[c.id] = decisaoInicialFinanceiro(c.classificacao);
+        if (!c.foi_pago) novasDecisoes[c.id] = c.decisao;
       }
       setDecisoes(novasDecisoes);
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao gerar relatório");
+      setErro(e instanceof Error ? e.message : "Erro ao carregar relatório");
       setDados(null);
     } finally {
       setCarregando(false);
     }
-  }, [entregadorId, inicio, fim]);
+  }, [relatorioId]);
+
+  useEffect(() => {
+    buscarDetalhe();
+  }, [buscarDetalhe]);
 
   function alternarDecisao(corridaId: number) {
     setDecisoes((atual) => ({
@@ -183,10 +146,6 @@ export default function RelatorioPagamentoMotoboy() {
     }));
   }
 
-  // REGRA DE NEGÓCIO: total REAL exibido — soma das corridas com decisão
-  // FINAL "pagar" (após o financeiro revisar/ajustar), não a sugestão crua
-  // que a rota devolveu. `calcularTotalAjustado` é a MESMA função testada em
-  // relatorio-pagamento-motoboy.test.ts — não recalcular a soma aqui.
   const totalAjustado = useMemo(() => {
     if (!dados) return 0;
     return calcularTotalAjustado(
@@ -205,38 +164,35 @@ export default function RelatorioPagamentoMotoboy() {
 
   /**
    * REGRA DE NEGÓCIO: "Confirmar pagamento" NÃO cria mecanismo novo — reusa
-   * a MESMA rota `POST /api/entregas-venda/motoboy/pagar` que o
-   * `PagamentoMotoboyPainel.tsx` já usa (pagamento em lote), mandando só as
-   * corridas que o financeiro deixou marcadas "pagar" após revisar o
-   * relatório. É essa chamada que persiste a decisão de verdade
-   * (`pagamentos_motoboy`/`pagamentos_motoboy_itens`) — o toggle da tela é
-   * só o rascunho até este clique.
-   * IMPACTO SE ALTERADO: duplicar a lógica de pagamento aqui (em vez de
-   * chamar a rota existente) criaria um segundo caminho para gravar
-   * pagamento, arriscando divergir da validação de unicidade já garantida
-   * lá (UNIQUE em pagamentos_motoboy_itens).
+   * `criarPagamentoMotoboyTx`/`buscarEntregasValidasParaPagar` (mesma
+   * validação e MESMO INSERT de `motoboy/pagar`), agora via
+   * `POST .../relatorio-pagamento/[id]/confirmar`, mandando a decisão ATUAL
+   * de cada corrida ainda não paga (inclui "nao_pagar" explícito para quem
+   * o financeiro desmarcou, não só as marcadas "pagar" — o backend usa isso
+   * pra sobrepor a decisão persistida na criação).
    */
   async function handleConfirmarPagamento() {
-    if (idsParaPagar.length === 0) return;
+    if (!dados || idsParaPagar.length === 0) return;
     setConfirmando(true);
     setErro("");
     setSucessoPagamento("");
     try {
+      const decisoesBody: Record<string, DecisaoPagamentoMotoboy> = {};
+      for (const c of dados.corridas) {
+        if (!c.foi_pago) decisoesBody[String(c.id)] = decisoes[c.id] ?? "nao_pagar";
+      }
       const resultado = await apiFetch<{ message: string }>(
-        "/api/entregas-venda/motoboy/pagar",
+        `/api/entregas-venda/motoboy/relatorio-pagamento/${relatorioId}/confirmar`,
         {
           method: "POST",
-          body: JSON.stringify({
-            motoboy_id: entregadorId,
-            entrega_ids: idsParaPagar,
-            data_vencimento: dataVencimento,
-          }),
+          body: JSON.stringify({ decisoes: decisoesBody, data_vencimento: dataVencimento }),
         },
       );
       setSucessoPagamento(resultado.message ?? "Pagamento registrado.");
-      // Rebusca o relatório — reflete `foi_pago=true` já persistido no banco
-      // (fonte da verdade), em vez de tentar adivinhar o estado no client.
-      await buscarRelatorio();
+      // Rebusca o relatório — reflete status='pago' e foi_pago=true já
+      // persistidos no banco (fonte da verdade), em vez de adivinhar no client.
+      await buscarDetalhe();
+      onConfirmado();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao confirmar pagamento");
     } finally {
@@ -245,74 +201,62 @@ export default function RelatorioPagamentoMotoboy() {
   }
 
   return (
-    <div>
-      {/* REGRA DE NEGÓCIO: aviso PERMANENTE e visível — corridas anteriores ao
-          marco já foram pagas manualmente (PDF antigo) e não entram aqui,
-          nunca (evita pagamento em dobro ao entregador). */}
-      <div style={{
-        display: "flex", alignItems: "flex-start", gap: 8,
-        padding: "10px 12px", borderRadius: 6,
-        background: C.ambarLt, color: "#92400E", fontSize: 12,
-        marginBottom: 16,
-      }}>
-        <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
-        <span>
-          Corridas anteriores a <strong>{fmtMarco(MARCO_RELATORIO_PAGAMENTO_MOTOBOY)}</strong> já
-          foram pagas e não entram neste relatório. A classificação abaixo é uma
-          <strong> sugestão</strong> — revise e ajuste a decisão de cada corrida antes de confirmar o pagamento.
-        </span>
-      </div>
-
-      {/* Filtros: entregador + período */}
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, marginBottom: 16, alignItems: "end" }}>
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6, display: "block" }}>
-            Entregador
-          </label>
-          <select value={entregadorId} onChange={(e) => setEntregadorId(e.target.value)}
-            style={{ width: "100%", padding: "10px 12px", fontSize: 13, border: `1px solid ${C.cremeBorder}`, borderRadius: 6, background: "#fff", color: "#1f2937" }}>
-            <option value="">Selecione...</option>
-            {motoboys.map((m) => (
-              <option key={m.user_id} value={m.user_id}>{m.nome}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6, display: "block" }}>
-            Início
-          </label>
-          {/* REGRA DE NEGÓCIO: `min` bloqueia no seletor de data escolher antes
-              do marco — a rota valida de novo no servidor (defesa em
-              profundidade, o front nunca é a única barreira). */}
-          <input type="date" value={inicio} min={MARCO_RELATORIO_PAGAMENTO_MOTOBOY}
-            onChange={(e) => setInicio(e.target.value)}
-            style={{ width: "100%", padding: "10px 12px", fontSize: 13, border: `1px solid ${C.cremeBorder}`, borderRadius: 6, background: "#fff", color: "#1f2937" }} />
-        </div>
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6, display: "block" }}>
-            Fim
-          </label>
-          <input type="date" value={fim} min={MARCO_RELATORIO_PAGAMENTO_MOTOBOY}
-            onChange={(e) => setFim(e.target.value)}
-            style={{ width: "100%", padding: "10px 12px", fontSize: 13, border: `1px solid ${C.cremeBorder}`, borderRadius: 6, background: "#fff", color: "#1f2937" }} />
-        </div>
-        <button onClick={buscarRelatorio} disabled={carregando}
-          style={{
-            padding: "10px 16px", borderRadius: 6, border: "none",
-            background: C.esmeralda, color: "#fff", fontSize: 13, fontWeight: 700,
-            cursor: "pointer", opacity: carregando ? 0.6 : 1,
-            display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
-          }}>
-          {carregando && <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />}
-          Gerar relatório
+    <div style={{
+      background: "#fff", borderRadius: 10,
+      border: `1px solid ${C.cremeBorder}`, padding: 20, marginBottom: 20,
+    }}>
+      {/* Cabeçalho do detalhe + fechar */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.esmeralda, margin: 0 }}>
+          {dados ? `Relatório — ${dados.motoboy_nome} (${fmtData(dados.data_inicio)} a ${fmtData(dados.data_fim)})` : "Relatório de pagamento"}
+        </h3>
+        <button onClick={onFechar} style={{ background: "none", border: "none", cursor: "pointer", display: "flex" }}>
+          <X size={16} color={C.cinza} />
         </button>
       </div>
+
+      {carregando && (
+        <div style={{ textAlign: "center", padding: 20 }}>
+          <Loader2 size={20} color={C.cinza} style={{ animation: "spin 1s linear infinite" }} />
+        </div>
+      )}
 
       {erro && (
         <div style={{ padding: 10, borderRadius: 6, background: C.vermelhoLt, color: C.vermelho, fontSize: 12, marginBottom: 12 }}>
           {erro}
         </div>
       )}
+
+      {dados && dados.status === "pago" && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "10px 12px", borderRadius: 6,
+          background: C.esmeraldaLt, color: C.esmeralda, fontSize: 12, fontWeight: 600,
+          marginBottom: 16,
+        }}>
+          <Lock size={14} />
+          <span>
+            Relatório PAGO em {dados.pago_em ? fmtData(dados.pago_em) : "—"} — histórico travado,
+            não pode ser reeditado nem pago novamente.
+          </span>
+        </div>
+      )}
+
+      {dados && dados.status === "aguardando" && (
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: 8,
+          padding: "10px 12px", borderRadius: 6,
+          background: C.ambarLt, color: "#92400E", fontSize: 12,
+          marginBottom: 16,
+        }}>
+          <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>
+            A classificação abaixo é uma <strong>sugestão</strong> — revise e ajuste a decisão de
+            cada corrida antes de confirmar o pagamento.
+          </span>
+        </div>
+      )}
+
       {sucessoPagamento && (
         <div style={{ padding: 10, borderRadius: 6, background: C.verdeLt, color: C.verde, fontSize: 12, marginBottom: 12, fontWeight: 600 }}>
           {sucessoPagamento}
@@ -323,7 +267,7 @@ export default function RelatorioPagamentoMotoboy() {
         <>
           {dados.corridas.length === 0 ? (
             <p style={{ fontSize: 13, color: C.cinza, textAlign: "center", padding: 20 }}>
-              Nenhuma corrida confirmada deste entregador no período selecionado.
+              Este relatório não tem corridas.
             </p>
           ) : (
             <div style={{ overflowX: "auto", border: `1px solid ${C.cremeBorder}`, borderRadius: 8, marginBottom: 12 }}>
@@ -344,6 +288,7 @@ export default function RelatorioPagamentoMotoboy() {
                   {dados.corridas.map((c) => {
                     const badge = badgeSugestao(c.classificacao);
                     const decisao = decisoes[c.id] ?? "nao_pagar";
+                    const editavel = dados.status === "aguardando" && !c.foi_pago;
                     return (
                       <tr key={c.id} style={{ borderTop: `1px solid ${C.cremeBorder}` }}>
                         <td style={{ padding: "8px 10px", fontWeight: 600 }}>{c.codigo_entrega}</td>
@@ -373,18 +318,15 @@ export default function RelatorioPagamentoMotoboy() {
                           <span style={{ padding: "3px 8px", borderRadius: 999, background: badge.bg, color: badge.color, fontWeight: 700, fontSize: 11 }}>
                             {badge.text}
                           </span>
-                          {c.motivo && (
-                            <div style={{ fontSize: 10, color: C.cinza, marginTop: 3, maxWidth: 220 }}>{c.motivo}</div>
-                          )}
                         </td>
                         <td style={{ padding: "8px 10px" }}>
                           {c.foi_pago ? (
                             <span style={{ padding: "3px 8px", borderRadius: 999, background: C.esmeraldaLt, color: C.esmeralda, fontWeight: 700, fontSize: 11 }}>
                               Já paga
                             </span>
-                          ) : (
+                          ) : editavel ? (
                             // REGRA DE NEGÓCIO: toggle editável — a sugestão é só o
-                            // ponto de partida (decisaoInicialFinanceiro), o
+                            // ponto de partida (decisão persistida na criação), o
                             // financeiro pode sobrepor clicando aqui.
                             <div style={{ display: "flex", gap: 4 }}>
                               <button
@@ -410,6 +352,12 @@ export default function RelatorioPagamentoMotoboy() {
                                 Não pagar
                               </button>
                             </div>
+                          ) : (
+                            // Relatório já PAGO (histórico travado) — só exibe a
+                            // decisão final gravada, sem toggle.
+                            <span style={{ padding: "3px 8px", borderRadius: 999, background: c.decisao === "pagar" ? C.verdeLt : C.vermelhoLt, color: c.decisao === "pagar" ? C.verde : C.vermelho, fontWeight: 700, fontSize: 11 }}>
+                              {c.decisao === "pagar" ? "Pagar" : "Não pagar"}
+                            </span>
                           )}
                         </td>
                         <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>
@@ -426,15 +374,14 @@ export default function RelatorioPagamentoMotoboy() {
           {/* Rodapé: total AJUSTADO (após revisão) + confirmação do pagamento */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderTop: `1px solid ${C.cremeBorder}`, marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
             <span style={{ fontSize: 11, color: C.cinza }}>
-              {dados.quantidade_pagar} sugestão-pagar · {dados.quantidade_revisar} revisar · {dados.quantidade_nao_pagar} não pagar
-              {" · "}{idsParaPagar.length} selecionada(s) para pagar agora
+              {dados.status === "pago" ? "Histórico do pagamento confirmado" : `${idsParaPagar.length} selecionada(s) para pagar agora`}
             </span>
             <span style={{ fontSize: 16, fontWeight: 800, color: C.esmeralda }}>
-              Total a pagar (após revisão): {fmtBRL(totalAjustado)}
+              {dados.status === "pago" ? "Total pago: " : "Total a pagar (após revisão): "}{fmtBRL(dados.status === "pago" ? dados.total_sugerido : totalAjustado)}
             </span>
           </div>
 
-          {dados.corridas.length > 0 && (
+          {dados.status === "aguardando" && dados.corridas.length > 0 && (
             <div style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap" }}>
               <div>
                 <label style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6, display: "block" }}>
