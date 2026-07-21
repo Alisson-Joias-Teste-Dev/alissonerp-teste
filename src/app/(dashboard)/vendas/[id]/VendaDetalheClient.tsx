@@ -26,8 +26,8 @@ import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 // REGRA DE NEGÓCIO: modal de entrega (parcial/total) da venda
 import MarcarEntregaModal from "@/components/entregas/MarcarEntregaModal";
-// REGRA DE NEGÓCIO (V3): modal de solicitação de frete avulso — mesma consultora,
-// aberto de dentro da venda (vendaId fixado, ver props abaixo)
+// REGRA DE NEGÓCIO (V3): modal de solicitação de frete avulso, aberto de
+// dentro da venda com modoSolicitacao (vendaId fixado, ver props abaixo)
 import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
 import { useErrorStore } from "@/stores/errorStore";
 import { getPublicUrl } from "@/lib/storage-url";
@@ -2151,11 +2151,17 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const situacaoStyle = SITUACAO_COLOR[venda.situacao] ?? SITUACAO_COLOR.rascunho;
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
 
-  // ── Frete avulso solicitado pela consultora (V3) ────────────────────────────
-  // REGRA DE NEGÓCIO: só a consultora DONA da venda vê o botão/status — o
-  // backend (GET /api/vendas/[id] via requireVendaOwnership) já barra o
-  // carregamento da venda para quem não é dono, então basta checar a role
-  // aqui (sem duplicar a checagem de vendedor_id no front).
+  // ── Frete avulso solicitado a partir da venda (V3) ──────────────────────────
+  // REGRA DE NEGÓCIO (intenção explícita — ponto de entrada decide, não o
+  // cargo): quem já acessa esta venda pode solicitar — não é mais só
+  // consultora. O backend (GET /api/vendas/[id] via requireVendaOwnership) já
+  // barra o carregamento da venda para quem não tem acesso (full-access ou
+  // dono da venda), então quem chegou até aqui já podia ver a venda; o gate
+  // do botão só espelha isso no front (mesmo padrão usado alhures nesta tela,
+  // ex.: `isFullAccess || ["gerente_loja", "diretor", "consultora"].includes(role)`).
+  // IMPACTO SE VOLTAR A SÓ "consultora": admin/dev/diretor/gerente não
+  // conseguiriam solicitar frete avulso pelo atalho da própria venda que
+  // estão vendo — teriam que ir em Tarefas e buscar a venda de novo.
   // QUANDO (decisão Jonathan): a janela INTEIRA da entrega — 'aprovado' (antes
   // de sair), 'em_rota' (entrega a caminho) e 'entregue'. O QUE: 'entregue'
   // entra de propósito, não é engano. POR QUÊ: existe corrida complementar
@@ -2168,7 +2174,9 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   // 06/2026, o fluxo atual é rascunho → aprovado → em_rota → entregue.
   // IMPACTO SE ALTERADO: tirar 'entregue' esconde o botão no cenário de ajuste
   // pós-entrega; incluir 'rascunho' deixaria pedir frete de venda não fechada.
-  const podeSolicitarFreteAvulso = role === "consultora" && ["aprovado", "em_rota", "entregue"].includes(venda.situacao);
+  const podeSolicitarFreteAvulso =
+    (isFullAccess || ["gerente_loja", "diretor", "consultora"].includes(role)) &&
+    ["aprovado", "em_rota", "entregue"].includes(venda.situacao);
   // Endereço sugerido para pré-preencher o textarea editável do modal —
   // mesma concatenação usada em FreteAvulsoModal.montarEndereco().
   const enderecoInicialFreteAvulso = [
@@ -2672,13 +2680,14 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           acompanhar o STATUS da solicitação (aguardando/liberada/recusada) —
           esse acompanhamento agora é só no módulo Tarefas, que passou a ser o
           lugar único das solicitações. Aqui fica só o atalho: a venda já é
-          conhecida, então abrir o modal direto poupa a consultora de buscar a
-          venda de novo. Tentar solicitar de novo pra uma venda que já tem
-          solicitação em aberto é barrado pelo backend (POST
-          /api/entregas-venda/frete-avulso), que devolve mensagem clara — não
-          duplicar essa checagem aqui.
-          IMPACTO SE REMOVIDO: a consultora perde o atalho de dentro da própria
-          venda e passa a depender só da busca de venda dentro do Tarefas. */}
+          conhecida, então abrir o modal direto (modoSolicitacao, ver abaixo)
+          poupa quem solicita de buscar a venda de novo. Tentar solicitar de
+          novo pra uma venda que já tem solicitação em aberto é barrado pelo
+          backend (POST /api/entregas-venda/frete-avulso), que devolve
+          mensagem clara — não duplicar essa checagem aqui.
+          IMPACTO SE REMOVIDO: quem solicita perde o atalho de dentro da
+          própria venda e passa a depender só da busca de venda dentro do
+          Tarefas. */}
       {podeSolicitarFreteAvulso && (
         <button
           onClick={() => setShowFreteAvulsoModal(true)}
@@ -4719,7 +4728,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         isOpen={showFreteAvulsoModal}
         onClose={() => setShowFreteAvulsoModal(false)}
         onCriado={() => setShowFreteAvulsoModal(false)}
-        userRole={role}
+        modoSolicitacao
         vendaId={venda.id}
         enderecoInicial={enderecoInicialFreteAvulso}
       />

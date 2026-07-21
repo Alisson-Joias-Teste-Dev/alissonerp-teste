@@ -20,15 +20,17 @@ import { zodError } from "@/lib/schemas/common";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { AuthError, ForbiddenError, type AuthUser } from "@/lib/auth-server";
 
-// REGRA DE NEGÓCIO (migration 353): "estoquista" cria avulso já liberado,
-// igual admin/gerente — não passa pelo fluxo de solicitação/liberação.
+// REGRA DE NEGÓCIO: quem PODE chamar esta rota (loja) — não muda com a
+// intenção explícita (`solicitar`, ver FreteAvulsoSchema abaixo). O que o
+// campo `solicitar` decide é só o MODO (solicitação vs criação direta), não
+// quem tem acesso ao endpoint.
 const ROLES_LOJA = ["desenvolvedor", "admin", "gerente_loja", "consultora", "estoquista"];
 
 const FreteAvulsoSchema = z.object({
   // REGRA DE NEGÓCIO (pool de motoboy — patch A2): motoboyId é OPCIONAL na
-  // criação pela loja. Consultora solicita SEM escolher motoboy (cai no pool,
-  // ver enderecoEntrega/vendaId abaixo); admin/gerente/estoquista também
-  // podem criar direto sem motoboy (nasce 'pendente' sem dono, pool). Quando
+  // criação pela loja. Quem SOLICITA (solicitar=true) não escolhe motoboy
+  // (cai no pool, ver enderecoEntrega/vendaId abaixo); quem cria DIRETO
+  // também pode criar sem motoboy (nasce 'pendente' sem dono, pool). Quando
   // informado, a corrida já nasce com dono.
   motoboyId: z.string().uuid("motoboyId deve ser um UUID válido").optional(),
   regiao: z.enum(["fortaleza", "fora_fortaleza", "longe", "correios"]),
@@ -37,10 +39,23 @@ const FreteAvulsoSchema = z.object({
   descricaoAvulso: z.string().min(1, "Descrição da corrida é obrigatória").max(500),
   contatoId: z.number().int().positive().optional(),
   observacoes: z.string().max(2000).optional(),
-  // REGRA DE NEGÓCIO (solicitação da consultora — migration 353, modelo POOL):
-  // campos só usados quando quem cria é a consultora (vira modoSolicitacao=true
-  // na lib). Não existe mais escolha de responsável — a solicitação cai no
-  // pool de liberadores (ver listarAprovadoresFreteAvulso em @/lib/entrega-venda).
+  // REGRA DE NEGÓCIO (intenção explícita — ponto de entrada decide, não o
+  // cargo): quem chama declara SE quer solicitar (`solicitar: true`) ou criar
+  // direto (omitido/false). O QUÊ: antes o backend inferia isso pelo CARGO
+  // (`role === "consultora"`) — o mesmo endpoint fazia coisas diferentes por
+  // trás das costas de quem chamava. POR QUÊ: isso tornava a feature
+  // intestável para admin/dev (não davam para testar a solicitação, só a
+  // criação direta) e o comportamento era surpreendente (mesmo botão, 2
+  // resultados diferentes conforme quem clicava). Agora é o PONTO DE ENTRADA
+  // (menu Tarefas → Solicitações vs botão da tela de Entregas) que decide,
+  // e manda essa intenção explícita no body.
+  // IMPACTO SE VOLTAR A INFERIR POR CARGO: volta o comportamento fantasma —
+  // o mesmo clique podendo gerar solicitação OU avulso liberado sem aviso.
+  solicitar: z.boolean().optional(),
+  // Campos abaixo só são obrigatórios quando `solicitar=true` (ver validação
+  // logo após o parse). Não existe mais escolha de responsável: a
+  // solicitação cai no pool de liberadores (ver listarAprovadoresFreteAvulso
+  // em @/lib/entrega-venda).
   vendaId: z.number().int().positive().optional(),
   enderecoEntrega: z.string().max(1000).optional(),
 });
@@ -102,27 +117,36 @@ export async function POST(req: NextRequest) {
   const parsed = FreteAvulsoSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
 
-  // REGRA DE NEGÓCIO (migration 353, modelo POOL): consultora não libera
-  // custo de frete sozinha — ela apenas SOLICITA, a partir de uma venda
-  // própria, com o endereço de entrega. NÃO escolhe mais um responsável: o
-  // avulso nasce 'solicitada' (criarFreteAvulso com modoSolicitacao=true) e
-  // cai no pool de liberadores (qualquer um decide); só entra no saldo da
-  // gerente quando liberado.
-  // IMPACTO SE REMOVIDO: consultora criaria avulso já 'pendente' (liberado),
-  // assumindo custo de frete sem controle de nenhum liberador.
-  const ehConsultora = role === "consultora";
-  if (ehConsultora) {
+  // REGRA DE NEGÓCIO (intenção explícita — ponto de entrada decide, não o
+  // cargo): quem SOLICITA (não libera o custo sozinho) é quem chamou a rota
+  // com `solicitar: true` no body — vindo do menu Tarefas › Solicitações,
+  // INDEPENDENTE do cargo (consultora, gerente_loja, admin, desenvolvedor,
+  // estoquista...). O avulso nasce 'solicitada' (criarFreteAvulso com
+  // modoSolicitacao=true) e cai no pool de liberadores (qualquer um decide);
+  // só entra no saldo da gerente quando liberado.
+  // O QUÊ MUDOU: antes esse ramo só rodava para `role === "consultora"` —
+  // qualquer outro cargo (mesmo com a MESMA intenção de solicitar) caía no
+  // ramo de criação direta sem passar por aqui.
+  // IMPACTO SE VOLTAR A CHECAR CARGO: quem solicita pelo cargo errado
+  // criaria avulso já 'pendente' (liberado), assumindo custo de frete sem
+  // controle de nenhum liberador — e admin/dev não conseguiriam nem testar
+  // o fluxo de solicitação.
+  const ehSolicitacao = parsed.data.solicitar === true;
+  if (ehSolicitacao) {
     if (!parsed.data.vendaId || !parsed.data.enderecoEntrega) {
       return NextResponse.json(
         { error: "Venda e endereço de entrega são obrigatórios para solicitar frete avulso" },
         { status: 400 },
       );
     }
-    // REGRA DE NEGÓCIO: consultora só solicita frete das PRÓPRIAS vendas —
-    // reusa requireVendaOwnership (mesma checagem usada em /api/vendas) para
-    // não duplicar a regra de ownership por vendedor_id.
-    // IMPACTO SE REMOVIDO: reabre IDOR — consultora solicitaria frete em
-    // nome de venda de colega, gerando custo de frete indevido para a loja.
+    // REGRA DE NEGÓCIO: quem solicita só pode fazê-lo para as PRÓPRIAS
+    // vendas — reusa requireVendaOwnership (mesma checagem usada em
+    // /api/vendas) para não duplicar a regra de ownership por vendedor_id.
+    // Roles full-access (admin/dev/diretor/gerente_loja/gerente_fabrica)
+    // passam validando só a existência da venda; os demais (ex: consultora,
+    // estoquista) precisam ser donos (vendedor_id) — MANTIDO como estava.
+    // IMPACTO SE REMOVIDO: reabre IDOR — alguém solicitaria frete em nome de
+    // venda de colega, gerando custo de frete indevido para a loja.
     const authUser: AuthUser = { id: user.id, role, email: user.email ?? "" };
     try {
       await requireVendaOwnership(authUser, parsed.data.vendaId);
@@ -136,7 +160,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const avulso = await criarFreteAvulso(
-      { ...parsed.data, modoSolicitacao: ehConsultora },
+      { ...parsed.data, modoSolicitacao: ehSolicitacao },
       user.id,
     );
     return NextResponse.json({ avulso });

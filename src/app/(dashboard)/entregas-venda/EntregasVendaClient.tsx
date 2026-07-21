@@ -1020,12 +1020,18 @@ export default function EntregasVendaClient({
         onClose={() => setPagarMotoboyOpen(false)}
       />
 
-      {/* ── Modal de Frete Avulso ──────────────────────────────────────────── */}
+      {/* ── Modal de Frete Avulso ────────────────────────────────────────────
+          REGRA DE NEGÓCIO (intenção explícita — ponto de entrada decide, não
+          o cargo): este botão é a tela de Entregas — sempre criação DIRETA
+          ('pendente', já liberado), nunca solicitação. Por isso NÃO passa
+          modoSolicitacao (default false em FreteAvulsoModal).
+          IMPACTO SE MUDAR PRA true: o botão da tela de Entregas passaria a
+          exigir venda+endereço e gerar 'solicitada' em vez de avulso direto —
+          quebra o uso real desta tela (loja cria corrida avulsa na hora). */}
       <FreteAvulsoModal
         isOpen={freteAvulsoOpen}
         onClose={() => setFreteAvulsoOpen(false)}
         onCriado={() => { setFreteAvulsoOpen(false); router.refresh(); }}
-        userRole={userRole}
       />
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

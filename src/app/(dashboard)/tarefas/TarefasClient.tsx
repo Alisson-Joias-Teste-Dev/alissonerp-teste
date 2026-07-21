@@ -24,7 +24,8 @@ import { useErrorStore } from "@/stores/errorStore";
 import { EvidenciasLimpeza, extrairBaixaIdLimpeza } from "@/components/EvidenciasLimpeza";
 // REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): Tarefas passa a ser TAMBÉM
 // ponto de entrada da solicitação de frete avulso (além do atalho na própria
-// venda) — ver uso mais abaixo (botão/FAB "Frete avulso", só consultora).
+// venda) — ver uso mais abaixo (botão/FAB "Frete avulso", visível para
+// qualquer papel que acessa Tarefas — ver TIPOS_SOLICITACAO).
 import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
 
 export interface Tarefa {
@@ -559,16 +560,18 @@ export default function TarefasClient() {
 
   const [drawerTarefa, setDrawerTarefa] = useState<Tarefa | null>(null);
   const [showNova, setShowNova] = useState(false);
-  // REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): Tarefas é o lugar ÚNICO das
-  // solicitações de frete avulso — a venda mantém só o atalho contextual
-  // (botão na própria tela, venda já definida). Aqui a consultora escolhe a
-  // venda DENTRO do modal (FreteAvulsoModal sem vendaId mostra o buscador).
-  // Só consultora vê isto: pra qualquer outro papel a MESMA rota POST
-  // /api/entregas-venda/frete-avulso cria o avulso JÁ LIBERADO (sem passar
-  // pelo pool) — não é o fluxo de solicitação que essa entrada representa.
-  // IMPACTO SE REMOVIDO: consultora fica dependente do atalho de dentro da
-  // venda — e nem toda venda tem frete avulso, então esse atalho sozinho não
-  // cobre quem ainda não abriu a venda certa.
+  // REGRA DE NEGÓCIO (decisão do Jonathan, 21/07 — intenção explícita):
+  // Tarefas é o lugar ÚNICO das solicitações de frete avulso — a venda
+  // mantém só o atalho contextual (botão na própria tela, venda já
+  // definida). Aqui quem solicita escolhe a venda DENTRO do modal
+  // (FreteAvulsoModal sem vendaId mostra o buscador).
+  // O QUÊ MUDOU: essa entrada abre o modal com modoSolicitacao={true} —
+  // decide o modo pelo PONTO DE ENTRADA (este menu), não mais pelo cargo de
+  // quem clicou (antes só consultora via). Qualquer papel que acessa Tarefas
+  // pode solicitar (ver podeVer em TIPOS_SOLICITACAO).
+  // IMPACTO SE REMOVIDO: quem solicita fica dependente do atalho de dentro
+  // da venda — e nem toda venda tem frete avulso, então esse atalho sozinho
+  // não cobre quem ainda não abriu a venda certa.
   const [showFreteAvulso, setShowFreteAvulso] = useState(false);
   // REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): o botão "+ Nova" do topo
   // (desktop) e o FAB (mobile) viraram MENU único — este estado controla se
@@ -982,7 +985,15 @@ export default function TarefasClient() {
       label: "Frete avulso",
       descricao: "Solicitar frete fora do fluxo normal da venda",
       Icon: Bike,
-      podeVer: (r: string | null) => r === "consultora",
+      // REGRA DE NEGÓCIO (decisão do Jonathan, 21/07 — intenção explícita):
+      // antes só consultora via este item (o cargo decidia se a SOLICITAÇÃO
+      // era sequer possível). Agora quem decide é o PONTO DE ENTRADA — este
+      // item já abre o modal em modoSolicitacao={true} — então visível para
+      // QUALQUER papel que acessa Tarefas (a própria página não tem gate de
+      // role; ver src/app/(dashboard)/tarefas/page.tsx).
+      // IMPACTO SE RESTRINGIR DE VOLTA: admin/dev voltam a não conseguir
+      // testar o fluxo de solicitação por este menu.
+      podeVer: (_r: string | null) => true,
       abrir: () => { setShowFreteAvulso(true); setNovoMenuOpen(false); },
     },
   ];
@@ -1168,8 +1179,8 @@ export default function TarefasClient() {
             </div>
 
             {/* Menu "+ Nova": Solicitações (extensível via TIPOS_SOLICITACAO,
-                hoje só Frete avulso p/ consultora) + Tarefa avulsa (criação
-                manual — preservada, ~74/mês em produção). Unifica os 2
+                hoje só Frete avulso, visível pra qualquer papel) + Tarefa
+                avulsa (criação manual — preservada, ~74/mês em produção). Unifica os 2
                 botões antigos (Nova + Frete avulso). Só desktop; mobile usa
                 o FAB único abaixo. Reusa o padrão visual do dropdown
                 "Filtros" (relative + overlay fixed + painel absolute). */}
@@ -1707,7 +1718,10 @@ export default function TarefasClient() {
        * buscador de venda dentro do próprio modal). REGRA DE NEGÓCIO: ao
        * concluir, a solicitação vira tarefa tipo 'frete_avulso' e precisa
        * aparecer pro pool de aprovadores — por isso recarrega a lista
-       * (carregar) e as estatísticas (carregarStats), igual ao criarTarefa(). */}
+       * (carregar) e as estatísticas (carregarStats), igual ao criarTarefa().
+       * modoSolicitacao={true} porque este é o ponto de entrada "Tarefas →
+       * Solicitações" — sempre SOLICITAÇÃO, independente do cargo (ver
+       * FreteAvulsoModal e route.ts). */}
       {showFreteAvulso && (
         <FreteAvulsoModal
           isOpen={showFreteAvulso}
@@ -1717,7 +1731,7 @@ export default function TarefasClient() {
             carregar();
             carregarStats();
           }}
-          userRole={role ?? ""}
+          modoSolicitacao
         />
       )}
     </div>
