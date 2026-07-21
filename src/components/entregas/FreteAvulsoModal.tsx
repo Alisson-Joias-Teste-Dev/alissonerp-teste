@@ -419,6 +419,114 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     (freteCalculado === 0 && !(freteNegociado && parseFloat(freteNegociado.replace(",", ".")) > 0));
   const disabledSubmit = ehSolicitacao ? disabledSolicitacao : disabledPadrao;
 
+  /**
+   * REGRA DE LAYOUT (responsividade, 21/07 — layout aprovado pelo Jonathan):
+   * Descrição/Região/Observações aparecem nos 2 modos, mas em posições
+   * diferentes (coluna A/B na solicitação vs. sequência única no direto).
+   * Viram JSX reaproveitável aqui para não duplicar o markup entre os dois
+   * layouts abaixo. NENHUMA regra/validação muda — só a ORGANIZAÇÃO visual.
+   */
+  const campoDescricao = (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
+        <AlignLeft size={13} /> Descrição da corrida *
+      </label>
+      <input
+        type="text"
+        required
+        placeholder="Ex: Buscar colar na casa da cliente, Levar material à loja..."
+        value={descricao}
+        onChange={e => setDescricao(e.target.value)}
+        style={{
+          width: "100%", padding: "9px 12px", borderRadius: 8,
+          border: `1px solid ${C.cremeBorder}`, fontSize: 13,
+          boxSizing: "border-box",
+        }}
+      />
+    </div>
+  );
+
+  const campoObservacoes = (
+    <div style={{ marginBottom: 0 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
+        <AlignLeft size={13} /> Observações (opcional)
+      </label>
+      <textarea
+        rows={2}
+        value={observacoes}
+        onChange={e => setObservacoes(e.target.value)}
+        placeholder="Informações adicionais..."
+        style={{
+          width: "100%", padding: "9px 12px", borderRadius: 8,
+          border: `1px solid ${C.cremeBorder}`, fontSize: 13,
+          resize: "vertical", boxSizing: "border-box",
+        }}
+      />
+    </div>
+  );
+
+  const campoRegiao = (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
+        <MapPin size={13} /> Região *
+      </label>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {REGIOES.map(r => (
+          <button
+            type="button"
+            key={r.value}
+            onClick={() => setRegiao(r.value)}
+            style={{
+              padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+              border: `1px solid ${regiao === r.value ? C.esmeralda : C.cremeBorder}`,
+              background: regiao === r.value ? C.esmeralda : "#fff",
+              color: regiao === r.value ? "#fff" : C.cinza,
+              cursor: "pointer",
+            }}
+          >
+            {r.label} {r.frete > 0 ? `(R$${r.frete})` : ""}
+          </button>
+        ))}
+      </div>
+      {freteCalculado > 0 && (
+        <p style={{ fontSize: 11, color: C.cinza, marginTop: 6 }}>
+          Motoboy recebe: R${freteCalculado.toFixed(2)} — descontado do saldo de frete grátis
+        </p>
+      )}
+      {freteCalculado === 0 && (
+        <div style={{ marginTop: 8 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: C.cinza, display: "block", marginBottom: 4 }}>
+            Valor negociado com o motoboy (R$) {ehSolicitacao ? "" : "*"}
+          </label>
+          <input
+            type="number"
+            min="0.01"
+            step="0.01"
+            placeholder="Ex: 35,00"
+            value={freteNegociado}
+            onChange={e => setFreteNegociado(e.target.value)}
+            style={{
+              width: "100%", padding: "8px 12px", borderRadius: 8,
+              border: `1px solid ${C.cremeBorder}`, fontSize: 13,
+              boxSizing: "border-box",
+            }}
+          />
+          {freteNegociado && parseFloat(freteNegociado.replace(",", ".")) > 0 && (
+            <p style={{ fontSize: 11, color: C.cinza, marginTop: 4 }}>
+              Motoboy recebe: R${parseFloat(freteNegociado.replace(",", ".")).toFixed(2)} — descontado do saldo de frete grátis
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  /** Título discreto de seção — mesmo padrão visual dos labels do arquivo (cinza/uppercase), só em esmeralda para marcar a divisão de coluna. */
+  const tituloSecao: React.CSSProperties = {
+    fontSize: 11, fontWeight: 700, color: C.esmeralda, letterSpacing: 0.6,
+    textTransform: "uppercase", marginBottom: 10,
+  };
+
   return (
     <div style={{
       position: "fixed", inset: 0, zIndex: 9999,
@@ -428,15 +536,25 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     }}>
       <div style={{
         background: "#fff", borderRadius: 16,
-        width: "100%", maxWidth: 480,
+        width: "100%",
+        // REGRA DE LAYOUT (responsividade, 21/07 — layout aprovado pelo
+        // Jonathan): modo solicitação tem mais campos (venda, endereço,
+        // pagamento, comprovante, região) — modal mais largo (~820px) libera
+        // as 2 colunas abaixo. Modo direto (motoboy, região, cliente) fica
+        // com coluna quase vazia em 2 colunas — mantido em 480px/1 coluna.
+        // IMPACTO SE IGUALAR: modo direto ganha espaço vazio sem uso.
+        maxWidth: ehSolicitacao ? 820 : 480,
+        maxHeight: "90vh",
+        display: "flex", flexDirection: "column",
         boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
         overflow: "hidden",
       }}>
-        {/* Header */}
+        {/* Header — fixo, fora da área de rolagem */}
         <div style={{
           background: C.esmeralda, color: "#fff",
           padding: "16px 20px",
           display: "flex", alignItems: "center", justifyContent: "space-between",
+          flexShrink: 0,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Bike size={20} />
@@ -451,7 +569,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
 
         {/* Sucesso */}
         {sucesso ? (
-          <div style={{ padding: 40, textAlign: "center" }}>
+          <div style={{ padding: 40, textAlign: "center", overflowY: "auto" }}>
             <CheckCircle size={48} color={C.verde} style={{ marginBottom: 12 }} />
             <p style={{ fontWeight: 700, color: C.esmeralda, fontSize: 16 }}>
               {ehSolicitacao ? "Solicitação enviada — aguardando liberação" : "Corrida registrada!"}
@@ -461,414 +579,391 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
             )}
           </div>
         ) : (
-          <form onSubmit={handleSubmit} style={{ padding: "20px" }}>
+          // REGRA DE LAYOUT (responsividade, 21/07): formulário em 3 faixas —
+          // corpo com overflowY:auto rola sozinho; rodapé (Cancelar/Solicitar)
+          // fica FIXO (flexShrink:0), fora da rolagem. ANTES o formulário
+          // inteiro rolava junto e, no modo solicitação (mais campos), o
+          // botão de ação ficava fora da área visível (print do Jonathan).
+          // IMPACTO SE REMOVIDO: botão some de novo em telas menores/baixas.
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
 
-            {/* Erro */}
-            {erro && (
-              <div style={{
-                padding: "10px 14px", borderRadius: 8,
-                background: C.vermelhoLt, color: C.vermelho,
-                fontSize: 13, marginBottom: 16,
-              }}>
-                {erro}
-              </div>
-            )}
+            {/* Corpo — rola independente do rodapé */}
+            <div style={{ padding: "20px", overflowY: "auto", flex: 1, minHeight: 0 }}>
 
-            {/* Descrição */}
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                <AlignLeft size={13} /> Descrição da corrida *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Ex: Buscar colar na casa da cliente, Levar material à loja..."
-                value={descricao}
-                onChange={e => setDescricao(e.target.value)}
-                style={{
-                  width: "100%", padding: "9px 12px", borderRadius: 8,
-                  border: `1px solid ${C.cremeBorder}`, fontSize: 13,
-                  boxSizing: "border-box",
-                }}
-              />
-            </div>
+              {/* Erro */}
+              {erro && (
+                <div style={{
+                  padding: "10px 14px", borderRadius: 8,
+                  background: C.vermelhoLt, color: C.vermelho,
+                  fontSize: 13, marginBottom: 16,
+                }}>
+                  {erro}
+                </div>
+              )}
 
-            {ehSolicitacao ? (
-              <>
-                {/* Venda (consultora) — escondido quando a venda já vem fixada (V3, aberto de dentro da venda) */}
-                {!vendaFixada && (
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                    <Search size={13} /> Venda *
-                  </label>
-                  {vendaSelecionada ? (
-                    <div style={{
-                      padding: "8px 12px", borderRadius: 8,
-                      border: `1px solid ${C.esmeralda}`,
-                      background: C.esmeraldaLt,
-                      display: "flex", alignItems: "center", justifyContent: "space-between",
-                    }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: C.esmeralda }}>
-                        {vendaSelecionada.numero_venda} — {vendaSelecionada.cliente_nome ?? "Cliente não identificado"}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => { setVendaSelecionada(null); setEnderecoEntrega(""); }}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: C.cinza }}
-                      >
-                        <X size={14} />
-                      </button>
+              {ehSolicitacao ? (
+                // REGRA DE LAYOUT (responsividade, 21/07 — layout aprovado
+                // pelo Jonathan): 2 colunas no desktop, 1 coluna no celular,
+                // via auto-fit/minmax — SEM media query manual. Uso
+                // minmax(min(300px,100%), 1fr) em vez de minmax(300px, 1fr)
+                // puro: com só 1 coluna (celular estreito, ~360px) o grid
+                // ainda reservava 300px fixos e estourava a largura do modal;
+                // o min(...,100%) trava a coluna no espaço realmente
+                // disponível. Coluna A = dados da corrida; Coluna B = pagamento.
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(min(300px, 100%), 1fr))",
+                  gap: 18,
+                }}>
+                  {/* Coluna A — A corrida */}
+                  <div>
+                    <div style={tituloSecao}>A CORRIDA</div>
+                    {campoDescricao}
+
+                    {/* Venda (consultora) — escondido quando a venda já vem fixada (V3, aberto de dentro da venda) */}
+                    {!vendaFixada && (
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
+                        <Search size={13} /> Venda *
+                      </label>
+                      {vendaSelecionada ? (
+                        <div style={{
+                          padding: "8px 12px", borderRadius: 8,
+                          border: `1px solid ${C.esmeralda}`,
+                          background: C.esmeraldaLt,
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                        }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: C.esmeralda }}>
+                            {vendaSelecionada.numero_venda} — {vendaSelecionada.cliente_nome ?? "Cliente não identificado"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => { setVendaSelecionada(null); setEnderecoEntrega(""); }}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: C.cinza }}
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ position: "relative" }}>
+                          <input
+                            type="text"
+                            placeholder="Buscar por número da venda ou cliente..."
+                            value={vendaBusca}
+                            onChange={e => setVendaBusca(e.target.value)}
+                            style={{
+                              width: "100%", padding: "9px 12px", borderRadius: 8,
+                              border: `1px solid ${C.cremeBorder}`, fontSize: 13,
+                              boxSizing: "border-box",
+                            }}
+                          />
+                          {buscandoVenda && (
+                            <div style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)" }}>
+                              <Loader2 size={14} color={C.cinza} style={{ animation: "spin 1s linear infinite" }} />
+                            </div>
+                          )}
+                          {vendasResultado.length > 0 && (
+                            <div style={{
+                              position: "absolute", top: "100%", left: 0, right: 0,
+                              background: "#fff", border: `1px solid ${C.cremeBorder}`,
+                              borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                              zIndex: 100, maxHeight: 200, overflowY: "auto",
+                            }}>
+                              {vendasResultado.map(v => (
+                                <button
+                                  key={v.id}
+                                  type="button"
+                                  onClick={() => selecionarVenda(v)}
+                                  style={{
+                                    display: "block", width: "100%", textAlign: "left",
+                                    padding: "8px 12px", border: "none",
+                                    background: "none", cursor: "pointer", fontSize: 13,
+                                  }}
+                                  onMouseEnter={e => e.currentTarget.style.background = C.cremeBg}
+                                  onMouseLeave={e => e.currentTarget.style.background = "none"}
+                                >
+                                  <strong>{v.numero_venda}</strong> — {v.cliente_nome ?? "—"}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div style={{ position: "relative" }}>
+                    )}
+
+                    {/* Endereço de entrega (editável — não altera o cadastro do cliente) */}
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
+                        <MapPin size={13} /> Endereço de entrega *
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={enderecoEntrega}
+                        onChange={e => setEnderecoEntrega(e.target.value)}
+                        placeholder={carregandoEndereco ? "Carregando endereço da venda..." : "Endereço completo de entrega..."}
+                        disabled={carregandoEndereco}
+                        style={{
+                          width: "100%", padding: "9px 12px", borderRadius: 8,
+                          border: `1px solid ${C.cremeBorder}`, fontSize: 13,
+                          resize: "vertical", boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+
+                    {campoObservacoes}
+                  </div>
+
+                  {/* Coluna B — Pagamento */}
+                  <div>
+                    <div style={tituloSecao}>PAGAMENTO</div>
+
+                    {/* Quem paga (migration 354) + Comprovante — bloco destacado:
+                        ANTES o comprovante nascia solto mais abaixo na lista de
+                        campos, longe do campo que o obriga (pagante==='cliente'). */}
+                    <div style={{ padding: 12, borderRadius: 10, background: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}>
+                      <div style={{ marginBottom: pagante === "cliente" ? 14 : 0 }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
+                          <Store size={13} /> Quem paga *
+                        </label>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          {(["loja", "cliente"] as const).map(op => (
+                            <button
+                              type="button"
+                              key={op}
+                              onClick={() => { setPagante(op); if (op === "loja") setComprovanteBase64(""); }}
+                              style={{
+                                flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+                                border: `1px solid ${pagante === op ? C.esmeralda : C.cremeBorder}`,
+                                background: pagante === op ? C.esmeralda : "#fff",
+                                color: pagante === op ? "#fff" : C.cinza,
+                                cursor: "pointer",
+                              }}
+                            >
+                              {op === "loja" ? "Loja" : "Cliente"}
+                            </button>
+                          ))}
+                        </div>
+                        <p style={{ fontSize: 11, color: C.cinza, marginTop: 6 }}>
+                          {pagante === "cliente"
+                            ? "Cliente pagou — anexe o comprovante abaixo. A tarefa vai para quem acompanha as entregas avulsas."
+                            : pagante === "loja"
+                              ? "Custo da loja — sem comprovante. A tarefa vai para quem autoriza esse custo."
+                              : "Define o comprovante e quem decide a solicitação."}
+                        </p>
+                      </div>
+
+                      {/* Comprovante de pagamento — obrigatório só quando o cliente paga */}
+                      {pagante === "cliente" && (
+                        <div>
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
+                            <Camera size={13} /> Comprovante de pagamento *
+                          </label>
+                          <input
+                            ref={comprovanteInputRef}
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={handleComprovanteSelecionado}
+                            style={{ display: "none" }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => comprovanteInputRef.current?.click()}
+                            style={{
+                              display: "inline-flex", alignItems: "center", gap: 6,
+                              padding: "8px 12px", borderRadius: 8,
+                              border: `1px solid ${C.cremeBorder}`,
+                              background: comprovanteBase64 ? C.verdeLt : "#fff",
+                              color: comprovanteBase64 ? C.verde : C.cinza,
+                              fontSize: 12, fontWeight: 600, cursor: "pointer",
+                            }}
+                          >
+                            <Camera size={14} />
+                            {comprovanteBase64 ? "Comprovante anexado" : "Anexar comprovante"}
+                          </button>
+                          {comprovanteBase64 && (
+                            <div style={{ marginTop: 8 }}>
+                              <img
+                                src={comprovanteBase64}
+                                alt="Comprovante de pagamento"
+                                style={{
+                                  width: "100%", maxWidth: 200, borderRadius: 8,
+                                  border: `1px solid ${C.cremeBorder}`,
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Valor cobrado do cliente */}
+                    <div style={{ marginTop: 14, marginBottom: 14 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
+                        <DollarSign size={13} /> Valor cobrado do cliente (R$) *
+                      </label>
                       <input
-                        type="text"
-                        placeholder="Buscar por número da venda ou cliente..."
-                        value={vendaBusca}
-                        onChange={e => setVendaBusca(e.target.value)}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Ex: 20,00"
+                        value={freteCobradoConsultora}
+                        onChange={e => setFreteCobradoConsultora(e.target.value)}
                         style={{
                           width: "100%", padding: "9px 12px", borderRadius: 8,
                           border: `1px solid ${C.cremeBorder}`, fontSize: 13,
                           boxSizing: "border-box",
                         }}
                       />
-                      {buscandoVenda && (
-                        <div style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)" }}>
-                          <Loader2 size={14} color={C.cinza} style={{ animation: "spin 1s linear infinite" }} />
-                        </div>
-                      )}
-                      {vendasResultado.length > 0 && (
-                        <div style={{
-                          position: "absolute", top: "100%", left: 0, right: 0,
-                          background: "#fff", border: `1px solid ${C.cremeBorder}`,
-                          borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                          zIndex: 100, maxHeight: 200, overflowY: "auto",
-                        }}>
-                          {vendasResultado.map(v => (
-                            <button
-                              key={v.id}
-                              type="button"
-                              onClick={() => selecionarVenda(v)}
-                              style={{
-                                display: "block", width: "100%", textAlign: "left",
-                                padding: "8px 12px", border: "none",
-                                background: "none", cursor: "pointer", fontSize: 13,
-                              }}
-                              onMouseEnter={e => e.currentTarget.style.background = C.cremeBg}
-                              onMouseLeave={e => e.currentTarget.style.background = "none"}
-                            >
-                              <strong>{v.numero_venda}</strong> — {v.cliente_nome ?? "—"}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </div>
-                  )}
-                </div>
-                )}
 
-                {/* Endereço de entrega (editável — não altera o cadastro do cliente) */}
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                    <MapPin size={13} /> Endereço de entrega *
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={enderecoEntrega}
-                    onChange={e => setEnderecoEntrega(e.target.value)}
-                    placeholder={carregandoEndereco ? "Carregando endereço da venda..." : "Endereço completo de entrega..."}
-                    disabled={carregandoEndereco}
-                    style={{
-                      width: "100%", padding: "9px 12px", borderRadius: 8,
-                      border: `1px solid ${C.cremeBorder}`, fontSize: 13,
-                      resize: "vertical", boxSizing: "border-box",
-                    }}
-                  />
-                </div>
-
-                {/* Valor cobrado do cliente */}
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                    <DollarSign size={13} /> Valor cobrado do cliente (R$) *
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="Ex: 20,00"
-                    value={freteCobradoConsultora}
-                    onChange={e => setFreteCobradoConsultora(e.target.value)}
-                    style={{
-                      width: "100%", padding: "9px 12px", borderRadius: 8,
-                      border: `1px solid ${C.cremeBorder}`, fontSize: 13,
-                      boxSizing: "border-box",
-                    }}
-                  />
-                </div>
-
-                {/* Quem paga (migration 354) — define comprovante obrigatório e o aprovador no backend */}
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                    <Store size={13} /> Quem paga *
-                  </label>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    {(["loja", "cliente"] as const).map(op => (
-                      <button
-                        type="button"
-                        key={op}
-                        onClick={() => { setPagante(op); if (op === "loja") setComprovanteBase64(""); }}
-                        style={{
-                          flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: 13, fontWeight: 600,
-                          border: `1px solid ${pagante === op ? C.esmeralda : C.cremeBorder}`,
-                          background: pagante === op ? C.esmeralda : "#fff",
-                          color: pagante === op ? "#fff" : C.cinza,
-                          cursor: "pointer",
-                        }}
-                      >
-                        {op === "loja" ? "Loja" : "Cliente"}
-                      </button>
-                    ))}
+                    {campoRegiao}
                   </div>
-                  <p style={{ fontSize: 11, color: C.cinza, marginTop: 6 }}>
-                    {pagante === "cliente"
-                      ? "Cliente pagou — anexe o comprovante abaixo. A tarefa vai para quem acompanha as entregas avulsas."
-                      : pagante === "loja"
-                        ? "Custo da loja — sem comprovante. A tarefa vai para quem autoriza esse custo."
-                        : "Define o comprovante e quem decide a solicitação."}
-                  </p>
                 </div>
+              ) : (
+                <>
+                  {campoDescricao}
 
-                {/* Comprovante de pagamento — obrigatório só quando o cliente paga */}
-                {pagante === "cliente" && (
+                  {/* Motoboy (criação direta — loja/admin/estoquista) */}
                   <div style={{ marginBottom: 14 }}>
                     <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                      <Camera size={13} /> Comprovante de pagamento *
+                      <Bike size={13} /> Motoboy *
                     </label>
-                    <input
-                      ref={comprovanteInputRef}
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={handleComprovanteSelecionado}
-                      style={{ display: "none" }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => comprovanteInputRef.current?.click()}
-                      style={{
-                        display: "inline-flex", alignItems: "center", gap: 6,
-                        padding: "8px 12px", borderRadius: 8,
-                        border: `1px solid ${C.cremeBorder}`,
-                        background: comprovanteBase64 ? C.verdeLt : "#fff",
-                        color: comprovanteBase64 ? C.verde : C.cinza,
-                        fontSize: 12, fontWeight: 600, cursor: "pointer",
-                      }}
-                    >
-                      <Camera size={14} />
-                      {comprovanteBase64 ? "Comprovante anexado" : "Anexar comprovante"}
-                    </button>
-                    {comprovanteBase64 && (
-                      <div style={{ marginTop: 8 }}>
-                        <img
-                          src={comprovanteBase64}
-                          alt="Comprovante de pagamento"
-                          style={{
-                            width: "100%", maxWidth: 200, borderRadius: 8,
-                            border: `1px solid ${C.cremeBorder}`,
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              /* Motoboy (criação direta — loja/admin/estoquista) */
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                  <Bike size={13} /> Motoboy *
-                </label>
-                <select
-                  required
-                  value={motoboyId}
-                  onChange={e => setMotoboyId(e.target.value)}
-                  style={{
-                    width: "100%", padding: "9px 12px", borderRadius: 8,
-                    border: `1px solid ${C.cremeBorder}`, fontSize: 13,
-                    boxSizing: "border-box", background: "#fff",
-                  }}
-                >
-                  <option value="">Selecionar motoboy...</option>
-                  {motoboys.map(m => (
-                    <option key={m.id} value={m.user_id ?? String(m.id)}>{m.nome}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* Região */}
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                <MapPin size={13} /> Região *
-              </label>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {REGIOES.map(r => (
-                  <button
-                    type="button"
-                    key={r.value}
-                    onClick={() => setRegiao(r.value)}
-                    style={{
-                      padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600,
-                      border: `1px solid ${regiao === r.value ? C.esmeralda : C.cremeBorder}`,
-                      background: regiao === r.value ? C.esmeralda : "#fff",
-                      color: regiao === r.value ? "#fff" : C.cinza,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {r.label} {r.frete > 0 ? `(R$${r.frete})` : ""}
-                  </button>
-                ))}
-              </div>
-              {freteCalculado > 0 && (
-                <p style={{ fontSize: 11, color: C.cinza, marginTop: 6 }}>
-                  Motoboy recebe: R${freteCalculado.toFixed(2)} — descontado do saldo de frete grátis
-                </p>
-              )}
-              {freteCalculado === 0 && (
-                <div style={{ marginTop: 8 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: C.cinza, display: "block", marginBottom: 4 }}>
-                    Valor negociado com o motoboy (R$) {ehSolicitacao ? "" : "*"}
-                  </label>
-                  <input
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    placeholder="Ex: 35,00"
-                    value={freteNegociado}
-                    onChange={e => setFreteNegociado(e.target.value)}
-                    style={{
-                      width: "100%", padding: "8px 12px", borderRadius: 8,
-                      border: `1px solid ${C.cremeBorder}`, fontSize: 13,
-                      boxSizing: "border-box",
-                    }}
-                  />
-                  {freteNegociado && parseFloat(freteNegociado.replace(",", ".")) > 0 && (
-                    <p style={{ fontSize: 11, color: C.cinza, marginTop: 4 }}>
-                      Motoboy recebe: R${parseFloat(freteNegociado.replace(",", ".")).toFixed(2)} — descontado do saldo de frete grátis
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Cliente (opcional) — só no modo criação direta; no modo consultora o cliente vem da venda */}
-            {!ehSolicitacao && (
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                  <User size={13} /> Cliente (opcional)
-                </label>
-                {contatoSelecionado ? (
-                  <div style={{
-                    padding: "8px 12px", borderRadius: 8,
-                    border: `1px solid ${C.esmeralda}`,
-                    background: C.esmeraldaLt,
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                  }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: C.esmeralda }}>
-                      {contatoSelecionado.nome}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => { setContatoSelecionado(null); setBuscaContato(""); }}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: C.cinza }}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ position: "relative" }}>
-                    <input
-                      type="text"
-                      placeholder="Buscar por nome..."
-                      value={buscaContato}
-                      onChange={e => setBuscaContato(e.target.value)}
+                    <select
+                      required
+                      value={motoboyId}
+                      onChange={e => setMotoboyId(e.target.value)}
                       style={{
                         width: "100%", padding: "9px 12px", borderRadius: 8,
                         border: `1px solid ${C.cremeBorder}`, fontSize: 13,
-                        boxSizing: "border-box",
+                        boxSizing: "border-box", background: "#fff",
                       }}
-                    />
-                    {buscandoContato && (
-                      <div style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)" }}>
-                        <Loader2 size={14} color={C.cinza} style={{ animation: "spin 1s linear infinite" }} />
-                      </div>
-                    )}
-                    {contatos.length > 0 && (
+                    >
+                      <option value="">Selecionar motoboy...</option>
+                      {motoboys.map(m => (
+                        <option key={m.id} value={m.user_id ?? String(m.id)}>{m.nome}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {campoRegiao}
+
+                  {/* Cliente (opcional) — só no modo criação direta; no modo consultora o cliente vem da venda */}
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
+                      <User size={13} /> Cliente (opcional)
+                    </label>
+                    {contatoSelecionado ? (
                       <div style={{
-                        position: "absolute", top: "100%", left: 0, right: 0,
-                        background: "#fff", border: `1px solid ${C.cremeBorder}`,
-                        borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                        zIndex: 100, maxHeight: 200, overflowY: "auto",
+                        padding: "8px 12px", borderRadius: 8,
+                        border: `1px solid ${C.esmeralda}`,
+                        background: C.esmeraldaLt,
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
                       }}>
-                        {contatos.map(c => (
-                          <button
-                            key={c.id_contato}
-                            type="button"
-                            onClick={() => { setContatoSelecionado(c); setBuscaContato(""); setContatos([]); }}
-                            style={{
-                              display: "block", width: "100%", textAlign: "left",
-                              padding: "8px 12px", border: "none",
-                              background: "none", cursor: "pointer", fontSize: 13,
-                            }}
-                            onMouseEnter={e => e.currentTarget.style.background = C.cremeBg}
-                            onMouseLeave={e => e.currentTarget.style.background = "none"}
-                          >
-                            {c.nome}
-                          </button>
-                        ))}
+                        <span style={{ fontSize: 13, fontWeight: 600, color: C.esmeralda }}>
+                          {contatoSelecionado.nome}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => { setContatoSelecionado(null); setBuscaContato(""); }}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: C.cinza }}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ position: "relative" }}>
+                        <input
+                          type="text"
+                          placeholder="Buscar por nome..."
+                          value={buscaContato}
+                          onChange={e => setBuscaContato(e.target.value)}
+                          style={{
+                            width: "100%", padding: "9px 12px", borderRadius: 8,
+                            border: `1px solid ${C.cremeBorder}`, fontSize: 13,
+                            boxSizing: "border-box",
+                          }}
+                        />
+                        {buscandoContato && (
+                          <div style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)" }}>
+                            <Loader2 size={14} color={C.cinza} style={{ animation: "spin 1s linear infinite" }} />
+                          </div>
+                        )}
+                        {contatos.length > 0 && (
+                          <div style={{
+                            position: "absolute", top: "100%", left: 0, right: 0,
+                            background: "#fff", border: `1px solid ${C.cremeBorder}`,
+                            borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                            zIndex: 100, maxHeight: 200, overflowY: "auto",
+                          }}>
+                            {contatos.map(c => (
+                              <button
+                                key={c.id_contato}
+                                type="button"
+                                onClick={() => { setContatoSelecionado(c); setBuscaContato(""); setContatos([]); }}
+                                style={{
+                                  display: "block", width: "100%", textAlign: "left",
+                                  padding: "8px 12px", border: "none",
+                                  background: "none", cursor: "pointer", fontSize: 13,
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = C.cremeBg}
+                                onMouseLeave={e => e.currentTarget.style.background = "none"}
+                              >
+                                {c.nome}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-            )}
 
-            {/* Observações */}
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                <AlignLeft size={13} /> Observações (opcional)
-              </label>
-              <textarea
-                rows={2}
-                value={observacoes}
-                onChange={e => setObservacoes(e.target.value)}
-                placeholder="Informações adicionais..."
-                style={{
-                  width: "100%", padding: "9px 12px", borderRadius: 8,
-                  border: `1px solid ${C.cremeBorder}`, fontSize: 13,
-                  resize: "vertical", boxSizing: "border-box",
-                }}
-              />
+                  {campoObservacoes}
+                </>
+              )}
             </div>
 
-            {/* Botão */}
-            <button
-              type="submit"
-              disabled={disabledSubmit}
-              style={{
-                width: "100%", padding: "12px 0",
-                background: C.esmeralda, color: "#fff",
-                border: "none", borderRadius: 10,
-                fontSize: 14, fontWeight: 700, cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                opacity: disabledSubmit ? 0.6 : 1,
-              }}
-            >
-              {enviando ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Bike size={16} />}
-              {enviando
-                ? (ehSolicitacao ? "Enviando..." : "Registrando...")
-                : (ehSolicitacao ? "Solicitar frete avulso" : "Registrar Corrida")}
-            </button>
+            {/* Rodapé — fixo, fora da rolagem. Cancelar chama o mesmo
+                handleClose do X do cabeçalho (reset + fechar), sem lógica
+                nova; é o ponto que mais incomodou no print do Jonathan
+                (botão de ação fora da área visível). */}
+            <div style={{
+              padding: "16px 20px",
+              borderTop: `1px solid ${C.cremeBorder}`,
+              display: "flex", gap: 10,
+              flexShrink: 0,
+            }}>
+              <button
+                type="button"
+                onClick={handleClose}
+                style={{
+                  padding: "12px 20px",
+                  background: "#fff", color: C.cinza,
+                  border: `1px solid ${C.cremeBorder}`, borderRadius: 10,
+                  fontSize: 14, fontWeight: 600, cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={disabledSubmit}
+                style={{
+                  flex: 1, padding: "12px 0",
+                  background: C.esmeralda, color: "#fff",
+                  border: "none", borderRadius: 10,
+                  fontSize: 14, fontWeight: 700, cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  opacity: disabledSubmit ? 0.6 : 1,
+                }}
+              >
+                {enviando ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Bike size={16} />}
+                {enviando
+                  ? (ehSolicitacao ? "Enviando..." : "Registrando...")
+                  : (ehSolicitacao ? "Solicitar frete avulso" : "Registrar Corrida")}
+              </button>
+            </div>
           </form>
         )}
       </div>
