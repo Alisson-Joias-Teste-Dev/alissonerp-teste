@@ -2,6 +2,37 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(estoque): baixa por perda / extravio — a única baixa manual do ERP, exclusiva do dono (vX.Y.Z (a definir no merge))
+
+**O quê:** peça que sumiu (não localizada, quebrada, extraviada) agora **sai do estoque de verdade**.
+Botão "Perda / extravio" no detalhe do produto em `/estoque-comercial/[produtoId]`, com modal que mostra
+o **histórico de faltas em inventário** daquela peça antes de confirmar. A linha aparece marcada com badge
+vermelho "Perda / extravio" no extrato de movimentações, com motivo, autor e data.
+
+**Quem pode:** SÓ o master admin (o dono — `parametros_sistema.MASTER_ADMIN_USER_ID`). O gate é por
+**identidade** (`isMasterAdmin(user.id)`), não por cargo: nem admin, nem desenvolvedor, nem gerente.
+Havia 7 admins e 3 devs na base — permissão por role daria a chave para 10 pessoas.
+
+**Como:**
+- Endpoint novo e separado `GET|POST /api/estoque-comercial/perda`. A trava da v2.81.3 em
+  `/api/estoque-comercial/movimentos` (403 em qualquer saída manual) **continua intacta** — perda é
+  exceção nomeada e auditada, não buraco na trava.
+- Três freios: histórico de faltas na tela + motivo com mín. 10 caracteres + palavra `PERDA` digitada.
+- Baixa limitada ao **disponível** (físico − reservado), nunca ao físico — 409 se exceder, para não
+  sumir com peça já prometida a uma venda.
+- Estorno de movimento `perda_extravio` também restrito ao master (senão a trava vazaria pelo outro lado);
+  os demais estornos seguem admin/dev.
+- `logAudit` dentro da mesma transação do INSERT.
+- **Migration 354:** `chk_voucher_type_valid` passa a aceitar `voucher_type='perda'` e o trigger
+  `fn_mirror_movimento_to_sle` traduz `perda_extravio` → `perda`. Sem isso o motivo caía no `ELSE 'manual'`
+  e `chk_voucher_for_outgoing` **rejeitava a baixa no banco** (descoberto testando no banco local).
+- Constantes compartilhadas em `src/lib/perda-extravio.ts` (`MOTIVO_PERDA`, `CONFIRMACAO_PERDA`).
+
+**Não muda:** o desfecho `perda` do **inventário** continua só registro, SEM baixa (§7 de comercial.md).
+Não há tela consolidada de perdas — decisão explícita do Jonathan.
+
+**Regras:** `docs/regras-negocio/comercial.md` §11.
+
 ## feat(frete-avulso): solicitação da venda vira tarefa, pool de aprovadores e pool de motoboy (vX.Y.Z (a definir no merge))
 
 **O quê:** frete avulso (corrida de motoboy sem itens vinculados) ganha um passo de **solicitação**: a
