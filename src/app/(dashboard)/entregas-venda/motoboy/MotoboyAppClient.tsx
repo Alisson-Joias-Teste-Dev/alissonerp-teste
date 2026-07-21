@@ -83,6 +83,20 @@ function fmtBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+// REGRA DE NEGÓCIO: chave única para reativar o auto-registro de corrida pelo
+// motoboy (PR #75).
+// O QUÊ: controla se o botão "Nova corrida" e o modal de registro aparecem
+//   nesta tela. Com false, ambos ficam ocultos — o motoboy só vê/aceita/
+//   confirma corridas já criadas pela loja/pool (modelo POOL, migration 353).
+// POR QUÊ: decisão do Jonathan (21/07) — a corrida deve nascer na loja/pool,
+//   não no motoboy. O backend (rota /api/entregas-venda/frete-avulso,
+//   FreteAvulsoMotoboySchema) e as corridas auto-registradas já existentes em
+//   produção continuam funcionando normalmente (guard auto_criado inalterado).
+// IMPACTO: para reativar o auto-registro na tela, basta trocar para true —
+//   nada além disso precisa mudar. NÃO remover o estado/handlers do modal:
+//   o objetivo é manter a reversão trivial.
+const MOTOBOY_PODE_REGISTRAR_CORRIDA = false;
+
 function statusBadge(situacao: string) {
   switch (situacao) {
     case "pendente": return { text: "Pendente", color: C.ambar, bg: C.ambarLt };
@@ -231,17 +245,21 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
               {motoboyNome}
             </p>
           </div>
-          <button
-            onClick={() => { setNovaErro(""); setNovaOpen(true); }}
-            style={{
-              marginLeft: "auto", padding: "9px 14px", borderRadius: 10,
-              background: C.esmeralda, color: "#fff", border: "none",
-              fontSize: 13, fontWeight: 700, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
-            }}
-          >
-            <Plus size={16} /> Nova corrida
-          </button>
+          {/* Botão "Nova corrida" (auto-registro do motoboy) — oculto por
+              decisão do Jonathan, ver MOTOBOY_PODE_REGISTRAR_CORRIDA acima. */}
+          {MOTOBOY_PODE_REGISTRAR_CORRIDA && (
+            <button
+              onClick={() => { setNovaErro(""); setNovaOpen(true); }}
+              style={{
+                marginLeft: "auto", padding: "9px 14px", borderRadius: 10,
+                background: C.esmeralda, color: "#fff", border: "none",
+                fontSize: 13, fontWeight: 700, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+              }}
+            >
+              <Plus size={16} /> Nova corrida
+            </button>
+          )}
         </div>
 
         {/* Cards */}
@@ -537,7 +555,8 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
       )}
 
       {/* ── Modal: nova corrida avulsa (registrada pelo motoboy) ─────────────── */}
-      {novaOpen && (
+      {/* Oculto junto com o botão — ver MOTOBOY_PODE_REGISTRAR_CORRIDA acima. */}
+      {MOTOBOY_PODE_REGISTRAR_CORRIDA && novaOpen && (
         <div
           onClick={() => { if (!novaSalvando) setNovaOpen(false); }}
           style={{
