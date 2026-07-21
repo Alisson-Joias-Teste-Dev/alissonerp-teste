@@ -2608,25 +2608,37 @@ export async function criarFreteAvulso(
 }
 
 /**
- * Libera um frete avulso SOLICITADO pela consultora ('solicitada' -> 'pendente').
+ * Libera um frete avulso SOLICITADO pela consultora ('solicitada' -> 'pendente')
+ * — variante que RECEBE a transação de fora (`tx`).
  *
- * REGRA DE NEGÓCIO: a liberação é o momento em que o custo do frete avulso é
- * de fato assumido pela loja — por isso é AQUI (e não na solicitação) que o
- * saldo da gerente é lançado (lancarSaldoFreteAvulsoNoTx). A checagem de QUEM
- * pode liberar (modelo TAREFA/POOL: qualquer aprovador da chave de config
- * aprovadores_frete_avulso — ou admin/dev/diretor, ver
- * PATCH /api/tarefas/[id]/aprovacao) fica no dispatcher; esta função só valida o
- * ESTADO da entrega.
+ * REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — atomicidade da decisão da tarefa): esta
+ * função existe para que o dispatcher de aprovação
+ * (PATCH /api/tarefas/[id]/aprovacao) rode a liberação DENTRO da MESMA
+ * transação que grava aprovacoes_tarefa/tarefas — se a liberação falhar, a tx
+ * inteira reverte e a tarefa CONTINUA aguardando_aprovacao (não fica "aprovada"
+ * com a entrega ainda 'solicitada', estado hoje invisível — nenhuma tela lista
+ * entregas is_avulso='solicitada'). `liberarFreteAvulso` (abaixo) é a casca
+ * fina para quem precisar chamar fora de uma transação existente — NÃO abrir
+ * um `sql.begin` aninhado aqui: postgres.js não dá erro, mas o begin interno
+ * pega OUTRA conexão do pool e vira uma transação separada — quebra a
+ * atomicidade que este bloco existe para garantir.
  *
- * O QUE: tranca a linha (FOR UPDATE) dentro da transação para evitar liberar
- * a mesma solicitação duas vezes em cliques concorrentes, atualiza
- * situacao/liberada_por/liberada_em e lança o saldo.
+ * O QUE: tranca a linha (FOR UPDATE) dentro da transação recebida para evitar
+ * liberar a mesma solicitação duas vezes em cliques concorrentes, atualiza
+ * situacao/liberada_por/liberada_em e lança o saldo (lancarSaldoFreteAvulsoNoTx).
+ * A checagem de QUEM pode liberar (modelo TAREFA/POOL: qualquer aprovador da
+ * chave de config aprovadores_frete_avulso — ou admin/dev/diretor) fica no
+ * dispatcher; esta função só valida o ESTADO da entrega.
  *
  * IMPACTO SE ALTERADO: sem o FOR UPDATE, dois cliques quase simultâneos no
  * botão "Liberar" lançariam o saldo em dobro no conta-corrente da gerente.
  */
-export async function liberarFreteAvulso(entregaId: number, usuarioId: string): Promise<void> {
-  const [entrega] = await sql`
+export async function liberarFreteAvulsoNoTx(
+  tx: DbSql,
+  entregaId: number,
+  usuarioId: string,
+): Promise<void> {
+  const [entrega] = await tx`
     SELECT id, situacao, codigo_entrega, is_avulso
     FROM alissonerp.entregas_venda
     WHERE id = ${entregaId}
@@ -2644,53 +2656,68 @@ export async function liberarFreteAvulso(entregaId: number, usuarioId: string): 
     );
   }
 
-  await sql.begin(async (tx: DbSql) => {
-    // REGRA: FOR UPDATE trava a linha até o fim da transação — reconfirma o
-    // estado 'solicitada' já com a trava, para não liberar (e lançar saldo)
-    // duas vezes em corrida.
-    const [locked] = await tx`
-      SELECT id, situacao, frete_cobrado, frete_motoboy
-      FROM alissonerp.entregas_venda
-      WHERE id = ${entregaId}
-      FOR UPDATE
-    `;
-    if (locked.situacao !== "solicitada") {
-      throw new Error(
-        `Entrega ${entrega.codigo_entrega} não está mais aguardando liberação (situação atual: ${locked.situacao}).`,
-      );
-    }
-
-    await tx`
-      UPDATE alissonerp.entregas_venda
-      SET
-        situacao = 'pendente',
-        liberada_por = ${usuarioId}::uuid,
-        liberada_em = now(),
-        updated_at = now()
-      WHERE id = ${entregaId}
-    `;
-
-    await lancarSaldoFreteAvulsoNoTx(
-      tx,
-      entregaId,
-      money(locked.frete_cobrado),
-      money(locked.frete_motoboy),
-      usuarioId,
+  // REGRA: FOR UPDATE trava a linha até o fim da transação — reconfirma o
+  // estado 'solicitada' já com a trava, para não liberar (e lançar saldo)
+  // duas vezes em corrida.
+  const [locked] = await tx`
+    SELECT id, situacao, frete_cobrado, frete_motoboy
+    FROM alissonerp.entregas_venda
+    WHERE id = ${entregaId}
+    FOR UPDATE
+  `;
+  if (locked.situacao !== "solicitada") {
+    throw new Error(
+      `Entrega ${entrega.codigo_entrega} não está mais aguardando liberação (situação atual: ${locked.situacao}).`,
     );
+  }
 
-    await logAudit(tx, {
-      tabela: "entregas_venda",
-      operacao: "UPDATE",
-      registro_id: entregaId,
-      usuario_id: usuarioId,
-      dados_antes: { situacao: "solicitada" },
-      dados_depois: { situacao: "pendente", liberada_por: usuarioId },
-    });
+  await tx`
+    UPDATE alissonerp.entregas_venda
+    SET
+      situacao = 'pendente',
+      liberada_por = ${usuarioId}::uuid,
+      liberada_em = now(),
+      updated_at = now()
+    WHERE id = ${entregaId}
+  `;
+
+  await lancarSaldoFreteAvulsoNoTx(
+    tx,
+    entregaId,
+    money(locked.frete_cobrado),
+    money(locked.frete_motoboy),
+    usuarioId,
+  );
+
+  await logAudit(tx, {
+    tabela: "entregas_venda",
+    operacao: "UPDATE",
+    registro_id: entregaId,
+    usuario_id: usuarioId,
+    dados_antes: { situacao: "solicitada" },
+    dados_depois: { situacao: "pendente", liberada_por: usuarioId },
   });
 }
 
 /**
- * Recusa um frete avulso SOLICITADO pela consultora ('solicitada' -> 'cancelada').
+ * Libera um frete avulso SOLICITADO pela consultora ('solicitada' -> 'pendente').
+ *
+ * Casca fina: abre a própria transação e delega para `liberarFreteAvulsoNoTx`
+ * (mesma lógica, sem duplicação — ver comentário lá para a regra de negócio
+ * completa). Usar esta função só quando NÃO houver uma transação em andamento
+ * para participar; o dispatcher de aprovação usa a variante NoTx diretamente.
+ */
+export async function liberarFreteAvulso(entregaId: number, usuarioId: string): Promise<void> {
+  await sql.begin(async (tx: DbSql) => {
+    await liberarFreteAvulsoNoTx(tx, entregaId, usuarioId);
+  });
+}
+
+/**
+ * Recusa um frete avulso SOLICITADO pela consultora ('solicitada' -> 'cancelada')
+ * — variante que RECEBE a transação de fora (`tx`). Ver comentário de
+ * `liberarFreteAvulsoNoTx` acima para o porquê desta variante existir
+ * (atomicidade com o dispatcher de aprovação, BLOCO 1 jul/2026).
  *
  * REGRA DE NEGÓCIO: exige motivo (rastreabilidade — a consultora precisa saber
  * por que o responsável recusou para poder corrigir e refazer o pedido).
@@ -2700,7 +2727,8 @@ export async function liberarFreteAvulso(entregaId: number, usuarioId: string): 
  * IMPACTO SE ALTERADO: sem o motivo obrigatório, a recusa vira uma caixa preta
  * para a consultora.
  */
-export async function recusarFreteAvulso(
+export async function recusarFreteAvulsoNoTx(
+  tx: DbSql,
   entregaId: number,
   usuarioId: string,
   motivo: string,
@@ -2710,7 +2738,7 @@ export async function recusarFreteAvulso(
     throw new Error("Motivo da recusa é obrigatório.");
   }
 
-  const [entrega] = await sql`
+  const [entrega] = await tx`
     SELECT id, situacao, codigo_entrega, is_avulso
     FROM alissonerp.entregas_venda
     WHERE id = ${entregaId}
@@ -2727,27 +2755,42 @@ export async function recusarFreteAvulso(
     );
   }
 
-  await sql.begin(async (tx: DbSql) => {
-    // SEM lançamento de saldo: recusa nunca toca saldo_frete_gratis (comentário
-    // acima explica o porquê). WHERE situacao='solicitada' de novo aqui evita
-    // recusar uma solicitação que já foi liberada/recusada em corrida.
-    await tx`
-      UPDATE alissonerp.entregas_venda
-      SET
-        situacao = 'cancelada',
-        motivo_recusa = ${motivoLimpo},
-        updated_at = now()
-      WHERE id = ${entregaId} AND situacao = 'solicitada'
-    `;
+  // SEM lançamento de saldo: recusa nunca toca saldo_frete_gratis (comentário
+  // acima explica o porquê). WHERE situacao='solicitada' de novo aqui evita
+  // recusar uma solicitação que já foi liberada/recusada em corrida.
+  await tx`
+    UPDATE alissonerp.entregas_venda
+    SET
+      situacao = 'cancelada',
+      motivo_recusa = ${motivoLimpo},
+      updated_at = now()
+    WHERE id = ${entregaId} AND situacao = 'solicitada'
+  `;
 
-    await logAudit(tx, {
-      tabela: "entregas_venda",
-      operacao: "UPDATE",
-      registro_id: entregaId,
-      usuario_id: usuarioId,
-      dados_antes: { situacao: "solicitada" },
-      dados_depois: { situacao: "cancelada", motivo_recusa: motivoLimpo },
-    });
+  await logAudit(tx, {
+    tabela: "entregas_venda",
+    operacao: "UPDATE",
+    registro_id: entregaId,
+    usuario_id: usuarioId,
+    dados_antes: { situacao: "solicitada" },
+    dados_depois: { situacao: "cancelada", motivo_recusa: motivoLimpo },
+  });
+}
+
+/**
+ * Recusa um frete avulso SOLICITADO pela consultora ('solicitada' -> 'cancelada').
+ *
+ * Casca fina: abre a própria transação e delega para `recusarFreteAvulsoNoTx`
+ * (mesma lógica, sem duplicação). Usar só fora de uma transação existente; o
+ * dispatcher de aprovação usa a variante NoTx diretamente.
+ */
+export async function recusarFreteAvulso(
+  entregaId: number,
+  usuarioId: string,
+  motivo: string,
+): Promise<void> {
+  await sql.begin(async (tx: DbSql) => {
+    await recusarFreteAvulsoNoTx(tx, entregaId, usuarioId, motivo);
   });
 }
 

@@ -324,7 +324,24 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
       onUpdated({ id: tarefa.id, status: novoStatus });
       carregarAprovacoes();
       setMotivoRejeicao("");
-    } catch { /* silencioso */ }
+    } catch (e) {
+      // REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — erro visível pro aprovador):
+      // O QUE: mostra a mensagem real do backend (ex.: 409 "esta aprovação já
+      //   foi respondida", ou o erro da ação de domínio que fez a transação
+      //   reverter) via useErrorStore. NÃO chama onUpdated/carregarAprovacoes/
+      //   limpa motivo — o estado no banco NÃO MUDOU (rollback), então o card
+      //   tem que continuar mostrando a aprovação como estava.
+      // POR QUÊ: este catch era silencioso — o aprovador via o spinner parar
+      //   e o card voltar a "Pendente" como se nada tivesse acontecido, sem
+      //   saber que a decisão dele não foi gravada.
+      // IMPACTO SE REMOVIDO: volta o erro mudo; aprovador acha que é bug de
+      //   tela e clica de novo, quando o backend já recusou (409) ou falhou
+      //   de verdade.
+      useErrorStore.getState().push(
+        e instanceof Error ? e.message : "Erro ao registrar a decisão da aprovação.",
+        { level: "critical" },
+      );
+    }
     setRespondendoAprovacao(null);
   }
 

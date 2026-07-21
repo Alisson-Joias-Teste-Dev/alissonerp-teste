@@ -25,8 +25,40 @@ import { zodError } from "@/lib/schemas/common";
 import { processarAprovacaoQuebraLimpeza } from "@/lib/limpeza-ouro-aprovacao";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } from "@/lib/entrega-sem-pagamento";
-import { liberarFreteAvulso, recusarFreteAvulso } from "@/lib/entrega-venda";
+import { liberarFreteAvulsoNoTx, recusarFreteAvulsoNoTx } from "@/lib/entrega-venda";
 import { podeDecidir, eventoDaTarefa } from "@/lib/aprovacoes";
+
+/**
+ * REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — guard de idempotência): sinaliza que o
+ * UPDATE de aprovacoes_tarefa não afetou nenhuma linha porque status já não é
+ * mais 'pendente' — outra decisão já rodou (reenvio do mesmo PATCH, ou 2º
+ * aprovador concorrente decidindo ao mesmo tempo). Vira 409 pro cliente;
+ * NUNCA reprocessa a decisão nem os efeitos colaterais dela.
+ * IMPACTO SE REMOVIDO: reenviar o PATCH (ex.: duplo-clique, retry de rede)
+ * re-executa a decisão inteira — no frete avulso isso lançaria o saldo da
+ * gerente em dobro.
+ */
+class AprovacaoJaRespondidaError extends Error {
+  constructor() {
+    super("Esta aprovação já foi respondida por outro aprovador.");
+    this.name = "AprovacaoJaRespondidaError";
+  }
+}
+
+/**
+ * REGRA DE NEGÓCIO: erro de domínio que precisa de um status HTTP específico
+ * (não 500) quando estourado DENTRO da transação do dispatcher — ex.: entrega
+ * de frete avulso não encontrada para a tarefa (404). Sem isto, qualquer throw
+ * dentro do sql.begin cairia no catch genérico e viraria 500 via internalError.
+ */
+class ErroComStatus extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+    this.name = "ErroComStatus";
+  }
+}
 
 const AprovacaoTarefaPostSchema = z.object({
   aprovador_id: z.string().min(1, "obrigatório"),
@@ -411,6 +443,33 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
+  // REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — frete avulso, pré-checagens ANTES de
+  // qualquer escrita): motivo obrigatório na recusa e a checagem de
+  // autoridade config-first ESPECÍFICA do evento (frete_avulso /
+  // frete_avulso_loja, conforme `evento` acima) rodam aqui, antes do
+  // sql.begin — nenhuma escrita acontece se falharem.
+  // POR QUÊ: antes desta correção, essas duas checagens só existiam DEPOIS da
+  // transação genérica já ter gravado a tarefa como aprovada/rejeitada (o
+  // bloco ficava lá embaixo, igual aos outros ~11 tipos) — um 403/400 aqui
+  // devolvia erro pro aprovador com a tarefa JÁ decidida no banco.
+  // ESCOPO: só frete_avulso. Os demais ~11 tipos continuam com suas checagens
+  // de autoridade específicas DEPOIS da transação genérica, sem mudança —
+  // generalizar este padrão é candidata a PR próprio (ver comentário maior
+  // mais abaixo, dentro da transação).
+  // IMPACTO SE REMOVIDO: volta o 403/400 com a tarefa já decidida no banco.
+  if (tarefaInfo?.tipo === "frete_avulso") {
+    const decFreteAvulsoPreCheck = await podeDecidir(
+      { id: user.id, role: usuarioLogado?.role ?? null },
+      evento ?? "frete_avulso",
+    );
+    if (!decFreteAvulsoPreCheck.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
+    if (body.decisao === "rejeitado" && !body.motivo?.trim()) {
+      return NextResponse.json({ error: "Motivo é obrigatório para recusar o frete avulso" }, { status: 400 });
+    }
+  }
+
   // REGRA DE NEGÓCIO (BUG 2, item c — cinto e suspensório): as 2 escritas
   // genéricas (status da aprovação + status da tarefa) e o registro de
   // histórico rodam na MESMA transação. O portão acima (BUG 1) já autoriza
@@ -426,23 +485,107 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // travada) é idêntico.
   // IMPACTO SE REMOVIDO: volta o risco de tarefa órfã (aprovada/rejeitada sem
   // o negócio ter rodado) se o mapa de eventos errar um caso.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await sql.begin(async (tx: any) => {
-    await tx`
-      UPDATE alissonerp.aprovacoes_tarefa
-      SET status = ${body.decisao}, motivo = ${body.motivo ?? null}, respondido_em = now()
-      WHERE id = ${body.aprovacao_id}
-    `;
+  //
+  // REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — guard de idempotência): o UPDATE
+  // abaixo ganhou `AND status = 'pendente'`. Escolhido em vez de filtrar no
+  // SELECT (linha ~361, `SELECT * FROM aprovacoes_tarefa WHERE id = ...`)
+  // porque um guard só no SELECT tem janela de corrida clássica (TOCTOU):
+  // duas requisições concorrentes podem ambas LER status='pendente' antes de
+  // qualquer uma ESCREVER — as duas passariam. O UPDATE com WHERE
+  // status='pendente' é atômico (mesmo padrão de src/lib/entrega-venda.ts
+  // ~L2807, `res.count` = linhas afetadas, driver postgres.js): só uma das
+  // duas requisições concorrentes afeta 1 linha; a outra afeta 0 e recebe 409.
+  // IMPACTO SE REMOVIDO: reenviar o PATCH (duplo-clique, retry, 2 aprovadores
+  // simultâneos) reprocessa a decisão e os efeitos colaterais dela.
+  //
+  // REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — ação de domínio do frete avulso
+  // DENTRO da transação, ESCOPO RESTRITO a este tipo): liberar/recusar a
+  // corrida (liberarFreteAvulsoNoTx/recusarFreteAvulsoNoTx, em
+  // src/lib/entrega-venda.ts) agora roda AQUI DENTRO, recebendo este mesmo
+  // `tx` — não abrem sql.begin próprio (postgres.js não erra num begin
+  // aninhado, mas pega OUTRA conexão do pool e vira uma transação separada,
+  // sem atomicidade nenhuma com esta). Se a ação de domínio lançar, a
+  // transação INTEIRA reverte: aprovacoes_tarefa volta a 'pendente' e tarefas
+  // volta a 'aguardando_aprovacao' — nunca fica "aprovada" com a entrega ainda
+  // 'solicitada' (estado hoje invisível, nenhuma tela lista entregas
+  // is_avulso='solicitada').
+  // OUTROS ~11 TIPOS (desconto, cartão, crédito, metal, devolução, inventário,
+  // compra_comercial...) NÃO FORAM TOCADOS — continuam com a ação de domínio
+  // FORA desta transação, mais abaixo neste arquivo, exatamente como estavam
+  // em produção. Generalizar este padrão para os demais tipos é candidata a
+  // PR PRÓPRIO — não faz parte deste fix (escopo combinado: só frete avulso).
+  let entregaFreteIdDecidida: number | null = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await sql.begin(async (tx: any) => {
+      const resUpdateAprovacao = await tx`
+        UPDATE alissonerp.aprovacoes_tarefa
+        SET status = ${body.decisao}, motivo = ${body.motivo ?? null}, respondido_em = now()
+        WHERE id = ${body.aprovacao_id} AND status = 'pendente'
+      `;
+      if (resUpdateAprovacao.count === 0) {
+        throw new AprovacaoJaRespondidaError();
+      }
 
-    const novoStatus = body.decisao === "aprovado" ? "aprovada" : "rejeitada";
-    await tx`
-      UPDATE alissonerp.tarefas SET status = ${novoStatus}, updated_at = now()
-      ${body.decisao === "aprovado" ? tx`, concluida_em = now()` : tx``}
-      WHERE id = ${Number(id)}
-    `;
+      const novoStatus = body.decisao === "aprovado" ? "aprovada" : "rejeitada";
+      await tx`
+        UPDATE alissonerp.tarefas SET status = ${novoStatus}, updated_at = now()
+        ${body.decisao === "aprovado" ? tx`, concluida_em = now()` : tx``}
+        WHERE id = ${Number(id)}
+      `;
 
-    await processarDecisao(Number(id), body.decisao, user.id, body.motivo, tx);
-  });
+      await processarDecisao(Number(id), body.decisao, user.id, body.motivo, tx);
+
+      if (tarefaInfo?.tipo === "frete_avulso") {
+        const [entregaFrete] = await tx`
+          SELECT id FROM alissonerp.entregas_venda WHERE tarefa_aprovacao_id = ${Number(id)} LIMIT 1
+        `;
+        if (!entregaFrete) {
+          throw new ErroComStatus("Entrega de frete avulso não encontrada para esta tarefa", 404);
+        }
+        entregaFreteIdDecidida = Number(entregaFrete.id);
+        if (body.decisao === "aprovado") {
+          await liberarFreteAvulsoNoTx(tx, entregaFreteIdDecidida, user.id);
+        } else {
+          // body.motivo já validado (não-vazio) na pré-checagem acima, quando
+          // tipo === "frete_avulso" e decisao === "rejeitado".
+          await recusarFreteAvulsoNoTx(tx, entregaFreteIdDecidida, user.id, body.motivo!);
+        }
+      }
+    });
+  } catch (err) {
+    if (err instanceof AprovacaoJaRespondidaError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    if (err instanceof ErroComStatus) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    return internalError(`[PATCH /api/tarefas/${id}/aprovacao]`, err);
+  }
+
+  // REGRA DE NEGÓCIO (BLOCO 1): resposta + notificação do frete avulso saem
+  // DAQUI agora (a transação acima já fez tudo que precisa ser atômico — ação
+  // de domínio inclusa). A notificação fica FORA da transação de propósito
+  // (não-crítica: se falhar, não deve reverter uma decisão que já é válida —
+  // mesmo padrão .catch(() => {}) usado nos demais blocos deste arquivo).
+  if (tarefaInfo?.tipo === "frete_avulso" && entregaFreteIdDecidida !== null) {
+    await criarNotificacao({
+      usuarioId: String(aprovacao.solicitante_id),
+      tipo: "aprovacao",
+      titulo: body.decisao === "aprovado" ? "Frete avulso liberado" : "Frete avulso recusado",
+      mensagem: body.decisao === "aprovado"
+        ? "O frete avulso foi liberado e entrou no pool de motoboys."
+        : (body.motivo ?? "O frete avulso foi recusado."),
+      remetenteId: user.id,
+      link: tarefaInfo?.venda_id ? `/vendas/${tarefaInfo.venda_id}` : `/tarefas?abrir=${Number(id)}`,
+      vendaId: tarefaInfo?.venda_id ? Number(tarefaInfo.venda_id) : null,
+    }).catch(() => {});
+
+    return NextResponse.json({
+      ok: true,
+      frete_avulso: { entrega_id: entregaFreteIdDecidida, decisao: body.decisao },
+    });
+  }
 
   /**
    * REGRA DE NEGOCIO: Automacao de Estoque 2.0.
@@ -865,82 +1008,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  /**
-   * REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — migrado pra camada
-   * central de aprovações no merge com a main, 20/07): solicitação de frete
-   * avulso feita pela consultora vira tarefa (ver criarFreteAvulso em
-   * src/lib/entrega-venda.ts). Decidida pela camada config-first (evento
-   * "frete_avulso", chave `aprovadores_frete_avulso` — ver
-   * src/lib/aprovacoes/catalogo.ts), igual a compra_comercial/recebimento_metal
-   * acima — não mais pelo pool na unha (isPoolFreteAvulso/
-   * listarAprovadoresFreteAvulso) que esta branch tinha antes do merge. Ao
-   * APROVAR, libera a corrida (lança o saldo da gerente); ao REJEITAR, recusa
-   * (exige motivo). Reuso puro — as libs liberarFreteAvulso/recusarFreteAvulso
-   * já fazem saldo/FOR UPDATE/motivo; este bloco só autoriza, localiza a
-   * entrega pela tarefa e delega.
-   * IMPACTO SE ALTERADO: duplicar a lógica aqui arrisca lançar saldo em dobro
-   * ou divergir do que a lib já garante com FOR UPDATE.
-   *
-   * REGRA "QUEM PAGA" (migration 354, 21/07): `evento` (já resolvido acima por
-   * eventoDaTarefa, linha ~404) é 'frete_avulso' OU 'frete_avulso_loja' —
-   * conforme a tag `frete_pagante:loja` da tarefa. NÃO hardcodear
-   * "frete_avulso" aqui de novo: quem está só na lista nova (loja) tomaria 403
-   * mesmo já autorizado pelo portão genérico acima, porque esta 2ª checagem
-   * consultaria a chave errada (cliente) para uma tarefa de custo da loja.
-   */
-  if (tarefaInfo?.tipo === "frete_avulso") {
-    const decFreteAvulso = await podeDecidir(
-      { id: user.id, role: usuarioLogado?.role ?? null },
-      evento ?? "frete_avulso",
-    );
-    if (!decFreteAvulso.pode) {
-      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
-    }
-    try {
-      const [entregaFrete] = await sql`
-        SELECT id FROM alissonerp.entregas_venda WHERE tarefa_aprovacao_id = ${Number(id)} LIMIT 1
-      `;
-      if (!entregaFrete) {
-        return NextResponse.json(
-          { error: "Entrega de frete avulso não encontrada para esta tarefa" }, { status: 404 },
-        );
-      }
-      if (body.decisao === "aprovado") {
-        await liberarFreteAvulso(Number(entregaFrete.id), user.id);
-      } else {
-        if (!body.motivo?.trim()) {
-          return NextResponse.json({ error: "Motivo é obrigatório para recusar o frete avulso" }, { status: 400 });
-        }
-        await recusarFreteAvulso(Number(entregaFrete.id), user.id, body.motivo);
-      }
-
-      // REGRA DE NEGÓCIO (V3): a consultora que solicitou precisa saber o
-      // resultado sem precisar abrir o módulo de Tarefas — espelha o mesmo
-      // padrão de notificação usado nos blocos cartao_desconto/desconto_acima
-      // acima (aprovacao.solicitante_id = quem pediu, já carregado no SELECT
-      // de aprovacao_tarefa no início do PATCH).
-      // IMPACTO SE REMOVIDO: a consultora só saberia da decisão entrando na
-      // tela de Tarefas — sem alarme nem confirmação.
-      await criarNotificacao({
-        usuarioId: String(aprovacao.solicitante_id),
-        tipo: "aprovacao",
-        titulo: body.decisao === "aprovado" ? "Frete avulso liberado" : "Frete avulso recusado",
-        mensagem: body.decisao === "aprovado"
-          ? "O frete avulso foi liberado e entrou no pool de motoboys."
-          : (body.motivo ?? "O frete avulso foi recusado."),
-        remetenteId: user.id,
-        link: tarefaInfo?.venda_id ? `/vendas/${tarefaInfo.venda_id}` : `/tarefas?abrir=${Number(id)}`,
-        vendaId: tarefaInfo?.venda_id ? Number(tarefaInfo.venda_id) : null,
-      }).catch(() => {});
-
-      return NextResponse.json({
-        ok: true,
-        frete_avulso: { entrega_id: Number(entregaFrete.id), decisao: body.decisao },
-      });
-    } catch (err) {
-      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] frete_avulso`, err);
-    }
-  }
+  // REGRA DE NEGÓCIO (BLOCO 1, jul/2026): o bloco frete_avulso que existia
+  // aqui (autorização config-first + liberar/recusar + notificação + return)
+  // foi MOVIDO para dentro/logo após a transação genérica acima (comentário
+  // "ação de domínio do frete avulso DENTRO da transação"), para rodar
+  // atomicamente com a decisão da tarefa. Este ponto do código nunca é
+  // alcançado por uma tarefa tipo='frete_avulso' (já retornou lá em cima) —
+  // não duplicar o bloco aqui de novo.
 
   await criarNotificacao({
     usuarioId: String(aprovacao.solicitante_id),
