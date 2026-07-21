@@ -106,6 +106,10 @@ interface EntregaDetalhe {
   cliente_celular: string | null;
   cliente_telefone: string | null;
   vendedor_id: number | null;
+  // BLOCO 4 (jul/2026), P1: já vem RESOLVIDO pelo backend — endereço da
+  // ENTREGA (confirmado na solicitação) se ela tiver algum campo próprio
+  // preenchido, senão o da VENDA. Ver resolverEnderecoEntrega,
+  // src/lib/entrega-venda.ts, e o GET /api/entregas-venda/[id].
   endereco_entrega: string | null;
   endereco_entrega_numero: string | null;
   endereco_entrega_complemento: string | null;
@@ -658,8 +662,15 @@ export default function EntregaDetalheDrawer({
             </div>
 
             {/* ── Endereço de Entrega (apenas motoboy) ─────────────────────── */}
-            {/* REGRA DE NEGÓCIO: endereço de entrega é crítico para o motoboy.
-                A venda pode ter um endereço diferente do cadastro do cliente.
+            {/* REGRA DE NEGÓCIO (BLOCO 4, jul/2026, P1): endereço de entrega é
+                crítico para o motoboy. Os campos `detalhe.endereco_entrega*`
+                abaixo já vêm RESOLVIDOS pelo backend (GET /api/entregas-venda/[id]
+                → resolverEnderecoEntrega, src/lib/entrega-venda.ts): é o
+                endereço CONFIRMADO na solicitação de frete avulso quando a
+                entrega tem QUALQUER campo próprio preenchido (nunca mistura
+                com o da venda); senão, o da VENDA (entrega normal/não-avulsa,
+                que nunca grava endereço próprio). O cadastro do CLIENTE é o
+                fallback final, só quando nem entrega nem venda têm nada.
                 Exibido com destaque para o entregador não errar a rota. */}
             {detalhe.forma_entrega === "motoboy" && (
               <div style={{
@@ -677,8 +688,11 @@ export default function EntregaDetalheDrawer({
                 {(detalhe.endereco_entrega || detalhe.endereco_entrega_bairro ||
                   detalhe.cliente_endereco || detalhe.cliente_bairro) ? (
                   (() => {
-                    // REGRA DE NEGÓCIO: prioriza endereço da venda. Se vazio,
-                    // usa o cadastro do cliente como fallback.
+                    // REGRA DE NEGÓCIO (BLOCO 4, P1): `detalhe.endereco_entrega*`
+                    // já é o conjunto RESOLVIDO pelo backend (entrega confirmada
+                    // OU venda — nunca misturado campo a campo). Cadastro do
+                    // cliente é só o último fallback, quando nem entrega nem
+                    // venda têm nenhum campo preenchido.
                     const rua = detalhe.endereco_entrega || detalhe.cliente_endereco;
                     const num = detalhe.endereco_entrega_numero || detalhe.cliente_numero;
                     const comp = detalhe.endereco_entrega_complemento || detalhe.cliente_complemento;
@@ -704,8 +718,12 @@ export default function EntregaDetalheDrawer({
                     );
                   })()
                 ) : (
+                  // BLOCO 4, P1: mensagem neutra — o endereço pode faltar na
+                  // entrega, na venda (ou não haver venda, caso avulso) ou no
+                  // cadastro do cliente; "não informado na venda" era enganoso
+                  // quando o avulso nem tem venda vinculada.
                   <div style={{ fontSize: 12, color: "#9A3412" }}>
-                    Endereço não informado na venda.
+                    Endereço não informado.
                   </div>
                 )}
               </div>

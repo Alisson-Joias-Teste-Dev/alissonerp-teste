@@ -4,12 +4,13 @@ import { useState, useEffect, useCallback } from "react";
 import {
   X, Loader2, Send, ShieldCheck, Check, XCircle,
   Trash2, Calendar, User, Tag, MessageSquare, Edit3,
-  Paperclip, History, ArrowRightLeft,
+  Paperclip, History, ArrowRightLeft, AlertTriangle,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import { getPublicUrl } from "@/lib/storage-url";
 import { useErrorStore } from "@/stores/errorStore";
 import { type Tarefa, type Usuario, PRIORIDADE_BADGE, STATUS_COLS } from "./TarefasClient";
+import { precisaAlertaFreteMotoboy } from "@/lib/frete-avulso-alerta";
 
 const C = {
   esmeralda:   "#184036",
@@ -59,20 +60,28 @@ interface Anexo {
 }
 
 /**
- * REGRA DE NEGÓCIO (21/07 — decisão do Jonathan): dados de "quem paga" e do
- * comprovante do frete avulso solicitado, vindos do GET singular de tarefa
- * (join com entregas_venda por tarefa_aprovacao_id — ver src/app/api/tarefas/[id]/route.ts).
+ * REGRA DE NEGÓCIO (21/07 — decisão do Jonathan; ampliada no BLOCO 4,
+ * jul/2026, P2): dados de "quem paga", do comprovante e do VALOR do frete
+ * avulso solicitado, vindos do GET singular de tarefa (join com
+ * entregas_venda por tarefa_aprovacao_id — ver src/app/api/tarefas/[id]/route.ts).
  * O QUÊ: representa o subset de campos que o bloco de frete avulso na aba
- *   Aprovação precisa pra mostrar quem paga e (se cliente) a foto do
- *   comprovante ANTES do aprovador clicar Aprovar/Rejeitar.
+ *   Aprovação precisa pra mostrar quem paga, o valor cobrado/pago ao
+ *   motoboy e (se cliente) a foto do comprovante ANTES do aprovador clicar
+ *   Aprovar/Rejeitar.
  * POR QUÊ: sem isso o comprovante (obrigatório desde a migration 354) fica
- *   salvo mas nunca conferido por ninguém — esvazia a regra de negócio.
+ *   salvo mas nunca conferido por ninguém — esvazia a regra de negócio; e
+ *   sem o valor, uma solicitação cara chega visualmente igual a uma barata.
  * IMPACTO SE REMOVIDO: aprovador volta a decidir "às cegas" sobre quem
- *   assume o custo do frete.
+ *   assume o custo do frete e sobre o valor em si.
  */
 interface FreteAvulsoInfo {
   frete_pagante: "loja" | "cliente" | null;
   frete_comprovante_pagante_path: string | null;
+  // BLOCO 4 (jul/2026), P2 — aprovador precisa ver o VALOR antes de decidir
+  // (não só quem paga/o comprovante). Vem do mesmo GET singular, mesmo JOIN
+  // por tarefa_aprovacao_id (ver route.ts) — já convertido pra number lá.
+  frete_cobrado: number | null;
+  frete_motoboy: number | null;
 }
 
 interface EvidenciaLimpeza {
@@ -117,6 +126,10 @@ function fmtHora(d: string | null | undefined): string {
   const date = safeDate(d);
   if (!date) return "-";
   return date.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtBRL(v: number): string {
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
 function statusLabel(acao: string): { label: string; color: string; bg: string } {
@@ -176,16 +189,20 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
 
   const carregarComentarios = useCallback(async () => {
     try {
-      // REGRA DE NEGÓCIO (21/07): este GET singular já traz frete_pagante e
-      // frete_comprovante_pagante_path (join com entregas_venda no backend) —
-      // reaproveita a MESMA chamada em vez de criar um fetch novo só pra isso.
-      // IMPACTO SE REMOVIDO: o bloco de comprovante do frete avulso não
-      // teria dado nenhum pra exibir.
+      // REGRA DE NEGÓCIO (21/07; ampliada BLOCO 4/P2): este GET singular já
+      // traz frete_pagante, frete_comprovante_pagante_path, frete_cobrado e
+      // frete_motoboy (join com entregas_venda no backend) — reaproveita a
+      // MESMA chamada em vez de criar um fetch novo só pra isso.
+      // IMPACTO SE REMOVIDO: o bloco de aprovação do frete avulso não teria
+      // dado nenhum (nem comprovante, nem valor) pra exibir.
       const data = await apiFetch<Tarefa & Partial<FreteAvulsoInfo> & { comentarios?: Comentario[] }>(`/api/tarefas/${tarefa.id}`);
       setComentarios(data.comentarios ?? []);
       setFreteInfo({
         frete_pagante: data.frete_pagante ?? null,
         frete_comprovante_pagante_path: data.frete_comprovante_pagante_path ?? null,
+        // BLOCO 4, P2 — valor cobrado/pago ao motoboy (ver comentário da interface acima)
+        frete_cobrado: data.frete_cobrado ?? null,
+        frete_motoboy: data.frete_motoboy ?? null,
       });
     } catch { /* silencioso */ }
   }, [tarefa.id]);
@@ -709,18 +726,60 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
                   decisão; tarefa antiga com pagante NULL (migration 353,
                   antes da 354) não mostra nada — não quebra a tela.
               */}
-              {tarefa.tipo === "frete_avulso" && freteInfo?.frete_pagante && (
+              {tarefa.tipo === "frete_avulso" && freteInfo &&
+                (freteInfo.frete_pagante || freteInfo.frete_cobrado != null || freteInfo.frete_motoboy != null) && (
                 <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
                   <div className="flex items-center gap-2">
                     <ShieldCheck size={16} style={{ color: C.esmeralda }} />
                     <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>Pagamento do Frete Avulso</p>
                   </div>
+
+                  {/*
+                    BLOCO 4 (jul/2026), P2 — decisão do Jonathan: aprovador vê
+                    o valor cobrado do cliente e o valor pago ao motoboy ANTES
+                    de decidir. SEM teto (nunca bloqueia); acima de
+                    LIMITE_ALERTA_FRETE_MOTOBOY o card do motoboy fica
+                    vermelho/com ícone de alerta — só aviso visual.
+                  */}
+                  {(freteInfo.frete_cobrado != null || freteInfo.frete_motoboy != null) && (() => {
+                    const alerta = precisaAlertaFreteMotoboy(freteInfo.frete_motoboy);
+                    return (
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="rounded-lg bg-white p-2 border" style={{ borderColor: C.cremeBorder }}>
+                          <p style={{ color: "#6B7280" }}>Frete cobrado</p>
+                          <p className="font-bold" style={{ color: "#111827" }}>
+                            {freteInfo.frete_cobrado != null ? fmtBRL(freteInfo.frete_cobrado) : "-"}
+                          </p>
+                        </div>
+                        <div
+                          className="rounded-lg p-2 border"
+                          style={
+                            alerta
+                              ? { borderColor: "#FCA5A5", backgroundColor: "#FEF2F2" }
+                              : { borderColor: C.cremeBorder, backgroundColor: "#fff" }
+                          }
+                        >
+                          <p style={{ color: "#6B7280" }}>Frete motoboy</p>
+                          <p
+                            className="font-bold flex items-center gap-1"
+                            style={{ color: alerta ? "#DC2626" : "#111827" }}
+                          >
+                            {alerta && <AlertTriangle size={12} />}
+                            {freteInfo.frete_motoboy != null ? fmtBRL(freteInfo.frete_motoboy) : "-"}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {freteInfo.frete_pagante && (
                   <p className="text-xs" style={{ color: "#6B7280" }}>
                     Quem paga:{" "}
                     <span className="font-semibold" style={{ color: "#1A1A1A" }}>
                       {freteInfo.frete_pagante === "cliente" ? "Cliente" : "Loja"}
                     </span>
                   </p>
+                  )}
                   {freteInfo.frete_pagante === "cliente" && (
                     freteInfo.frete_comprovante_pagante_path ? (
                       <a

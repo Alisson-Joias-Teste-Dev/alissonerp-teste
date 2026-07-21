@@ -2053,6 +2053,55 @@ export function formatarEnderecoEntregaAvulso(row: {
   return partes.length > 0 ? partes.join(", ") : null;
 }
 
+/** Conjunto de colunas estruturadas de endereço (mesmo shape em entregas_venda e vendas_erp). */
+export interface EnderecoEntregaCampos {
+  endereco_entrega: string | null;
+  endereco_entrega_numero: string | null;
+  endereco_entrega_complemento: string | null;
+  endereco_entrega_bairro: string | null;
+  endereco_entrega_cidade: string | null;
+  endereco_entrega_cep: string | null;
+  endereco_entrega_uf: string | null;
+}
+
+/** Algum campo do conjunto está preenchido (não-nulo e não-string-vazia)? */
+function enderecoTemAlgumCampo(c: EnderecoEntregaCampos): boolean {
+  return Object.values(c).some((v) => v != null && String(v).trim() !== "");
+}
+
+/**
+ * BLOCO 4 (jul/2026), P1 — decide qual dos DOIS conjuntos de endereço vale
+ * pro drawer de detalhe da entrega (GET /api/entregas-venda/[id]): o
+ * gravado em `entregas_venda` (endereço estruturado da migration 355 — o
+ * que a consultora CONFIRMOU na solicitação de frete avulso) ou o de
+ * `vendas_erp` (o cadastrado na venda em si).
+ *
+ * O QUE: se a ENTREGA tem QUALQUER campo de endereço próprio preenchido,
+ *   usa o conjunto DELA INTEIRO — nunca mistura com o da venda. Só cai
+ *   pro conjunto da VENDA quando a entrega não tem NENHUM campo de
+ *   endereço preenchido (entrega normal, não-avulsa, que nunca grava
+ *   endereço próprio — só a venda tem).
+ * POR QUE (whole-set, não COALESCE campo a campo): endereço é uma unidade
+ *   — logradouro e bairro têm que vir do MESMO lugar. Um COALESCE campo a
+ *   campo geraria endereço "Frankenstein" (ex.: logradouro da ENTREGA +
+ *   bairro da VENDA) sempre que um dos dois lados tiver só PARTE do
+ *   endereço preenchida — caso comum de solicitação com endereço mínimo
+ *   (logradouro + número + cidade, ver migration 355) vinculada a uma
+ *   venda que tem endereço completo cadastrado.
+ * IMPACTO SE ALTERADO/REMOVIDO: GET /api/entregas-venda/[id] volta a
+ *   sempre expor o endereço da VENDA (bug original do BLOCO 4) — loja e
+ *   motoboy voltam a ver endereços DIFERENTES pra frete avulso com
+ *   endereço próprio, e o caso "sem venda vinculada" volta a aparecer
+ *   como "Endereço não informado na venda" mesmo com o endereço da
+ *   entrega gravado.
+ */
+export function resolverEnderecoEntrega(
+  enderecoEntrega: EnderecoEntregaCampos,
+  enderecoVenda: EnderecoEntregaCampos,
+): EnderecoEntregaCampos {
+  return enderecoTemAlgumCampo(enderecoEntrega) ? enderecoEntrega : enderecoVenda;
+}
+
 /**
  * Parâmetros para criação de frete avulso (corrida sem venda vinculada).
  * REGRA DE NEGÓCIO: avulso não tem venda, itens ou código de verificação.

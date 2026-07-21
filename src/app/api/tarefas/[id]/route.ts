@@ -57,7 +57,15 @@ export async function GET(
         -- quem paga nem a foto do comprovante — regra do comprovante vira
         -- letra morta (arquivo salvo que ninguém confere).
         ev.pagante AS frete_pagante,
-        ev.comprovante_pagante_path AS frete_comprovante_pagante_path
+        ev.comprovante_pagante_path AS frete_comprovante_pagante_path,
+        -- BLOCO 4 (jul/2026), P2 — aprovador precisa ver o VALOR antes de
+        -- decidir, não só quem paga/a foto. Mesmo JOIN acima (por
+        -- tarefa_aprovacao_id), só mais duas colunas — sem custo extra de
+        -- query. IMPACTO SE REMOVIDO: uma solicitação de valor alto chega
+        -- visualmente idêntica a uma de R$20 — aprovador libera "no
+        -- automático" e o débito vai pro saldo da gerente sem conferência.
+        ev.frete_cobrado AS frete_cobrado,
+        ev.frete_motoboy AS frete_motoboy
       FROM alissonerp.tarefas t
       LEFT JOIN alissonerp.usuarios ur ON ur.id = t.responsavel_id
       LEFT JOIN alissonerp.usuarios uc ON uc.id = t.criado_por
@@ -128,6 +136,13 @@ export async function GET(
 
     return NextResponse.json({
       ...tarefa,
+      // BLOCO 4, P2 — NUMERIC vem como string do postgres.js; converter pra
+      // number aqui (e não deixar cru) porque o front compara o valor com a
+      // constante do aviso (LIMITE_ALERTA_FRETE_MOTOBOY,
+      // src/lib/frete-avulso-alerta.ts, consumida por TarefaDrawer.tsx) —
+      // comparação numérica precisa, não string.
+      frete_cobrado: tarefa.frete_cobrado != null ? Number(tarefa.frete_cobrado) : null,
+      frete_motoboy: tarefa.frete_motoboy != null ? Number(tarefa.frete_motoboy) : null,
       comentarios,
       pode_decidir: podeDecidirTarefa || isOwnerDaAprovacao,
     });
