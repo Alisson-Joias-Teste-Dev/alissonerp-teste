@@ -151,6 +151,107 @@ function fmBRL(v: number): string {
   return `R$ ${v.toFixed(2)}`;
 }
 
+// ─── Fotos da confirmação de entrega (migration 357) ─────────────────────────
+
+/**
+ * REGRA DE NEGÓCIO (migration 357, decisão Jonathan 21/07): "sempre que o
+ * motoboy tiver uma corrida ele pode anexar fotos antes de finalizar — não é
+ * obrigatório". Vale pra TODA entrega dele: avulsa (confirmarFreteAvulso) e
+ * de pedido (confirmarEntrega). Limite de quantidade por confirmação — mesmo
+ * valor usado no padrão já existente do projeto (solicitação de peça,
+ * migration 349) para não inventar um número novo sem motivo.
+ */
+export const MAX_FOTOS_ENTREGA = 5;
+
+/**
+ * Insere as fotos de UMA confirmação de entrega na tabela filha
+ * entregas_venda_fotos, dentro da MESMA transação que já mudou a situação da
+ * entrega (atômico — se o INSERT falhar, quem chama decide se aborta ou
+ * segue: ver o try/catch em confirmarEntrega/confirmarFreteAvulso).
+ *
+ * IMPACTO SE ALTERADO: duplicar este INSERT em vez de reusar esta função
+ * arrisca as duas rotas (confirmar e confirmar-avulso) gravarem a foto de
+ * jeitos diferentes (campos, nulos) — mesmo motivo de `inserirFotos` no
+ * módulo de Movimentação Interna (src/app/api/solicitacao-peca/[id]/route.ts).
+ */
+function inserirFotosEntrega(
+  tx: DbSql,
+  entregaId: number,
+  paths: string[],
+  usuarioId: string,
+): Promise<unknown> {
+  if (paths.length === 0) return Promise.resolve();
+  const rows = paths.map((foto_path) => ({
+    entrega_id: entregaId,
+    foto_path,
+    criado_por_id: usuarioId,
+  }));
+  return tx`INSERT INTO alissonerp.entregas_venda_fotos ${tx(rows)}`;
+}
+
+/**
+ * Devolve a lista de fotos (paths, mais antiga → mais nova) de UMA entrega,
+ * unificando as duas fontes possíveis:
+ *   - entregas_venda_fotos (migration 357): 1+ fotos, confirmações NOVAS.
+ *   - entregas_venda.foto_entrega_path (migration 287, CONGELADA): 1 foto,
+ *     confirmações ANTIGAS (antes desta migration entrar em produção).
+ *
+ * REGRA DE NEGÓCIO: helper ÚNICO de leitura — a tela de detalhe (drawer) e
+ * qualquer relatório futuro (ex.: pagamento do motoboy) chamam ESTA função em
+ * vez de reimplementar o fallback. Mesmo padrão já usado no módulo
+ * Movimentação Interna (COALESCE com array_agg + fallback pra coluna antiga,
+ * ver src/app/(dashboard)/movimentacao-interna/page.tsx).
+ *
+ * IMPACTO SE REMOVIDO (ou se cada tela reimplementar por conta própria): fotos
+ * de entregas confirmadas ANTES da migration 357 (só na coluna antiga)
+ * ficariam invisíveis nas telas que só olharem a tabela nova.
+ */
+export async function buscarFotosEntrega(entregaId: number): Promise<string[]> {
+  const rows = await sql`
+    SELECT COALESCE(
+      (SELECT array_agg(foto_path ORDER BY criado_em, id)
+       FROM alissonerp.entregas_venda_fotos WHERE entrega_id = ${entregaId}),
+      (SELECT CASE WHEN NULLIF(btrim(foto_entrega_path), '') IS NOT NULL
+              THEN ARRAY[foto_entrega_path] ELSE '{}'::text[] END
+       FROM alissonerp.entregas_venda WHERE id = ${entregaId})
+    ) AS fotos
+  `;
+  return (rows[0]?.fotos ?? []) as string[];
+}
+
+/**
+ * Faz upload de N fotos (base64) pro bucket pagamento-fotos, best-effort.
+ *
+ * REGRA DE NEGÓCIO: fotos são OPCIONAIS e NUNCA podem bloquear a finalização
+ * da entrega (decisão Jonathan) — por isso, ao contrário do comprovante
+ * obrigatório do frete avulso pago pelo cliente (criarFreteAvulso, que falha
+ * cedo/fail-fast se o Storage falhar), aqui uma falha de upload é logada e a
+ * foto problemática é apenas descartada; as demais (se houver) e a
+ * confirmação em si seguem normalmente.
+ *
+ * IMPACTO SE ALTERADO PARA FAIL-FAST: uma instabilidade do Storage passaria a
+ * derrubar a confirmação da entrega inteira por causa de um anexo opcional —
+ * o motoboy ficaria impedido de finalizar a corrida à toa.
+ */
+async function uploadFotosEntrega(
+  entregaId: number,
+  fotosBase64: string[],
+): Promise<string[]> {
+  const paths: string[] = [];
+  const timestamp = Date.now();
+  for (let i = 0; i < fotosBase64.length; i++) {
+    try {
+      const fotoPath = `entregas/${entregaId}/${timestamp}-${i}.jpg`;
+      const upload = await uploadFile("pagamento-fotos", fotoPath, fotosBase64[i], "image/jpeg");
+      if ("url" in upload) paths.push(upload.path);
+      else console.error(`[entrega-venda] Falha ao enviar foto ${i} da entrega ${entregaId}:`, upload.error);
+    } catch (err) {
+      console.error(`[entrega-venda] Erro ao enviar foto ${i} da entrega ${entregaId}:`, err);
+    }
+  }
+  return paths;
+}
+
 /**
  * Baixa no estoque comercial apenas os itens confirmados nesta entrega.
  *
@@ -1310,12 +1411,22 @@ async function tentarEnviarWhatsAppConclusao(vendaId: number): Promise<void> {
  * IMPACTO SE ALTERADO: a baixa de estoque (baixa_estoque_realizada = true)
  * é o gatilho para dedução do estoque físico. Alterar este fluxo pode
  * causar estoque inconsistente ou dupla baixa.
+ *
+ * FOTOS (migration 357 — decisão Jonathan 21/07): `fotosBase64` é OPCIONAL e
+ * aceita várias (até MAX_FOTOS_ENTREGA). ⚠️ ORDEM INVIOLÁVEL (alerta
+ * Jonathan): o código A/B é validado ANTES de qualquer coisa (guards acima,
+ * antes até de abrir a transação) — a foto NUNCA é condição pra aprovar o
+ * código, nunca antecipa nem substitui essa checagem. Só depois do código
+ * aprovado (já dentro da transação) é que as fotos são enviadas ao Storage e
+ * gravadas; se o código for inválido, a função já retornou erro bem antes —
+ * nenhum arquivo é sequer tentado. Upload é best-effort (não fail-fast): ver
+ * uploadFotosEntrega — falha de Storage não derruba a confirmação.
  */
 export async function confirmarEntrega(
   entregaId: number,
   codigo: string,
   usuarioId: string,
-  fotoBase64?: string,
+  fotosBase64?: string[],
 ): Promise<ConfirmacaoResult> {
   // Carregar entrega
   const [entrega] = await sql`
@@ -1554,20 +1665,19 @@ export async function confirmarEntrega(
     // se falhar, a confirmação continua válida sem foto.
     // POR QUE: auditoria visual de quem retirou/recebeu a mercadoria.
     // IMPACTO SE REMOVIDO: perde-se comprovação fotográfica da entrega.
-    if (fotoBase64) {
-      try {
-        const timestamp = Date.now();
-        const fotoPath = `entregas/${entregaId}/${timestamp}.jpg`;
-        const upload = await uploadFile("pagamento-fotos", fotoPath, fotoBase64, "image/jpeg");
-        if ("url" in upload) {
-          await tx`
-            UPDATE alissonerp.entregas_venda
-            SET foto_entrega_path = ${upload.path}
-            WHERE id = ${entregaId}
-          `;
+    // MULTIFOTO (migration 357): coluna foto_entrega_path fica CONGELADA (não
+    // é mais escrita — mesmo padrão da migration 349 no módulo Movimentação
+    // Interna); fotos novas vão para entregas_venda_fotos via inserirFotosEntrega.
+    // Upload best-effort (uploadFotosEntrega) — nunca lança, então uma falha
+    // de Storage não derruba a confirmação já validada por código.
+    if (fotosBase64 && fotosBase64.length > 0) {
+      const paths = await uploadFotosEntrega(entregaId, fotosBase64);
+      if (paths.length > 0) {
+        try {
+          await inserirFotosEntrega(tx, entregaId, paths, usuarioId);
+        } catch (fotoErr) {
+          console.error("[entrega-venda] Erro ao registrar fotos da entrega:", fotoErr);
         }
-      } catch (fotoErr) {
-        console.error("[entrega-venda] Erro ao salvar foto da entrega:", fotoErr);
       }
     }
 
@@ -3060,10 +3170,18 @@ export async function aceitarFreteAvulso(entregaId: number, usuarioId: string): 
  * IMPACTO SE ALTERADO: entrega confirmada entra no acerto do motoboy. Não
  * duplicar confirmação (guard situacao já tratada) e não permitir confirmar
  * uma corrida atribuída que o motoboy nunca aceitou/retirou fisicamente.
+ *
+ * FOTOS (migration 357 — decisão Jonathan 21/07): `fotosBase64` é OPCIONAL
+ * (até MAX_FOTOS_ENTREGA). Mesma regra de confirmarEntrega: os guards de
+ * estado acima (existe / é avulso / não confirmada / não cancelada / pode
+ * confirmar) já rodaram e já podem ter lançado ANTES daqui — a foto só é
+ * processada depois de toda essa validação passar, dentro da transação, e de
+ * forma best-effort (nunca bloqueia a finalização da corrida).
  */
 export async function confirmarFreteAvulso(
   entregaId: number,
   usuarioId: string,
+  fotosBase64?: string[],
 ): Promise<void> {
   const [entrega] = await sql`
     SELECT id, situacao, codigo_entrega, is_avulso, motoboy_id, created_by
@@ -3097,6 +3215,15 @@ export async function confirmarFreteAvulso(
     );
   }
 
+  // Upload best-effort ANTES de abrir a transação: como é best-effort (nunca
+  // lança — ver uploadFotosEntrega), não há risco de deixar a corrida
+  // travada por causa do Storage; e ao rodar aqui (fora do tx), os guards de
+  // estado acima já garantiram que a corrida É confirmável antes de qualquer
+  // I/O de foto.
+  const fotosPaths = fotosBase64 && fotosBase64.length > 0
+    ? await uploadFotosEntrega(entregaId, fotosBase64)
+    : [];
+
   await sql.begin(async (tx: DbSql) => {
     await tx`
       UPDATE alissonerp.entregas_venda
@@ -3107,6 +3234,14 @@ export async function confirmarFreteAvulso(
         updated_at = now()
       WHERE id = ${entregaId}
     `;
+
+    if (fotosPaths.length > 0) {
+      try {
+        await inserirFotosEntrega(tx, entregaId, fotosPaths, usuarioId);
+      } catch (fotoErr) {
+        console.error("[entrega-venda] Erro ao registrar fotos da corrida avulsa:", fotoErr);
+      }
+    }
 
     await logAudit(tx, {
       tabela: "entregas_venda",

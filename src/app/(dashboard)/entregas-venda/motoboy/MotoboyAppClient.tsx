@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
+import FinalizarAvulsoModal from "@/components/entregas/FinalizarAvulsoModal";
 import { useErrorStore } from "@/stores/errorStore";
 
 const C = {
@@ -116,11 +117,14 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
   // Drawer de detalhe
   const [selectedEntregaId, setSelectedEntregaId] = useState<number | null>(null);
 
-  // Confirmação de avulso (finalizar entrega — POST /confirmar-avulso)
-  const [confirmandoAvulso, setConfirmandoAvulso] = useState<number | null>(null);
+  // REGRA DE NEGÓCIO (migration 357): finalizar corrida avulsa abre um modal
+  // perguntando se quer anexar fotos (opcional) antes de chamar
+  // /confirmar-avulso — antes era um clique direto sem nenhuma pergunta.
+  const [finalizandoAvulsoId, setFinalizandoAvulsoId] = useState<number | null>(null);
   // REGRA DE NEGÓCIO (modelo POOL — migration 353): "Aceitar corrida" é o
   // passo novo entre a liberação (situacao='pendente') e a finalização —
-  // espelha confirmandoAvulso, mas chama /aceitar-avulso (pendente → em_rota).
+  // chama /aceitar-avulso (pendente → em_rota), antes de abrir o modal de
+  // finalização acima.
   const [aceitandoAvulso, setAceitandoAvulso] = useState<number | null>(null);
 
   // Nova corrida avulsa (registrada pelo próprio motoboy → nasce pendente p/ loja)
@@ -499,39 +503,22 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                     </div>
                   )}
 
-                  {/* Caso 3: corrida já em rota (motoboy aceitou) — finalizar
-                      a entrega (POST /confirmar-avulso: 'em_rota' -> 'confirmada'). */}
+                  {/* Caso 3: corrida já em rota (motoboy aceitou) — abre o modal
+                      que pergunta se quer anexar fotos (opcional) antes de
+                      finalizar (POST /confirmar-avulso: 'em_rota' -> 'confirmada'). */}
                   {item.is_avulso && item.situacao === "em_rota" && (
                     <div style={{ marginTop: 10 }} onClick={e => e.stopPropagation()}>
                       <button
-                        disabled={confirmandoAvulso === item.id}
-                        onClick={async () => {
-                          setConfirmandoAvulso(item.id);
-                          try {
-                            const { apiFetch } = await import("@/lib/apiFetch");
-                            await apiFetch(`/api/entregas-venda/${item.id}/confirmar-avulso`, { method: "POST" });
-                            await carregar();
-                          } catch (e) {
-                            // Pitfall §3 (CLAUDE.md): nada de alert() nativo — o resto do
-                            // sistema usa o toast global do useErrorStore.
-                            useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao confirmar");
-                          } finally {
-                            setConfirmandoAvulso(null);
-                          }
-                        }}
+                        onClick={() => setFinalizandoAvulsoId(item.id)}
                         style={{
                           width: "100%", padding: "8px 0",
                           background: C.esmeralda, color: "#fff",
                           border: "none", borderRadius: 8,
                           fontSize: 13, fontWeight: 700, cursor: "pointer",
                           display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                          opacity: confirmandoAvulso === item.id ? 0.6 : 1,
                         }}
                       >
-                        {confirmandoAvulso === item.id
-                          ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
-                          : <CheckCircle size={14} />
-                        }
+                        <CheckCircle size={14} />
                         Finalizar entrega
                       </button>
                     </div>
@@ -551,6 +538,16 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
           isOpen={selectedEntregaId !== null}
           onClose={() => { setSelectedEntregaId(null); carregar(); }}
           userRole="entregador"
+        />
+      )}
+
+      {/* ── Modal: finalizar corrida avulsa (pergunta opcional de fotos) ─────── */}
+      {finalizandoAvulsoId !== null && (
+        <FinalizarAvulsoModal
+          entregaId={finalizandoAvulsoId}
+          isOpen={finalizandoAvulsoId !== null}
+          onClose={() => setFinalizandoAvulsoId(null)}
+          onSuccess={() => { setFinalizandoAvulsoId(null); carregar(); }}
         />
       )}
 

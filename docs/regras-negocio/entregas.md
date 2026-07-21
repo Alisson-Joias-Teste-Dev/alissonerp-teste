@@ -4,7 +4,8 @@
 > Fonte de schema (colunas/tabelas) = `docs/schema/` (auto-gerado). Aqui é o **porquê** e o **como** do negócio.
 > ⚠️ Existe uma nota mais antiga e parcial sobre frete avulso registrado pelo motoboy em `docs/regras-negocio/comercial.md` §8 (PR#75). Este arquivo é o documento completo do módulo — considerar migrar/mesclar aquele trecho para cá numa limpeza futura.
 
-Última atualização: 2026-07-21 (VERBA DE FRETE GRÁTIS — Blocos 0-3, fundação: formulário ENXUTO órfão removido de `FreteAvulsoModal.tsx`; gerente do saldo passa a ser configurável (`gerente_frete_gratis`, com fallback ao comportamento antigo); migration 356 reaproveita `fechamentos_frete` (nunca usada) para o fechamento mensal — positivo ZERA, negativo vira conta a pagar (não mais desconto em folha); `src/lib/frete-verba.ts` calcula o faturamento-base a partir da MESMA consulta da dashboard comercial. Ver §10. Migration não executada). Blocos anteriores do módulo de frete avulso (mesma branch `feat/frete-avulso-solicitacao`): BLOCO 6 — reforma visual da tela `/entregas-venda`: 3 abas, filtros em select, paginação de 10, componentização, e o botão "Frete Avulso" da tela passa a usar o formulário COMPLETO — endereço/quem paga/comprovante — continuando a criar DIRETO; BLOCO 5 — estoque acompanha TODAS as entregas avulsas; quem solicita enxerga o próprio pedido, inclusive recusado; link de notificação para de ser morto; BLOCO 4 — drawer da entrega mostra o endereço CONFIRMADO na solicitação (não o da venda), aprovador vê o valor do frete antes de decidir (aviso acima de R$ 200); BLOCO 3 — validações viram INVARIANTES independentes do modo, cargos alinhados ao banco e fonte única de permissão; BLOCO 2 — autorização não-manipulável: sem auto-aprovação, pool decidido pelo dado "quem paga" e não pela tag.
+Última atualização: 2026-07-21 (MULTIFOTO na confirmação — migration 357, arquivo criado, NÃO executada: motoboy pode anexar VÁRIAS fotos, sempre OPCIONAL, ao finalizar QUALQUER corrida dele — avulsa (`confirmar-avulso`) e entrega de pedido (`confirmar`, código A/B). Tabela filha `entregas_venda_fotos` (mesmo padrão de `solicitacao_peca_fotos`, migration 349); `foto_entrega_path` (migration 287) fica CONGELADA; helper único `buscarFotosEntrega` unifica leitura antiga+nova. ⚠️ ORDEM INVIOLÁVEL: o código A/B de `confirmarEntrega` é validado ANTES de qualquer foto — fotos nunca condicionam, antecipam ou substituem essa checagem; upload é best-effort (nunca bloqueia a finalização). Ver §11).
+Atualização anterior: 2026-07-21 (VERBA DE FRETE GRÁTIS — Blocos 0-3, fundação: formulário ENXUTO órfão removido de `FreteAvulsoModal.tsx`; gerente do saldo passa a ser configurável (`gerente_frete_gratis`, com fallback ao comportamento antigo); migration 356 reaproveita `fechamentos_frete` (nunca usada) para o fechamento mensal — positivo ZERA, negativo vira conta a pagar (não mais desconto em folha); `src/lib/frete-verba.ts` calcula o faturamento-base a partir da MESMA consulta da dashboard comercial. Ver §10. Migration não executada). Blocos anteriores do módulo de frete avulso (mesma branch `feat/frete-avulso-solicitacao`): BLOCO 6 — reforma visual da tela `/entregas-venda`: 3 abas, filtros em select, paginação de 10, componentização, e o botão "Frete Avulso" da tela passa a usar o formulário COMPLETO — endereço/quem paga/comprovante — continuando a criar DIRETO; BLOCO 5 — estoque acompanha TODAS as entregas avulsas; quem solicita enxerga o próprio pedido, inclusive recusado; link de notificação para de ser morto; BLOCO 4 — drawer da entrega mostra o endereço CONFIRMADO na solicitação (não o da venda), aprovador vê o valor do frete antes de decidir (aviso acima de R$ 200); BLOCO 3 — validações viram INVARIANTES independentes do modo, cargos alinhados ao banco e fonte única de permissão; BLOCO 2 — autorização não-manipulável: sem auto-aprovação, pool decidido pelo dado "quem paga" e não pela tag.
 
 ---
 
@@ -283,3 +284,60 @@ Antes, "a gerente" do saldo de frete grátis (avulso) era escolhida por `SELECT 
 - Componente limpo (BLOCO 0): `src/components/entregas/FreteAvulsoModal.tsx` (formulário enxuto removido — ver comentário "LIMPEZA" no topo do arquivo).
 - Testes: `src/__tests__/frete-gerente-configuravel.test.ts` (BLOCO 1), `src/__tests__/frete-verba-equivalente-dashboard.test.ts` (BLOCO 3).
 - **Fora do escopo desta sessão (fundação apenas)**: fechamento automático do dia 01 (cron), config de "quem aprova o negativo", geração da tarefa/conta a pagar em si, e a busca arbitrária de `gerente_loja` ainda existente em `criarEntrega` (entrega normal — ver §10.1).
+
+---
+
+## 11. MULTIFOTO na confirmação de entrega (migration 357, 21/07)
+
+Decisão do Jonathan: *"sempre que o motoboy tiver uma corrida ele pode anexar fotos antes de finalizar — não é obrigatório"*. Vale para **toda entrega dele** — corrida avulsa (`POST /[id]/confirmar-avulso`) **e** entrega de pedido (`POST /[id]/confirmar`, código A/B). Objetivo: alimentar o relatório de pagamento do entregador (o financeiro confere a comprovação).
+
+### 11.1. Modelagem — tabela filha (mesmo padrão do projeto)
+
+A coluna existente `entregas_venda.foto_entrega_path` (migration 287) só guarda **um** caminho. Em vez de inventar um jeito novo de guardar fotos, este bloco **reusa exatamente** o padrão já validado em produção pelo módulo Movimentação Interna / Solicitação de Peça (`alissonerp.solicitacao_peca_fotos`, migration 349): tabela normalizada, **uma linha por foto**.
+
+- **Tabela nova**: `alissonerp.entregas_venda_fotos` (`id`, `entrega_id` FK → `entregas_venda` `ON DELETE CASCADE`, `foto_path`, `criado_por_id`, `criado_em`). **Sem coluna `etapa`** (diferença vs. `solicitacao_peca_fotos`): lá existem 3 momentos físicos por solicitação (entrega/recebimento/devolução); aqui existe **um único momento** por entrega (a confirmação) — coluna `etapa` seria sempre a mesma constante, sem benefício.
+- **`foto_entrega_path` fica CONGELADA** (não removida — Database Safety; não é mais escrita pelo código novo) — continua válida pra ler os registros ANTIGOS (confirmados antes desta migration).
+- **Sem cópia de dados históricos** (diferença vs. migration 349, que copiou os `foto_*` antigos pra tabela filha): o pagamento do motoboy foi acertado até 19/07 e recomeça do zero (decisão Jonathan) — não há necessidade de migrar fotos antigas pra tabela nova pra efeito de acerto financeiro. O fallback de LEITURA (abaixo) já cobre exibir fotos antigas sem duplicar o dado fisicamente.
+- **Migration criada como ARQUIVO, NÃO executada** — `supabase/migrations/357_entregas_venda_fotos.sql`. Confirmado número livre contra `main` (que tinha até `354_perda_extravio_stock_ledger.sql` — **conteúdo diferente** do `354_frete_avulso_pagante.sql` desta branch; ver §11.5 "atenção" abaixo) e contra este branch (`353`–`356` já usados aqui).
+
+### 11.2. Leitura unificada — helper único (`buscarFotosEntrega`)
+
+`buscarFotosEntrega(entregaId)` (`src/lib/entrega-venda.ts`) é o **único** ponto de leitura de fotos de uma entrega — mesmo espírito do COALESCE com fallback já usado em `src/app/(dashboard)/movimentacao-interna/page.tsx`:
+
+- Se existir **qualquer** linha em `entregas_venda_fotos` para a entrega, ela manda (ordem cronológica, mais antiga → mais nova).
+- Senão, cai no fallback de `entregas_venda.foto_entrega_path` (uma foto, ou array vazio se nunca teve foto nenhuma).
+- `GET /api/entregas-venda/[id]` chama este helper e expõe `fotos_entrega: string[]` na resposta (mantendo `foto_entrega_path` no payload, sem quebrar nenhum consumidor antigo do campo).
+- **IMPACTO SE CADA TELA REIMPLEMENTAR O FALLBACK POR CONTA PRÓPRIA**: fotos de entregas confirmadas ANTES da migration 357 (só na coluna antiga) ficariam invisíveis em qualquer tela que só olhasse a tabela nova.
+
+### 11.3. Upload — best-effort, NUNCA fail-fast (diferença deliberada vs. o comprovante do frete avulso)
+
+`uploadFotosEntrega` (`src/lib/entrega-venda.ts`) faz upload de N fotos (base64) pro bucket **`pagamento-fotos`** (mesmo de `foto_entrega_path` e do comprovante do frete avulso), via `src/lib/storage.ts` (`uploadFile`) — server-side, nunca upload direto do client.
+
+- **Limite de quantidade**: `MAX_FOTOS_ENTREGA = 5` (exportado de `src/lib/entrega-venda.ts`) — mesmo valor já usado no padrão existente (`solicitacao_peca_fotos`, migration 349), sem inventar um número novo.
+- **Limite de tamanho por foto**: `LIMITS.IMAGE_BASE64_MAX` (`src/lib/payload-limits.ts`, ~3.75MB binário) — checado via `zod` no schema da rota **e** em profundidade via `checkArrayLength`/`checkBase64Length` (mesmo padrão de `src/app/api/produtos/[id]/imagens/route.ts`).
+- **Best-effort, NÃO fail-fast**: cada foto que falhar no upload é descartada (logada, sem lançar) — o `criarFreteAvulso` faz upload do comprovante **fail-fast** (lança se o Storage falhar) porque ali o comprovante é OBRIGATÓRIO quando `pagante='cliente'`; aqui a foto é **sempre opcional** (decisão Jonathan) — fail-fast trocaria uma instabilidade do Storage por uma finalização de corrida bloqueada à toa, o que violaria a própria regra de negócio ("nunca bloquear a finalização por falta de foto"). Esta é uma decisão deliberada, registrada aqui para não ser "corrigida" de volta ao padrão fail-fast numa limpeza futura sem reler este parágrafo.
+
+### 11.4. Ordem inviolável em `confirmarEntrega` (entrega de PEDIDO — código A/B)
+
+⚠️ Alerta explícito do Jonathan: a validação do código de verificação (`codigo_cliente`/`codigo_motoboy`, contador `tentativas_codigo`, migration 285/295) é o controle que garante que a peça foi entregue à pessoa certa — **NUNCA** pode ser alterada, antecipada ou substituída pela foto.
+
+- Em `confirmarEntrega`, TODOS os guards de código (entrega existe, não cancelada/já confirmada, não bloqueada por tentativas, código bate contra `codigo_cliente`/`codigo_motoboy`, senão incrementa `tentativas_codigo` e rejeita) rodam **antes** de `sql.begin` — ou seja, antes de qualquer processamento de foto. Um código inválido rejeita exatamente como sempre rejeitou (mesma mensagem, mesmo contador) e a função retorna **sem sequer tentar** nenhum upload.
+- Só depois do código aprovado (já dentro da transação) é que `fotosBase64` é processado — best-effort, nunca lança, nunca condiciona a confirmação.
+- **Teste anti-volta que prova a ordem**: `src/__tests__/entrega-fotos-multiplas.test.ts` — código inválido + fotos fornecidas → rejeita como sempre, `uploadFile` **nunca** chamado e `sql.begin` **nunca** aberto.
+
+### 11.5. Front — pergunta opcional ao finalizar (nunca trava)
+
+- **`ConfirmarEntregaModal.tsx`** (confirmação COM código — entrega de pedido): o botão "Anexar foto" (já existia, uma foto só) virou multi-seleção (`input[multiple]`, até `MAX_FOTOS`), com preview em grade e remoção individual. A ordem de validação do código no front **não mudou** — só o corpo enviado passou de `foto_base64` (string) para `fotos_base64` (array).
+- **`FinalizarAvulsoModal.tsx`** (NOVO — confirmação SEM código, corrida avulsa): antes, o botão "Finalizar entrega" chamava `POST /confirmar-avulso` direto, sem nenhuma pergunta. Agora abre este modal perguntando *"Quer anexar um comprovante (foto)? É opcional"* — pular é **1 clique** (o botão principal funciona igual com ou sem foto anexada) e o clique fica desabilitado durante o envio (trava duplo clique). Reusado nos dois pontos onde existia o botão direto: `MotoboyAppClient.tsx` (lista de corridas do app) e `EntregaDetalheDrawer.tsx` ("Confirmar Corrida Avulsa").
+- **`src/lib/fotos-base64.ts`** (NOVO, client-safe): `lerArquivosComoBase64` — extraído pra não duplicar a leitura de múltiplos arquivos (FileReader + Promise.all) entre os dois modais acima.
+- **Exibição**: `EntregaDetalheDrawer.tsx` mostra a galeria de `fotos_entrega` (grade de miniaturas, clique abre em nova aba) via `getPublicUrl("pagamento-fotos", path)` (`src/lib/storage-url.ts`) — proxy autenticado, sem gerar signed URL nova.
+- **⚠️ Atenção separada (não é sobre fotos)**: ao pesquisar o número livre da migration, esta branch (`353`–`356`) diverge de `main` a partir da 354 — `main` tem `354_perda_extravio_stock_ledger.sql` (conteúdo diferente do `354_frete_avulso_pagante.sql` local). É uma colisão de numeração PRÉ-EXISTENTE nesta branch (não introduzida por este bloco) que precisa de renumeração/rebase antes do merge para `main` — reportado ao Jonathan, não resolvido aqui (fora do escopo combinado desta tarefa).
+
+### 11.6. Referência (§11)
+
+- Migration: `supabase/migrations/357_entregas_venda_fotos.sql` (arquivo criado, **NÃO executada**).
+- Lib: `src/lib/entrega-venda.ts` (`MAX_FOTOS_ENTREGA`, `buscarFotosEntrega`, `uploadFotosEntrega`, `inserirFotosEntrega` — privada; `confirmarEntrega`/`confirmarFreteAvulso` estendidos com `fotosBase64?: string[]`).
+- Util front: `src/lib/fotos-base64.ts` (`lerArquivosComoBase64`).
+- Rotas: `src/app/api/entregas-venda/[id]/confirmar/route.ts` (`fotos_base64` no body, código intocado), `src/app/api/entregas-venda/[id]/confirmar-avulso/route.ts` (passou a ler o body — antes ignorava), `src/app/api/entregas-venda/[id]/route.ts` (expõe `fotos_entrega`).
+- Front: `src/components/entregas/ConfirmarEntregaModal.tsx` (multifoto), `src/components/entregas/FinalizarAvulsoModal.tsx` (NOVO), `src/app/(dashboard)/entregas-venda/motoboy/MotoboyAppClient.tsx`, `src/components/entregas/EntregaDetalheDrawer.tsx` (galeria + modal de finalizar avulso).
+- Testes: `src/__tests__/entrega-fotos-multiplas.test.ts` (sem foto / N fotos / ordem código-antes-de-foto / helper de leitura); `src/__tests__/entrega-detalhe-endereco-resolvido.test.ts` ajustado (nova query de fotos no mock do GET, sem mudança de comportamento testado).

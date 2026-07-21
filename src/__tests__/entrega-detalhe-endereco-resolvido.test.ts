@@ -201,7 +201,8 @@ function setupQueries(linha: Record<string, unknown>) {
     .mockResolvedValueOnce([linha])                                // Query 1 — cabeçalho
     .mockResolvedValueOnce([])                                     // Query 2 — itens
     .mockResolvedValueOnce([{ total: 0 }])                         // Query 3 — count
-    .mockResolvedValueOnce([{ total: 0 }]);                        // Query 4 — na_entrega_pendente
+    .mockResolvedValueOnce([{ total: 0 }])                         // Query 4 — na_entrega_pendente
+    .mockResolvedValueOnce([{ fotos: [] }]);                       // Query 5 (mig 357) — buscarFotosEntrega
 }
 
 describe("GET /api/entregas-venda/[id] — endereço resolvido (P1)", () => {

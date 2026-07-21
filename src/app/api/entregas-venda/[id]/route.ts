@@ -20,7 +20,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { resolverEnderecoEntrega } from "@/lib/entrega-venda";
+import { resolverEnderecoEntrega, buscarFotosEntrega } from "@/lib/entrega-venda";
 
 const ROLES_ENTREGAS = ["desenvolvedor", "admin", "gerente_loja", "consultora", "entregador"];
 
@@ -48,7 +48,7 @@ export async function GET(
   // Três queries em paralelo para montar o detalhe completo da entrega
   // REGRA DE NEGÓCIO: queries separadas permitem exibição progressiva
   // no frontend (cabeçalho primeiro, itens depois).
-  const [entrega, itens, countRow, naEntregaRow] = await Promise.all([
+  const [entrega, itens, countRow, naEntregaRow, fotosEntrega] = await Promise.all([
     // Query 1 — Cabeçalho da entrega com venda, motoboy e usuários
     // JOIN com vendas_erp para dados comerciais (número, total, situação, cliente)
     // JOIN com motoboys para nome/telefone do entregador
@@ -172,6 +172,10 @@ export async function GET(
       JOIN alissonerp.entregas_venda ev ON ev.venda_id = p.venda_id
       WHERE ev.id = ${entregaId} AND p.forma = 'Na Entrega' AND p.status = 'pendente'
     `,
+    // Query 5 — Fotos da confirmação (migration 357): helper único que
+    // unifica a tabela nova (entregas_venda_fotos) com o fallback pra coluna
+    // antiga (foto_entrega_path) de entregas confirmadas antes da migration.
+    buscarFotosEntrega(entregaId),
   ]);
 
   if (!entrega[0]) {
@@ -258,6 +262,9 @@ export async function GET(
     created_at: e.created_at,
     updated_at: e.updated_at,
     foto_entrega_path: e.foto_entrega_path ?? null,
+    // MULTIFOTO (migration 357): lista já unificada (nova tabela + fallback
+    // pra coluna antiga) — ver buscarFotosEntrega em src/lib/entrega-venda.ts.
+    fotos_entrega: fotosEntrega,
     is_avulso: Boolean(e.is_avulso),
     descricao_avulso: e.descricao_avulso ?? null,
     auto_criado: Boolean(e.auto_criado),
