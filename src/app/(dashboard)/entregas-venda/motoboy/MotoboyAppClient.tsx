@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
+import { useErrorStore } from "@/stores/errorStore";
 
 const C = {
   esmeralda: "#184036",
@@ -455,7 +456,9 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                             await apiFetch(`/api/entregas-venda/${item.id}/aceitar-avulso`, { method: "POST" });
                             await carregar();
                           } catch (e) {
-                            alert(e instanceof Error ? e.message : "Erro ao aceitar corrida");
+                            // Pitfall §3 (CLAUDE.md): nada de alert() nativo — o resto do
+                            // sistema usa o toast global do useErrorStore.
+                            useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao aceitar corrida");
                           } finally {
                             setAceitandoAvulso(null);
                           }
@@ -491,7 +494,9 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                             await apiFetch(`/api/entregas-venda/${item.id}/confirmar-avulso`, { method: "POST" });
                             await carregar();
                           } catch (e) {
-                            alert(e instanceof Error ? e.message : "Erro ao confirmar");
+                            // Pitfall §3 (CLAUDE.md): nada de alert() nativo — o resto do
+                            // sistema usa o toast global do useErrorStore.
+                            useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao confirmar");
                           } finally {
                             setConfirmandoAvulso(null);
                           }

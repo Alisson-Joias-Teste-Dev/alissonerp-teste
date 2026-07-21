@@ -1210,6 +1210,10 @@ export default function TarefasClient() {
                           <option value="protocolo_metal">Protocolo metal</option>
                           <option value="aprovacao_quebra_metal">Aprovação quebra metal</option>
                           <option value="compra_comercial">Compra comercial</option>
+                          {/* 21/07 — faltava: a tarefa nasce com tipo 'frete_avulso'
+                              (TIPO_LABEL já tinha o rótulo, só não estava na lista
+                              deste filtro) */}
+                          <option value="frete_avulso">Frete avulso</option>
                         </select>
                       </div>
                       {(filtro || filtroPrioridade || filtroTipo) && (

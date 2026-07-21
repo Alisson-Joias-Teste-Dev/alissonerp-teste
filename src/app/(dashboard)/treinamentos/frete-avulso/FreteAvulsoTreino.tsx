@@ -1,6 +1,6 @@
 "use client";
 
-import { Bike, MapPin, DollarSign, AlignLeft, Check, XCircle, Clock, CheckCircle, Search, Plus } from "lucide-react";
+import { Bike, MapPin, DollarSign, AlignLeft, Check, XCircle, Clock, CheckCircle, Search, Plus, Store, Camera, Send, AlertTriangle } from "lucide-react";
 import TreinamentoLayout, { type ColaItem } from "@/components/treinamentos/TreinamentoLayout";
 import { type PassoTreino } from "@/components/treinamentos/TreinamentoPlayer";
 import {
@@ -12,70 +12,83 @@ import {
  * motoboy). Criado 21/07/2026 seguindo a receita de conversao-reversa /
  * movimentacao-interna (exemplos de referência).
  *
- * ATUALIZADO 21/07/2026 (fix/tarefas+treinamento): o fluxo mudou — a
- * solicitação passou a nascer TAMBÉM (e principalmente) no módulo Tarefas.
- * Os rótulos abaixo foram conferidos de novo contra o código:
+ * BLOCO 6 (21/07/2026) — reescrito do zero para o comportamento FINAL da
+ * branch feat/frete-avulso-solicitacao (após os blocos 1-5). Cada rótulo foi
+ * conferido de novo contra o código NESTA data — fonte de cada um:
  *
- * ATUALIZADO DE NOVO 21/07/2026 (commit e938410c, "feat(tarefas): botao do
- * topo vira menu (Solicitacoes + Tarefa avulsa)"): o botão solto "Frete
- * avulso" do cabeçalho virou um MENU — o botão do topo agora é "+ Nova"
- * (ícone Plus) e abre um dropdown com a seção "Solicitações" (hoje só o item
- * "Frete avulso"; lista pensada pra CRESCER sem trocar de lugar), separador,
- * e "Tarefa avulsa". No mobile é um FAB único que abre o mesmo menu.
- *   - botão "+ Nova" (ícone Plus) no cabeçalho desktop do módulo Tarefas;
- *     menu com seção "Solicitações" → item "Frete avulso" (ícone Bike,
- *     descrição "Solicitar frete fora do fluxo normal da venda", só pra
- *     `role === "consultora"`), separador, e "Tarefa avulsa" (ícone Plus);
- *     no mobile o MESMO menu abre pelo FAB único (aria-label "Nova"):
- *     `app/(dashboard)/tarefas/TarefasClient.tsx` (commit e938410c —
- *     `TIPOS_SOLICITACAO` ~L979-988, `menuNovoConteudo` ~L991-1021, botão
- *     desktop ~L1176-1192, FAB mobile ~L1537-1554)
- *   - busca de venda dentro do modal (label "Venda *", placeholder "Buscar
- *     por número da venda ou cliente...", resultado "{numero_venda} —
- *     {cliente_nome}") e mensagem de sucesso "Solicitação enviada —
- *     aguardando liberação": `components/entregas/FreteAvulsoModal.tsx`
- *     (busca ~L462-505, sucesso ~L392-401)
- *   - atalho ALTERNATIVO — botão "Solicitar frete avulso" de dentro da
- *     própria venda (Aprovado/Em Rota/Entregue), que abre o MESMO modal já
- *     com a venda escolhida (pula a busca): `app/(dashboard)/vendas/[id]/VendaDetalheClient.tsx`
- *     (`podeSolicitarFreteAvulso`, botão ~L2682-2691)
- *   - a venda NÃO mostra mais nenhum status da solicitação (os banners
- *     aguardando/liberada/recusada foram removidos — comentário no próprio
- *     `VendaDetalheClient.tsx` ~L4710-4716: "Não recarrega mais a venda ao
- *     solicitar... não há mais nada aqui que dependa desse refresh"); o
- *     acompanhamento é só em Tarefas.
+ *   - DUAS listas de aprovadores, título EXATO de cada uma ("Frete avulso
+ *     solicitado — pago pelo cliente" / "Frete avulso solicitado — custo da
+ *     loja") e suas descrições: `components/configuracoes/aprovadores/
+ *     ListaAprovadores.tsx` (chaves `aprovadores_frete_avulso` e
+ *     `aprovadores_frete_avulso_loja`, ~L205-219).
+ *   - mensagem de erro quando falta aprovador em cada lista ("Nenhum
+ *     aprovador de frete avulso configurado..." / "...(loja) configurado..."):
+ *     `lib/entrega-venda.ts` (`criarFreteAvulso`, ~L2435-2439).
+ *   - item "Frete avulso" do menu "+ Nova" visível pra QUALQUER papel que
+ *     acessa Tarefas (não só consultora — `podeVer: (_r) => true`), rótulo e
+ *     descrição ("Solicitar frete fora do fluxo normal da venda"):
+ *     `app/(dashboard)/tarefas/TarefasClient.tsx` (`TIPOS_SOLICITACAO`
+ *     ~L1028-1044, `menuNovoConteudo` ~L1052-1078).
+ *   - campo "Venda (opcional)" (sem asterisco — deixou de ser obrigatória),
+ *     hint "Se a corrida for de uma venda, busque aqui — o endereço vem
+ *     preenchido.", placeholder "Buscar por número da venda ou cliente...",
+ *     resultado "{numero_venda} — {cliente_nome}":
+ *     `components/entregas/FreteAvulsoModal.tsx` (~L651-723).
+ *   - endereço de entrega virou o formulário ESTRUTURADO (CEP, logradouro,
+ *     número, complemento, bairro, cidade, UF) com busca automática por CEP
+ *     (ViaCEP) — não é mais textarea de texto livre:
+ *     `components/endereco/EnderecoForm.tsx` (migration 355) e uso em
+ *     `FreteAvulsoModal.tsx` (~L725-741).
+ *   - bloco "Quem paga *" (botões "Loja"/"Cliente") + "Comprovante de
+ *     pagamento *" (obrigatório só quando Cliente), textos de apoio ("Cliente
+ *     pagou — anexe o comprovante abaixo...", "Custo da loja — sem
+ *     comprovante..."): `FreteAvulsoModal.tsx` (~L748-826, migration 354).
+ *   - "Descrição da corrida *", "Valor cobrado do cliente (R$) *", "Região *"
+ *     (Fortaleza R$20 / Fora de Fortaleza R$50 / Longe (negociar) / Correios),
+ *     botão "Solicitar frete avulso" e sucesso "Solicitação enviada —
+ *     aguardando liberação": `FreteAvulsoModal.tsx` (`REGIOES` ~L143-148,
+ *     rodapé ~L986-1002, sucesso ~L599).
  *   - guarda de solicitação duplicada ("Já existe uma solicitação de frete
  *     avulso aguardando decisão para esta venda."): `lib/entrega-venda.ts`
- *     (`criarFreteAvulso`, guard ~L2175-2188)
- *   - modal de solicitação (header "Solicitar Frete Avulso", campos Descrição
- *     da corrida / Endereço de entrega / Valor cobrado do cliente / Região /
- *     Observações, botão "Solicitar frete avulso"): `components/entregas/FreteAvulsoModal.tsx`
- *   - título/descrição da tarefa ("Frete avulso solicitado — venda {numero}",
- *     "Corrida {codigo} ({regiao}). Endereço: ... Obs: ..."), prioridade "alta"
- *     e o estado 'solicitada': `lib/entrega-venda.ts` (`criarFreteAvulso`)
- *   - card da tarefa agrupado por venda (título "Venda {numero}", linha por
- *     aprovação com o nome amigável do tipo — agora "Frete avulso" — e os
- *     botões ✓/✗) e o bloco genérico Aprovar/Rejeitar com o textarea "Motivo
- *     (obrigatório para rejeitar)": `app/(dashboard)/tarefas/TarefasClient.tsx`
- *     (mapa `TIPO_LABEL`, aba "aguardando" ~L1215-1399) + `TarefaDrawer.tsx`
- *     (~757 bloco de decisão)
- *   - liberação (solicitada→pendente, lança o saldo) e recusa (solicitada→cancelada,
- *     motivo obrigatório): `lib/entrega-venda.ts` (`liberarFreteAvulso`, `recusarFreteAvulso`)
- *   - os 3 casos do motoboy ("Aceitar corrida", "Finalizar entrega",
+ *     (`criarFreteAvulso`, guard ~L2175-2188 na versão anterior — mesma
+ *     mensagem mantida nesta).
+ *   - aba "Minhas solicitações" (ícone Send) dentro do painel Filtros —
+ *     mostra pra quem CRIOU a tarefa tudo que pediu, em qualquer status,
+ *     inclusive recusada: `TarefasClient.tsx` (`VIEW_OPTIONS` ~L538).
+ *   - o aprovador vê "Frete cobrado" e "Frete motoboy" (com fmtBRL) ANTES de
+ *     decidir, "Quem paga: Cliente/Loja" e o link "Ver comprovante" quando o
+ *     cliente paga; acima de R$200 (`LIMITE_ALERTA_FRETE_MOTOBOY`, `lib/
+ *     frete-avulso-alerta.ts`) o card do frete do motoboy fica vermelho com
+ *     ícone de alerta — SEM bloquear a aprovação:
+ *     `app/(dashboard)/tarefas/TarefaDrawer.tsx` (~L709-800).
+ *   - card da tarefa agrupado por venda (título "Venda {numero}", linha
+ *     "Frete avulso") e o bloco Aprovar/Rejeitar com o textarea "Motivo
+ *     (obrigatório para rejeitar)": `TarefasClient.tsx` (mapa `TIPO_LABEL`,
+ *     aba "aguardando") + `TarefaDrawer.tsx` (bloco de decisão).
+ *   - liberação (solicitada→pendente, lança o saldo) e recusa
+ *     (solicitada→cancelada, motivo obrigatório): `lib/entrega-venda.ts`
+ *     (`liberarFreteAvulso`, `recusarFreteAvulso`).
+ *   - os casos do motoboy ("Aceitar corrida", "Finalizar entrega",
  *     "Aguardando confirmação da loja") e os badges de status do card
- *     ("Pendente"/"Em Rota"/"Entregue"): `app/(dashboard)/entregas-venda/motoboy/MotoboyAppClient.tsx`
- *     (`statusBadge`, casos 1/2/3 ~L433-515)
- *   - erro do 2º motoboy que tenta aceitar depois: `app/api/entregas-venda/[id]/aceitar-avulso/route.ts`
- *     ("Esta corrida já tem outro motoboy.")
- *   - "entra no acerto do motoboy": comentário de `confirmarFreteAvulso` em `lib/entrega-venda.ts`
+ *     ("Pendente"/"Em Rota"/"Entregue"):
+ *     `app/(dashboard)/entregas-venda/motoboy/MotoboyAppClient.tsx`.
+ *   - erro do 2º motoboy que tenta aceitar depois: `app/api/entregas-venda/
+ *     [id]/aceitar-avulso/route.ts` ("Esta corrida já tem outro motoboy.").
+ *   - o estoque (`estoquista_loja`) passou a ter acesso ao módulo de menu
+ *     "Entregas" (`/entregas-venda`, ícone Truck, grupo "Logística") e vê
+ *     TODAS as entregas avulsas, sem o filtro de vendedor_id que só vale pra
+ *     consultora: `lib/auth/permissions.ts` (`ROLES_ENTREGAS_VENDA`,
+ *     `ROLE_MENUS.estoquista_loja` ~L112), `components/Sidebar.tsx`
+ *     (`ROLES_ENTREGAS_VENDA` ~L148), confirmado pelo teste
+ *     `src/__tests__/entregas-venda-estoquista-acesso.test.ts`.
  *
- * RÓTULOS NÃO ENCONTRADOS NO CÓDIGO (reportado, não inventado): não existe um
- * chip curto de UMA palavra para os estados 'solicitada' e 'cancelada' em
- * lugar nenhum da tela (esses estados só existem no banco/backend agora — a
- * venda não mostra mais status nenhum, e o app do motoboy não tem badge pra
- * esses dois). Os chips "Solicitada" e "Recusada" abaixo são só o indicador
- * genérico "o registro vira X" do próprio player de treinamento — não
- * simulam nenhum elemento real de tela.
+ * RÓTULOS NÃO ENCONTRADOS NO CÓDIGO (reportado, não inventado): continua sem
+ * existir um chip curto de UMA palavra para os estados 'solicitada' e
+ * 'cancelada' em nenhum lugar da tela (esses estados só existem no banco/
+ * backend — a venda não mostra status nenhum, e o app do motoboy não tem
+ * badge pra esses dois). Os chips "Solicitada" e "Recusada" abaixo continuam
+ * sendo só o indicador genérico "o registro vira X" do player de
+ * treinamento — não simulam nenhum elemento real de tela.
  */
 
 // ─── Chips: cópia fiel do que existe (badges "Pendente"/"Em Rota"/"Entregue"
@@ -95,27 +108,39 @@ const StatusChip = criarStatusChip(STATUS);
 const PASSOS: PassoTreino[] = [
   {
     quem: "Admin",
-    titulo: "Antes de tudo: configurar quem libera",
-    narracao: <>Em {nb("Configurações → Aprovadores")}, ache {nb("Frete avulso solicitado (pool)")} e marque quem pode liberar ou recusar. Pode marcar {nb("mais de uma pessoa")}.</>,
-    porque: "Sem ninguém marcado, o sistema NÃO deixa criar a solicitação — dá erro \"Nenhum aprovador de frete avulso configurado\". Esse passo é feito UMA vez.",
+    titulo: "Antes de tudo: configurar as DUAS listas de quem libera",
+    narracao: <>Em {nb("Configurações → Aprovadores")} existem duas listas separadas: {nb("Frete avulso solicitado — pago pelo cliente")} (decide quando o CLIENTE paga, com comprovante) e {nb("Frete avulso solicitado — custo da loja")} (decide quando é a LOJA quem paga). Marque quem participa de cada uma — pode marcar {nb("mais de uma pessoa")} em cada lista.</>,
+    porque: "Sem ninguém marcado na lista certa, o sistema NÃO deixa criar a solicitação — o erro muda conforme quem paga: \"Nenhum aprovador de frete avulso configurado\" (cliente) ou \"Nenhum aprovador de frete avulso (loja) configurado\" (loja). Esse passo é feito UMA vez.",
     tela: (
       <TelaMock titulo="Aprovadores">
-        <div className="flex items-start gap-2">
-          <span className="text-[15px]">🛵</span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[12px] font-semibold" style={{ color: "#111827" }}>Frete avulso solicitado (pool)</p>
-            <p className="text-[10px] mt-0.5" style={{ color: "#9CA3AF" }}>Qualquer um da lista decide a mesma tarefa. Pode marcar vários.</p>
-            <div className="mt-2 space-y-1">
-              <div className="relative flex items-center gap-2 px-2 py-1.5 rounded-lg border" style={{ borderColor: CT.esmeralda, background: "#18403610" }}>
-                <span className="w-3.5 h-3.5 rounded flex items-center justify-center" style={{ background: CT.esmeralda }}>
-                  <Check size={9} style={{ color: CT.creme }} />
-                </span>
-                <span className="text-[12px] font-medium" style={{ color: CT.esmeralda }}>Germana Valentim</span>
-                <Cursor />
+        <div className="space-y-3">
+          <div className="flex items-start gap-2">
+            <span className="text-[15px]">🛵</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[12px] font-semibold" style={{ color: "#111827" }}>Frete avulso solicitado — pago pelo cliente</p>
+              <p className="text-[10px] mt-0.5" style={{ color: "#9CA3AF" }}>Qualquer um da lista decide a mesma tarefa. Pode marcar vários.</p>
+              <div className="mt-2 space-y-1">
+                <div className="relative flex items-center gap-2 px-2 py-1.5 rounded-lg border" style={{ borderColor: CT.esmeralda, background: "#18403610" }}>
+                  <span className="w-3.5 h-3.5 rounded flex items-center justify-center" style={{ background: CT.esmeralda }}>
+                    <Check size={9} style={{ color: CT.creme }} />
+                  </span>
+                  <span className="text-[12px] font-medium" style={{ color: CT.esmeralda }}>Germana Valentim</span>
+                  <Cursor />
+                </div>
               </div>
-              <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg border" style={{ borderColor: CT.cremeBorder }}>
-                <span className="w-3.5 h-3.5 rounded border" style={{ borderColor: "#D1D5DB" }} />
-                <span className="text-[12px]" style={{ color: "#374151" }}>Alisson Ranyel</span>
+            </div>
+          </div>
+          <div className="border-t" style={{ borderColor: CT.cremeBorder }} />
+          <div className="flex items-start gap-2">
+            <span className="text-[15px]">🏪</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[12px] font-semibold" style={{ color: "#111827" }}>Frete avulso solicitado — custo da loja</p>
+              <p className="text-[10px] mt-0.5" style={{ color: "#9CA3AF" }}>Lista separada — autoriza o custo quando é a loja quem paga.</p>
+              <div className="mt-2 space-y-1">
+                <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg border" style={{ borderColor: CT.cremeBorder }}>
+                  <span className="w-3.5 h-3.5 rounded border" style={{ borderColor: "#D1D5DB" }} />
+                  <span className="text-[12px]" style={{ color: "#374151" }}>Alisson Ranyel</span>
+                </div>
               </div>
             </div>
           </div>
@@ -126,8 +151,8 @@ const PASSOS: PassoTreino[] = [
   {
     quem: "Consultora",
     titulo: "Abrir o menu Nova e escolher Frete avulso",
-    narracao: <>No módulo {nb("Tarefas")}, clique no botão {nb("+ Nova")} (canto superior) — esse é o caminho PRINCIPAL agora. No menu que abre, vá até a seção {nb("Solicitações")} e clique em {nb("Frete avulso")}. Só aparece pra quem é {nb("consultora")} (no celular é o mesmo botão flutuante único, que abre o mesmo menu).</>,
-    porque: "É dali que vão sair TODAS as solicitações no futuro — hoje só o Frete avulso está na lista, mas o menu já nasceu pensado pra crescer sem trocar de lugar. O atalho de dentro da própria venda (Aprovado/Em Rota/Entregue) continua existindo e abre o mesmo modal — mas já com a venda escolhida, pulando a busca (ver nota do passo 3).",
+    narracao: <>No módulo {nb("Tarefas")}, clique no botão {nb("+ Nova")} (canto superior). No menu que abre, vá até a seção {nb("Solicitações")} e clique em {nb("Frete avulso")} — visível pra {nb("QUALQUER papel")} que acessa Tarefas, não só consultora (no celular é o mesmo botão flutuante único, que abre o mesmo menu).</>,
+    porque: "Antes só a consultora via este item — hoje quem decide é o PONTO DE ENTRADA (de onde o modal é aberto), não o cargo de quem clica. O atalho de dentro da própria venda (Aprovado/Em Rota/Entregue) continua existindo e abre o mesmo modal — mas já com a venda escolhida, pulando a busca (ver passo 3).",
     tela: (
       <div className="space-y-1.5">
         <div className="flex items-center justify-between gap-2 rounded-xl border p-2.5" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
@@ -154,13 +179,13 @@ const PASSOS: PassoTreino[] = [
   },
   {
     quem: "Consultora",
-    titulo: "Buscar e escolher a venda",
-    narracao: <>O modal {nb("Solicitar Frete Avulso")} abre com o campo {nb("Venda")} vazio. Digite o {nb("número da venda ou o nome do cliente")} e escolha na lista.</>,
-    porque: "Nota: se em vez disso ela clicar no atalho \"Solicitar frete avulso\" de DENTRO da venda, este passo some — o mesmo modal já abre com a venda fixada.",
+    titulo: "Buscar a venda — agora opcional",
+    narracao: <>O modal {nb("Solicitar Frete Avulso")} abre com o campo {nb("Venda (opcional)")} vazio. Se a corrida for de uma venda, digite o {nb("número da venda ou o nome do cliente")} e escolha na lista — senão, pode seguir sem buscar.</>,
+    porque: "A corrida pode não ter venda nenhuma (ex.: \"levar material à loja\", \"buscar peça\") — por isso o rótulo diz \"(opcional)\" e não trava mais o botão de enviar. Nota: se em vez disso a consultora clicar no atalho \"Solicitar frete avulso\" de DENTRO da venda, este passo some — o mesmo modal já abre com a venda fixada.",
     tela: (
       <TelaMock titulo="Solicitar Frete Avulso" acessorio={<Bike size={14} style={{ color: CT.esmeralda }} />}>
         <p className="text-[10px] font-semibold uppercase mb-1 flex items-center gap-1" style={{ color: "#9CA3AF" }}>
-          <Search size={10} /> Venda <span style={{ color: "#DC2626" }}>*</span>
+          <Search size={10} /> Venda (opcional)
         </p>
         <div className="rounded-lg border px-2.5 py-2 text-[12px] mb-1" style={{ borderColor: CT.cremeBorder, color: "#9CA3AF" }}>
           Buscar por número da venda ou cliente...
@@ -176,25 +201,60 @@ const PASSOS: PassoTreino[] = [
   },
   {
     quem: "Consultora",
-    titulo: "Conferir o endereço",
-    narracao: <>Ao escolher a venda, o {nb("Endereço de entrega")} carrega sozinho a partir do cadastro dela. Pode editar aqui — {nb("não muda o cadastro do cliente")}.</>,
+    titulo: "Preencher o endereço — formulário com busca por CEP",
+    narracao: <>O {nb("Endereço de entrega")} deixou de ser um texto único — agora é um formulário com {nb("CEP, logradouro, número, complemento, bairro, cidade e UF")}. Ao escolher a venda ele carrega sozinho (pode editar aqui — {nb("não muda o cadastro do cliente")}); digitando um CEP válido, os campos se preenchem sozinhos.</>,
     tela: (
-      <TelaMock titulo="Solicitar Frete Avulso" acessorio={<Bike size={14} style={{ color: CT.esmeralda }} />}>
+      <TelaMock titulo="Solicitar Frete Avulso" acessorio={<MapPin size={14} style={{ color: CT.esmeralda }} />}>
         <p className="text-[10px] font-semibold uppercase mb-1 flex items-center gap-1" style={{ color: "#9CA3AF" }}>
           <MapPin size={10} /> Endereço de entrega <span style={{ color: "#DC2626" }}>*</span>
         </p>
-        <div className="relative rounded-lg border px-2.5 py-2 text-[12px]" style={{ borderColor: CT.esmeralda, color: "#374151" }}>
-          Rua das Flores, nº 210, Aldeota, Fortaleza, CE
-          <Cursor />
+        <div className="grid grid-cols-3 gap-1.5 mb-1.5">
+          <div className="relative col-span-2 rounded-lg border px-2 py-1.5 text-[11px]" style={{ borderColor: CT.esmeralda, color: "#374151" }}>
+            60175-047
+            <Cursor />
+          </div>
+          <div className="rounded-lg border px-2 py-1.5 text-[11px]" style={{ borderColor: CT.cremeBorder, color: "#374151" }}>210</div>
+        </div>
+        <div className="rounded-lg border px-2 py-1.5 text-[11px] mb-1.5" style={{ borderColor: CT.cremeBorder, color: "#374151" }}>Rua das Flores</div>
+        <div className="grid grid-cols-3 gap-1.5">
+          <div className="rounded-lg border px-2 py-1.5 text-[11px]" style={{ borderColor: CT.cremeBorder, color: "#374151" }}>Aldeota</div>
+          <div className="rounded-lg border px-2 py-1.5 text-[11px]" style={{ borderColor: CT.cremeBorder, color: "#374151" }}>Fortaleza</div>
+          <div className="rounded-lg border px-2 py-1.5 text-[11px]" style={{ borderColor: CT.cremeBorder, color: "#374151" }}>CE</div>
         </div>
       </TelaMock>
     ),
   },
   {
     quem: "Consultora",
-    titulo: "Preencher valor e enviar",
+    titulo: "Informar quem paga — e anexar o comprovante se for o cliente",
+    narracao: <>Escolha {nb("Quem paga")}: {nb("Loja")} ou {nb("Cliente")}. Se for {nb("Cliente")}, anexe o {nb("Comprovante de pagamento")} (foto) — campo obrigatório.</>,
+    porque: "Este é o passo mais importante do treino: sem \"Quem paga\" marcado — ou sem o comprovante quando é o Cliente — o botão \"Solicitar frete avulso\" fica desabilitado, sem nenhum aviso na tela além disso. E quem paga decide QUEM vai aprovar depois: cliente cai na lista de acompanhamento, loja cai na lista que autoriza o custo (ver passo 1).",
+    tela: (
+      <TelaMock titulo="Solicitar Frete Avulso" acessorio={<Store size={14} style={{ color: CT.esmeralda }} />}>
+        <p className="text-[10px] font-semibold uppercase mb-1 flex items-center gap-1" style={{ color: "#9CA3AF" }}>
+          <Store size={10} /> Quem paga <span style={{ color: "#DC2626" }}>*</span>
+        </p>
+        <div className="flex gap-1.5 mb-2">
+          <span className="flex-1 text-center text-[11px] font-semibold py-1.5 rounded-lg border" style={{ borderColor: CT.cremeBorder, color: "#6B7280" }}>Loja</span>
+          <span className="relative flex-1 inline-flex">
+            <span className="w-full text-center text-[11px] font-semibold py-1.5 rounded-lg" style={{ background: CT.esmeralda, color: "#fff" }}>Cliente</span>
+            <Cursor />
+          </span>
+        </div>
+        <p className="text-[10px] font-semibold uppercase mb-1 flex items-center gap-1" style={{ color: "#9CA3AF" }}>
+          <Camera size={10} /> Comprovante de pagamento <span style={{ color: "#DC2626" }}>*</span>
+        </p>
+        <div className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-[11px] font-semibold" style={{ borderColor: "#D1FAE5", background: "#D1FAE5", color: "#059669" }}>
+          <Camera size={12} /> Comprovante anexado
+        </div>
+      </TelaMock>
+    ),
+  },
+  {
+    quem: "Consultora",
+    titulo: "Preencher valor, região e descrição — e enviar",
     narracao: <>Informe a {nb("Descrição da corrida")}, o {nb("Valor cobrado do cliente (R$)")} e a {nb("Região")} (Fortaleza / Fora de Fortaleza / Longe / Correios). Observações é opcional. Depois clique em {nb("Solicitar frete avulso")}.</>,
-    porque: "A consultora NÃO escolhe motoboy nem responsável — a solicitação cai no pool configurado no passo 1. Enquanto ninguém decide, um novo pedido pra MESMA venda é barrado: \"Já existe uma solicitação de frete avulso aguardando decisão para esta venda.\"",
+    porque: "A consultora não escolhe motoboy nem responsável — a solicitação cai no pool certo, definido pelo passo anterior (quem paga). Um novo pedido pra MESMA venda é barrado enquanto o anterior não for decidido: \"Já existe uma solicitação de frete avulso aguardando decisão para esta venda.\" Depois de enviar, dá pra acompanhar em \"Minhas solicitações\" (próximo passo).",
     resultado: <StatusChip s="solicitada" />,
     tela: (
       <div className="space-y-2">
@@ -217,29 +277,56 @@ const PASSOS: PassoTreino[] = [
     ),
   },
   {
-    quem: "Liberador (pool)",
-    titulo: "A solicitação chega como tarefa",
-    narracao: <>Quem estiver no pool vê em {nb("Tarefas → Aguard. Aprovação")} o card da {nb("Venda 15412")} com a linha {nb("“Frete avulso”")} — nome amigável, não o código cru. {nb("Qualquer um do pool decide")} — não é só o 1º da lista.</>,
+    quem: "Quem solicitou",
+    titulo: "Acompanhar em \"Minhas solicitações\"",
+    narracao: <>Em {nb("Tarefas → Filtros → Minhas solicitações")}, quem pediu vê TODOS os próprios pedidos, em qualquer status — inclusive os {nb("recusados")}.</>,
+    porque: "É o único lugar que mostra o pedido depois que ele some da fila do aprovador (por exemplo, se for recusado) — a venda não mostra mais nenhum status da solicitação.",
     tela: (
-      <div className="rounded-xl border overflow-hidden" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
-        <div className="p-3 border-b" style={{ borderColor: "#F3F4F6" }}>
-          <p className="text-[13px] font-semibold" style={{ color: "#1A1A1A" }}>Venda 15412</p>
-          <p className="text-[11px] mt-0.5" style={{ color: "#6B7280" }}>Larissa Freitas</p>
+      <div className="rounded-xl border p-2 space-y-1.5" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
+        <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg" style={{ background: "#18403610" }}>
+          <Send size={13} style={{ color: CT.esmeralda }} />
+          <span className="text-[12px] font-semibold" style={{ color: CT.esmeralda }}>Minhas solicitações</span>
         </div>
-        <div className="px-3 py-2.5 flex items-center justify-between gap-2">
-          <span className="text-[12px] font-medium" style={{ color: "#1A1A1A" }}>Frete avulso</span>
-          <div className="flex gap-1.5">
-            <span className="px-2 py-1 text-[11px] rounded-lg font-semibold" style={{ background: "#059669", color: "#fff" }}>✓</span>
-            <span className="px-2 py-1 text-[11px] rounded-lg font-semibold border" style={{ borderColor: "#FCA5A5", color: "#DC2626" }}>✗</span>
+        <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg border" style={{ borderColor: CT.cremeBorder }}>
+          <div className="min-w-0">
+            <p className="text-[12px] font-medium truncate" style={{ color: "#1A1A1A" }}>Venda 15412 — Frete avulso</p>
+            <p className="text-[10px]" style={{ color: "#9CA3AF" }}>Larissa Freitas</p>
           </div>
+          <StatusChip s="cancelada" />
         </div>
       </div>
     ),
   },
   {
     quem: "Liberador (pool)",
+    titulo: "A solicitação chega como tarefa — com os valores",
+    narracao: <>Quem estiver no pool certo vê em {nb("Tarefas → Aguard. Aprovação")} os valores ANTES de decidir: {nb("Frete cobrado")} e {nb("Frete motoboy")}. Acima de {nb("R$200")} o valor do motoboy aparece em vermelho, com aviso — não bloqueia, só chama atenção.</>,
+    porque: "Se for o cliente que paga, aparece também \"Quem paga: Cliente\" e o link para ver o comprovante anexado — sem isso, o comprovante fica salvo mas ninguém confere antes de decidir.",
+    tela: (
+      <div className="rounded-xl border p-3 space-y-2" style={{ borderColor: CT.cremeBorder, background: CT.cremeBg }}>
+        <p className="text-[12px] font-semibold" style={{ color: CT.esmeralda }}>Pagamento do Frete Avulso</p>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-lg bg-white p-2 border text-[11px]" style={{ borderColor: CT.cremeBorder }}>
+            <p style={{ color: "#6B7280" }}>Frete cobrado</p>
+            <p className="font-bold" style={{ color: "#111827" }}>R$ 20,00</p>
+          </div>
+          <div className="rounded-lg p-2 border text-[11px]" style={{ borderColor: "#FCA5A5", background: "#FEF2F2" }}>
+            <p style={{ color: "#6B7280" }}>Frete motoboy</p>
+            <p className="font-bold flex items-center gap-1" style={{ color: "#DC2626" }}>
+              <AlertTriangle size={11} /> R$ 250,00
+            </p>
+          </div>
+        </div>
+        <p className="text-[11px]" style={{ color: "#6B7280" }}>
+          Quem paga: <span className="font-semibold" style={{ color: "#1A1A1A" }}>Cliente</span>
+        </p>
+      </div>
+    ),
+  },
+  {
+    quem: "Liberador (pool)",
     titulo: "Aprovar — libera e lança o frete",
-    narracao: <>Confira o endereço e o valor, e clique em {nb("Aprovar")}.</>,
+    narracao: <>Confira o endereço, os valores e (se for o caso) o comprovante, e clique em {nb("Aprovar")}.</>,
     porque: "Aprovar muda a corrida de solicitada pra pendente e já lança o frete no saldo de frete grátis da gerente — nada disso acontece antes da aprovação.",
     resultado: <StatusChip s="pendente" />,
     tela: (
@@ -264,8 +351,8 @@ const PASSOS: PassoTreino[] = [
   {
     quem: "Liberador (pool)",
     titulo: "Desfecho B — Recusar com motivo",
-    narracao: <>Achou algo errado (endereço estranho, valor fora do padrão)? Escreva o {nb("Motivo (obrigatório para rejeitar)")} e clique em {nb("Rejeitar")}.</>,
-    porque: "O motivo é obrigatório — fica gravado na tarefa. A venda não mostra mais status da solicitação; a consultora acompanha o desfecho em Tarefas e, se quiser, solicita de novo pelo mesmo caminho (passo 2).",
+    narracao: <>Achou algo errado (endereço estranho, valor fora do padrão, comprovante que não confere)? Escreva o {nb("Motivo (obrigatório para rejeitar)")} e clique em {nb("Rejeitar")}.</>,
+    porque: "O motivo é obrigatório — fica gravado na tarefa. A venda não mostra mais status da solicitação; quem pediu acompanha o desfecho em \"Minhas solicitações\" (passo 7) e, se quiser, solicita de novo pelo mesmo caminho (passo 2).",
     resultado: <StatusChip s="cancelada" />,
     tela: (
       <div className="rounded-xl border p-3" style={{ borderColor: CT.cremeBorder }}>
@@ -288,8 +375,10 @@ const PASSOS: PassoTreino[] = [
   },
   {
     quem: "Motoboy",
-    titulo: "A corrida aparece sem dono",
-    narracao: <>No app do motoboy, a corrida liberada aparece pra {nb("TODOS os entregadores")} com o endereço e a observação herdados da venda.</>,
+    titulo: "A corrida aparece sem dono — o primeiro que aceitar leva",
+    narracao: <>No app do motoboy, a corrida liberada aparece pra {nb("TODOS os entregadores")}, com o endereço e a observação herdados da venda. Clique em {nb("Aceitar corrida")}.</>,
+    porque: "O PRIMEIRO que aceitar vira dono — quem tentar depois recebe \"Esta corrida já tem outro motoboy.\"",
+    resultado: <StatusChip s="em_rota" />,
     tela: (
       <div className="rounded-xl border p-3" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
         <div className="flex items-center justify-between mb-1">
@@ -300,24 +389,6 @@ const PASSOS: PassoTreino[] = [
           <span className="font-semibold" style={{ color: "#1f2937" }}>Larissa Freitas</span> · <span className="font-semibold" style={{ color: "#6D28D9" }}>Levar colar na casa da cliente</span>
         </p>
         <p className="text-[11px] mt-1" style={{ color: "#6B7280" }}>📍 Rua das Flores, nº 210, Aldeota, Fortaleza, CE</p>
-        <div className="mt-2">
-          <BotaoMock label="Aceitar corrida" Icon={Bike} />
-        </div>
-      </div>
-    ),
-  },
-  {
-    quem: "Motoboy",
-    titulo: "Aceitar corrida",
-    narracao: <>Clique em {nb("Aceitar corrida")}.</>,
-    porque: "O PRIMEIRO que aceitar vira dono — quem tentar depois recebe \"Esta corrida já tem outro motoboy.\"",
-    resultado: <StatusChip s="em_rota" />,
-    tela: (
-      <div className="rounded-xl border p-3" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[13px] font-bold" style={{ color: CT.esmeralda }}>FA-0231</span>
-          <span className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ background: "#FEF3C7", color: "#D97706" }}>Pendente</span>
-        </div>
         <div className="mt-2 relative inline-flex">
           <BotaoMock label="Aceitar corrida" Icon={Bike} cursor />
         </div>
@@ -328,7 +399,7 @@ const PASSOS: PassoTreino[] = [
     quem: "Motoboy",
     titulo: "Finalizar entrega",
     narracao: <>Depois de entregar, clique em {nb("Finalizar entrega")}.</>,
-    porque: "Entrega confirmada entra no acerto do motoboy — é o corte que decide o que ele recebe.",
+    porque: "Entrega confirmada entra no acerto do motoboy — é o corte que decide o que ele recebe. Quem também acompanha essas entregas pelo caminho normal: o estoque (papel estoquista_loja) agora tem acesso ao menu \"Entregas\" e vê TODAS as avulsas, sem filtro por vendedor. (Caso à parte não detalhado neste treino: se o PRÓPRIO motoboy registra a corrida, ela nasce esperando a LOJA confirmar, não o pool — o card mostra \"Aguardando confirmação da loja\" no lugar do botão Aceitar.)",
     resultado: <StatusChip s="confirmada" />,
     tela: (
       <div className="rounded-xl border p-3" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
@@ -342,33 +413,15 @@ const PASSOS: PassoTreino[] = [
       </div>
     ),
   },
-  {
-    quem: "Motoboy",
-    titulo: "Caso à parte — corrida que ele mesmo registrou",
-    narracao: <>Se o PRÓPRIO motoboy registra a corrida (ele já saiu e volta pra lançar depois), ela {nb("nasce esperando a LOJA confirmar")} — não o pool. No lugar do botão Aceitar, o card mostra {nb("“Aguardando confirmação da loja”")}.</>,
-    porque: "É um caminho diferente da solicitação da consultora — não confundir os dois: aqui quem libera é a loja, não o pool de aprovadores.",
-    tela: (
-      <div className="rounded-xl border p-3" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[13px] font-bold" style={{ color: CT.esmeralda }}>FA-0244</span>
-          <span className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ background: "#FEF3C7", color: "#D97706" }}>Pendente</span>
-        </div>
-        <div className="mt-2 flex items-center gap-2 rounded-lg px-2.5 py-2" style={{ background: CT.cremeBg }}>
-          <Clock size={13} style={{ color: "#92400E" }} />
-          <span className="text-[11px] font-medium" style={{ color: "#92400E" }}>Aguardando confirmação da loja</span>
-        </div>
-      </div>
-    ),
-  },
 ];
 
 // ─── Cola rápida ──────────────────────────────────────────────────────────────
 const COLA: ColaItem[] = [
-  { chip: <StatusChip s="solicitada" />, txt: "A consultora enviou. Está no pool, esperando algum aprovador liberar ou recusar." },
+  { chip: <StatusChip s="solicitada" />, txt: "Enviada. Está no pool certo (cliente ou loja, conforme quem paga), esperando algum aprovador liberar ou recusar." },
   { chip: <StatusChip s="pendente" />, txt: "Liberado — o frete já foi lançado no saldo da gerente, mas nenhum motoboy aceitou ainda." },
   { chip: <StatusChip s="em_rota" />, txt: "Um motoboy aceitou e está a caminho." },
   { chip: <StatusChip s="confirmada" />, txt: "Entregue — entra no acerto do motoboy." },
-  { chip: <StatusChip s="cancelada" />, txt: "Recusado com motivo. A consultora vê o motivo em Tarefas e pode solicitar de novo." },
+  { chip: <StatusChip s="cancelada" />, txt: "Recusado com motivo. Some da fila do aprovador, mas continua visível em \"Minhas solicitações\" — dá pra solicitar de novo." },
 ];
 
 interface TreinoProps { videoUrl: string | null; isDev: boolean; treinamentoKey: string }
@@ -378,8 +431,8 @@ export default function FreteAvulsoTreino(props: TreinoProps) {
     <TreinamentoLayout
       {...props}
       titulo="Frete Avulso (solicitação)"
-      subtitulo="A consultora solicita um motoboy avulso pelo módulo Tarefas (ou pelo atalho de dentro da própria venda). A solicitação cai num pool de liberadores (qualquer um decide) e, depois de liberada, num pool de motoboys (o primeiro que aceitar leva a corrida)."
-      regraDeOuro={<>a consultora {nb("nunca escolhe motoboy nem responsável")} — a solicitação sempre cai no pool. Sem ninguém configurado em Aprovadores, ela nem consegue enviar.</>}
+      subtitulo="Quem solicita (qualquer papel que acessa Tarefas) informa quem paga o frete e o endereço; a corrida cai no pool de aprovadores certo (qualquer um decide) e, depois de liberada, num pool de motoboys (o primeiro que aceitar leva a corrida)."
+      regraDeOuro={<>quem solicita {nb("nunca escolhe motoboy nem responsável")} — a solicitação sempre cai no pool certo, definido por {nb("quem paga")} (Loja ou Cliente). Sem ninguém configurado nas DUAS listas de Aprovadores, ela nem consegue enviar.</>}
       passos={PASSOS}
       cola={COLA}
     />

@@ -499,7 +499,17 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
           <button
             type="button"
             key={r.value}
-            onClick={() => setRegiao(r.value)}
+            // REGRA DE NEGÓCIO (cosmético, 21/07): limpa o valor negociado com
+            // o motoboy ao trocar de região. O QUÊ: freteNegociado só é
+            // usado pelo backend quando a região tem frete=0 (longe/correios
+            // — ver calcularValorMotoboy/criarFreteAvulso); em região com
+            // valor fixo (Fortaleza/Fora de Fortaleza) o override é
+            // descartado SILENCIOSAMENTE no servidor. O PORQUÊ: sem limpar,
+            // quem digitava um valor em "Longe" e trocava pra "Fortaleza"
+            // continuava com o campo preenchido (mesmo escondido) e achava
+            // que aquele valor tinha sido enviado. IMPACTO SE REMOVIDO:
+            // volta a confusão — valor "fantasma" que nunca chega a valer.
+            onClick={() => { setRegiao(r.value); setFreteNegociado(""); }}
             style={{
               padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600,
               border: `1px solid ${regiao === r.value ? C.esmeralda : C.cremeBorder}`,
