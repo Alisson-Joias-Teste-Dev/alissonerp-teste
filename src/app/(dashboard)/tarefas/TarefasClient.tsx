@@ -44,6 +44,15 @@ export interface Tarefa {
   created_at: string;
   updated_at: string;
   concluida_em: string | null;
+  // REGRA DE NEGÓCIO (20/07): reflete se O USUÁRIO LOGADO está configurado
+  // como aprovador do evento desta tarefa (config-first, mesma autoridade que
+  // o PATCH /api/tarefas/[id]/aprovacao já concede) — não é uma propriedade
+  // da tarefa em si. Vem de GET /api/tarefas (coluna pode_decidir, reusa
+  // multiAprovadorCond) e de GET /api/tarefas/[id] (podeDecidirTarefa ||
+  // isOwnerDaAprovacao). Usado pelo TarefaDrawer pra mostrar os botões
+  // Aprovar/Rejeitar pro 2º/3º aprovador, não só pro 1º (aprovador_id gravado
+  // na linha de aprovacoes_tarefa).
+  pode_decidir?: boolean;
 }
 
 export interface Usuario { id: string; nome: string; }

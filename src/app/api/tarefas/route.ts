@@ -166,7 +166,21 @@ export async function GET(req: NextRequest) {
       t.responsavel_id, t.criado_por,
       ur.nome AS responsavel_nome,
       uc.nome AS criador_nome,
-      o.numero_ordem
+      o.numero_ordem,
+      -- REGRA DE NEGÓCIO (20/07 — correção do 2º/3º aprovador configurado): expõe
+      -- pra cada tarefa, SEM N+1 (reusa a mesma expressão SQL de multiAprovadorCond
+      -- já usada no WHERE acima), se ESTE usuário está configurado como aprovador
+      -- do evento da tarefa — mesmo critério que já libera a LISTAGEM (16/07).
+      -- O QUÊ: o front (TarefaDrawer) usa este flag pra mostrar os botões
+      --   Aprovar/Rejeitar pro 2º/3º aprovador, não só pro 1º (responsavel_id
+      --   gravado na criação, único que aparecia como aprovador_id na linha de
+      --   aprovacoes_tarefa).
+      -- POR QUÊ: sem isto, só o "sortudo" (1º da lista) vê o botão — o pool de
+      --   aprovadores configurados não funciona na prática mesmo já autorizado
+      --   pelo PATCH (podeDecidir, config-first).
+      -- IMPACTO SE REMOVIDO: volta o botão escondido pro 2º/3º aprovador, que
+      --   segue autorizado pela API mas sem jeito de clicar em nada na tela.
+      (${multiAprovadorCond}) AS pode_decidir
     FROM alissonerp.tarefas t
     LEFT JOIN alissonerp.usuarios ur ON ur.id = t.responsavel_id
     LEFT JOIN alissonerp.usuarios uc ON uc.id = t.criado_por

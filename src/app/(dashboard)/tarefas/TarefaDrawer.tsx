@@ -339,7 +339,15 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
   const pri = PRIORIDADE_BADGE[tarefa.prioridade] ?? PRIORIDADE_BADGE.media;
   const statusCol = STATUS_COLS.find(c => c.key === tarefa.status);
   const pendingAprovacao = aprovacoes.find(a => a.status === "pendente");
-  const isAprovador = pendingAprovacao?.aprovador_id === currentUserId;
+  // REGRA DE NEGÓCIO (20/07 — 2º/3º aprovador configurado): antes, só quem
+  // era o aprovador_id GRAVADO na linha (o 1º da lista, resolvido na
+  // criação) contava como aprovador aqui — o PATCH .../aprovacao já
+  // autorizava qualquer aprovador configurado no evento (podeDecidir,
+  // config-first), mas a UI não sabia disso. `tarefa.pode_decidir` vem de
+  // GET /api/tarefas (lista) e GET /api/tarefas/[id] (detalhe) e espelha
+  // essa MESMA autoridade. IMPACTO SE REMOVIDO: só o 1º aprovador da chave
+  // consegue decidir pela tela — o 2º/3º autorizado pela API fica sem botão.
+  const isAprovador = pendingAprovacao?.aprovador_id === currentUserId || !!tarefa.pode_decidir;
   const isLimpezaOuro = baixaIdLimpeza > 0;
 
   return (
@@ -733,21 +741,29 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
                         {a.respondido_em && <p className="text-[10px] mt-1" style={{ color: "#9CA3AF" }}>Respondido em {fmtHora(a.respondido_em)}</p>}
 
                         {/*
-                          REGRA DE NEGÓCIO: botão de decisão só aparece pro
-                          aprovador_id gravado na linha (mesmo critério usado
-                          para TODOS os tipos multi-aprovador — compra_comercial,
-                          conversao_reversa, garantia_fora_prazo etc.). Frete
-                          avulso migrou pra camada central de aprovações no
-                          merge com a main (20/07) e passou a seguir a MESMA
-                          regra — removido o pode_decidir_pool que só este tipo
-                          tinha. O dispatcher (PATCH .../aprovacao) autoriza de
-                          verdade via podeDecidir (config-first); um aprovador
-                          configurado que não seja o aprovador_id da linha ainda
-                          decide certo pela API, mas só vê o botão aqui se for
-                          o aprovador_id gravado — limitação PRÉ-EXISTENTE da
-                          camada central, igual pros demais tipos multi.
+                          REGRA DE NEGÓCIO (20/07 — correção do 2º/3º aprovador
+                          configurado): o botão agora aparece tanto pro
+                          aprovador_id GRAVADO na linha (o 1º da lista,
+                          resolvido na criação) quanto pra qualquer OUTRO
+                          aprovador configurado no evento (tarefa.pode_decidir,
+                          calculado no servidor com a MESMA autoridade
+                          config-first que o dispatcher PATCH .../aprovacao já
+                          usa — podeDecidir). Vale para TODOS os tipos
+                          multi-aprovador (compra_comercial, conversao_reversa,
+                          garantia_fora_prazo, cartao_desconto,
+                          entrega_sem_pagamento, desconto_padrao,
+                          credito_diretor, vale_troca_excecao, frete_avulso).
+                          O QUÊ: mostra Aprovar/Rejeitar pra qualquer aprovador
+                            configurado, não só pro 1º.
+                          POR QUÊ: o PATCH já autorizava desde o BUGFIX de
+                            16/07 (BUG 1, aprovacao/route.ts) — só a UI é que
+                            travava o 2º/3º aprovador.
+                          IMPACTO SE REMOVIDO: sem isto, só quem tem o
+                            aprovador_id gravado consegue clicar — o pool de
+                            aprovadores configurados não funciona na prática,
+                            mesmo já autorizado pela API.
                         */}
-                        {isPending && a.aprovador_id === currentUserId && (
+                        {isPending && (a.aprovador_id === currentUserId || !!tarefa.pode_decidir) && (
                           <div className="mt-3 space-y-2">
                             <textarea rows={2} placeholder="Motivo (obrigatório para rejeitar)"
                               value={motivoRejeicao} onChange={e => setMotivoRejeicao(e.target.value)}
