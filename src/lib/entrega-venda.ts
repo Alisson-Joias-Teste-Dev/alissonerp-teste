@@ -2239,66 +2239,99 @@ export async function criarFreteAvulso(
     throw new Error("Valor do frete não pode ser negativo.");
   }
 
-  // REGRA DE NEGÓCIO (solicitação — migration 353, modelo TAREFA/POOL; fix
-  // 21/07 — venda deixa de ser obrigatória): frete avulso É POR NATUREZA uma
+  // REGRA DE NEGÓCIO (BLOCO 3 — invariante, não mais preso ao modo; fix 21/07
+  // — venda deixa de ser obrigatória): frete avulso É POR NATUREZA uma
   // corrida que pode não ter venda (ex.: "levar material à loja", "buscar
-  // peça"). Quando o fluxo nascia dentro da tela da venda, vendaId sempre
-  // existia; a entrada mudou para o módulo Tarefas (busca de venda OPCIONAL)
-  // e a obrigatoriedade tinha ficado represada aqui. Agora só valida
-  // venda/janela/duplicata QUANDO vendaId foi informado (herda cliente/
-  // endereço da venda) — sem venda, a solicitação segue só com o endereço
-  // informado no formulário. NÃO escolhe mais um responsável — a solicitação
-  // vira uma tarefa de aprovação para o pool configurado (ver abaixo) e
-  // qualquer um decide.
-  // IMPACTO SE VOLTAR A EXIGIR: reabre o erro original — trava a solicitação
-  // de corridas legítimas sem venda (a maioria dos casos reais).
-  let numeroVendaSolicitacao: string | null = null;
-  if (params.modoSolicitacao) {
-    if (params.vendaId) {
-      const [venda] = await sql`
-        SELECT id, numero_venda, situacao FROM alissonerp.vendas_erp WHERE id = ${params.vendaId} LIMIT 1
-      `;
-      if (!venda) {
-        throw new Error(`Venda ${params.vendaId} não encontrada.`);
-      }
-      numeroVendaSolicitacao = venda.numero_venda ? String(venda.numero_venda) : null;
+  // peça"). ANTES desta janela/duplicata só rodavam com modoSolicitacao=true
+  // — a criação DIRETA (modoSolicitacao=false) gravava venda_id sem checar
+  // NADA disso, e como o endpoint aceita vendaId nos dois modos, dava pra
+  // mandar `vendaId` de venda de OUTRA pessoa, em QUALQUER situação (rascunho,
+  // cancelada, virou_credito), sem limite de duplicatas — a entrega ficava
+  // pendurada na venda alheia (ownership é checado à parte, no route.ts, mas
+  // tinha o MESMO problema). Agora janela + duplicata (COM venda) valem
+  // SEMPRE que `vendaId` vier, independente do modo — não há caso de uso real
+  // (direto ou solicitação) em que uma venda rascunho/cancelada/virou_credito
+  // devesse ganhar uma entrega avulsa vinculada.
+  // IMPACTO SE VOLTAR A SÓ modoSolicitacao: reabre o bypass — criação direta
+  // (ou uso futuro da API) grava frete avulso em venda de outra pessoa, fora
+  // da janela de entrega, sem limite de duplicatas.
+  let numeroVendaVinculada: string | null = null;
+  if (params.vendaId) {
+    const [venda] = await sql`
+      SELECT id, numero_venda, situacao FROM alissonerp.vendas_erp WHERE id = ${params.vendaId} LIMIT 1
+    `;
+    if (!venda) {
+      throw new Error(`Venda ${params.vendaId} não encontrada.`);
+    }
+    numeroVendaVinculada = venda.numero_venda ? String(venda.numero_venda) : null;
 
-      // REGRA DE NEGÓCIO (blindagem V4 — janela de entrega, decisão Jonathan no
-      // commit 291b029a): o front só mostra o botão "Solicitar frete avulso"
-      // com a venda em aprovado/em_rota/entregue, mas essa checagem existia SÓ
-      // no client (VendaDetalheClient) — quem chamasse a API direto (curl, bug
-      // de outro client) driblava a janela e solicitava frete de uma venda
-      // rascunho/cancelada/virou_credito. Espelha a MESMA lista aqui, no server,
-      // que é a autoridade real. Só se aplica quando há venda informada.
-      // IMPACTO SE REMOVIDO: reabre o bypass — solicitação de frete avulso para
-      // venda fora da janela de entrega (ex.: ainda rascunho, já cancelada).
-      const JANELA_SOLICITACAO_FRETE_AVULSO = ["aprovado", "em_rota", "entregue"];
-      if (!JANELA_SOLICITACAO_FRETE_AVULSO.includes(String(venda.situacao))) {
-        throw new Error(
-          `Venda ${numeroVendaSolicitacao ?? params.vendaId} não está numa situação que permite solicitar frete avulso (situação atual: ${venda.situacao}).`,
-        );
-      }
-
-      // REGRA DE NEGÓCIO (guard de solicitação duplicada — V3): espelha o guard
-      // de src/lib/inventario-solicitacoes.ts (criarSolicitacaoInventario) — não
-      // deixa abrir uma 2ª solicitação de frete avulso para a MESMA venda
-      // enquanto a 1ª ainda está 'solicitada' (aguardando decisão do pool). É
-      // um guard POR VENDA — sem venda não há como duplicar por este critério
-      // (cada solicitação sem venda é uma corrida independente).
-      // IMPACTO SE REMOVIDO: a consultora clica de novo (ou dá duplo-clique) e
-      // duas tarefas idênticas nascem para a mesma venda, confundindo o pool.
-      const [jaSolicitada] = await sql`
-        SELECT id FROM alissonerp.entregas_venda
-        WHERE is_avulso = true AND venda_id = ${params.vendaId} AND situacao = 'solicitada'
-        LIMIT 1
-      `;
-      if (jaSolicitada) {
-        throw new Error(
-          "Já existe uma solicitação de frete avulso aguardando decisão para esta venda.",
-        );
-      }
+    // REGRA DE NEGÓCIO (blindagem V4 — janela de entrega, decisão Jonathan no
+    // commit 291b029a — BLOCO 3: virou invariante): a janela vale para
+    // QUALQUER frete avulso vinculado a uma venda, solicitado ou direto — não
+    // existe cenário legítimo (nem solicitação, nem criação direta) de amarrar
+    // uma corrida a uma venda ainda rascunho, já cancelada ou virou_credito.
+    // Espelha a MESMA lista usada no front (VendaDetalheClient), que é só a
+    // primeira camada — esta aqui é a autoridade real.
+    // IMPACTO SE REMOVIDO: reabre o bypass — frete avulso (direto ou
+    // solicitado) para venda fora da janela de entrega.
+    const JANELA_FRETE_AVULSO_COM_VENDA = ["aprovado", "em_rota", "entregue"];
+    if (!JANELA_FRETE_AVULSO_COM_VENDA.includes(String(venda.situacao))) {
+      throw new Error(
+        `Venda ${numeroVendaVinculada ?? params.vendaId} não está numa situação que permite frete avulso vinculado (situação atual: ${venda.situacao}).`,
+      );
     }
 
+    // REGRA DE NEGÓCIO (guard de duplicata COM venda — V3, BLOCO 3: virou
+    // invariante): espelha o guard de src/lib/inventario-solicitacoes.ts
+    // (criarSolicitacaoInventario) — não deixa abrir uma 2ª solicitação de
+    // frete avulso para a MESMA venda enquanto a 1ª ainda está 'solicitada'
+    // (aguardando decisão do pool). Roda SEMPRE que há venda (não só em modo
+    // solicitação) — fecha o desvio de criar um avulso DIRETO para uma venda
+    // que já tem solicitação pendente, contornando o pool.
+    // IMPACTO SE REMOVIDO: 2ª solicitação (ou criação direta por cima) duplica
+    // a corrida para a mesma venda, confundindo o pool/financeiro.
+    const [jaSolicitada] = await sql`
+      SELECT id FROM alissonerp.entregas_venda
+      WHERE is_avulso = true AND venda_id = ${params.vendaId} AND situacao = 'solicitada'
+      LIMIT 1
+    `;
+    if (jaSolicitada) {
+      throw new Error(
+        "Já existe uma solicitação de frete avulso aguardando decisão para esta venda.",
+      );
+    }
+  } else {
+    // REGRA DE NEGÓCIO (guard de duplicata SEM venda — BLOCO 3/P2): o guard
+    // acima (por venda_id) não serve pra corrida sem venda (o caso comum hoje
+    // — Tarefas › Solicitações com busca de venda OPCIONAL, e a criação direta
+    // do próprio motoboy/loja). Sem isto, duplo-clique ou reenvio (rede lenta,
+    // usuário impaciente) cria 2 corridas + 2 tarefas (modo solicitação) ou 2
+    // lançamentos de saldo (modo direto) — frete pago em dobro. Critério:
+    // mesmo autor (created_by) + mesma descrição (descricao_avulso, campo
+    // OBRIGATÓRIO no schema) + situação ainda aberta ('solicitada' ou
+    // 'pendente') + criada nos últimos 5 minutos — janela curta o bastante pra
+    // pegar duplo-clique/reenvio real sem barrar 2 corridas avulsas
+    // legítimas e diferentes no mesmo dia (não usa só created_by, usa também
+    // a descrição — corridas de propósitos diferentes não colidem).
+    // IMPACTO SE REMOVIDO: reabre o duplo-lançamento de frete avulso sem venda.
+    const [duplicataSemVenda] = await sql`
+      SELECT id FROM alissonerp.entregas_venda
+      WHERE is_avulso = true
+        AND venda_id IS NULL
+        AND created_by = ${userId}::uuid
+        AND descricao_avulso = ${params.descricaoAvulso ?? null}
+        AND situacao IN ('solicitada', 'pendente')
+        AND created_at > now() - interval '5 minutes'
+      LIMIT 1
+    `;
+    if (duplicataSemVenda) {
+      throw new Error(
+        "Já existe uma corrida avulsa igual (mesma descrição) criada por você há poucos minutos. Confira antes de tentar de novo.",
+      );
+    }
+  }
+
+  if (params.modoSolicitacao) {
     // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): obrigatório no
     // modo solicitação, COM ou SEM venda. Decide comprovante (cliente) e pool
     // de aprovador (ver bloco de listaAprovadoresFrete logo abaixo). Validado
@@ -2434,8 +2467,8 @@ export async function criarFreteAvulso(
     // tarefa e sem ninguém notificado para decidir.
     if (params.modoSolicitacao) {
       const responsavelPrincipal = listaAprovadoresFrete[0];
-      const tituloTarefa = numeroVendaSolicitacao
-        ? `Frete avulso solicitado — venda ${numeroVendaSolicitacao}`
+      const tituloTarefa = numeroVendaVinculada
+        ? `Frete avulso solicitado — venda ${numeroVendaVinculada}`
         : `Frete avulso solicitado — entrega ${codigoEntrega}`;
       // REGRA DE NEGÓCIO (migration 355): a descrição da tarefa mostra o
       // endereço em texto legível — monta a partir dos campos estruturados
@@ -2543,8 +2576,8 @@ export async function criarFreteAvulso(
         usuarioId: aprovadorId,
         tipo: "aprovacao",
         titulo: "Frete avulso solicitado",
-        mensagem: numeroVendaSolicitacao
-          ? `Solicitação de frete avulso da venda ${numeroVendaSolicitacao} aguardando decisão.`
+        mensagem: numeroVendaVinculada
+          ? `Solicitação de frete avulso da venda ${numeroVendaVinculada} aguardando decisão.`
           : "Solicitação de frete avulso aguardando decisão.",
         remetenteId: userId,
         link: `/tarefas?abrir=${tarefaIdNotif}`,

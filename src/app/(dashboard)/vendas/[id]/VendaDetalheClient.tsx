@@ -29,6 +29,11 @@ import MarcarEntregaModal from "@/components/entregas/MarcarEntregaModal";
 // REGRA DE NEGÓCIO (V3): modal de solicitação de frete avulso, aberto de
 // dentro da venda com modoSolicitacao (vendaId fixado, ver props abaixo)
 import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
+// REGRA DE NEGÓCIO (BLOCO 3 — fonte única de permissão): quem pode SOLICITAR
+// frete avulso vem de src/lib/permissoes/frete-avulso.ts — backend
+// (route.ts) e este front usam o MESMO predicado. NUNCA reescrever a lista
+// aqui (ver comentário completo no módulo).
+import { podeSolicitarFreteAvulso } from "@/lib/permissoes/frete-avulso";
 import { enderecoDaVenda } from "@/components/endereco/EnderecoForm";
 import { useErrorStore } from "@/stores/errorStore";
 import { getPublicUrl } from "@/lib/storage-url";
@@ -2153,21 +2158,18 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
 
   // ── Frete avulso solicitado a partir da venda (V3) ──────────────────────────
-  // REGRA DE NEGÓCIO (intenção explícita — ponto de entrada decide, não o
-  // cargo): quem já acessa esta venda pode solicitar — não é mais só
-  // consultora. O backend (GET /api/vendas/[id] via requireVendaOwnership) já
-  // barra o carregamento da venda para quem não tem acesso (full-access ou
-  // dono da venda), então quem chegou até aqui já podia ver a venda; o gate
-  // do botão só espelha isso no front (mesmo padrão usado alhures nesta tela,
-  // ex.: `isFullAccess || ["gerente_loja", "diretor", "consultora"].includes(role)`).
-  // IMPACTO SE VOLTAR A SÓ "consultora": admin/dev/diretor/gerente não
-  // conseguiriam solicitar frete avulso pelo atalho da própria venda que
-  // estão vendo — teriam que ir em Tarefas e buscar a venda de novo.
-  // QUANDO (decisão Jonathan): a janela INTEIRA da entrega — 'aprovado' (antes
-  // de sair), 'em_rota' (entrega a caminho) e 'entregue'. O QUE: 'entregue'
-  // entra de propósito, não é engano. POR QUÊ: existe corrida complementar
-  // DEPOIS da entrega — o caso real é "levar a aliança que ficou para ajuste".
-  // Cortar em 'em_rota' mataria justamente esse cenário.
+  // REGRA DE NEGÓCIO (BLOCO 3 — fonte única de permissão): quem PODE solicitar
+  // (o cargo) vem de podeSolicitarFreteAvulso() (src/lib/permissoes/frete-avulso.ts)
+  // — o MESMO predicado usado pelo backend (route.ts) e testado na matriz
+  // papel×capacidade. Antes essa lista vivia solta aqui (inline), causando a
+  // classe de bug "front libera um papel, backend 403" (ex.: diretor).
+  // IMPACTO SE VOLTAR A LISTA INLINE: reabre a divergência front/backend.
+  // QUANDO (decisão Jonathan) — isto AQUI continua local, é regra da VENDA,
+  // não de cargo: a janela INTEIRA da entrega — 'aprovado' (antes de sair),
+  // 'em_rota' (entrega a caminho) e 'entregue'. O QUE: 'entregue' entra de
+  // propósito, não é engano. POR QUÊ: existe corrida complementar DEPOIS da
+  // entrega — o caso real é "levar a aliança que ficou para ajuste". Cortar em
+  // 'em_rota' mataria justamente esse cenário.
   // Fora da lista: 'rascunho' (venda ainda não fechada), 'cancelado' e
   // 'virou_credito' (não há mais entrega a fazer).
   // ⚠️ 'enviado'/'concluido' NÃO entram: são situações APOSENTADAS (ver
@@ -2175,8 +2177,8 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   // 06/2026, o fluxo atual é rascunho → aprovado → em_rota → entregue.
   // IMPACTO SE ALTERADO: tirar 'entregue' esconde o botão no cenário de ajuste
   // pós-entrega; incluir 'rascunho' deixaria pedir frete de venda não fechada.
-  const podeSolicitarFreteAvulso =
-    (isFullAccess || ["gerente_loja", "diretor", "consultora"].includes(role)) &&
+  const podeSolicitarFreteAvulsoAqui =
+    podeSolicitarFreteAvulso(role) &&
     ["aprovado", "em_rota", "entregue"].includes(venda.situacao);
   // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): endereço
   // sugerido para pré-preencher o EnderecoForm do modal de frete avulso —
@@ -2682,7 +2684,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           IMPACTO SE REMOVIDO: quem solicita perde o atalho de dentro da
           própria venda e passa a depender só da busca de venda dentro do
           Tarefas. */}
-      {podeSolicitarFreteAvulso && (
+      {podeSolicitarFreteAvulsoAqui && (
         <button
           onClick={() => setShowFreteAvulsoModal(true)}
           className="mb-3 w-full px-4 py-2.5 rounded-lg border flex items-center gap-2 text-left transition-all hover:brightness-95"

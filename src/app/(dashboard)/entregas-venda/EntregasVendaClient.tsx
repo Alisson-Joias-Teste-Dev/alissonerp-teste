@@ -43,6 +43,11 @@ import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
 import MotoboyDrawer from "@/components/entregas/MotoboyDrawer";
 import PagarMotoboyModal from "@/components/entregas/PagarMotoboyModal";
 import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
+// REGRA DE NEGÓCIO (BLOCO 3 — fonte única de permissão): quem pode CRIAR
+// frete avulso DIRETO (o botão desta tela) vem de
+// src/lib/permissoes/frete-avulso.ts — backend (route.ts) e este front usam
+// o MESMO predicado. NUNCA reescrever a lista aqui.
+import { podeCriarFreteAvulsoDireto } from "@/lib/permissoes/frete-avulso";
 import type { EntregaItem, ContagensEntregas } from "./page";
 
 // ── Paleta ──────────────────────────────────────────────────────────────────────
@@ -250,6 +255,15 @@ export default function EntregasVendaClient({
   const [pagarMotoboyOpen, setPagarMotoboyOpen] = useState(false);
   // Modal de frete avulso
   const [freteAvulsoOpen, setFreteAvulsoOpen] = useState(false);
+  // REGRA DE NEGÓCIO (BLOCO 3 — fonte única de permissão): este botão cria
+  // frete avulso DIRETO (já liberado, lança saldo na hora) — antes não
+  // checava cargo nenhum aqui (qualquer um que chegasse até a página via
+  // page.tsx via a lista antiga). Agora usa o MESMO predicado do backend
+  // (route.ts) — se um papel for removido/adicionado, os dois lados mudam
+  // juntos (fonte única em src/lib/permissoes/frete-avulso.ts).
+  // IMPACTO SE REMOVIDO: o botão volta a aparecer pra quem o backend recusa
+  // com 403 (UX ruim — clique sem efeito), ou some pra quem deveria ver.
+  const podeCriarDireto = podeCriarFreteAvulsoDireto(userRole);
 
   // ── Saldo de frete grátis ──────────────────────────────────────────────────
   const [saldoFrete, setSaldoFrete] = useState<number | null>(null);
@@ -459,18 +473,20 @@ export default function EntregasVendaClient({
             </p>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-            <button
-              onClick={() => setFreteAvulsoOpen(true)}
-              style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "8px 14px", borderRadius: 8,
-                border: `1px solid ${C.esmeralda}`,
-                background: C.esmeralda, color: "#fff", fontSize: 13, fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              <Bike size={16} /> Frete Avulso
-            </button>
+            {podeCriarDireto && (
+              <button
+                onClick={() => setFreteAvulsoOpen(true)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "8px 14px", borderRadius: 8,
+                  border: `1px solid ${C.esmeralda}`,
+                  background: C.esmeralda, color: "#fff", fontSize: 13, fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <Bike size={16} /> Frete Avulso
+              </button>
+            )}
             <button
               onClick={() => setMotoboyDrawerOpen(true)}
               style={{

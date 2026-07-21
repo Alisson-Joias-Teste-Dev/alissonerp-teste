@@ -4,7 +4,7 @@
 > Fonte de schema (colunas/tabelas) = `docs/schema/` (auto-gerado). Aqui é o **porquê** e o **como** do negócio.
 > ⚠️ Existe uma nota mais antiga e parcial sobre frete avulso registrado pelo motoboy em `docs/regras-negocio/comercial.md` §8 (PR#75). Este arquivo é o documento completo do módulo — considerar migrar/mesclar aquele trecho para cá numa limpeza futura.
 
-Última atualização: 2026-07-21 (BLOCO 2 — autorização não-manipulável: sem auto-aprovação, pool decidido pelo dado "quem paga" e não pela tag; branch `feat/frete-avulso-solicitacao`).
+Última atualização: 2026-07-21 (BLOCO 3 — validações viram INVARIANTES independentes do modo, cargos alinhados ao banco e fonte única de permissão; branch `feat/frete-avulso-solicitacao`). Blocos anteriores: BLOCO 2 — autorização não-manipulável: sem auto-aprovação, pool decidido pelo dado "quem paga" e não pela tag.
 
 ---
 
@@ -24,19 +24,22 @@ Ordem do enum: `solicitada` foi inserida **antes** de `pendente` (migration 353,
 
 ---
 
-## 2. Fluxo da consultora: solicitar frete avulso de dentro da venda
+## 2. Fluxo de solicitar frete avulso (de dentro da venda ou por Tarefas)
 
-Frete avulso = corrida de motoboy **sem itens vinculados** (`entregas_venda.is_avulso=true`), mas que **pode referenciar uma venda** (`venda_id`) só para herdar cliente/endereço quando é uma solicitação.
+Frete avulso = corrida de motoboy **sem itens vinculados** (`entregas_venda.is_avulso=true`), mas que **pode referenciar uma venda** (`venda_id`) só para herdar cliente/endereço quando é uma solicitação — `venda_id` é **opcional** (fix 21/07, "levar material à loja"/"buscar peça" não partem de venda nenhuma).
 
-1. **Botão "Solicitar frete avulso" em `VendaDetalheClient.tsx`** — visível só para a **consultora dona da venda** (`role === "consultora"` + `requireVendaOwnership`), e só quando a venda está na **janela da entrega**: `situacao IN ('aprovado', 'em_rota', 'entregue')`.
-   - `'aprovado'`: antes de sair para entrega.
-   - `'em_rota'`: entrega já a caminho (corrida complementar).
-   - `'entregue'`: corrida **complementar pós-entrega** (caso real: levar a aliança que ficou para ajuste) — cortar em `em_rota` mataria esse cenário.
-   - Fora da janela de propósito: `rascunho` (venda ainda não fechada), `cancelado`/`virou_credito` (não há mais entrega a fazer).
-   - Decisão do Jonathan (commit `291b029a`). **Blindagem V4:** a janela existia só no client — `criarFreteAvulso` (`src/lib/entrega-venda.ts`) agora **revalida a mesma lista no servidor** quando `modoSolicitacao=true`, fechando o bypass de quem chamasse a API direto fora da janela.
-2. **Modal** (`FreteAvulsoModal.tsx`): a consultora escolhe **endereço de entrega** (pré-preenchido a partir do cliente/venda, texto livre editável — grava **na entrega**, não altera o cadastro do cliente), **região**, **valor cobrado do cliente**, **valor do motoboy** e **observação**. **Não escolhe motoboy nem responsável.**
-3. **Guard de duplicata**: `criarFreteAvulso` barra uma 2ª solicitação para a mesma venda enquanto a 1ª ainda está `solicitada` (`WHERE is_avulso AND venda_id=X AND situacao='solicitada'`).
-4. A entrega nasce **`solicitada`**, **sem lançar saldo**, e na **mesma transação** cria uma **tarefa** de aprovação (ver §3). `entregas_venda.tarefa_aprovacao_id` guarda o vínculo.
+1. **Quem pode solicitar / criar direto**: fonte única em `src/lib/permissoes/frete-avulso.ts` (`ROLES_SOLICITAR_FRETE_AVULSO`/`ROLES_CRIAR_FRETE_AVULSO_DIRETO` + predicados `podeSolicitarFreteAvulso`/`podeCriarFreteAvulsoDireto`) — backend (`route.ts`) e os dois pontos de entrada do front (`VendaDetalheClient.tsx` botão "Solicitar frete avulso"; `EntregasVendaClient.tsx` botão "Frete Avulso" direto) importam a MESMA constante. **Solicita**: desenvolvedor, admin, diretor, gerente_loja, consultora, estoquista_loja. **Cria direto**: os mesmos MENOS diretor (decisão Jonathan — diretor autoriza, não libera o próprio custo sozinho). Ver §3.3 (BLOCO 3) para o porquê da centralização.
+   - **Botão "Solicitar frete avulso" em `VendaDetalheClient.tsx`** — além do cargo acima, só aparece quando a venda está na **janela da entrega**: `situacao IN ('aprovado', 'em_rota', 'entregue')`.
+     - `'aprovado'`: antes de sair para entrega.
+     - `'em_rota'`: entrega já a caminho (corrida complementar).
+     - `'entregue'`: corrida **complementar pós-entrega** (caso real: levar a aliança que ficou para ajuste) — cortar em `em_rota` mataria esse cenário.
+     - Fora da janela de propósito: `rascunho` (venda ainda não fechada), `cancelado`/`virou_credito` (não há mais entrega a fazer).
+     - Decisão do Jonathan (commit `291b029a`). **BLOCO 3 (21/07):** a janela (e o ownership da venda) viraram **INVARIANTES no servidor** — valem sempre que `vendaId` vier no body, **independente do modo** (`solicitar=true` ou criação direta). Antes só rodavam dentro de `modoSolicitacao=true`; a criação direta conseguia gravar `venda_id` de QUALQUER venda (inclusive de outra consultora, inclusive rascunho/cancelada) sem nenhuma checagem — ver §3.3.
+2. **Modal** (`FreteAvulsoModal.tsx`): quem solicita escolhe **endereço de entrega** (pré-preenchido a partir do cliente/venda quando há `vendaId`, texto livre editável — grava **na entrega**, não altera o cadastro do cliente), **região**, **valor cobrado do cliente**, **valor do motoboy**, **quem paga** e **observação**. **Não escolhe motoboy nem responsável.**
+3. **Guard de duplicata**:
+   - **Com venda**: barra uma 2ª solicitação para a mesma venda enquanto a 1ª ainda está `solicitada` (`WHERE is_avulso AND venda_id=X AND situacao='solicitada'`) — desde o BLOCO 3, roda **independente do modo** (fecha o desvio de criar um avulso DIRETO por cima de uma solicitação pendente pra mesma venda).
+   - **Sem venda (BLOCO 3, novo):** não existia guard nenhum — duplo clique/reenvio sem venda (o caso comum hoje) criava 2 corridas + 2 tarefas, ou 2 lançamentos de saldo no modo direto. Critério: mesmo `created_by` + mesma `descricao_avulso` (campo obrigatório) + `situacao IN ('solicitada','pendente')` + criada nos últimos **5 minutos**. Vale para os dois modos, inclusive o auto-registro do entregador.
+4. A entrega nasce **`solicitada`** (modo solicitação, sem lançar saldo) ou **`pendente`** (modo direto, já libera saldo — ver §5), e no modo solicitação a **mesma transação** cria uma **tarefa** de aprovação (ver §3). `entregas_venda.tarefa_aprovacao_id` guarda o vínculo.
 
 ---
 
@@ -77,6 +80,16 @@ Dois problemas de segregação de função encontrados e corrigidos no dispatche
 - **P2 — pool decidido pelo dado, não pela tag.** `eventoDaTarefa` escolhia entre `frete_avulso`/`frete_avulso_loja` pela tag `frete_pagante:loja` em `tarefas.tags` — um array livre que o **próprio solicitante** podia editar via `PATCH /api/tarefas/[id]` (`isOwner` inclui `criado_por`, sem nenhuma validação de campo), trocando qual pool decidia (inclusive mandando um frete pago pela loja para o pool do cliente, ou zerando os dois). Fix: `eventoDaTarefa` agora decide por `tarefaInfo.frete_pagante` — o valor de `entregas_venda.pagante` (join por `tarefa_aprovacao_id`, carregado pelo caller em `aprovacao/route.ts` e já existente em `tarefas/[id]/route.ts` GET), gravado uma única vez na criação e nunca reexposto como editável. `multiAprovadorCond` (`src/app/api/tarefas/route.ts`) foi ajustado pro MESMO critério (join com `entregas_venda`), mantendo `matriz-sql-ts-aprovadores.test.ts` verde (SQL e TS concordam sobre quem vê o botão).
   - **Defesa em profundidade:** como o campo `tarefas.tipo` ainda decide **se existe evento nenhum** (trocar `tipo='frete_avulso'` por outra coisa faz a exclusão do P1 não se aplicar mais), `PATCH /api/tarefas/[id]` passou a recusar (409) tentativas de alterar `tags` **ou** `tipo` enquanto a tarefa é `frete_avulso` **e** tem uma `aprovacoes_tarefa` pendente. Escopo: só `frete_avulso`, mesmo raciocínio de não mexer nos outros tipos sem avaliar caso a caso.
 
+### 3.3. BLOCO 3 (21/07) — validações viram invariantes, cargos alinhados, fonte única
+
+Três problemas de "validação presa ao modo" em `POST /api/entregas-venda/frete-avulso` e `criarFreteAvulso` (`src/lib/entrega-venda.ts`), todos com a mesma causa raiz: o INSERT grava `venda_id` nos DOIS modos (solicitação e criação direta), mas as regras que dependem da venda só rodavam num dos dois.
+
+- **P1 — IDOR real no modo direto.** `requireVendaOwnership` (dono da venda), a janela de situações (`aprovado`/`em_rota`/`entregue`) e o guard de duplicata por venda estavam todos dentro de `if (ehSolicitacao)` / `if (params.modoSolicitacao)`. No modo DIRETO dava pra mandar `vendaId` de venda de **outra consultora**, em **qualquer situação** (rascunho, cancelada, virou_credito), sem limite de duplicatas. Fix: as três passam a rodar **sempre que `vendaId` vier**, independente do modo — ownership em `route.ts` (fora do bloco `ehSolicitacao`), janela e duplicata-por-venda em `criarFreteAvulso` (fora do bloco `modoSolicitacao`).
+- **P2 — sem guard de duplicata quando NÃO há venda.** O guard antigo só funcionava com `venda_id` preenchido. Sem venda (o caso comum desde a "venda deixa de ser obrigatória", 21/07), duplo clique/reenvio criava 2 corridas + 2 tarefas (ou 2 lançamentos de saldo no modo direto). Fix: novo guard em `criarFreteAvulso` — mesmo `created_by` + mesma `descricao_avulso` + `situacao IN ('solicitada','pendente')` + criada nos últimos 5 minutos.
+- **P3/P4 — cargos alinhados ao banco real.** `ROLES_LOJA` (backend) não tinha `diretor` (o front de `VendaDetalheClient.tsx` já liberava — 403 mudo pra quem clicava) e tinha `estoquista` (role que **não existe** em `alissonerp.usuarios` — confirmado via `SELECT DISTINCT role`, 21/07/2026, homolog: os papéis reais são `estoquista_fabrica`/`estoquista_loja`). Fix: diretor entra em `ROLES_SOLICITAR_FRETE_AVULSO` (decisão Jonathan: só solicita, não cria direto); `estoquista` vira `estoquista_loja` (frete avulso é despacho da LOJA — `estoquista_fabrica` fica de fora).
+- **P5 — fonte única de permissão.** Nova `src/lib/permissoes/frete-avulso.ts`: `ROLES_SOLICITAR_FRETE_AVULSO`, `ROLES_CRIAR_FRETE_AVULSO_DIRETO`, `ROLES_FRETE_AVULSO` (união) + predicados `podeSolicitarFreteAvulso`/`podeCriarFreteAvulsoDireto`/`podeAcessarFreteAvulso`. `route.ts` importa e faz **enforcement por modo** (403 dedicado se o papel não pode o modo escolhido — é o que de fato impede diretor de criar direto via chamada de API direta, não só a ausência do botão no front); `VendaDetalheClient.tsx` e `EntregasVendaClient.tsx` importam os mesmos predicados para mostrar/esconder os botões. Teste de matriz papel×capacidade em `src/lib/permissoes/__tests__/frete-avulso.test.ts` (os 15 papéis reais do banco) + verificação estática de que os 3 consumidores importam do módulo (não reescrevem lista).
+- **Testes anti-volta**: `src/__tests__/frete-avulso-invariantes-route.test.ts` (ownership sempre, enforcement por modo) e `src/__tests__/frete-avulso-invariantes-lib.test.ts` (janela/duplicata com e sem venda).
+
 ---
 
 ## 4. Pool de motoboy + claim atômico (inalterado, validado)
@@ -89,9 +102,9 @@ Corrida **liberada** (seja por liberação de solicitação, seja por criação 
 
 ---
 
-## 5. Criação direta (estoquista/admin/gerente/dev)
+## 5. Criação direta (estoquista_loja/admin/gerente_loja/dev/consultora)
 
-Estes papéis continuam criando o avulso **já liberado** — não passam pela solicitação/tarefa:
+Estes papéis continuam criando o avulso **já liberado** — não passam pela solicitação/tarefa (lista exata: `ROLES_CRIAR_FRETE_AVULSO_DIRETO` em `src/lib/permissoes/frete-avulso.ts` — NÃO inclui diretor, ver §3.3):
 
 - Nasce **`pendente`** direto (não `solicitada`), sem tarefa.
 - Lança saldo **na criação** (`lancarSaldoFreteAvulsoNoTx` chamado dentro de `criarFreteAvulso` quando `modoSolicitacao` é falso).
@@ -127,6 +140,7 @@ O próprio motoboy registra a própria corrida pelo app (`MotoboyAppClient` → 
 - **Diretor/aprovador fora da lista de config não decide a tarefa** — limitação **pré-existente de todos os tipos** de aprovação no dispatcher (`PATCH /api/tarefas/[id]/aprovacao`), não é específica de frete avulso: só decide quem está gravado como `aprovador_id` da linha, é admin/dev, ou (só para `frete_avulso`) está na chave de config. Um diretor que não esteja em nenhuma das duas listas não decide nenhum tipo de aprovação, não só frete avulso.
 - **Exclusão do solicitante (BLOCO 2) é escopada a `frete_avulso`** — os outros ~11 tipos de aprovação do portão genérico (`PATCH /api/tarefas/[id]/aprovacao`) continuam sem checar se `aprovacao.aprovador_id`/config coincide com quem solicitou. Não avaliado caso a caso se algum desses fluxos depende hoje (ainda que por acidente) do solicitante poder decidir o próprio pedido — candidato a auditoria + PR próprio antes de generalizar.
 - **Trava de `tags`/`tipo` (BLOCO 2) também é escopada a `frete_avulso`** — qualquer outro tipo de tarefa com aprovação pendente continua deixando o dono (`responsavel_id`/`criado_por`) editar `tags`/`tipo` livremente pelo `PATCH /api/tarefas/[id]`. Mesmo raciocínio de não generalizar sem avaliar os outros fluxos.
+- **`estoquista_loja` tem permissão no BLOCO 3 mas ainda não tem CAMINHO até o botão (achado 21/07, não corrigido nesta leva — fora do escopo aprovado, reportado ao Jonathan)** — `src/app/(dashboard)/entregas-venda/page.tsx` (`ROLES_PERMITIDOS`, gate de acesso à página inteira) e `src/components/Sidebar.tsx` (`ROLES_ENTREGAS_VENDA`, item de menu "Entregas") **não incluem `estoquista_loja`** — só `desenvolvedor/admin/gerente_loja/consultora` (e o Sidebar nem lista consultora). Ou seja: mesmo com `podeCriarFreteAvulsoDireto("estoquista_loja") === true` (backend + botão em `EntregasVendaClient.tsx`), um usuário `estoquista_loja` real ainda não consegue chegar na tela pra clicar (403 ao acessar `/entregas-venda`, e nem vê o link no menu). Decisão pendente do Jonathan: liberar `page.tsx`/`Sidebar.tsx` pra `estoquista_loja` (mudança de escopo maior — abre a listagem INTEIRA de entregas, não só o botão de frete avulso) é candidato a PR próprio.
 
 ---
 
@@ -137,5 +151,7 @@ O próprio motoboy registra a própria corrida pelo app (`MotoboyAppClient` → 
 - Migration da solicitação/pool: **`353_frete_avulso_solicitacao.sql`** — enum `solicitada` (inserido antes de `pendente`), colunas `endereco_entrega`/`liberada_por`/`liberada_em`/`motivo_recusa`/`tarefa_aprovacao_id`, constraint `chk_entrega_origem` recriada. **Já aplicada em homolog; produção pendente.**
 - Migration "quem paga": **`354_frete_avulso_pagante.sql`** — colunas `pagante` (`'loja'`|`'cliente'`, `chk_entrega_frete_avulso_pagante`) e `comprovante_pagante_path` em `entregas_venda`. Só arquivo criado nesta branch — **banco (local/homolog/produção) ainda não rodou esta migration.**
 - Lib principal: `src/lib/entrega-venda.ts` (`criarFreteAvulso`, `liberarFreteAvulso`/`liberarFreteAvulsoNoTx`, `recusarFreteAvulso`/`recusarFreteAvulsoNoTx`, `aceitarFreteAvulso`, `confirmarFreteAvulso`, `listarAprovadoresFreteAvulso`, `lancarSaldoFreteAvulsoNoTx`).
+- **Permissão (BLOCO 3, 21/07):** `src/lib/permissoes/frete-avulso.ts` — fonte única de quem solicita/cria direto (ver §3.3).
 - Rotas: `src/app/api/entregas-venda/frete-avulso/route.ts` (criação/solicitação), `[id]/aceitar-avulso`, `[id]/confirmar-avulso`, `src/app/api/configuracoes/aprovadores/route.ts` (chave `aprovadores_frete_avulso`), `src/app/api/tarefas/route.ts` + `[id]/route.ts` + `[id]/aprovacao/route.ts` (pool aditivo, ver §3).
-- Tela: `src/app/(dashboard)/entregas-venda/page.tsx` (SSR, sem aba própria de solicitações — decisão acontece em `/tarefas`), `EntregasVendaClient.tsx`, `src/app/(dashboard)/vendas/[id]/VendaDetalheClient.tsx` (botão "Solicitar frete avulso"), `src/components/entregas/FreteAvulsoModal.tsx` (criação/solicitação), `MotoboyAppClient.tsx` (app do entregador), `src/app/(dashboard)/tarefas/TarefaDrawer.tsx` (decisão da tarefa pelo pool).
+- Tela: `src/app/(dashboard)/entregas-venda/page.tsx` (SSR, sem aba própria de solicitações — decisão acontece em `/tarefas`; `ROLES_PERMITIDOS` ainda não inclui `estoquista_loja` — ver débito técnico em §8), `EntregasVendaClient.tsx`, `src/app/(dashboard)/vendas/[id]/VendaDetalheClient.tsx` (botão "Solicitar frete avulso"), `src/components/entregas/FreteAvulsoModal.tsx` (criação/solicitação), `MotoboyAppClient.tsx` (app do entregador), `src/app/(dashboard)/tarefas/TarefaDrawer.tsx` (decisão da tarefa pelo pool).
+- Testes (BLOCO 3): `src/__tests__/frete-avulso-invariantes-route.test.ts`, `src/__tests__/frete-avulso-invariantes-lib.test.ts`, `src/lib/permissoes/__tests__/frete-avulso.test.ts`.

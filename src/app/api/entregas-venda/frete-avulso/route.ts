@@ -20,12 +20,20 @@ import { zodError } from "@/lib/schemas/common";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { AuthError, ForbiddenError, type AuthUser } from "@/lib/auth-server";
 import { LIMITS, checkBase64Length, payloadTooLargeResponse } from "@/lib/payload-limits";
+import {
+  podeAcessarFreteAvulso,
+  podeSolicitarFreteAvulso,
+  podeCriarFreteAvulsoDireto,
+} from "@/lib/permissoes/frete-avulso";
 
-// REGRA DE NEGÓCIO: quem PODE chamar esta rota (loja) — não muda com a
-// intenção explícita (`solicitar`, ver FreteAvulsoSchema abaixo). O que o
-// campo `solicitar` decide é só o MODO (solicitação vs criação direta), não
-// quem tem acesso ao endpoint.
-const ROLES_LOJA = ["desenvolvedor", "admin", "gerente_loja", "consultora", "estoquista"];
+// REGRA DE NEGÓCIO (BLOCO 3 — fonte única de permissão, ver
+// src/lib/permissoes/frete-avulso.ts): quem PODE chamar esta rota vem de lá,
+// não é mais uma lista local. `podeAcessarFreteAvulso` é a UNIÃO de quem
+// solicita + quem cria direto (gate de entrada); o MODO (`solicitar` no body)
+// decide qual das duas listas específicas se aplica — ver enforcement logo
+// abaixo de `ehSolicitacao`.
+// IMPACTO SE VOLTAR A TER LISTA LOCAL: reabre a classe de bug "permissão
+// existe mas a porta não" (front libera um papel, backend não conhece).
 
 const FreteAvulsoSchema = z.object({
   // REGRA DE NEGÓCIO (pool de motoboy — patch A2): motoboyId é OPCIONAL na
@@ -109,7 +117,7 @@ export async function POST(req: NextRequest) {
   `;
   const role = usuario?.role as string | undefined;
   const ehEntregador = role === "entregador";
-  if (!role || (!ehEntregador && !ROLES_LOJA.includes(role))) {
+  if (!role || (!ehEntregador && !podeAcessarFreteAvulso(role))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -147,8 +155,8 @@ export async function POST(req: NextRequest) {
   // REGRA DE NEGÓCIO (intenção explícita — ponto de entrada decide, não o
   // cargo): quem SOLICITA (não libera o custo sozinho) é quem chamou a rota
   // com `solicitar: true` no body — vindo do menu Tarefas › Solicitações,
-  // INDEPENDENTE do cargo (consultora, gerente_loja, admin, desenvolvedor,
-  // estoquista...). O avulso nasce 'solicitada' (criarFreteAvulso com
+  // INDEPENDENTE do cargo, respeitando ROLES_SOLICITAR_FRETE_AVULSO (ver
+  // src/lib/permissoes/frete-avulso.ts). O avulso nasce 'solicitada' (criarFreteAvulso com
   // modoSolicitacao=true) e cai no pool de liberadores (qualquer um decide);
   // só entra no saldo da gerente quando liberado.
   // O QUÊ MUDOU: antes esse ramo só rodava para `role === "consultora"` —
@@ -159,6 +167,47 @@ export async function POST(req: NextRequest) {
   // controle de nenhum liberador — e admin/dev não conseguiriam nem testar
   // o fluxo de solicitação.
   const ehSolicitacao = parsed.data.solicitar === true;
+
+  // REGRA DE NEGÓCIO (BLOCO 3 — enforcement por MODO, fonte única em
+  // src/lib/permissoes/frete-avulso.ts): o gate de entrada acima
+  // (podeAcessarFreteAvulso) só garante acesso ao endpoint — aqui checa se o
+  // papel pode o MODO específico escolhido. Isto é o que de fato impede, por
+  // exemplo, diretor (só está em ROLES_SOLICITAR_FRETE_AVULSO) de criar um
+  // avulso DIRETO mandando `solicitar: false`/omitido — sem isto o gate de
+  // entrada sozinho deixaria passar (diretor tem acesso ao endpoint), e só o
+  // front (que nem mostra esse botão pra diretor) impediria — 403 nenhum.
+  // IMPACTO SE REMOVIDO: quem só deveria solicitar (diretor) consegue criar
+  // direto via chamada de API direta, já liberado, sem passar pelo pool.
+  if (ehSolicitacao && !podeSolicitarFreteAvulso(role)) {
+    return NextResponse.json({ error: "Sem permissão para solicitar frete avulso" }, { status: 403 });
+  }
+  if (!ehSolicitacao && !podeCriarFreteAvulsoDireto(role)) {
+    return NextResponse.json({ error: "Sem permissão para criar frete avulso direto" }, { status: 403 });
+  }
+
+  // REGRA DE NEGÓCIO (BLOCO 3 — ownership virou invariante, não mais preso ao
+  // modo): antes só rodava dentro de `if (ehSolicitacao)` — a criação DIRETA
+  // (ehSolicitacao=false) gravava venda_id no INSERT (ver criarFreteAvulso)
+  // sem NUNCA checar dono da venda. Resultado (IDOR real): quem tivesse acesso
+  // a este endpoint podia mandar `vendaId` de venda de OUTRA consultora no
+  // modo direto e a entrega nascia pendurada lá, sem 403. Agora reusa
+  // requireVendaOwnership (mesma checagem de /api/vendas) SEMPRE que
+  // `vendaId` vier, independente do modo — full-access passa validando só a
+  // existência da venda; os demais precisam ser donos (vendedor_id).
+  // IMPACTO SE VOLTAR A SÓ ehSolicitacao: reabre o IDOR — criação direta em
+  // nome de venda de colega, sem checagem nenhuma.
+  if (parsed.data.vendaId) {
+    const authUser: AuthUser = { id: user.id, role, email: user.email ?? "" };
+    try {
+      await requireVendaOwnership(authUser, parsed.data.vendaId);
+    } catch (e) {
+      if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+      if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+      if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: 401 });
+      throw e;
+    }
+  }
+
   if (ehSolicitacao) {
     // REGRA DE NEGÓCIO (migration 355 — endereço estruturado; fix 21/07 —
     // venda deixa de ser obrigatória): mínimo exigido é logradouro + número +
@@ -202,28 +251,8 @@ export async function POST(req: NextRequest) {
         throw e;
       }
     }
-    // REGRA DE NEGÓCIO (fix 21/07 — venda deixa de ser obrigatória): quem
-    // solicita só pode fazê-lo para as PRÓPRIAS vendas — reusa
-    // requireVendaOwnership (mesma checagem usada em /api/vendas) para não
-    // duplicar a regra de ownership por vendedor_id. Roles full-access
-    // (admin/dev/diretor/gerente_loja/gerente_fabrica) passam validando só a
-    // existência da venda; os demais (ex: consultora, estoquista) precisam
-    // ser donos (vendedor_id) — MANTIDO como estava. Só roda QUANDO a venda
-    // foi informada — sem venda não há "dono" para checar (o requestId é o
-    // próprio usuário autenticado que já passou pelo gate de ROLES_LOJA).
-    // IMPACTO SE REMOVIDO: reabre IDOR — alguém solicitaria frete em nome de
-    // venda de colega, gerando custo de frete indevido para a loja.
-    if (parsed.data.vendaId) {
-      const authUser: AuthUser = { id: user.id, role, email: user.email ?? "" };
-      try {
-        await requireVendaOwnership(authUser, parsed.data.vendaId);
-      } catch (e) {
-        if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
-        if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
-        if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: 401 });
-        throw e;
-      }
-    }
+    // Ownership de vendaId já foi checada ACIMA (fora deste bloco) — vale nos
+    // dois modos, ver comentário BLOCO 3 antes de `ehSolicitacao`.
   }
 
   try {
