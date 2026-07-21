@@ -1,6 +1,6 @@
 "use client";
 
-import { Bike, MapPin, DollarSign, AlignLeft, Check, XCircle, Clock, CheckCircle, Search } from "lucide-react";
+import { Bike, MapPin, DollarSign, AlignLeft, Check, XCircle, Clock, CheckCircle, Search, Plus } from "lucide-react";
 import TreinamentoLayout, { type ColaItem } from "@/components/treinamentos/TreinamentoLayout";
 import { type PassoTreino } from "@/components/treinamentos/TreinamentoPlayer";
 import {
@@ -15,11 +15,21 @@ import {
  * ATUALIZADO 21/07/2026 (fix/tarefas+treinamento): o fluxo mudou — a
  * solicitação passou a nascer TAMBÉM (e principalmente) no módulo Tarefas.
  * Os rótulos abaixo foram conferidos de novo contra o código:
- *   - botão "Frete avulso" (ícone Bike) no cabeçalho desktop do módulo
- *     Tarefas, visível só pra `role === "consultora"`, e o 2º FAB mobile
- *     (aria-label "Solicitar frete avulso", empilhado acima do FAB "Nova
- *     tarefa"): `app/(dashboard)/tarefas/TarefasClient.tsx` (state
- *     `showFreteAvulso`, botão ~L1104-1110, FAB ~L1460-1468)
+ *
+ * ATUALIZADO DE NOVO 21/07/2026 (commit e938410c, "feat(tarefas): botao do
+ * topo vira menu (Solicitacoes + Tarefa avulsa)"): o botão solto "Frete
+ * avulso" do cabeçalho virou um MENU — o botão do topo agora é "+ Nova"
+ * (ícone Plus) e abre um dropdown com a seção "Solicitações" (hoje só o item
+ * "Frete avulso"; lista pensada pra CRESCER sem trocar de lugar), separador,
+ * e "Tarefa avulsa". No mobile é um FAB único que abre o mesmo menu.
+ *   - botão "+ Nova" (ícone Plus) no cabeçalho desktop do módulo Tarefas;
+ *     menu com seção "Solicitações" → item "Frete avulso" (ícone Bike,
+ *     descrição "Solicitar frete fora do fluxo normal da venda", só pra
+ *     `role === "consultora"`), separador, e "Tarefa avulsa" (ícone Plus);
+ *     no mobile o MESMO menu abre pelo FAB único (aria-label "Nova"):
+ *     `app/(dashboard)/tarefas/TarefasClient.tsx` (commit e938410c —
+ *     `TIPOS_SOLICITACAO` ~L979-988, `menuNovoConteudo` ~L991-1021, botão
+ *     desktop ~L1176-1192, FAB mobile ~L1537-1554)
  *   - busca de venda dentro do modal (label "Venda *", placeholder "Buscar
  *     por número da venda ou cliente...", resultado "{numero_venda} —
  *     {cliente_nome}") e mensagem de sucesso "Solicitação enviada —
@@ -115,15 +125,30 @@ const PASSOS: PassoTreino[] = [
   },
   {
     quem: "Consultora",
-    titulo: "Abrir Tarefas e clicar em Frete avulso",
-    narracao: <>No módulo {nb("Tarefas")}, clique no botão {nb("Frete avulso")} (ícone de moto) no cabeçalho — esse é o caminho PRINCIPAL agora. Só aparece pra quem é {nb("consultora")} (no celular é o 2º botão flutuante, empilhado sobre o de Nova tarefa).</>,
-    porque: "O atalho de dentro da própria venda (Aprovado/Em Rota/Entregue) continua existindo e abre o mesmo modal — mas já com a venda escolhida, pulando a busca (ver nota do passo 3). O Tarefas virou o ponto de entrada principal porque não depende de já estar na venda certa.",
+    titulo: "Abrir o menu Nova e escolher Frete avulso",
+    narracao: <>No módulo {nb("Tarefas")}, clique no botão {nb("+ Nova")} (canto superior) — esse é o caminho PRINCIPAL agora. No menu que abre, vá até a seção {nb("Solicitações")} e clique em {nb("Frete avulso")}. Só aparece pra quem é {nb("consultora")} (no celular é o mesmo botão flutuante único, que abre o mesmo menu).</>,
+    porque: "É dali que vão sair TODAS as solicitações no futuro — hoje só o Frete avulso está na lista, mas o menu já nasceu pensado pra crescer sem trocar de lugar. O atalho de dentro da própria venda (Aprovado/Em Rota/Entregue) continua existindo e abre o mesmo modal — mas já com a venda escolhida, pulando a busca (ver nota do passo 3).",
     tela: (
-      <div className="flex items-center justify-between gap-2 rounded-xl border p-2.5" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
-        <span className="text-[13px] font-semibold" style={{ color: CT.esmeralda }}>Tarefas</span>
-        <span className="relative inline-flex">
-          <BotaoMock label="Frete avulso" Icon={Bike} primario={false} cursor />
-        </span>
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2 rounded-xl border p-2.5" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
+          <span className="text-[13px] font-semibold" style={{ color: CT.esmeralda }}>Tarefas</span>
+          <BotaoMock label="Nova" Icon={Plus} />
+        </div>
+        <div className="rounded-xl border p-2 space-y-1" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
+          <p className="text-[9px] font-bold uppercase tracking-wide px-1 pt-0.5 pb-0.5" style={{ color: "#9CA3AF" }}>Solicitações</p>
+          <span className="relative flex items-start gap-2 px-2 py-1.5 rounded-lg" style={{ background: "#18403610" }}>
+            <Bike size={13} className="flex-shrink-0 mt-0.5" style={{ color: CT.esmeralda }} />
+            <span className="min-w-0">
+              <span className="block text-[12px] font-medium" style={{ color: "#1A1A1A" }}>Frete avulso</span>
+              <span className="block text-[10px]" style={{ color: "#9CA3AF" }}>Solicitar frete fora do fluxo normal da venda</span>
+            </span>
+            <Cursor />
+          </span>
+          <div className="border-t my-1" style={{ borderColor: CT.cremeBorder }} />
+          <span className="flex items-center gap-2 px-2 py-1.5 text-[12px]" style={{ color: "#6B7280" }}>
+            <Plus size={13} /> Tarefa avulsa
+          </span>
+        </div>
       </div>
     ),
   },
