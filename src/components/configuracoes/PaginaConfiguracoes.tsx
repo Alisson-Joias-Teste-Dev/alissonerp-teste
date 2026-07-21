@@ -8,7 +8,7 @@ import NavegacaoAbas, { type Aba } from "@/components/NavegacaoAbas";
 import {
   Settings, DollarSign, Link2, Webhook, Users, Bot,
   Warehouse, Flame, MapPin, Wrench, PenLine, Wallet,
-  Truck, CreditCard, Scale, Shield, Eye, Smartphone,
+  Truck, CreditCard, Scale, Shield, Eye, Smartphone, Tag,
 } from "lucide-react";
 import TabParametros from "@/components/configuracoes/TabParametros";
 import TabUsuarios from "@/components/configuracoes/TabUsuarios";
@@ -29,6 +29,7 @@ import TabMetal from "@/components/configuracoes/TabMetal";
 import TabAprovadores from "@/components/configuracoes/TabAprovadores";
 import LocaisEstoqueTab from "@/components/LocaisEstoqueTab";
 import TabProdutoVisibilidade from "@/components/configuracoes/TabProdutoVisibilidade";
+import TabRfid from "@/components/configuracoes/TabRfid";
 
 interface Props {
   parametros: Record<string, unknown>;
@@ -60,6 +61,7 @@ const todasAbas: Aba[] = [
   { key: "permissoes", label: "Permissões", href: "", icon: Shield },
   { key: "produto_visibilidade", label: "Visib. Produtos", href: "", icon: Eye },
   { key: "maquininhas", label: "Maquininhas", href: "", icon: Smartphone },
+  { key: "rfid", label: "RFID", href: "", icon: Tag },
 ];
 
 export default function PaginaConfiguracoes({ parametros, webhooks, logs, usuarios, depositos, teores, ligaTipos }: Props) {
@@ -72,9 +74,10 @@ export default function PaginaConfiguracoes({ parametros, webhooks, logs, usuari
   const canSeeMaquininhas = isFullAccess(currentRole);
 
   const abas = useMemo(() => {
-    const base = todasAbas.filter((a) => a.key !== "permissoes" && a.key !== "produto_visibilidade" && a.key !== "maquininhas");
+    const base = todasAbas.filter((a) => a.key !== "permissoes" && a.key !== "produto_visibilidade" && a.key !== "maquininhas" && a.key !== "rfid");
     if (isSuperAdmin) base.push(...todasAbas.filter((a) => a.key === "permissoes" || a.key === "produto_visibilidade"));
     if (canSeeMaquininhas) base.push(todasAbas.find((a) => a.key === "maquininhas")!);
+    if (canSeeMaquininhas) base.push(todasAbas.find((a) => a.key === "rfid")!);
     return base;
   }, [isSuperAdmin, canSeeMaquininhas]);
 
@@ -121,6 +124,7 @@ export default function PaginaConfiguracoes({ parametros, webhooks, logs, usuari
       {tab === "aprovadores" && <TabAprovadores />}
       {tab === "locais" && <LocaisEstoqueTab canEdit={isSuperAdmin} />}
       {tab === "produto_visibilidade" && <TabProdutoVisibilidade />}
+      {tab === "rfid" && <TabRfid />}
     </div>
   );
 }

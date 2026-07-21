@@ -10,6 +10,13 @@ export const ETAPAS_APONTAMENTO   = new Set(["Novas Ordens", "Em Andamento"]);
 export const ETAPAS_TRANSFERENCIA = new Set(["Novas Ordens", "Em Andamento"]);
 export const ETAPAS_SAIDA         = new Set(["Em Andamento"]);
 
+// Tipos de ordem de SERVIÇO: a peça é do cliente, não há apontamento de
+// entrada de ouro — logo a etapa interna nunca vira "Em Andamento" e o card
+// ficaria preso em "Novas Ordens" pra sempre. Para esses tipos o botão Saída
+// é liberado direto (desde que haja operador atribuído). Fabricação NÃO entra
+// aqui: liberar sem apontamento faria a quebra sair zerada em silêncio.
+export const TIPOS_SERVICO = new Set(["servico_venda", "garantia", "servico_interno"]);
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PCPItem = any;
 
@@ -43,7 +50,14 @@ export default function KanbanCard({
   const etapa          = pcp.etapas ?? "";
   const podeApontar    = ETAPAS_APONTAMENTO.has(etapa);
   const podeTransferir = ETAPAS_TRANSFERENCIA.has(etapa);
-  const podeSaida      = ETAPAS_SAIDA.has(etapa);
+  // Saída liberada quando: (a) etapa interna "Em Andamento" (fluxo de fabricação
+  // normal) OU (b) ordem de serviço com operador atribuído ainda em "Novas Ordens"
+  // ou "Em Andamento". O fallback `?? ""` em tipo_ordem preserva o comportamento
+  // antigo p/ qualquer chamador que não envie o campo (sem regressão).
+  const isServico      = TIPOS_SERVICO.has(pcp.tipo_ordem ?? "");
+  const podeSaida      = ETAPAS_SAIDA.has(etapa) ||
+                         (isServico && pcp.deposito_id != null &&
+                          (etapa === "Novas Ordens" || etapa === "Em Andamento"));
   const podeAtribuir   = pcp.deposito_id == null && etapa === "Novas Ordens";
 
   return (

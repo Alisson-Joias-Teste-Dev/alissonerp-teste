@@ -11,7 +11,6 @@ import {
 } from "@/lib/payload-limits";
 import { zodError } from "@/lib/schemas/common";
 import { criarNotificacao } from "@/lib/notificacoes";
-import { listarAprovadoresFreteAvulso } from "@/lib/entrega-venda";
 
 const TarefaPostSchema = z.object({
   titulo: z.string().min(1, "obrigatório"),
@@ -48,25 +47,115 @@ export async function GET(req: NextRequest) {
   const isAdmin = isFullAccess(usuario?.role);
   const userId = user.id;
 
-  const tagsList = tagsParam ? tagsParam.split(",").map(t => t.trim()).filter(Boolean) : [];
+  // REGRA DE NEGÓCIO (Fase 5 conversão reversa): a tarefa de aprovação de
+  // conversão reversa deve aparecer pra TODOS os aprovadores configurados em
+  // Configurações → Aprovadores, não só pro responsável. Fragmento reutilizado
+  // nos filtros de visibilidade abaixo.
+  const reversaAprovadorCond = sql`(t.tipo = 'conversao_reversa' AND EXISTS (
+    SELECT 1 FROM alissonerp.configuracoes_sistema cs
+    WHERE cs.chave = 'aprovadores_conversao_reversa'
+      AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+  ))`;
 
-  /**
-   * REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — ADITIVO, escopado
-   * SÓ para tipo='frete_avulso'): além de responsavel_id/criado_por, quem está
-   * na chave de config `aprovadores_frete_avulso` também enxerga as tarefas de
-   * frete avulso — é o pool que decide (qualquer um, não só o 1º gravado como
-   * responsavel_id). Lida uma única vez por request (evita N+1 por linha).
-   * NÃO afeta a visibilidade dos demais tipos de tarefa.
-   * IMPACTO SE REMOVIDO: só o 1º aprovador da lista (responsavel_id) veria a
-   * tarefa — os demais do pool nunca a encontrariam para decidir.
-   */
-  let isPoolFreteAvulso = false;
-  if (!isAdmin) {
-    // Fonte única (V3): listarAprovadoresFreteAvulso (@/lib/entrega-venda) —
-    // antes essa mesma query estava duplicada aqui, na lib e no dispatcher.
-    const listaPoolFrete = await listarAprovadoresFreteAvulso();
-    isPoolFreteAvulso = listaPoolFrete.includes(userId);
-  }
+  // REGRA DE NEGÓCIO (16/07 — decisão do Jonathan): "toda aprovação pode ter
+  // mais de um aprovador, todos devem RECEBER a tarefa de aprovação — só
+  // basta um aprovar". Sem isto, só quem virou `responsavel_id` (o 1º UUID
+  // resolvido na criação — ver resolverAprovadores/criarTarefaAprovacao) via
+  // a tarefa na fila; o 2º+ aprovador configurado na MESMA chave (MULTI,
+  // separada por vírgula) não a via, mesmo podendo decidir (podeDecidir já
+  // aceitava qualquer um da lista — só a LISTAGEM que só mostrava o 1º).
+  // Generaliza o padrão que já existia só pra conversao_reversa (acima) pros
+  // eventos que hoje suportam múltiplos aprovadores. Mapeamento tipo/tags →
+  // chave de config conferido direto no código de cada criação (grep, 16/07)
+  // — não adivinhado.
+  //
+  // 16/07 (2ª rodada) — cobre TODOS os eventos do CATALOGO que criam tarefa.
+  // Os 4 que faltavam (conversao_sku, compra_metal, recebimento_metal,
+  // limpeza_ouro) entraram depois de um achado testando no homolog: a tarefa
+  // 305 (conversao_sku) ficou SEM SAÍDA. Ela nasce com responsavel_id de quem
+  // o fluxo elegeu (Paloma), que NÃO estava em `aprovador_conversao` — então
+  // quem podia decidir (config) não via, e quem via não podia decidir
+  // (podeDecidir é config-first estrito, sem fallback por cargo). Resultado:
+  // travada, só saía por SQL. `precificacao` ficou de fora de propósito: não
+  // existe criação de tarefa pra ela em lugar nenhum (só permissão de módulo).
+  // IMPACTO SE REMOVIDO: volta o problema — só o "sortudo" (responsavel_id)
+  // recebe a tarefa; os outros aprovadores configurados ficam cegos, e se o
+  // responsavel_id não estiver na config a aprovação trava de vez.
+  const multiAprovadorCond = sql`(
+    ${reversaAprovadorCond}
+    OR (t.tipo = 'desconto_acima' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_desconto_padrao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR (t.tipo = 'cartao_desconto' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_cartao_desconto_padrao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR (t.tipo = 'entrega_sem_pagamento_total' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_entrega_sem_pagamento' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR (t.tipo = 'compra_comercial' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_compra_comercial' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR (t.tipo = 'conversao' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_conversao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    -- conversao_sku: MESMA chave de 'conversao' (decisão do Jonathan, 12/07 — vide catalogo.ts).
+    OR (t.tipo = 'conversao_sku' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_conversao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    -- compra_metal e recebimento_metal: chave 'metal_aprovador_id' (api/metal/compras
+    -- e api/metal/recebimentos gravam esses tipos — conferido no INSERT, 16/07).
+    OR (t.tipo IN ('compra_metal', 'recebimento_metal') AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'metal_aprovador_id' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    -- limpeza de ouro: a tarefa nasce com tipo 'aprovacao_quebra_metal' (NÃO
+    -- 'limpeza_ouro') — api/purificacao/limpeza grava assim de propósito, porque o
+    -- aprovador valida a QUEBRA, não o recebimento. Chave: 'aprovador_limpeza'.
+    OR (t.tipo = 'aprovacao_quebra_metal' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_limpeza' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    -- garantia fora do prazo (17/07): tarefa nasce com tipo 'garantia_fora_prazo'
+    -- em api/garantia/solicitar-aprovacao (conferido no INSERT, não adivinhado).
+    -- Chave: 'aprovadores_garantia_fora_prazo'. Ver docs/regras-negocio/ordens.md §3.
+    OR (t.tipo = 'garantia_fora_prazo' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovadores_garantia_fora_prazo' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    -- frete avulso solicitado (migration 353, camada central — evento 'frete_avulso'
+    -- em src/lib/aprovacoes/catalogo.ts): tarefa nasce com tipo 'frete_avulso' em
+    -- criarFreteAvulso (src/lib/entrega-venda.ts). Chave: 'aprovadores_frete_avulso'.
+    OR (t.tipo = 'frete_avulso' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovadores_frete_avulso' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    -- credito_loja: tags = ['credito_loja', 'gerente'|'diretor'] (vendas-credito-aprovar.ts) — tipo NULL.
+    OR ('credito_loja' = ANY(t.tags) AND 'gerente' = ANY(t.tags) AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovadora_credito_gerente' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR ('credito_loja' = ANY(t.tags) AND 'diretor' = ANY(t.tags) AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_credito_diretor' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    -- devolucao: tags=['devolucao'] (etapa 1) vs tags=['devolucao','devolucao_estoque'] (etapa 2) — tipo NULL (devolucoes.ts).
+    OR ('devolucao_estoque' = ANY(t.tags) AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_devolucao_estoque' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+    OR ('devolucao' = ANY(t.tags) AND NOT ('devolucao_estoque' = ANY(t.tags)) AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovador_devolucao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
+  )`;
+
+  const tagsList = tagsParam ? tagsParam.split(",").map(t => t.trim()).filter(Boolean) : [];
 
   const tarefas = await sql`
     SELECT
@@ -83,17 +172,39 @@ export async function GET(req: NextRequest) {
     LEFT JOIN alissonerp.usuarios uc ON uc.id = t.criado_por
     LEFT JOIN alissonerp.ordens o ON o.id = t.ordem_id
     WHERE 1=1
+      -- REGRA DE NEGÓCIO (Fase 5, Jonathan 15/07): a tarefa de conversão reversa
+      -- SÓ é visível pros aprovadores configurados em Configurações → Aprovadores —
+      -- NEM admin vê se não estiver na lista, e o solicitante também não a vê na
+      -- fila (ele acompanha pelo selo "aguardando aprovação" na aba Ouro). Vale pra
+      -- QUALQUER visão (por isso é global, fora dos filtros de visao/isAdmin abaixo).
+      -- BUGFIX (16/07 — achado testando o front): 'conversao_reversa' <> t.tipo
+      -- dá NULL (não FALSE) quando t.tipo IS NULL em SQL — e credito_loja e
+      -- devolucao NUNCA setam t.tipo (só tags — ver vendas-credito-aprovar.ts/
+      -- devolucoes.ts). Resultado: NULL OR FALSE = NULL = linha EXCLUÍDA da
+      -- consulta pra QUALQUER usuário, inclusive admin (bypass de isAdmin nunca
+      -- chegava a rodar — a linha já tinha sumido aqui). 2 tarefas de crédito
+      -- reais ficaram invisíveis em PRODUÇÃO por causa disso (achado 16/07,
+      -- corrigido na mesma sessão). COALESCE trata o NULL como "não é reversa".
+      ${sql`AND (COALESCE(t.tipo, '') <> 'conversao_reversa' OR ${reversaAprovadorCond})`}
       ${visao === "minhas"
           ? sql`AND (t.responsavel_id = ${userId}::uuid)`
           : visao === "time"
             ? sql``
             : !isAdmin
-              ? sql`AND (t.responsavel_id = ${userId}::uuid OR t.criado_por = ${userId}::uuid OR (t.tipo = 'frete_avulso' AND ${isPoolFreteAvulso}::boolean))`
+              ? sql`AND (t.responsavel_id = ${userId}::uuid OR t.criado_por = ${userId}::uuid OR ${multiAprovadorCond})`
               : sql``}
+      -- BUGFIX (16/07 — achado pelo Jonathan testando o front): "Aprovações
+      -- pendentes" mostrava a tarefa pra QUALQUER admin/desenvolvedor, mesmo
+      -- fora da lista configurada — clicar em Aprovar já dava 403 corretamente
+      -- (podeDecidir nunca teve esse furo), mas a tarefa NÃO devia nem
+      -- aparecer pra eles (mesma regra já valia pra conversao_reversa desde a
+      -- Fase 5 — "nem admin vê se não estiver configurado"). Removido o bypass
+      -- de isAdmin aqui: a fila de aprovação agora respeita SEMPRE
+      -- responsavel_id/multiAprovadorCond, admin incluso. "Tarefas do time"
+      -- (visao=time, acima) continua sem restrição — é a visão de supervisão
+      -- geral, não a fila de aprovação.
       ${(visao === "aguardando_aprovacao" || visao === "aguardando")
-        ? (isAdmin
-            ? sql`AND t.status = 'aguardando_aprovacao'`
-            : sql`AND t.status = 'aguardando_aprovacao' AND (t.responsavel_id = ${userId}::uuid OR (t.tipo = 'frete_avulso' AND ${isPoolFreteAvulso}::boolean))`)
+        ? sql`AND t.status = 'aguardando_aprovacao' AND (t.responsavel_id = ${userId}::uuid OR ${multiAprovadorCond})`
         : sql``}
       ${visao === "concluidas" ? sql`AND t.status IN ('concluida', 'aprovada')` : sql``}
       ${visao === "pendentes" ? sql`AND t.status IN ('pendente', 'em_andamento', 'aguardando_aprovacao')` : sql``}
@@ -113,22 +224,7 @@ export async function GET(req: NextRequest) {
     LIMIT 200
   `;
 
-  /**
-   * REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — ADITIVO, escopado
-   * SÓ para tipo='frete_avulso'): expõe um flag calculado no servidor (em vez
-   * de mandar a lista de UUIDs do pool pro client) para o TarefaDrawer decidir
-   * se mostra os botões Aprovar/Rejeitar a um usuário que NÃO é o
-   * responsavel_id da tarefa. Não é a autoridade final — o dispatcher
-   * (PATCH /api/tarefas/[id]/aprovacao) sempre revalida no servidor.
-   * IMPACTO SE REMOVIDO: pool decide certo no backend, mas o botão de decisão
-   * não aparece pra quem não é o responsavel_id gravado na criação.
-   */
-  const tarefasComFlag = tarefas.map((t: Record<string, unknown>) => ({
-    ...t,
-    pode_decidir_pool: t.tipo === "frete_avulso" && (isAdmin || isPoolFreteAvulso),
-  }));
-
-  return NextResponse.json(tarefasComFlag);
+  return NextResponse.json(tarefas);
 }
 
 export async function POST(req: NextRequest) {

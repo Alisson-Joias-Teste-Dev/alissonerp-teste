@@ -22,6 +22,8 @@ import { createClient } from "@/lib/supabase/client";
 // Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos frontends.
 import { isServicoRodioProduto, descricaoItemComBaseRodio, calcularPreviewRodioPorSkuBase, getPctRodio, round2, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
 import { useErrorStore } from "@/stores/errorStore";
+// Formas que contam como cartão pro gate de desconto (fonte única, espelha o servidor).
+import { ehFormaCartao } from "@/lib/desconto/precificar-item";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -260,6 +262,9 @@ interface Props {
   vendedorNome: string;
   maxDesconto: number;
   descontoAuthThreshold?: number;
+  /** Limite (%) acima do qual o Cartão de Crédito exige aprovação. Vem da config
+   *  `limite_desconto_cartao_pct` (Configurações › Aprovadores), não mais fixo em 20. */
+  limiteDescontoCartao?: number;
   vendedores?: { id: number; nome: string }[];
   userId: string;
   userName: string;
@@ -608,7 +613,7 @@ function RodioBaseSelector({ pct, valorPreview, baseLabel, erro, onSelectBase, o
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
-export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxDesconto, descontoAuthThreshold, vendedores = [], userId, userName }: Props) {
+export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxDesconto, descontoAuthThreshold, limiteDescontoCartao, vendedores = [], userId, userName }: Props) {
   const router = useRouter();
 
   // ── Wizard state ──────────────────────────────────────────────────────────
@@ -819,7 +824,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     const saldo = pagamentos.filter(p => p.forma === "A Receber").reduce((s, p) => s + p.valor, 0);
     return calcularCrediPreview({ tipo: crediTipo, valorBase: saldo, parcelas: crediParcelas, diaVenc: crediDiaVenc, dias: crediDias });
   }, [temAReceber, pagForma, pagamentos, crediTipo, crediParcelas, crediDiaVenc, crediDias, totalVenda]);
-  const LIMITE_DESCONTO_CARTAO = 20;
+  // REGRA DE NEGÓCIO (Fase 5, fix 16/07): vem da config limite_desconto_cartao_pct
+  // (Configurações › Aprovadores), não mais cravado em 20 — a tela divergia do
+  // gate real do servidor quando a config era alterada. Fallback 20 = mesmo
+  // default do backend (LIMITE_DESCONTO_CARTAO_PADRAO em precificar-item.ts).
+  const LIMITE_DESCONTO_CARTAO = limiteDescontoCartao ?? 20;
   // Só precisa aprovação se desconto > maxDesconto (exceto admin = bypass com 100)
   const precisaAprovacaoDesconto = maxDesconto < 100 && itens.some(i => i.pct_desconto > maxDesconto);
   const temDescontoCartao = itens.some(i => i.pct_desconto > LIMITE_DESCONTO_CARTAO);
@@ -1795,7 +1804,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     }
     if (step === 3 && tipoVenda !== "servico" && itens.length === 0) { setSaveErr("Adicione pelo menos 1 item"); return; }
     if (step === 3 && precisaAprovacaoDesconto) { setSaveErr(`Desconto acima de ${maxDesconto}% requer aprovação. Clique em 'Solicitar Aprovação'.`); return; }
-    if (step === 3 && cartaoBloqueado && pagForma === "Cartão de Crédito") { setSaveErr("Cartão de crédito bloqueado para esta venda devido a descontos acima de 20%. Solicite aprovação ou escolha outra forma de pagamento."); return; }
+    if (step === 3 && cartaoBloqueado && ehFormaCartao(pagForma)) { setSaveErr(`Pagamento em ${pagForma} bloqueado: desconto acima de ${LIMITE_DESCONTO_CARTAO}%. Solicite aprovação ou escolha outra forma — as demais seguem liberadas.`); return; }
     // Valida pendencias de personalizacao no passo 3
     if (step === 3) {
       const pendencias = itens
@@ -1900,8 +1909,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       setConcluindo(false);
       return;
     }
-    if (cartaoBloqueado && pagForma === "Cartão de Crédito") {
-      setSaveErr("Cartão de crédito bloqueado para esta venda. Solicite aprovação ou escolha outra forma de pagamento.");
+    if (cartaoBloqueado && ehFormaCartao(pagForma)) {
+      setSaveErr(`Pagamento em ${pagForma} bloqueado para esta venda. Solicite aprovação ou escolha outra forma — as demais seguem liberadas.`);
       setConcluindo(false);
       return;
     }
@@ -3219,6 +3228,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               vendaId={vendaId}
               numeroVenda={numeroVenda || "Nova"}
               mode="criacao"
+              role={role}
               gateways={gateways}
               // Payment form
               pagForma={pagForma} setPagForma={setPagForma}
@@ -3300,6 +3310,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               onPagamentoConfirmado={(id) => { if (tipoVenda === "servico") concluirVenda(id); else router.push(`/vendas/${id}`); }}
               showAReceberWarning={temAReceber}
               cartaoBloqueado={cartaoBloqueado}
+              limiteDescontoCartao={LIMITE_DESCONTO_CARTAO}
               onSolicitarAprovacaoCartao={async () => {
                 /**
                  * REGRA DE NEGÓCIO: cartão com desconto acima do limite exige

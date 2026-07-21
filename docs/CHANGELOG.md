@@ -21,9 +21,15 @@ ativo pode aceitar — o aceite é um claim atômico no banco (evita dois motobo
 - **Sem tabela própria de liberadores** — reusa a engrenagem existente do módulo Tarefas
   (`tarefas` + `aprovacoes_tarefa`) e a chave de config MULTI `aprovadores_frete_avulso`
   (`GET/PATCH /api/configuracoes/aprovadores`), mesmo padrão de `aprovadores_devolver_peca`.
-  Pool lido por uma fonte única (`listarAprovadoresFreteAvulso`) em 4 pontos aditivos, escopados por
-  `tipo='frete_avulso'`: `GET /api/tarefas`, `GET /api/tarefas/[id]`, `PATCH /api/tarefas/[id]/aprovacao`
-  e o flag `pode_decidir_pool` do `TarefaDrawer` — nenhum outro tipo de tarefa muda de comportamento.
+  **Decisão plugada na camada central de aprovações** (`src/lib/aprovacoes/` — merge com a
+  main, 20/07): evento `frete_avulso` no `CATALOGO`, mapeado em `eventoDaTarefa` e autorizado
+  por `podeDecidir` (política config-first estrita — só quem está em `aprovadores_frete_avulso`
+  decide, nem admin) no `PATCH /api/tarefas/[id]/aprovacao`; visibilidade na fila via a mesma
+  cláusula genérica `multiAprovadorCond` de `GET /api/tarefas`. Substituiu o pool "na unha"
+  (`isPoolFreteAvulso`/flag `pode_decidir_pool`) que a feature tinha antes do merge — mesmo
+  comportamento, menos código duplicado, herda os testes do módulo central. `criarFreteAvulso`
+  continua sendo a fonte única pra ESCOLHER o `responsavel_id` da tarefa e notificar o pool na
+  criação (`listarAprovadoresFreteAvulso`, uso legítimo — não é autorização).
 - Rotas: `POST /api/entregas-venda/frete-avulso` (criação/solicitação), `/[id]/aceitar-avulso`,
   `/[id]/confirmar-avulso`. Decisão (aprovar/rejeitar) passa por `PATCH /api/tarefas/[id]/aprovacao`,
   não por rota própria.
@@ -43,10 +49,117 @@ ativo pode aceitar — o aceite é um claim atômico no banco (evita dois motobo
 região/loja (decisão de produto); card "Pendentes" não conta o pool separadamente; cancelar um avulso
 liberado não estorna o saldo já lançado; entregador aceita/registra sem exigir cadastro prévio em
 `alissonerp.motoboys`; diretor fora da lista de config não decide a tarefa (limitação pré-existente de
-todos os tipos de aprovação no dispatcher, não específica de frete avulso).
+todos os tipos de aprovação no dispatcher, não específica de frete avulso). **Achado no merge (20/07):**
+o 2º+ aprovador configurado no pool (que não seja o `aprovador_id` gravado na criação da tarefa) toma
+403 tentando ABRIR a tarefa (`GET /api/tarefas/[id]`, aba Comentários) e não vê o botão Aprovar/Rejeitar
+no `TarefaDrawer` — ele CONSEGUE decidir via API (`podeDecidir` autoriza certo), só falta acesso pela UI.
+Mesma limitação já existe hoje pra TODOS os outros tipos multi-aprovador (`compra_comercial`,
+`conversao_reversa`, `garantia_fora_prazo` etc.) — não é regressão específica de frete avulso, é gap
+pré-existente da camada central que precisa de decisão do Jonathan se/quando for endereçado.
 
 **Status:** migration 353 **já aplicada em homolog**. Produção ainda pendente. Ver
 `docs/regras-negocio/entregas.md` para o fluxo completo e a matriz de permissão a testar.
+
+## feat(garantia): regras de abertura de ordem de garantia
+
+**O quê (regras aprovadas pelo Jonathan em 17/07/2026 — `docs/regras-negocio/ordens.md`):**
+- Só é possível abrir garantia de venda com situação `entregue` (trava seca, sem aprovação).
+- `Acabamento e polimento` tem garantia **vitalícia** (sem prazo).
+- Demais serviços: **7 dias úteis** desde a entrega; fora disso, exige **aprovação**.
+- Garantia com serviços misturados: o mais restritivo vence (basta um não-vitalício).
+- A aprovação de fora do prazo é **uso único** (uma aprovação = uma garantia).
+
+**Como (reaproveitando o que já existe):**
+- Regra em `src/lib/garantia/prazo-garantia.ts` (`avaliarGarantia`), reusando
+  `src/lib/dias-uteis.ts` (o mesmo cálculo de 7 dias úteis + feriados de Fortaleza da devolução).
+- Data da entrega: entrega real → transição para `entregue` → `data_entrega` do PDV (com
+  sanidade contra datas futuras/absurdas). Sem data confiável, não bloqueia por prazo.
+- Trava no servidor em `POST /api/ordens` (dentro da transação, junto do guard de rascunho);
+  o modal só antecipa o aviso via `POST /api/garantia/avaliar`.
+- Aprovação pela camada config-first: evento `garantia_fora_prazo`, chave
+  `aprovadores_garantia_fora_prazo` em Configurações › Aprovadores. A tarefa libera a
+  **venda**; a ordem só nasce ao abrir a garantia, que consome a aprovação
+  (`tarefas.ordem_id`, `UPDATE ... WHERE ordem_id IS NULL` na mesma transação = uso único).
+- Migration `348_garantia_vitalicia.sql`: coluna `tipos_servico.garantia_vitalicia`
+  (marca `Acabamento e polimento`). A chave de config não tem migration — criar via `/dba`.
+
+## feat(movimentacao-interna): multiplas fotos por passo + observacao na devolucao (v2.87.0)
+
+**O que:** os usuarios pediram (1) poder anexar mais de uma foto em cada passo fisico
+e (2) um campo de observacao na volta ao estoque.
+
+- **Ate 5 fotos por passo** (entrega, recebimento, devolucao), em vez de uma so.
+- **Observacao opcional** na confirmacao da devolucao, pro estoque anotar o estado da
+  peca na volta ("voltou com risco perto do fecho").
+
+**Como (blindado, sem quebrar o que existe):**
+- Migration **349**: tabela filha `solicitacao_peca_fotos` (uma linha por foto, com
+  `etapa` + CHECK), copia as fotos que ja existiam (idempotente), e coluna
+  `obs_devolucao`. As colunas antigas `foto_*` ficam CONGELADAS (nao removidas) — a
+  fonte de verdade das fotos passou a ser a tabela filha.
+- `PATCH /api/solicitacao-peca/[id]`: aceita `foto_paths[]` (1..5) — mantem `foto_path`
+  singular por compatibilidade — e `obs`. Status + insert das fotos numa transacao
+  (atomico). Passo com foto exige pelo menos 1.
+- Front: `AcaoSolicitacaoModal` com grade de fotos (adicionar/remover, teto de 5) e
+  textarea de observacao so na devolucao; lista e historico mostram todas as fotos e a
+  observacao. Upload client-side (1 chamada por foto), mesmo padrao provado.
+- Docs: `comercial.md` §10 atualizada.
+
+**Testado no homolog:** query agregando arrays por etapa, observacao gravada, CHECK de
+etapa invalida rejeitado, cascade (apagar a solicitacao apaga as fotos). tsc limpo.
+
+## feat(movimentacao-interna): cancelar solicitação de peça (v2.86.0)
+
+**O quê:** a consultora que solicita uma peça e desiste agora consegue **cancelar** a
+solicitação. Antes não havia saída: a solicitação ficava presa em "Solicitado" pra
+sempre, sujando o filtro "Em aberto" e mentindo sobre o que estava pendente no estoque
+(havia **5 solicitações presas** em prod na data desta mudança).
+
+**Regra (o porquê dos limites):**
+- **Só cancela a partir de `solicitado`** — enquanto a peça ainda está fisicamente no
+  estoque e nada aconteceu. A partir de `entregue` a peça saiu, e o desfecho honesto é a
+  **devolução** (com foto) ou "cliente levou"; cancelar ali apagaria o rastro de que
+  alguém está com a peça. API devolve **409** e aponta pra devolução.
+- **Motivo obrigatório** — é o que dá visibilidade de por que as consultoras desistem.
+  Travado em dois níveis: API (400) e banco (CHECK `chk_solic_peca_cancelado_motivo`).
+- **Cancelada não conta como "em aberto"** — o filtro deixou de ser `!= finalizado` e
+  passou a excluir também `cancelado`, que é o propósito da feature. Chip "Canceladas".
+- **Não movimenta estoque** — coerente com o módulo, que só registra posse (nunca saldo).
+  Nada é estornado: a peça nunca saiu.
+
+**Como:**
+- Migration **347**: estado `cancelado` no CHECK de status (superset — nenhuma linha
+  existente viola) + colunas `cancelado_por_id`, `cancelado_em`, `motivo_cancelamento`
+  + CHECK `NOT VALID` exigindo motivo quando cancelado.
+- `PATCH /api/solicitacao-peca/[id]`: nova action `cancelar` (motivo obrigatório, guarda
+  de estado, `logAudit` com o motivo).
+- Front: `AcaoSolicitacaoModal` **estendido** (não duplicado) com suporte a motivo/aviso/
+  perigo; botão "Cancelar" vermelho só em `solicitado`; badge "Cancelada"; chip de filtro;
+  motivo visível na lista e na linha do tempo do histórico. No modal de cancelamento o
+  botão de sair virou **"Voltar"** — dois "Cancelar" na mesma barra fariam a consultora
+  encerrar a solicitação achando que estava desistindo.
+- Docs: `docs/regras-negocio/comercial.md` §10 (seção nova — o módulo não tinha).
+
+## feat(produtos): localização física no cadastro e na edição de produtos (v2.85.0)
+
+**O quê:** o campo **Localização** (prateleira/gaveta), já disponível no Estoque Comercial
+(v2.84.0), passa a aparecer também no **cadastro** e na **edição** do produto — mesmo
+padrão do campo Fornecedor (que vive na mesma tabela `erp_produtos`).
+
+**Como (reaproveitando o padrão existente):**
+- `POST /api/produtos` (criação): aceita `localizacao` opcional, grava no pai e replica
+  pras variações (mesmo fluxo do `fornecedor`).
+- `PATCH /api/produtos/[id]` (edição): lê/grava `localizacao` no drawer do produto.
+  A replicação pras variações quando o pai muda é **automática** — o mecanismo já existente
+  (`erpRepl`) copia qualquer campo alterado de `erpUpdate`, sem precisar de código novo.
+- Frontend: campo no `CadastroProdutoModal.tsx` (ao lado do Fornecedor, sempre visível —
+  não dentro da seção colapsável "Ficha Técnica") e no `ProdutoDrawer.tsx` (nas duas
+  variantes de produto: pedra e joia/normal).
+
+**Não mexe em:** banco (coluna já existe — migration 336, v2.84.0), views, triggers.
+
+**Testado:** query exata do PATCH validada no homolog (grava e reverte limpo). `tsc` zero
+erros. Testado no front pelo Jonathan (homolog).
 
 ## feat(estoque-comercial): localização das peças + ferramenta de importação (v2.84.0)
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { hasRole, ROLES_DEVOLUCAO_ABRIR } from "@/lib/roles";
-import { solicitarAprovacaoDevolucao } from "@/lib/devolucoes";
+import { solicitarAprovacaoDevolucao, HttpError } from "@/lib/devolucoes";
 // Ownership: consultora só solicita aprovação da devolução da própria venda.
 import { requireDevolucaoOwnership } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
@@ -41,6 +41,12 @@ export async function POST(
     const res = await solicitarAprovacaoDevolucao(devId, user.id);
     return NextResponse.json(res);
   } catch (err) {
+    // REGRA DE NEGÓCIO (Fase 3e): "aprovador não configurado" tem status/mensagem
+    // próprios (política config-first) — as demais mensagens de erro continuam
+    // genéricas via internalError, contrato idêntico ao de antes.
+    if (err instanceof HttpError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     return internalError(`[POST /api/devolucoes/${devId}/solicitar-aprovacao]`, err, "Erro ao solicitar aprovacao", 400);
   }
 }

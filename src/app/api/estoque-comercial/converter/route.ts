@@ -5,6 +5,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { zodError } from "@/lib/schemas/common";
+import { resolverAprovadores } from "@/lib/aprovacoes";
 
 const ROLES_PERMITIDOS = ["estoquista_loja", "gerente_loja", "admin", "desenvolvedor"];
 
@@ -65,6 +66,17 @@ export async function POST(req: NextRequest) {
 
   // ── Buscar insumo destino padrão do sistema ──────────────────────────────
   const insumoDestino = insumo_destino ?? await getParametroNumber(PARAM.INSUMO_CONVERSAO_PADRAO).catch(() => 1);
+
+  // REGRA DE NEGÓCIO: sem aprovador configurado, a conversão não nasce (política
+  // config-first — 03b-config-first-estrito.md). Sem ctx.solicitanteId: conversão
+  // não exclui quem está criando.
+  const resol = await resolverAprovadores("conversao");
+  if (resol.status === "nao_configurado") {
+    return NextResponse.json(
+      { error: "Aprovador de conversão não configurado. Defina em Configurações › Aprovadores." },
+      { status: 409 },
+    );
+  }
 
   // ── Transação: ordem + conversao + itens + movimentações ─────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

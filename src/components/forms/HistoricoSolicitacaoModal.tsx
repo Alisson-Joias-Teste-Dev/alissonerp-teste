@@ -1,6 +1,6 @@
 "use client";
 
-import { X, Check } from "lucide-react";
+import { X, Check, Ban } from "lucide-react";
 import { getPublicUrl } from "@/lib/storage-url";
 
 const C = { esmeralda: "#184036", cremeBorder: "#E8DCC8" };
@@ -9,14 +9,18 @@ interface HistoricoRow {
   id: number;
   status: string;
   motivo_final: string | null;
+  cancelado_em: string | null;
+  motivo_cancelamento: string | null;
+  cancelado_por_nome: string | null;
   created_at: string;
   entregue_em: string | null;
   recebido_em: string | null;
   volta_solicitada_em: string | null;
   finalizado_em: string | null;
-  foto_entrega: string | null;
-  foto_recebimento: string | null;
-  foto_devolucao: string | null;
+  obs_devolucao: string | null;
+  fotos_entrega: string[];
+  fotos_recebimento: string[];
+  fotos_devolucao: string[];
   solicitante_nome: string | null;
   entregue_por_nome: string | null;
   recebido_por_nome: string | null;
@@ -48,7 +52,10 @@ interface Passo {
   label: string;
   nome: string | null;
   em: string | null;
-  foto: string | null;
+  fotos: string[];          // 0+ fotos do passo (mig 349)
+  detalhe?: string | null;  // texto livre vermelho (hoje: motivo do cancelamento)
+  obs?: string | null;      // observacao neutra (hoje: obs da devolucao)
+  perigo?: boolean;         // pinta o marcador de vermelho (encerramento sem desfecho fisico)
 }
 
 /**
@@ -60,16 +67,23 @@ export default function HistoricoSolicitacaoModal({ isOpen, onClose, row, produt
   if (!isOpen) return null;
 
   const passos: Passo[] = [
-    { label: "Solicitado", nome: row.solicitante_nome, em: row.created_at, foto: null },
+    { label: "Solicitado", nome: row.solicitante_nome, em: row.created_at, fotos: [] },
   ];
-  if (row.entregue_em) passos.push({ label: "Entregue pelo estoque", nome: row.entregue_por_nome, em: row.entregue_em, foto: row.foto_entrega });
-  if (row.recebido_em) passos.push({ label: "Recebido pela solicitante", nome: row.recebido_por_nome, em: row.recebido_em, foto: row.foto_recebimento });
-  if (row.volta_solicitada_em) passos.push({ label: "Volta ao estoque solicitada", nome: row.volta_solicitada_por_nome, em: row.volta_solicitada_em, foto: null });
+  if (row.entregue_em) passos.push({ label: "Entregue pelo estoque", nome: row.entregue_por_nome, em: row.entregue_em, fotos: row.fotos_entrega });
+  if (row.recebido_em) passos.push({ label: "Recebido pela solicitante", nome: row.recebido_por_nome, em: row.recebido_em, fotos: row.fotos_recebimento });
+  if (row.volta_solicitada_em) passos.push({ label: "Volta ao estoque solicitada", nome: row.volta_solicitada_por_nome, em: row.volta_solicitada_em, fotos: [] });
+  // Cancelamento: encerra a linha do tempo logo apos "Solicitado" — por regra so
+  // acontece a partir de 'solicitado', entao nunca convive com entrega/recebimento.
+  if (row.status === "cancelado") {
+    passos.push({ label: "Cancelada", nome: row.cancelado_por_nome, em: row.cancelado_em, fotos: [],
+      detalhe: row.motivo_cancelamento, perigo: true });
+  }
   if (row.status === "finalizado") {
     if (row.motivo_final === "cliente_levou") {
-      passos.push({ label: "Cliente levou", nome: row.finalizado_por_nome, em: row.finalizado_em, foto: null });
+      passos.push({ label: "Cliente levou", nome: row.finalizado_por_nome, em: row.finalizado_em, fotos: [] });
     } else {
-      passos.push({ label: "Devolvido — estoque confirmou", nome: row.finalizado_por_nome, em: row.finalizado_em, foto: row.foto_devolucao });
+      passos.push({ label: "Devolvido — estoque confirmou", nome: row.finalizado_por_nome, em: row.finalizado_em,
+        fotos: row.fotos_devolucao, obs: row.obs_devolucao });
     }
   }
 
@@ -95,13 +109,13 @@ export default function HistoricoSolicitacaoModal({ isOpen, onClose, row, produt
 
         <div className="px-6 py-5">
           {passos.map((p, i) => {
-            const fotoUrl = resolveStorageUrl(p.foto);
+            const fotoUrls = p.fotos.map((f) => resolveStorageUrl(f)).filter(Boolean) as string[];
             const ultimo = i === passos.length - 1 && !aguardando;
             return (
               <div key={i} className="flex gap-3">
                 <div className="flex flex-col items-center">
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: C.esmeralda }}>
-                    <Check size={13} color="#fff" />
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: p.perigo ? "#A32D2D" : C.esmeralda }}>
+                    {p.perigo ? <Ban size={13} color="#fff" /> : <Check size={13} color="#fff" />}
                   </div>
                   {!ultimo && <div className="w-0.5 flex-1" style={{ backgroundColor: C.cremeBorder, minHeight: 16 }} />}
                 </div>
@@ -109,12 +123,26 @@ export default function HistoricoSolicitacaoModal({ isOpen, onClose, row, produt
                   <p className="text-[13px] font-semibold" style={{ color: "#1A1A1A" }}>{p.label}</p>
                   <p className="text-[12px]" style={{ color: "#6B7280" }}>{p.nome ?? "—"}</p>
                   <p className="text-[12px] font-mono" style={{ color: "#9CA3AF" }}>{fmtDT(p.em)}</p>
-                  {fotoUrl && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={fotoUrl} alt={`Foto ${p.label}`} title={`Foto ${p.label}`}
-                      className="w-14 h-14 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity mt-1.5"
-                      onClick={() => onAbrirFoto(fotoUrl, `Foto · ${p.label}`)}
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                  {p.detalhe && (
+                    <p className="text-[12px] italic mt-1 px-2 py-1 rounded" style={{ backgroundColor: "#FCEBEB", color: "#A32D2D" }}>
+                      &ldquo;{p.detalhe}&rdquo;
+                    </p>
+                  )}
+                  {p.obs && (
+                    <p className="text-[12px] italic mt-1 px-2 py-1 rounded" style={{ backgroundColor: "#FFFBEB", color: "#92400E" }}>
+                      &ldquo;{p.obs}&rdquo;
+                    </p>
+                  )}
+                  {fotoUrls.length > 0 && (
+                    <div className="flex gap-1.5 flex-wrap mt-1.5">
+                      {fotoUrls.map((url, k) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={k} src={url} alt={`Foto ${p.label}`} title={`Foto ${p.label}`}
+                          className="w-14 h-14 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => onAbrirFoto(url, `Foto · ${p.label}`)}
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>

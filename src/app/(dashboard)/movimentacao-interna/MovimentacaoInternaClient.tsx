@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, CheckCircle2, Clock, Search, Truck, HandHeart, Undo2, UserCheck } from "lucide-react";
+import { Plus, CheckCircle2, Clock, Search, Truck, HandHeart, Undo2, UserCheck, Ban } from "lucide-react";
 import SolicitarPecaModal from "@/components/forms/SolicitarPecaModal";
 import AcaoSolicitacaoModal, { type AcaoTipo } from "@/components/forms/AcaoSolicitacaoModal";
 import HistoricoSolicitacaoModal from "@/components/forms/HistoricoSolicitacaoModal";
@@ -11,7 +11,7 @@ import { getPublicUrl } from "@/lib/storage-url";
 
 const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8", cremeBg: "#FAFAF7" };
 
-type Filtro = "abertas" | "finalizadas" | "todas";
+type Filtro = "abertas" | "finalizadas" | "canceladas" | "todas";
 
 interface Produto { nome: string; sku: string | null; }
 
@@ -25,14 +25,18 @@ interface SolicitacaoRow {
   volta_solicitada_em: string | null;
   finalizado_em: string | null;
   motivo_final: string | null;
-  foto_entrega: string | null;
-  foto_recebimento: string | null;
-  foto_devolucao: string | null;
+  cancelado_em: string | null;
+  motivo_cancelamento: string | null;
+  obs_devolucao: string | null;
+  fotos_entrega: string[];
+  fotos_recebimento: string[];
+  fotos_devolucao: string[];
   solicitante_nome: string | null;
   entregue_por_nome: string | null;
   recebido_por_nome: string | null;
   volta_solicitada_por_nome: string | null;
   finalizado_por_nome: string | null;
+  cancelado_por_nome: string | null;
   produtos: Produto[];
 }
 
@@ -63,14 +67,20 @@ function statusInfo(r: SolicitacaoRow): { label: string; bg: string; color: stri
   if (r.status === "entregue")         return { label: "Entregue",   bg: "#EFF6FF", color: "#2563EB", cor: "bg-blue-100 text-blue-700" };
   if (r.status === "recebido")         return { label: "Com a solicitante", bg: "#F3F4F6", color: "#6B7280", cor: "bg-gray-100 text-gray-600" };
   if (r.status === "volta_solicitada") return { label: "Volta solicitada", bg: "#FEF3C7", color: "#92400E", cor: "bg-yellow-100 text-yellow-700" };
+  if (r.status === "cancelado")        return { label: "Cancelada", bg: "#FCEBEB", color: "#A32D2D", cor: "bg-red-100 text-red-700" };
   // finalizado
   if (r.motivo_final === "cliente_levou") return { label: "Cliente levou", bg: "#ECFDF5", color: "#059669", cor: "bg-green-100 text-green-700" };
   return { label: "Devolvido", bg: "#F3F4F6", color: "#6B7280", cor: "bg-gray-100 text-gray-600" };
 }
 
 // acoes disponiveis no estado atual (recebido tem 2: cliente levou / devolver)
-function acoesDoStatus(status: string): { tipo: AcaoTipo; label: string; icon: typeof Truck }[] {
-  if (status === "solicitado")       return [{ tipo: "entregar", label: "Confirmar entrega", icon: Truck }];
+// 'solicitado' tem 2: entregar OU cancelar — cancelar so existe aqui, enquanto a
+// peca ainda esta no estoque. Depois de entregue o desfecho e devolucao/cliente.
+function acoesDoStatus(status: string): { tipo: AcaoTipo; label: string; icon: typeof Truck; perigo?: boolean }[] {
+  if (status === "solicitado")       return [
+    { tipo: "entregar", label: "Confirmar entrega", icon: Truck },
+    { tipo: "cancelar", label: "Cancelar", icon: Ban, perigo: true },
+  ];
   if (status === "entregue")         return [{ tipo: "receber", label: "Confirmar recebimento", icon: HandHeart }];
   if (status === "recebido")         return [
     { tipo: "cliente_levou", label: "Cliente levou", icon: UserCheck },
@@ -93,13 +103,20 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
   const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
   const abrirFoto = (url: string | null | undefined, titulo: string) => { if (url) setFotoModal({ url, titulo }); };
 
-  const countAbertas = rows.filter((r) => r.status !== "finalizado").length;
+  // "Em aberto" = ainda pendente de acao. Cancelada NAO e aberta — o motivo de
+  // existir o cancelamento e justamente tirar do "Em aberto" o que ninguem vai
+  // resolver. IMPACTO: se voltar a ser so `!== finalizado`, a cancelada reaparece
+  // como pendente e a feature perde o proposito.
+  const estaEncerrada = (s: string) => s === "finalizado" || s === "cancelado";
+  const countAbertas = rows.filter((r) => !estaEncerrada(r.status)).length;
   const countFinalizadas = rows.filter((r) => r.status === "finalizado").length;
+  const countCanceladas = rows.filter((r) => r.status === "cancelado").length;
 
   const buscaNorm = busca.trim().toLowerCase();
   const porFiltro =
-    filtro === "abertas" ? rows.filter((r) => r.status !== "finalizado") :
+    filtro === "abertas" ? rows.filter((r) => !estaEncerrada(r.status)) :
     filtro === "finalizadas" ? rows.filter((r) => r.status === "finalizado") :
+    filtro === "canceladas" ? rows.filter((r) => r.status === "cancelado") :
     rows;
   const rowsFiltrados = buscaNorm.length === 0 ? porFiltro : porFiltro.filter((r) =>
     r.produtos.some((p) => p.nome.toLowerCase().includes(buscaNorm) || (p.sku ?? "").toLowerCase().includes(buscaNorm))
@@ -109,20 +126,22 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
   const opFiltro: { value: Filtro; label: string; count: number }[] = [
     { value: "abertas",     label: "Em aberto",   count: countAbertas },
     { value: "finalizadas", label: "Finalizadas", count: countFinalizadas },
+    { value: "canceladas",  label: "Canceladas",  count: countCanceladas },
     { value: "todas",       label: "Todas",       count: rows.length },
   ];
 
   function FotosCell({ r, small }: { r: SolicitacaoRow; small?: boolean }) {
     const size = small ? "w-12 h-12" : "w-10 h-10";
-    const fotos: { path: string | null; titulo: string }[] = [
-      { path: r.foto_entrega, titulo: "Foto da Entrega" },
-      { path: r.foto_recebimento, titulo: "Foto do Recebimento" },
-      { path: r.foto_devolucao, titulo: "Foto da Devolução" },
+    // Cada etapa pode ter VARIAS fotos (mig 349) — achata todas numa lista so.
+    const fotos: { path: string; titulo: string }[] = [
+      ...r.fotos_entrega.map((p) => ({ path: p, titulo: "Foto da Entrega" })),
+      ...r.fotos_recebimento.map((p) => ({ path: p, titulo: "Foto do Recebimento" })),
+      ...r.fotos_devolucao.map((p) => ({ path: p, titulo: "Foto da Devolução" })),
     ];
     const visiveis = fotos.filter((f) => resolveStorageUrl(f.path));
     if (visiveis.length === 0) return <span style={{ color: "#9CA3AF" }}>—</span>;
     return (
-      <div className="flex gap-1.5">
+      <div className="flex gap-1.5 flex-wrap">
         {visiveis.map((f, i) => (
           // eslint-disable-next-line @next/next/no-img-element
           <img key={i} src={resolveStorageUrl(f.path)!} alt={f.titulo} title={f.titulo}
@@ -188,12 +207,15 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
                   ...(r.recebido_por_nome ? [{ label: "Recebido por", valor: r.recebido_por_nome }] : []),
                   ...(r.volta_solicitada_por_nome ? [{ label: "Volta pedida por", valor: r.volta_solicitada_por_nome }] : []),
                   ...(r.finalizado_por_nome ? [{ label: "Finalizado por", valor: r.finalizado_por_nome }] : []),
+                  ...(r.cancelado_por_nome ? [{ label: "Cancelado por", valor: r.cancelado_por_nome }] : []),
+                  ...(r.motivo_cancelamento ? [{ label: "Motivo", valor: r.motivo_cancelamento }] : []),
                   { label: "Fotos", valor: <FotosCell r={r} small /> },
                   { label: "Ação", valor: acoes.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5">
                       {acoes.map((ac) => (
                         <button key={ac.tipo} onClick={(e) => { e.stopPropagation(); setAcao({ row: r, tipo: ac.tipo }); }}
-                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold" style={{ backgroundColor: "#18403612", color: C.esmeralda }}>
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold"
+                          style={ac.perigo ? { backgroundColor: "#FCEBEB", color: "#A32D2D" } : { backgroundColor: "#18403612", color: C.esmeralda }}>
                           <ac.icon size={11} /> {ac.label}
                         </button>
                       ))}
@@ -227,17 +249,25 @@ export default function MovimentacaoInternaClient({ rows }: Props) {
                     <td className="px-4 py-3 text-[12px]" style={{ color: "#374151" }}>{r.solicitante_nome || "—"}</td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: si.bg, color: si.color }}>
-                        {r.status === "finalizado" ? <CheckCircle2 size={10} /> : <Clock size={10} />}
+                        {r.status === "cancelado" ? <Ban size={10} /> : r.status === "finalizado" ? <CheckCircle2 size={10} /> : <Clock size={10} />}
                         {si.label}
                       </span>
                     </td>
                     <td className="px-4 py-3"><FotosCell r={r} /></td>
                     <td className="px-4 py-3 text-right">
+                      {/* Cancelada nao tem acao — o espaco mostra o motivo, que e a
+                          informacao util pro gestor ver por que desistiram. */}
+                      {r.status === "cancelado" && (
+                        <span className="text-[11px] italic" style={{ color: "#9CA3AF" }} title={r.motivo_cancelamento ?? ""}>
+                          {r.motivo_cancelamento || "—"}
+                        </span>
+                      )}
                       {acoes.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 justify-end">
                           {acoes.map((ac) => (
                             <button key={ac.tipo} onClick={(e) => { e.stopPropagation(); setAcao({ row: r, tipo: ac.tipo }); }}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold" style={{ backgroundColor: "#18403612", color: C.esmeralda }}>
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold"
+                              style={ac.perigo ? { backgroundColor: "#FCEBEB", color: "#A32D2D" } : { backgroundColor: "#18403612", color: C.esmeralda }}>
                               <ac.icon size={12} /> {ac.label}
                             </button>
                           ))}

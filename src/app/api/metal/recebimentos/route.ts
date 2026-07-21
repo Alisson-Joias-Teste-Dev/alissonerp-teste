@@ -13,7 +13,7 @@ import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { internalError } from "@/lib/api-error";
 import { RecebimentoPostSchema } from "@/lib/metal/types";
 import { criarRecebimentoMetal, listarRecebimentos } from "@/lib/metal/recebimentos";
-import { getModuloConfig } from "@/lib/metal/config";
+import { resolverAprovadores } from "@/lib/aprovacoes";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { ROLES_METAL } from "@/lib/roles";
 import sql from "@/lib/db";
@@ -45,9 +45,11 @@ export async function POST(req: NextRequest) {
 
     // REGRA DE NEGÓCIO: Se recebimento acima do teto, cria tarefa de aprovação
     // + notificação para o aprovador configurado (mesmo fluxo da compra de metal).
+    // Resolvido pela camada config-first (metal_aprovador_id) — sem
+    // ctx.solicitanteId, pois metal não exclui quem cadastrou o recebimento.
     if (result.status === "pendente_aprovacao") {
-      const config = await getModuloConfig();
-      const aprovadorId = (config.metal_aprovador_id ?? "").trim();
+      const resolucao = await resolverAprovadores("recebimento_metal");
+      const aprovadorId = resolucao.status === "ok" ? resolucao.aprovadores[0] : "";
       if (aprovadorId) {
         // Busca nome do cliente para o resumo da tarefa
         const [cli] = await sql`

@@ -1,87 +1,117 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { gerarZplEtiquetaJoia, imprimirZplDireto } from "@/lib/rfid-zpl";
+import { hasRole, isFullAccess } from "@/lib/roles";
+import { ROLES_CADASTRAR_RFID } from "@/lib/rfid/roles";
+import { RfidCadastrarSchema } from "@/lib/rfid/tipos";
+import { buscarProduto, gerarProximoSerial, cadastrarJoiaPendente, modeloEtiquetaPadrao } from "@/lib/rfid/repo";
+import { buildEpc } from "@/lib/rfid/epc";
+import { gerarZplJoiaDoModelo } from "@/lib/rfid/zpl";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 
-const RfidImprimirSchema = z.object({
-  produto_id: z.coerce.number().int().positive(),
-  tipo: z.string().optional(),
-}).passthrough();
-
-// POST /api/rfid/imprimir
-// Body: { produto_id: number, tipo?: string }
-//   tipo: "gerar" (só gera ZPL) | "imprimir" (gera + envia pra impressora)
-//
-// Gera novo EPC, cria registro RFID e imprime etiqueta
+/**
+ * POST /api/rfid/imprimir
+ *
+ * Body: { produto_id: number }
+ *
+ * Alias simplificado do cadastrar — gera EPC + ZPL e cadastra a joia como
+ * pendente_impressao. NAO imprime do servidor (TCP 9100 removido).
+ * A impressao acontece no frontend via Zebra Browser Print.
+ *
+ * Fluxo: identico ao POST /api/rfid/cadastrar
+ *
+ * Response: { ok: true, epc, zpl, status: "pendente_impressao" }
+ */
 export async function POST(req: NextRequest) {
+  // -----------------------------------------------------------
+  // 1. Auth
+  // -----------------------------------------------------------
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const [u] = await sql`
-    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
-  `;
-  if (!u || !["admin", "desenvolvedor", "gerente_fabrica", "gerente_loja"].includes(u.role)) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  if (!user) {
+    return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
   }
 
-  const raw = await req.json().catch(() => ({}));
-  const parsed = RfidImprimirSchema.safeParse(raw);
+  // -----------------------------------------------------------
+  // 2. Role check
+  // -----------------------------------------------------------
+  const [u] = await sql`
+    SELECT role::text AS role
+    FROM alissonerp.usuarios
+    WHERE id = ${user.id}::uuid
+  `;
+  const role = u?.role ?? null;
+  if (!role || (!isFullAccess(role) && !hasRole(role, ROLES_CADASTRAR_RFID))) {
+    return NextResponse.json(
+      { error: "Sem permissao para cadastrar tag RFID" },
+      { status: 403 },
+    );
+  }
+
+  // -----------------------------------------------------------
+  // 3. Parse + valida body
+  // -----------------------------------------------------------
+  const raw = await req.json().catch(() => null);
+  if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
+  const parsed = RfidCadastrarSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
-  const body = parsed.data;
-  const produtoId = body.produto_id;
-
-  const [prod] = await sql`
-    SELECT id_produto, sku, nome FROM alissonerp.produtos_compat WHERE id_produto = ${produtoId}::bigint
-  `;
-  if (!prod) return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
-
-  // Gera novo EPC (sequencial)
-  const [{ prox }] = await sql`
-    SELECT COALESCE(MAX(SUBSTRING(epc FROM 5)::int), 0) + 1 AS prox
-    FROM alissonerp.joias_rfid WHERE epc ~ '^AJ26[0-9]{8}$'
-  `;
-  const ano = new Date().getFullYear().toString().slice(-2);
-  const epc = `AJ${ano}${String(prox).padStart(8, "0")}`;
-
-  const tipo = body.tipo ?? "imprimir";
+  const produtoId = parsed.data.produto_id;
 
   try {
-    // Cria registro RFID
-    const rfidId = crypto.randomUUID();
-    await sql`
-      INSERT INTO alissonerp.joias_rfid (id, epc, produto_id, sku, nome, localizacao_atual, status)
-      VALUES (${rfidId}::uuid, ${epc}, ${produtoId}::bigint, ${prod.sku ?? ""}, ${prod.nome}, 'Loja', 'pendente_impressao')
-    `;
-
-    const zpl = gerarZplEtiquetaJoia({ epc, sku: prod.sku ?? "", nome: prod.nome });
-
-    if (tipo === "imprimir") {
-      try {
-        await imprimirZplDireto(zpl);
-        await sql`UPDATE alissonerp.joias_rfid SET status = 'ativo' WHERE id = ${rfidId}::uuid`;
-      } catch (printErr) {
-        // Impressora offline — mantém pendente_impressao
-        return NextResponse.json({
-          ok: true,
-          epc,
-          zpl,
-          status: "pendente_impressao",
-          warning: `Impressora offline: ${(printErr as Error).message}. ZPL gerado para impressão manual.`,
-        });
-      }
+    // -----------------------------------------------------------
+    // 4. Busca produto
+    // -----------------------------------------------------------
+    const produto = await buscarProduto(produtoId);
+    if (!produto) {
+      return NextResponse.json(
+        { error: "Produto nao encontrado" },
+        { status: 404 },
+      );
     }
 
-    return NextResponse.json({
-      ok: true,
+    if (!produto.sku || !produto.nome) {
+      return NextResponse.json(
+        { error: "Produto nao tem SKU ou nome preenchidos — impossivel gerar etiqueta" },
+        { status: 422 },
+      );
+    }
+
+    const produtoData = {
+      produto_id: produto.id_produto,
+      sku: produto.sku,
+      nome: produto.nome,
+      categoria: produto.categoria,
+      peso_g: produto.peso_real,
+      preco_venda: produto.preco_tiny,
+    };
+
+    // -----------------------------------------------------------
+    // 5. Gera serial + EPC
+    // -----------------------------------------------------------
+    const serial = await gerarProximoSerial();
+    const epc = buildEpc(produtoId, serial);
+
+    // -----------------------------------------------------------
+    // 6. Cadastra joia pendente (transacao: joia + leitura)
+    // -----------------------------------------------------------
+    await cadastrarJoiaPendente({
+      produtoData,
+      userId: user.id,
       epc,
-      zpl,
-      status: tipo === "imprimir" ? "ativo" : "pendente_impressao",
-      produto: { id: produtoId, sku: prod.sku, nome: prod.nome },
     });
+
+    // -----------------------------------------------------------
+    // 7. Gera ZPL (impressao delegada ao frontend)
+    // -----------------------------------------------------------
+    const modelo = await modeloEtiquetaPadrao();
+    const zpl = gerarZplJoiaDoModelo(
+      { id_produto: produtoId, sku: produto.sku, nome: produto.nome },
+      epc,
+      modelo,
+    );
+
+    return NextResponse.json({ ok: true, epc, zpl, status: "pendente_impressao" });
   } catch (err) {
     return internalError("[POST /api/rfid/imprimir]", err, "Erro ao gerar RFID");
   }

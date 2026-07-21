@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { RfidConfirmarSchema } from "@/lib/rfid/tipos";
+import { confirmarImpressao } from "@/lib/rfid/repo";
+import { validateEpc } from "@/lib/rfid/epc";
+import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
-
-const ConfirmarImpressaoSchema = z.object({
-  epc: z.string().min(1, "obrigatório"),
-}).passthrough();
 
 /**
  * POST /api/rfid/confirmar-impressao
@@ -23,35 +21,39 @@ const ConfirmarImpressaoSchema = z.object({
  *   409 joia nao esta pendente (ja ativa, cancelada, ou inexistente)
  */
 export async function POST(req: NextRequest) {
+  // -----------------------------------------------------------
+  // 1. Auth
+  // -----------------------------------------------------------
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
   }
 
+  // -----------------------------------------------------------
+  // 2. Parse + valida body
+  // -----------------------------------------------------------
   const raw = await req.json().catch(() => null);
   if (raw === null) return NextResponse.json({ error: "JSON invalido" }, { status: 400 });
-  const parsed = ConfirmarImpressaoSchema.safeParse(raw);
+  const parsed = RfidConfirmarSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const epc = parsed.data.epc.trim();
-  if (!/^AJ\d{2}\d{8}$/.test(epc)) {
+
+  // Valida formato EPC (24 digitos, prefixo 1001 ou 0000)
+  if (!validateEpc(epc)) {
     return NextResponse.json(
-      { error: "epc invalido — esperado formato AJ{AA}{NNNNNNNN}" },
+      { error: "EPC invalido — esperado 24 digitos numericos" },
       { status: 400 },
     );
   }
 
   try {
-    const updated = await sql`
-      UPDATE alissonerp.joias_rfid
-      SET status = 'ativo',
-          updated_at = now()
-      WHERE epc = ${epc}
-        AND status = 'pendente_impressao'
-      RETURNING id
-    `;
+    // -----------------------------------------------------------
+    // 3. Confirma impressao via repo
+    // -----------------------------------------------------------
+    const ok = await confirmarImpressao(epc);
 
-    if (updated.length === 0) {
+    if (!ok) {
       return NextResponse.json(
         {
           error:
@@ -63,7 +65,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[POST /api/rfid/confirmar-impressao] Erro:", err);
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
+    return internalError("[POST /api/rfid/confirmar-impressao]", err, "Erro interno");
   }
 }

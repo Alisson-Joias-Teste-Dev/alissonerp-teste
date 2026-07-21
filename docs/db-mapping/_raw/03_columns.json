@@ -10259,7 +10259,7 @@
     "numeric_scale": null,
     "is_nullable": "YES",
     "column_default": null,
-    "description": "Identificador do dispositivo de leitura/gravacao. Ex: ZEBRA-ZD621R, TSL-1128-SN123."
+    "description": "Identificador do dispositivo de leitura/gravacao. Ex: ZEBRA-ZD500R, TSL-1128-SN123."
   },
   {
     "table_schema": "alissonerp",

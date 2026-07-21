@@ -173,6 +173,9 @@ interface Venda {
   empresa_emitente_id?: number | null;
   nota_fiscal_id?: number | null;
   descontoThreshold?: number | null;
+  /** Limite (%) de desconto acima do qual o Cartão de Crédito exige aprovação.
+   *  Vem da config `limite_desconto_cartao_pct` (Configurações › Aprovadores). */
+  limiteDescontoCartao?: number | null;
   devolucoes?: Array<{
     id: number;
     numero: string;
@@ -1674,6 +1677,51 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     finally { setUpdating(false); }
   }
 
+  /**
+   * REGRA DE NEGÓCIO (16/07, pedido do Jonathan): pede de uma vez TODAS as
+   * aprovações pendentes da venda (desconto + cartão), pra consultora não ter
+   * que clicar em dois banners.
+   *
+   * O QUÊ: dispara os POSTs em sequência e junta o resultado. Cada pedido é
+   *   independente: se um falhar, o outro segue e a falha é reportada.
+   * O PORQUÊ: os botões individuais CONTINUAM existindo — se a venda vai ser
+   *   paga no Pix, ela pede só o desconto e não incomoda o aprovador com uma
+   *   aprovação de cartão que não vai usar. Este botão é atalho, não substituto.
+   * O IMPACTO: só aparece quando há 2+ pendentes (ver aprovacoesPendentes).
+   * NOTA: pedir cartão junto só funciona porque o guard do backend foi
+   *   liberado pra cartao_desconto em 16/07 (solicitar-aprovacao/route.ts) —
+   *   antes dava 409 "solicite o desconto primeiro".
+   */
+  async function solicitarTodasAprovacoes() {
+    if (!venda) return;
+    setUpdating(true); setSaveErr("");
+    const pedidos: { tipo: string; label: string }[] = [];
+    if (precisaSolicitarDesconto) pedidos.push({ tipo: "desconto", label: "Desconto" });
+    if (precisaSolicitarDescontoCartao) pedidos.push({ tipo: "cartao_desconto", label: "Cartão" });
+    const falhas: string[] = [];
+    for (const p of pedidos) {
+      try {
+        const res = await fetch(`/api/vendas/${venda.id}/solicitar-aprovacao`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tipo: p.tipo }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error((d.error as string | undefined) ?? `HTTP ${res.status}`);
+      } catch (e) {
+        falhas.push(`${p.label}: ${e instanceof Error ? e.message : "erro"}`);
+      }
+    }
+    await load();
+    setUpdating(false);
+    if (falhas.length > 0) {
+      setSaveErr(
+        falhas.length === pedidos.length
+          ? `Nenhuma solicitação foi enviada — ${falhas.join(" | ")}`
+          : `Enviadas com 1 falha — ${falhas.join(" | ")}`,
+      );
+    }
+  }
+
   // ── Solicitar aprovação (com suporte a crédito gerente) ────────────────────
   async function solicitarAprovacao() {
     if (!venda) return;
@@ -2183,6 +2231,32 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const totalEmPagamentos = venda.pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0);
   const pagamentoCobreTotal = totalEmPagamentos + 0.01 >= venda.total_venda;
 
+  /**
+   * REGRA DE NEGÓCIO (17/07, decisão do Jonathan): "crédito aprovado, mas a
+   * venda não". Aprovar o crédito e aprovar a venda são 2 passos; o 2º
+   * (approveVenda) pode falhar por motivo OPERACIONAL — o clássico é cliente
+   * sem celular. Quando falha, a aprovação do crédito CONTINUA valendo (não
+   * voltamos a tarefa pra fila: "pedir aprovação é chato") e alguém precisa
+   * corrigir o cadastro e aprovar a venda na mão. Sem esta faixa, quem abre a
+   * venda não tem como saber disso — o aprovador via 200 "sucesso".
+   *
+   * DEDUZIDO, não gravado (decisão do Jonathan: sem migration). Os 3 estados se
+   * separam sozinhos, porque quando a venda aprova de fato o
+   * `aprovacao_credito_tarefa_id` é LIMPO (vendas-credito-aprovar.ts):
+   *   - aprovou              → campo NULL          → creditoFoiAprovado=false aqui
+   *   - esperando pagamento  → campo preenchido + AINDA há pagamento não-"A
+   *     Receber" pendente  → NÃO é falha, não mostra (espera legítima)
+   *   - approveVenda falhou  → campo preenchido + todos os outros já confirmados
+   * A 3ª condição espelha `todosOutrosConfirmados` da lib (linhas 380-385):
+   * COUNT de pagamentos com forma != 'A Receber' e status 'pendente' = 0.
+   * IMPACTO SE A REGRA DA LIB MUDAR: a faixa pode aparecer na hora errada — é
+   * só um aviso com botão, não trava nada, mas tem que andar junto.
+   */
+  const outrosPagamentosConfirmados = !venda.pagamentos.some(
+    p => p.forma !== "A Receber" && p.status === "pendente",
+  );
+  const creditoAprovadoVendaNao = creditoFoiAprovado && vendaEmRascunho && outrosPagamentosConfirmados;
+
   // Desconto acima do limite — usa campo próprio (aprovacao_desconto_tarefa_id)
   const isDescontoApproval = !!venda.aprovacao_desconto_tarefa_id && venda.aprovacao_desconto_status === "aguardando_aprovacao";
 
@@ -2196,12 +2270,20 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const temDescontoAlto = venda.itens.some(i => Number(i.pct_desconto) > descontoThreshold);
   // REGRA DE NEGÓCIO #1: verifica campo próprio de desconto, não de crédito
   const precisaSolicitarDesconto = temDescontoAlto && !venda.desconto_aprovado_por_nome && !venda.aprovacao_desconto_tarefa_id && venda.situacao === "rascunho";
-  const LIMITE_DESCONTO_CARTAO = 20;
+  // REGRA DE NEGÓCIO (Fase 5, fix 16/07): limite do cartão vem da config
+  // (limite_desconto_cartao_pct), não mais `const = 20` cravado aqui — a tela
+  // ficava dizendo "acima de 20%" mesmo com a config em 30, divergindo do gate
+  // real do servidor. Fallback 20 = mesmo default do backend (LIMITE_DESCONTO_CARTAO_PADRAO).
+  const LIMITE_DESCONTO_CARTAO = venda.limiteDescontoCartao ?? 20;
   const temDescontoCartao = venda.itens.some(i => Number(i.pct_desconto) > LIMITE_DESCONTO_CARTAO);
   const descontoCartaoAprovado = !!venda.desconto_cartao_aprovado_por_nome;
   const cartaoBloqueado = temDescontoCartao && !descontoCartaoAprovado;
   // REGRA DE NEGÓCIO #1: verifica campo próprio de cartão, não de crédito
   const precisaSolicitarDescontoCartao = cartaoBloqueado && !venda.aprovacao_cartao_desconto_tarefa_id && venda.situacao === "rascunho";
+  // REGRA DE NEGÓCIO (16/07): quantas aprovações esta venda ainda precisa pedir.
+  // Só com 2+ o atalho "Solicitar todas" faz sentido — com 1 o banner individual
+  // já resolve e um botão a mais só polui.
+  const aprovacoesPendentes = [precisaSolicitarDesconto, precisaSolicitarDescontoCartao].filter(Boolean).length;
   // REGRA DE NEGOCIO: Automacao de Estoque 2.0.
   // O QUE: badge visual e derivado do backend quando venda entregue ainda tem
   // saldo aberto aprovado por excecao.
@@ -2313,7 +2395,8 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               title="Ver NFC-e emitida">
               <FileText size={13} /> NFC-e
             </button>
-          ) : venda ? (
+          ) : venda && venda.situacao !== "rascunho" ? (
+            // Emitir NFC-e escondido em rascunho: nota fiscal só pode ser emitida de venda firmada
             <button onClick={() => setAbrirNfce(true)}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
               style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
@@ -2391,6 +2474,24 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         </div>
       )}
 
+      {/* ── Banner: crédito aprovado, mas a venda não (approveVenda falhou) ──
+           Laranja, não amarelo-"aguardando": aqui não há espera — a decisão já
+           foi tomada e a bola está com quem abriu a venda. Ver a dedução em
+           `creditoAprovadoVendaNao`. */}
+      {creditoAprovadoVendaNao && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-2"
+          style={{ backgroundColor: "#FFF7ED", borderColor: "#FED7AA", color: "#7C2D12" }}>
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle size={16} className="shrink-0" />
+            <p className="text-sm font-medium break-words">
+              Crédito aprovado — falta aprovar a venda. A aprovação automática não passou
+              (geralmente cadastro do cliente incompleto, ex.: sem celular). Corrija o cadastro
+              e aprove a venda.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ── Banner: aprovação de desconto pendente ── */}
       {isDescontoApproval && (
         <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-2"
@@ -2417,6 +2518,23 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           style={{ backgroundColor: "#EFF6FF", borderColor: "#BFDBFE", color: "#1E40AF" }}>
           <Loader2 size={16} className="animate-spin shrink-0" />
           <p className="text-sm font-medium">Confirme o pagamento Manual (MP) antes de aprovar a venda.</p>
+        </div>
+      )}
+
+      {/* ── Atalho: pedir todas as aprovações de uma vez ──
+          Aparece só com 2+ pendentes. Os banners individuais abaixo continuam —
+          quem vai receber no Pix pede só o desconto (decisão do Jonathan, 16/07). */}
+      {aprovacoesPendentes >= 2 && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-3"
+          style={{ backgroundColor: "#F5F3FF", borderColor: "#DDD6FE", color: "#5B21B6" }}>
+          <p className="text-sm font-medium">
+            Esta venda precisa de {aprovacoesPendentes} aprovações. Você pode pedir todas de uma vez ou uma por uma abaixo.
+          </p>
+          <button onClick={solicitarTodasAprovacoes} disabled={updating}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 disabled:opacity-50"
+            style={{ backgroundColor: "#6D28D9", color: "#fff" }}>
+            {updating ? "Enviando..." : `Solicitar todas (${aprovacoesPendentes})`}
+          </button>
         </div>
       )}
 
@@ -2464,7 +2582,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-3"
           style={{ backgroundColor: "#FFF7ED", borderColor: "#FED7AA", color: "#9A3412" }}>
           <p className="text-sm font-medium">
-            Esta venda tem itens com desconto acima de 20%. Para pagar no cartão de crédito, solicite aprovação.
+            Esta venda tem itens com desconto acima de {LIMITE_DESCONTO_CARTAO}%. Para pagar no cartão de crédito, solicite aprovação.
           </p>
           <button onClick={solicitarAprovacaoCartao} disabled={updating}
             className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 whitespace-nowrap"
@@ -3841,7 +3959,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                             <AlertCircle size={14} className="shrink-0 mt-0.5" style={{ color: "#9A3412" }} />
                             <div className="text-xs" style={{ color: "#9A3412" }}>
                               <p className="font-medium">Cartão de crédito bloqueado</p>
-                              <p>Este pedido possui itens com desconto acima de 20%. Aguarde aprovação para pagar no cartão.</p>
+                              <p>Este pedido possui itens com desconto acima de {LIMITE_DESCONTO_CARTAO}%. Aguarde aprovação para pagar no cartão.</p>
                             </div>
                           </div>
                         ) : (
@@ -4060,6 +4178,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                   vendaId={venda.id}
                   numeroVenda={venda.numero_venda}
                   mode="edicao"
+                  role={role}
                   gateways={gateways.length > 0 ? gateways : [{ id: 1, nome: "Mercado Pago" }, { id: 2, nome: "PagBank" }]}
                   // Payment form
                   pagForma={newPagForma} setPagForma={setNewPagForma}
@@ -4133,6 +4252,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                   onAplicarVale={aplicarValeSingleComCodigo}
                   onPaymentSaved={load}
                   cartaoBloqueado={cartaoBloqueado}
+                  limiteDescontoCartao={LIMITE_DESCONTO_CARTAO}
                   onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}
                   solicitandoAprovacaoCartao={updating}
                 />
@@ -4172,6 +4292,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       vendaId={venda.id}
                       numeroVenda={venda.numero_venda}
                       mode="edicao"
+                      role={role}
                       gateways={gateways.length > 0 ? gateways : [{ id: 1, nome: "Mercado Pago" }, { id: 2, nome: "PagBank" }]}
                       pagForma={newPagForma} setPagForma={setNewPagForma}
                       pagGateway={newPagGateway} setPagGateway={setNewPagGateway}
@@ -4240,6 +4361,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       onAplicarVale={aplicarValeSingleComCodigo}
                       onPaymentSaved={() => { load(); setAddingPag(false); }}
                       cartaoBloqueado={cartaoBloqueado}
+                      limiteDescontoCartao={LIMITE_DESCONTO_CARTAO}
                       onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}
                       solicitandoAprovacaoCartao={updating}
                     />

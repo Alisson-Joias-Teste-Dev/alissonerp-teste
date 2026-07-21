@@ -139,6 +139,9 @@ interface Props {
   cotacaoInicial: Cotacao;
   currentUserId: string;
   currentUserRole: string;
+  // REGRA DE NEGÓCIO: calculado no server (podeDecidir contra aprovador_precificacao
+  // configurado — política config-first). Substitui o cargo fixo admin/desenvolvedor.
+  podeAprovarPrecificacao: boolean;
   curvaConfigInicial: CurvaConfig | null;
   curvaCategoriasInicial: CurvaCategoriaInput[];
 }
@@ -2201,8 +2204,8 @@ function TabRegras({ configInicial }: { configInicial: Record<string, string> })
 }
 
 // ─── Componente Principal ──────────────────────────────────────────────────────
-export default function PrecificacaoClient({ faixasPedrasInicial, configInicial, cotacaoInicial, currentUserId, currentUserRole, curvaConfigInicial, curvaCategoriasInicial }: Props) {
-  const canAprovar = currentUserRole === "desenvolvedor" || currentUserRole === "admin";
+export default function PrecificacaoClient({ faixasPedrasInicial, configInicial, cotacaoInicial, currentUserId, currentUserRole, podeAprovarPrecificacao, curvaConfigInicial, curvaCategoriasInicial }: Props) {
+  const canAprovar = podeAprovarPrecificacao;
   const canEditCurva = ["admin", "desenvolvedor", "diretor"].includes(currentUserRole);
   const [tab, setTab] = useState<Tab>("markup-ouro");
   const [modal, setModal] = useState<ModalTarget | null>(null);

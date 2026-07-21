@@ -125,13 +125,53 @@ export interface PrecificarItemResult {
 export const FULL_ACCESS_ROLES_DESCONTO = ["desenvolvedor", "admin"] as const;
 
 /** Teto quando o cadastro do usuário está vazio/0 (decisão Jonathan 23/06: 0% —
- *  sem cadastro, nada de desconto sem aprovação). */
+ *  sem cadastro, nada de desconto sem aprovação).
+ *  FASE 5 (15/07): este valor é só o SEED/fallback-do-fallback — o valor REAL
+ *  vem de `alissonerp.configuracoes_sistema` (chave `desconto_fallback_sem_cadastro_pct`),
+ *  lido pelos callers (ex.: `getDescontoThreshold` em aprovacao-regras.ts) ANTES de
+ *  chamar `calcularTetoDesconto(tetoUsuario, role, fullAccessRoles, valorDaConfig)`.
+ *  Se a chave ainda não existir no banco (sera criada via /dba), cai neste valor. */
 export const FALLBACK_TETO_DESCONTO_PCT = 0;
 
-/** Limite padrão de desconto no CARTÃO. Vira configurável via parametros_sistema
- *  (decisão Jonathan 23/06) — este é só o default enquanto o parâmetro não existe.
- *  IMPACTO: hoje 20% está hardcoded em ≥4 lugares; centralizar aqui acaba com isso. */
+/** Limite padrão de desconto no CARTÃO.
+ *  FASE 5 (15/07): este valor é só o SEED — o valor REAL vem de
+ *  `alissonerp.configuracoes_sistema` (chave `limite_desconto_cartao_pct`), lido
+ *  pelos 4 gates de cartão (solicitar-aprovacao, vendas-aprovar, pagamentos) via
+ *  helper compartilhado `buscarLimiteDescontoCartao` (aprovacao-regras.ts). Se a
+ *  chave ainda não existir no banco, cai neste valor.
+ *  IMPACTO: antes 20% estava hardcoded em >=4 lugares; centralizar aqui acaba com isso. */
 export const LIMITE_DESCONTO_CARTAO_PADRAO = 20;
+
+/** Formas de pagamento que contam como CARTÃO DE CRÉDITO pro gate de desconto.
+ *  O QUÊ: quando algum item passa do limite (`limite_desconto_cartao_pct`), esta
+ *    forma — e SÓ ela — fica bloqueada até a aprovação do cartão. As demais
+ *    (Dinheiro, Pix, Ouro, Vale-Troca, A Receber, Manual) seguem livres.
+ *
+ *  HISTÓRICO — leia antes de mexer:
+ *  - 16/07: "Manual (MP)" e "Manual (PagBank)" ENTRARAM aqui, tratados como
+ *    cobrança no cartão. QUALQUER usuário via essas formas, então dava pra pular
+ *    a aprovação escolhendo Manual em vez de "Cartão de Crédito". Furo real.
+ *  - 17/07 (PR #99): saíram da trava porque o seletor passou a esconder as
+ *    manuais de quem não é admin — a trava só atrapalhava o admin.
+ *  - 17/07 (decisão FINAL do Jonathan): **"Manual (MP)" NÃO é cartão** na
+ *    operação da loja (é confirmação por ID de transação do MP). Foi liberado de
+ *    volta pra TODOS (ver FORMAS_RESTRITAS_ADMIN em PagamentoForm) e fica FORA
+ *    desta trava DE PROPÓSITO — não porque "está escondido", mas porque não é
+ *    pagamento no cartão. NÃO devolva "Manual (MP)" pra esta lista citando o
+ *    furo antigo: pra ele, não há furo.
+ *  - "Manual (PagBank)" continua fora da trava E ainda restrito a admin — não
+ *    foi reavaliado; se um dia for liberado pra todos, aí sim reavalie se é
+ *    cartão (se for, volta pra cá).
+ *  NÃO CONFUNDIR com a trava do DESCONTO (`tem_desconto_alto`, R3 do dossiê): essa
+ *    é outra regra e trava TODAS as formas até o desconto ser aprovado. */
+export const FORMAS_PAGAMENTO_CARTAO = [
+  "Cartão de Crédito",
+] as const;
+
+/** true se a forma exige aprovação de cartão quando o desconto passa do limite. */
+export function ehFormaCartao(forma: string | null | undefined): boolean {
+  return !!forma && (FORMAS_PAGAMENTO_CARTAO as readonly string[]).includes(forma);
+}
 
 // ─── Helpers puros ────────────────────────────────────────────────────────────
 

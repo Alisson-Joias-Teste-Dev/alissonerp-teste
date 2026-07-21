@@ -7,6 +7,7 @@ import { estornarVenda, approveVenda } from "@/lib/vendas-aprovar";
 import { logAudit } from "@/lib/audit";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { vendaTemExcecaoEntregaAprovada, vendaTemPagamentoCompleto } from "@/lib/entrega-sem-pagamento";
+import { podeDecidir } from "@/lib/aprovacoes";
 
 // Campos da venda que só podem ser alterados em rascunho (cliente/vendedor/data).
 // Espelha a regra do PATCH /api/vendas/[id] linhas 293-297.
@@ -22,8 +23,6 @@ const SITUACOES_COM_HELPER = new Set(["aprovado"]);
 // solicitação pode levar uma venda PARA eles. IMPACTO SE REMOVIDO: vendas novas
 // voltariam a virar 'concluido'/'enviado' por solicitação, quebrando o fluxo novo.
 const SITUACOES_APOSENTADAS = new Set(["concluido", "enviado"]);
-
-const ROLES_FINANCEIRO = ["admin", "desenvolvedor", "diretor"];
 
 const DecidirSchema = z.object({
   decisao: z.enum(["aprovado", "rejeitado"]),
@@ -46,7 +45,11 @@ export async function PATCH(
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
 
-  if (!ROLES_FINANCEIRO.includes(user.role)) {
+  // REGRA DE NEGÓCIO: alteração de venda decidida pela camada config-first
+  // (aprovador_alteracao_venda) — não mais pelo cargo fixo ROLES_FINANCEIRO.
+  // Sem ctx.solicitanteId: alteração de venda não exclui quem solicitou.
+  const decAlteracaoVenda = await podeDecidir({ id: user.id, role: user.role }, "alteracao_venda");
+  if (!decAlteracaoVenda.pode) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 

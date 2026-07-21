@@ -10,13 +10,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { internalError } from "@/lib/api-error";
 import { aprovarCompra } from "@/lib/metal/compras";
-import { ROLES_METAL_APROVACOES } from "@/lib/roles";
+import { podeDecidir } from "@/lib/aprovacoes";
 
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
-  if (!ROLES_METAL_APROVACOES.includes(user.role)) {
+  // REGRA DE NEGÓCIO: só quem estiver em Configurações › Aprovadores ›
+  // "Compra de metal" (chave metal_aprovador_id) decide — política config-first
+  // (docs/regras-negocio/aprovacoes-refatoracao/03b-config-first-estrito.md).
+  // Sem ctx.solicitanteId: metal não exclui quem cadastrou a compra.
+  const decisao = await podeDecidir({ id: user.id, role: user.role }, "compra_metal");
+  if (!decisao.pode) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 

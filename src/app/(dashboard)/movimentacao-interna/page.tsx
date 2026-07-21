@@ -10,6 +10,9 @@ export const dynamic = 'force-dynamic';
  * aprovacao, sem role propria. Ciclo: solicitado -> entregue -> recebido ->
  * finalizado (devolvido ao estoque | cliente levou). Cada passo grava quem fez,
  * quando, e (nos passos fisicos) uma foto. Independente do modulo Protocolo.
+ *
+ * Saida lateral (mig 347): solicitado -> cancelado, quando a consultora desiste
+ * antes de a peca sair do estoque. Grava quem cancelou, quando e o motivo.
  */
 export default async function MovimentacaoInternaPage() {
   const supabase = await createServerSupabase();
@@ -26,14 +29,37 @@ export default async function MovimentacaoInternaPage() {
       s.volta_solicitada_em,
       s.finalizado_em,
       s.motivo_final,
-      s.foto_entrega,
-      s.foto_recebimento,
-      s.foto_devolucao,
+      s.cancelado_em,
+      s.motivo_cancelamento,
+      s.obs_devolucao,
+      -- Fotos vem da tabela filha (mig 349): 1+ por etapa, em ordem de criacao.
+      -- FALLBACK pra coluna antiga foto_*: cobre a JANELA entre a migration entrar
+      -- em prod e o deploy do codigo novo — nesse intervalo o codigo VELHO ainda
+      -- grava a foto so na coluna foto_* (nao na tabela filha). Sem o fallback,
+      -- foto tirada nessa janela sumiria da tela apos o deploy. array_agg sobre
+      -- zero linhas retorna NULL -> cai no CASE da coluna antiga. Cada etapa
+      -- acontece uma vez, entao nunca duplica (ou esta na filha, ou na coluna).
+      COALESCE(
+        (SELECT array_agg(f.foto_path ORDER BY f.criado_em, f.id)
+         FROM alissonerp.solicitacao_peca_fotos f WHERE f.solicitacao_id = s.id AND f.etapa = 'entrega'),
+        CASE WHEN NULLIF(btrim(s.foto_entrega), '') IS NOT NULL THEN ARRAY[s.foto_entrega] ELSE '{}'::text[] END
+      ) AS fotos_entrega,
+      COALESCE(
+        (SELECT array_agg(f.foto_path ORDER BY f.criado_em, f.id)
+         FROM alissonerp.solicitacao_peca_fotos f WHERE f.solicitacao_id = s.id AND f.etapa = 'recebimento'),
+        CASE WHEN NULLIF(btrim(s.foto_recebimento), '') IS NOT NULL THEN ARRAY[s.foto_recebimento] ELSE '{}'::text[] END
+      ) AS fotos_recebimento,
+      COALESCE(
+        (SELECT array_agg(f.foto_path ORDER BY f.criado_em, f.id)
+         FROM alissonerp.solicitacao_peca_fotos f WHERE f.solicitacao_id = s.id AND f.etapa = 'devolucao'),
+        CASE WHEN NULLIF(btrim(s.foto_devolucao), '') IS NOT NULL THEN ARRAY[s.foto_devolucao] ELSE '{}'::text[] END
+      ) AS fotos_devolucao,
       sol.nome AS solicitante_nome,
       ent.nome AS entregue_por_nome,
       rec.nome AS recebido_por_nome,
       vlt.nome AS volta_solicitada_por_nome,
       fin.nome AS finalizado_por_nome,
+      can.nome AS cancelado_por_nome,
       COALESCE(
         (SELECT json_agg(json_build_object('nome', pr.nome, 'sku', pr.sku) ORDER BY pr.nome)
          FROM alissonerp.solicitacao_peca_produtos spp
@@ -47,6 +73,7 @@ export default async function MovimentacaoInternaPage() {
     LEFT JOIN alissonerp.usuarios rec ON rec.id = s.recebido_por_id
     LEFT JOIN alissonerp.usuarios vlt ON vlt.id = s.volta_solicitada_por_id
     LEFT JOIN alissonerp.usuarios fin ON fin.id = s.finalizado_por_id
+    LEFT JOIN alissonerp.usuarios can ON can.id = s.cancelado_por_id
     ORDER BY s.id DESC
     LIMIT 200
   ` : [];

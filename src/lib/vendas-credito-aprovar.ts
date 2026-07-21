@@ -14,6 +14,11 @@ import { getSaldoDisponivel } from "@/lib/saldo-credito";
 import { approveVenda } from "@/lib/vendas-aprovar";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { criarNotificacao } from "@/lib/notificacoes";
+import { resolverAprovadores } from "@/lib/aprovacoes";
+// REGRA DE NEGÓCIO (Fase 3g.2): reusa a mesma HttpError que a Fase 3e criou em
+// devolucoes.ts (mesmo padrão em todo o projeto — ver comentário na classe) em
+// vez de duplicar a classe aqui.
+import { HttpError } from "@/lib/devolucoes";
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -102,48 +107,19 @@ export async function submeterVendaParaAprovacaoCredito(
   const tipo: "gerente" | "diretor" = valorAReceber <= saldoAtual ? "gerente" : "diretor";
 
   // 3. Encontrar aprovador (fora da tx — só leitura)
-  let aprovadorId = "";
-  if (tipo === "gerente") {
-    const [config] = await sql`
-      SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadora_credito_gerente'
-    `;
-    if (config?.valor) {
-      const [gerenteConfig] = await sql`
-        SELECT id FROM alissonerp.usuarios WHERE id = ${config.valor}::uuid AND ativo = true
-      `;
-      if (gerenteConfig?.id) aprovadorId = gerenteConfig.id;
-    }
-    if (!aprovadorId) {
-      const [gerente] = await sql`
-        SELECT id FROM alissonerp.usuarios
-        WHERE role = 'gerente_loja' AND ativo = true
-        ORDER BY id LIMIT 1
-      `;
-      if (!gerente) throw new Error("Nenhum gerente de loja ativo encontrado");
-      aprovadorId = gerente.id;
-    }
-  } else {
-    // Buscar da config primeiro; fallback diretor→admin→dev
-    const [config] = await sql`
-      SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovador_credito_diretor'
-    `;
-    if (config?.valor) {
-      const [diretorConfig] = await sql`
-        SELECT id FROM alissonerp.usuarios WHERE id = ${config.valor}::uuid AND ativo = true
-      `;
-      if (diretorConfig?.id) aprovadorId = diretorConfig.id;
-    }
-    if (!aprovadorId) {
-      const [diretor] = await sql`
-        SELECT id FROM alissonerp.usuarios
-        WHERE role IN ('diretor', 'admin', 'desenvolvedor') AND ativo = true
-        ORDER BY CASE role WHEN 'diretor' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END
-        LIMIT 1
-      `;
-      if (!diretor) throw new Error("Nenhum diretor ou admin ativo encontrado");
-      aprovadorId = diretor.id;
-    }
+  // REGRA DE NEGÓCIO (Fase 3g.2, política config-first estrita —
+  // 03b-config-first-estrito.md): a regra de saldo ACIMA só ROTEIA qual tarefa
+  // nasce (gerente/diretor) — quem PODE decidir agora é 100% a config
+  // (aprovadora_credito_gerente / aprovador_credito_diretor), sem fallback por
+  // cargo. Sem aprovador configurado, a solicitação NÃO nasce (409 — o
+  // endpoint que chama esta função trata o HttpError e devolve a mensagem ao
+  // front, ver vendas/[id]/solicitar-aprovacao/route.ts).
+  const eventoCredito = tipo === "diretor" ? "credito_diretor" : "credito_gerente";
+  const resolAprovador = await resolverAprovadores(eventoCredito);
+  if (resolAprovador.status === "nao_configurado") {
+    throw new HttpError(409, `Aprovador de crédito (${tipo}) não configurado. Defina em Configurações › Aprovadores.`);
   }
+  const aprovadorId = resolAprovador.aprovadores[0]; // aprovacoes_tarefa.aprovador_id / responsavel_id é UUID único
 
   // 4. Buscar nome do solicitante
   const [solicitante] = await sql`

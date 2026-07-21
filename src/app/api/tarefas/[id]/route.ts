@@ -6,7 +6,6 @@ import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 import { criarNotificacao } from "@/lib/notificacoes";
-import { listarAprovadoresFreteAvulso } from "@/lib/entrega-venda";
 
 const TarefaPatchSchema = z.object({
   titulo: z.string().optional(),
@@ -56,21 +55,18 @@ export async function GET(
     const isOwner = tarefa.responsavel_id === user.id || tarefa.criado_por === user.id;
     const isAdminOuDev = isFullAccess(usuario?.role);
 
-    // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — ADITIVO, escopado
-    // SÓ para tipo='frete_avulso'): mesmo padrão aditivo/escopado usado em
-    // GET /api/tarefas e PATCH /api/tarefas/[id]/aprovacao — qualquer membro
-    // do pool (chave de config aprovadores_frete_avulso) também pode ABRIR a
-    // tarefa (e ver a aba Comentários), não só o responsavel_id/criado_por
-    // gravado na criação. Só consulta a config quando necessário (tipo bate).
-    // IMPACTO SE REMOVIDO: membro do pool decide a tarefa (PATCH já libera),
-    // mas o GET desta tarefa devolve 403 — a aba Comentários fica vazia/quebrada.
-    let isPoolFreteAvulso = false;
-    if (!isOwner && !isAdminOuDev && tarefa.tipo === "frete_avulso") {
-      const listaPool = await listarAprovadoresFreteAvulso();
-      isPoolFreteAvulso = listaPool.includes(user.id);
-    }
-
-    if (!isOwner && !isAdminOuDev && !isPoolFreteAvulso) {
+    // REGRA DE NEGÓCIO: este GET não tem exceção por evento/pool — mesmo
+    // comportamento que a main já aplica a TODOS os outros tipos multi-aprovador
+    // (compra_comercial, conversao_reversa, garantia_fora_prazo etc.): só
+    // responsavel_id/criado_por/admin abrem a tarefa por aqui. O 2º+ aprovador
+    // configurado (fora do responsavel_id gravado na criação) já consegue
+    // DECIDIR via PATCH /api/tarefas/[id]/aprovacao (podeDecidir, config-first),
+    // mas esbarra no mesmo 403 pra abrir a aba Comentários — limitação
+    // PRÉ-EXISTENTE da camada central, não específica de frete_avulso (ver
+    // relato do merge feat/frete-avulso-solicitacao, 20/07). Removido o
+    // isPoolFreteAvulso que a nossa branch tinha só para este tipo — one-off
+    // que a decisão do Jonathan foi eliminar em favor do mecanismo genérico.
+    if (!isOwner && !isAdminOuDev) {
       return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
     }
 
@@ -114,6 +110,28 @@ export async function PATCH(
   }
 
   const raw = await req.json().catch(() => ({}));
+
+  // REGRA DE NEGOCIO (Fase 4, item 2):
+  // - O que faz: bloqueia marcar "aprovada"/"rejeitada" por este PATCH genérico quando a tarefa é uma
+  //   aprovação formal (tem linha em aprovacoes_tarefa) — obriga a decisão a passar pelo despachante
+  //   dedicado (POST /api/tarefas/[id]/aprovacao).
+  // - Por que: este endpoint só atualiza a tarefa, sem rodar os efeitos colaterais (comissão, estoque,
+  //   crédito, contas a pagar) que o despachante roda — decidir por aqui deixava a tarefa marcada como
+  //   decidida sem nenhum efeito ter acontecido.
+  // - Impacto se alterado/removido: reabre o backdoor — qualquer dono/full-access pode "aprovar" uma
+  //   aprovação formal sem os efeitos de negócio associados rodarem.
+  if (raw?.status === "aprovada" || raw?.status === "rejeitada") {
+    const [temAprovacaoFormal] = await sql`
+      SELECT 1 FROM alissonerp.aprovacoes_tarefa WHERE tarefa_id = ${tarefaId} LIMIT 1
+    `;
+    if (temAprovacaoFormal) {
+      return NextResponse.json(
+        { error: "Esta tarefa é uma aprovação formal — decida por /api/tarefas/[id]/aprovacao" },
+        { status: 409 },
+      );
+    }
+  }
+
   const parsed = TarefaPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;

@@ -123,6 +123,9 @@ export async function GET(req: NextRequest) {
         categoria:   r.categoria as string | null,
         qtd_estoque: Number(r.qtd_estoque),
         imagem:      (r.imagem as string | null) ?? null,
+        // Card/botão gatam por este campo (contrato ProdutoRfid). Sem ele vem
+        // undefined → "sem SKU ou nome" mesmo com os dados presentes.
+        tem_sku_e_nome: Boolean(r.sku) && Boolean(r.nome),
       })),
     );
   } catch (err) {

@@ -25,7 +25,8 @@ import { zodError } from "@/lib/schemas/common";
 import { processarAprovacaoQuebraLimpeza } from "@/lib/limpeza-ouro-aprovacao";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } from "@/lib/entrega-sem-pagamento";
-import { liberarFreteAvulso, recusarFreteAvulso, listarAprovadoresFreteAvulso } from "@/lib/entrega-venda";
+import { liberarFreteAvulso, recusarFreteAvulso } from "@/lib/entrega-venda";
+import { podeDecidir, eventoDaTarefa } from "@/lib/aprovacoes";
 
 const AprovacaoTarefaPostSchema = z.object({
   aprovador_id: z.string().min(1, "obrigatório"),
@@ -93,7 +94,25 @@ async function processarAprovacaoCompraComercial(
     `;
     const totalCompra = Number(tot?.total ?? 0);
 
-    for (const item of itens) {
+    // REGRA DE NEGOCIO (Fase 4, item 4 — guard R4 anti-duplicação de estoque):
+    // - O que faz: pula o loop de INSERT em movimentacoes_estoque_comercial se esta compra já
+    //   gerou a entrada (mesmo motivo + mesma observação, que carrega o "#<id> aprovada" único).
+    // - Por que: não existe coluna própria compra_comercial_id em
+    //   movimentacoes_estoque_comercial (confirmado via information_schema.columns — só há
+    //   referencia_id/referencia_tipo genéricos, não usados por este insert) — o casamento
+    //   possível é por motivo+observação, que já é único por compra (o texto sempre termina em
+    //   "#<id> aprovada", sem colisão com outro id: "#5 aprovada" não é substring de "#50
+    //   aprovada"). Se a compra for reprocessada (ex.: reaprovação após erro parcial) o estoque
+    //   duplicaria a entrada.
+    // - Impacto se alterado/removido: reprocessar a aprovação duplica a entrada de estoque.
+    const [jaTemEstoque] = await tx`
+      SELECT 1 FROM alissonerp.movimentacoes_estoque_comercial
+      WHERE motivo = 'compra_comercial_aprovada'
+        AND observacao LIKE ${`%compra comercial #${compra.id} aprovada%`}
+      LIMIT 1
+    `;
+
+    for (const item of jaTemEstoque ? [] : itens) {
       // REGRA DE NEGOCIO:
       // - O que faz: normaliza qtd para inteiro antes do insert no estoque.
       // - Por que: a coluna quantidade e INTEGER no banco e compras comerciais usam pecas inteiras.
@@ -131,7 +150,19 @@ async function processarAprovacaoCompraComercial(
     `;
     const fornecedorNome = String(forn?.nome ?? "Fornecedor");
 
-    for (let i = 1; i <= parcelas; i++) {
+    // REGRA DE NEGOCIO (Fase 4, item 4 — guard R4 anti-duplicação financeira):
+    // - O que faz: pula o loop de INSERT em contas_pagar se esta compra já tem parcela gerada
+    //   (coluna própria compra_comercial_id, confirmada via information_schema.columns e já usada
+    //   pelo guard EXISTS da trigger 331 fn_gerar_conta_pagar_chegada_comercial).
+    // - Por que: a "chegada" (trigger 331) já pode ter gerado as parcelas antes desta aprovação
+    //   rodar — sem o guard, reprocessar a aprovação duplicaria as contas a pagar.
+    // - Impacto se alterado/removido: compra que já teve chegada processada ganha parcelas
+    //   duplicadas ao ser aprovada.
+    const [jaTemContaPagar] = await tx`
+      SELECT 1 FROM alissonerp.contas_pagar WHERE compra_comercial_id = ${compra.id} LIMIT 1
+    `;
+
+    for (let i = 1; i <= (jaTemContaPagar ? 0 : parcelas); i++) {
       const valorParcela = i === parcelas ? Math.round((base + diff) * 100) / 100 : base;
       await tx`
         INSERT INTO alissonerp.contas_pagar
@@ -197,9 +228,19 @@ async function processarAprovacaoRecebimentoMetal(
 async function processarAprovacaoCompraMetal(
   tarefaId: number,
   decisao: "aprovado" | "rejeitado",
-  aprovadorId: string,
+  user: { id: string; role: string | null },
   motivo?: string,
 ) {
+  // REGRA DE NEGÓCIO: este é um caminho LATENTE (o front usa os endpoints
+  // dedicados /api/metal/aprovacoes/[id]/{aprovar,rejeitar}) — mas se for
+  // acionado, tem que respeitar a MESMA autoridade config-first, não a checagem
+  // genérica do topo do PATCH (L326-333, que serve os outros fluxos e não muda).
+  const decisaoAutorizada = await podeDecidir(user, "compra_metal");
+  if (!decisaoAutorizada.pode) {
+    return { ok: false, motivo: "sem_permissao" };
+  }
+  const aprovadorId = user.id;
+
   const [compra] = await sql`
     SELECT * FROM alissonerp.compras_metal
     WHERE tarefa_aprovacao_id = ${tarefaId}
@@ -323,57 +364,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   `;
   if (!aprovacao) return NextResponse.json({ error: "Aprovação não encontrada" }, { status: 404 });
 
-  // Admin e desenvolvedor podem responder qualquer aprovação
   const [usuarioLogado] = await sql`
     SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
   `;
-  const isAdminOuDev = ["admin", "desenvolvedor"].includes(usuarioLogado?.role ?? "");
 
-  /**
-   * REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — ADITIVO, escopado
-   * SÓ para tipo='frete_avulso'): além do aprovador_id fixo da linha (gravado
-   * na criação com o 1º da lista) e do admin/dev, QUALQUER usuário da chave de
-   * config `aprovadores_frete_avulso` pode decidir a MESMA tarefa — não existe
-   * responsável único no pool. Só entra nesse caminho quando o usuário logado
-   * não é nem o aprovador_id da linha nem admin/dev, e só consulta a tarefa/
-   * config quando necessário (não roda para os demais tipos de aprovação).
-   * IMPACTO SE REMOVIDO: só o aprovador_id fixo conseguiria decidir — os
-   * demais do pool ficariam sem acesso, voltando ao "responsável designado"
-   * que este modelo veio substituir.
-   */
-  let isPoolFreteAvulso = false;
-  if (String(aprovacao.aprovador_id) !== user.id && !isAdminOuDev) {
-    const [tarefaTipoCheck] = await sql`
-      SELECT tipo FROM alissonerp.tarefas WHERE id = ${Number(id)} LIMIT 1
-    `;
-    if (tarefaTipoCheck?.tipo === "frete_avulso") {
-      // Fonte única (V3): listarAprovadoresFreteAvulso (@/lib/entrega-venda) —
-      // antes essa mesma query estava duplicada aqui, na lib e em GET /api/tarefas.
-      const listaPool = await listarAprovadoresFreteAvulso();
-      isPoolFreteAvulso = listaPool.includes(user.id);
-    }
-  }
-
-  if (String(aprovacao.aprovador_id) !== user.id && !isAdminOuDev && !isPoolFreteAvulso) {
-    return NextResponse.json({ error: "Somente o aprovador pode responder" }, { status: 403 });
-  }
-
-  await sql`
-    UPDATE alissonerp.aprovacoes_tarefa
-    SET status = ${body.decisao}, motivo = ${body.motivo ?? null}, respondido_em = now()
-      ${isPoolFreteAvulso ? sql`, aprovador_id = ${user.id}::uuid` : sql``}
-    WHERE id = ${body.aprovacao_id}
-  `;
-
-  const novoStatus = body.decisao === "aprovado" ? "aprovada" : "rejeitada";
-  await sql`
-    UPDATE alissonerp.tarefas SET status = ${novoStatus}, updated_at = now()
-    ${body.decisao === "aprovado" ? sql`, concluida_em = now()` : sql``}
-    WHERE id = ${Number(id)}
-  `;
-
-  await processarDecisao(Number(id), body.decisao, user.id, body.motivo);
-
+  // REGRA DE NEGÓCIO (BUG 2, item b — docs/regras-negocio/aprovacoes-refatoracao/
+  // 19-FASE-7-bugs-pos-merge.md): o SELECT da tarefa (tipo/tags/venda) sobe pra
+  // ANTES do portão de permissão (antes era feito só depois das escritas, linha
+  // ~391 na versão anterior). eventoDaTarefa precisa desses dados pra saber qual
+  // evento do CATÁLOGO decide quem pode responder — sem isso o portão só
+  // enxergava o UUID gravado em aprovacoes_tarefa.aprovador_id (BUG 1).
+  // IMPACTO SE REMOVIDO/MOVIDO: o portão volta a decidir sem saber o evento —
+  // mesmo bug do 2º aprovador configurado tomando 403.
   const [tarefaInfo] = await sql`
     SELECT t.venda_id, t.tags, t.tipo,
            ve.aprovacao_credito_tipo,
@@ -387,6 +389,61 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     ? tagsRaw
     : (typeof tagsRaw === "string" ? tagsRaw.replace(/[{}"]/g, "").split(",").filter(Boolean) : []);
 
+  // REGRA DE NEGÓCIO (BUG 1 — 19-FASE-7-bugs-pos-merge.md): o portão genérico
+  // do PATCH passa a ser "é o aprovador gravado OU a config do evento diz que
+  // pode". `isAdminOuDev` SOME de propósito: a política é config-first ESTRITA
+  // (03b-config-first-estrito.md) — nem admin/desenvolvedor decide fora da
+  // lista configurada. Quando eventoDaTarefa devolve null (tarefa 'geral',
+  // 'sangria' — que não são aprovação de negócio), vale só o aprovador gravado,
+  // igual ao comportamento de sempre (menos o bypass de admin que havia antes).
+  // POR QUÊ: sem isto, o 2º/3º aprovador configurado (não-admin) de um evento
+  // com múltiplos aprovadores tomava 403 ao tentar decidir — só quem tinha
+  // role admin/desenvolvedor conseguia (achado testando com o dono, 16/07,
+  // tarefa 301 de desconto em homolog).
+  // IMPACTO SE REMOVIDO: volta o 403 pro 2º/3º aprovador configurado.
+  const evento = eventoDaTarefa(tarefaInfo?.tipo ?? null, tags, tarefaInfo);
+  const ehAprovadorGravado = String(aprovacao.aprovador_id) === user.id;
+  let autorizado = ehAprovadorGravado;
+  if (!autorizado && evento) {
+    autorizado = (await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, evento)).pode;
+  }
+  if (!autorizado) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+
+  // REGRA DE NEGÓCIO (BUG 2, item c — cinto e suspensório): as 2 escritas
+  // genéricas (status da aprovação + status da tarefa) e o registro de
+  // histórico rodam na MESMA transação. O portão acima (BUG 1) já autoriza
+  // ANTES de qualquer escrita — isto é proteção extra contra o mapa
+  // eventoDaTarefa errar um tipo (ou um handler abaixo negar por outro motivo
+  // não previsto): se a transação falhar/for revertida, nenhuma das 2 escritas
+  // fica gravada pela metade.
+  // POR QUÊ: antes desta correção, essas escritas rodavam SEM transação e
+  // ANTES do 403 dos handlers por tipo — a tarefa ficava "aprovada"/"rejeitada"
+  // mesmo quando o negócio (venda, estoque, financeiro) não rodava. Mesma
+  // classe de bug que travou as vendas 15300/15312/15399/15562 (dossiê
+  // comercial.md) — lá a causa era outra, mas o sintoma (tarefa órfã, venda
+  // travada) é idêntico.
+  // IMPACTO SE REMOVIDO: volta o risco de tarefa órfã (aprovada/rejeitada sem
+  // o negócio ter rodado) se o mapa de eventos errar um caso.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await sql.begin(async (tx: any) => {
+    await tx`
+      UPDATE alissonerp.aprovacoes_tarefa
+      SET status = ${body.decisao}, motivo = ${body.motivo ?? null}, respondido_em = now()
+      WHERE id = ${body.aprovacao_id}
+    `;
+
+    const novoStatus = body.decisao === "aprovado" ? "aprovada" : "rejeitada";
+    await tx`
+      UPDATE alissonerp.tarefas SET status = ${novoStatus}, updated_at = now()
+      ${body.decisao === "aprovado" ? tx`, concluida_em = now()` : tx``}
+      WHERE id = ${Number(id)}
+    `;
+
+    await processarDecisao(Number(id), body.decisao, user.id, body.motivo, tx);
+  });
+
   /**
    * REGRA DE NEGOCIO: Automacao de Estoque 2.0.
    * O QUE: ao aprovar entrega sem pagamento total, reconcilia A Receber sem
@@ -398,6 +455,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
    * gerar o saldo aberto no crediario.
    */
   if (tarefaInfo?.tipo === ENTREGA_SEM_PAGAMENTO_TIPO || tags.includes("aprov_entrega_sem_pagamento")) {
+    // REGRA DE NEGÓCIO: entrega sem pagamento decidida pela camada config-first
+    // (aprovador_entrega_sem_pagamento) — não mais pela checagem genérica do topo
+    // do PATCH. Sem ctx.solicitanteId: entrega sem pagamento não exclui quem solicitou.
+    const decEntregaSemPagamento = await podeDecidir(
+      { id: user.id, role: usuarioLogado?.role ?? null },
+      "entrega_sem_pagamento",
+    );
+    if (!decEntregaSemPagamento.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const resultado = await processarAprovacaoEntregaSemPagamento(
         Number(id),
@@ -441,6 +508,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (tarefaInfo?.tipo === "cartao_desconto" && tarefaInfo?.venda_id) {
+    // REGRA DE NEGÓCIO (Fase 3g.3): cartão com desconto decidido pela camada
+    // config-first (aprovador_cartao_desconto_padrao) — sem ctx.solicitanteId.
+    const decCartaoDesconto = await podeDecidir(
+      { id: user.id, role: usuarioLogado?.role ?? null },
+      "cartao_desconto",
+    );
+    if (!decCartaoDesconto.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     const logCtx = { tarefa_id: Number(id), venda_id: tarefaInfo.venda_id, decisao: body.decisao, aprovador_id: user.id };
     console.log(`[cartao_desconto] inicio`, logCtx);
     try {
@@ -491,6 +567,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // travava em rascunho mesmo após o diretor aprovar (vendas 15300/15312/15399/
   // 15562/15629 destravadas à mão). Espelha o padrão do bloco cartao_desconto acima.
   if (tarefaInfo?.tipo === "desconto_acima" && tarefaInfo?.venda_id) {
+    // REGRA DE NEGÓCIO (Fase 3g.3): desconto decidido pela camada config-first
+    // (aprovador_desconto_padrao) — sem ctx.solicitanteId.
+    const decDesconto = await podeDecidir(
+      { id: user.id, role: usuarioLogado?.role ?? null },
+      "desconto",
+    );
+    if (!decDesconto.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     const logCtx = { tarefa_id: Number(id), venda_id: tarefaInfo.venda_id, decisao: body.decisao, aprovador_id: user.id };
     console.log(`[desconto] inicio`, logCtx);
     try {
@@ -538,6 +623,49 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           WHERE id = ${tarefaInfo.venda_id}
         `;
         console.log(`[desconto] vendas_erp: lock removido (rejeição)`);
+
+        /**
+         * REGRA DE NEGÓCIO (16/07, decisão do Jonathan): REPROVAR o desconto
+         * reprova, em cascata, a aprovação de CARTÃO da mesma venda.
+         *
+         * O QUÊ: se existir tarefa de cartão pendente nesta venda, ela é
+         *   marcada rejeitada junto e o lock da venda é limpo.
+         * O PORQUÊ: as duas passaram a poder ser pedidas juntas (ver
+         *   solicitar-aprovacao/route.ts, mesma data). Sem a cascata, reprovar
+         *   o desconto deixaria órfã uma tarefa de "cartão com desconto de X%"
+         *   cujo X foi recusado — o aprovador decidiria sobre um desconto que
+         *   não existe mais. Aprovar o desconto NÃO aprova o cartão: cada uma
+         *   tem sua decisão (só a reprovação cascateia).
+         * O IMPACTO SE REMOVIDO: volta a tarefa órfã de cartão, e a consultora
+         *   veria "aguardando aprovação de cartão" numa venda cujo desconto foi
+         *   recusado (o banner some só quando a tarefa é decidida).
+         */
+        const [vendaCartao] = await sql`
+          SELECT aprovacao_cartao_desconto_tarefa_id AS tid
+          FROM alissonerp.vendas_erp WHERE id = ${tarefaInfo.venda_id}
+        `;
+        const cartaoTarefaId = vendaCartao?.tid ? Number(vendaCartao.tid) : null;
+        if (cartaoTarefaId) {
+          const motivoCascata = `Reprovado automaticamente: o desconto desta venda foi reprovado${body.motivo ? ` (${body.motivo})` : ""}.`;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await sql.begin(async (tx: any) => {
+            await tx`
+              UPDATE alissonerp.aprovacoes_tarefa
+              SET status = 'rejeitado', motivo = ${motivoCascata}, respondido_em = now()
+              WHERE tarefa_id = ${cartaoTarefaId} AND status = 'pendente'
+            `;
+            await tx`
+              UPDATE alissonerp.tarefas SET status = 'rejeitada', updated_at = now()
+              WHERE id = ${cartaoTarefaId} AND status = 'aguardando_aprovacao'
+            `;
+            await tx`
+              UPDATE alissonerp.vendas_erp
+              SET aprovacao_cartao_desconto_tarefa_id = NULL, updated_at = NOW()
+              WHERE id = ${tarefaInfo.venda_id}
+            `;
+          });
+          console.log(`[desconto] cascata: tarefa de cartão ${cartaoTarefaId} reprovada junto`);
+        }
       }
       const [aprov] = await sql`SELECT solicitante_id FROM alissonerp.aprovacoes_tarefa WHERE tarefa_id = ${Number(id)} LIMIT 1`;
       if (aprov?.solicitante_id) {
@@ -579,12 +707,56 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       tarefaInfo?.tipo !== "desconto_acima" &&
       !tags.includes("aprovacao_venda") &&
       tarefaInfo?.tipo !== "cartao_desconto") {
+    // REGRA DE NEGÓCIO (Fase 3g.2): crédito decidido pela camada config-first —
+    // 2 aprovadores (aprovadora_credito_gerente / aprovador_credito_diretor),
+    // escolhidos pelo evento conforme aprovacao_credito_tipo (gravado na venda
+    // por submeterVendaParaAprovacaoCredito, roteado pela regra de saldo — isso
+    // não muda). Não mais pela checagem genérica do topo do PATCH. Sem
+    // ctx.solicitanteId: crédito não exclui quem solicitou.
+    const eventoCredito = tarefaInfo?.aprovacao_credito_tipo === "diretor" ? "credito_diretor" : "credito_gerente";
+    const decCredito = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, eventoCredito);
+    if (!decCredito.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const { processarAprovacaoCredito } = await import("@/lib/vendas-credito-aprovar");
       const resultado = await processarAprovacaoCredito(
         Number(id), user.id, body.decisao, body.motivo,
       );
-      return NextResponse.json({ ok: true, credito: resultado });
+
+      /**
+       * REGRA DE NEGÓCIO (17/07, decisão do Jonathan): aprovar o crédito e a
+       * venda ser aprovada são 2 passos, e o 2º (approveVenda) pode falhar por
+       * motivo OPERACIONAL — o clássico é cliente sem celular cadastrado.
+       *
+       * O QUE: quando falha, a aprovação do crédito CONTINUA VALENDO (a tarefa
+       *   não volta pra fila) e devolvemos o motivo real junto do 200, pra tela
+       *   avisar quem aprovou. Quem corrige o cadastro aprova a venda na mão.
+       * POR QUE: o aprovador já decidiu — a decisão dele é válida. A falha não é
+       *   de decisão, é de cadastro. Fazer ele aprovar de novo é ruído ("pedir
+       *   aprovação é chato" — Jonathan).
+       *   Isto DIVERGE de propósito do fd80d4d0 (23/06), que revertia a tarefa
+       *   pra 'aguardando_aprovacao' e devolvia 409. Aquele bloco sumiu no
+       *   0ae5e1607 (26/06, base errada); NÃO restaurar — o desenho mudou.
+       * IMPACTO SE REMOVIDO: volta o 200 mudo — o aprovador vê "sucesso", o
+       *   approveVenda falhou por baixo e ninguém avisa que falta aprovar a
+       *   venda na mão. (A consultora é notificada por
+       *   vendas-credito-aprovar.ts; quem aprova, não era.)
+       *
+       * Espera legítima por pagamento (venda_aprovada=false SEM erro_aprovacao)
+       * não é falha — segue 200 limpo, sem aviso.
+       */
+      const falhouAoAprovarVenda = body.decisao === "aprovado" && !!resultado.erro_aprovacao;
+      return NextResponse.json({
+        ok: true,
+        credito: resultado,
+        ...(falhouAoAprovarVenda
+          ? {
+              aviso: `Crédito aprovado, mas a venda não foi aprovada automaticamente: ${resultado.erro_aprovacao}. Corrija o cadastro e aprove a venda manualmente.`,
+              venda_id: tarefaInfo?.venda_id ?? null,
+            }
+          : {}),
+      });
     } catch (err) {
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] credito`, err);
     }
@@ -594,6 +766,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // sobre a aprovacao normal — ambas as tarefas apontam pra mesma devolucao via
   // tarefa_id, entao desambiguamos pela tag. Ao aprovar, conclui e gera o vale.
   if (tags.includes("devolucao_estoque")) {
+    // REGRA DE NEGÓCIO: etapa 2 (estoque) decidida pela camada config-first
+    // (aprovador_devolucao_estoque) — não mais pela checagem genérica do topo do
+    // PATCH. Sem ctx.solicitanteId: devolução não exclui quem solicitou.
+    const decEstoque = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "devolucao_estoque");
+    if (!decEstoque.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const { processarAprovacaoEstoqueDevolucao } = await import("@/lib/devolucoes");
       const resultado = await processarAprovacaoEstoqueDevolucao(
@@ -609,6 +788,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     SELECT id FROM alissonerp.devolucoes_venda WHERE tarefa_id = ${Number(id)} LIMIT 1
   `;
   if (devLink || tags.includes("devolucao")) {
+    // REGRA DE NEGÓCIO: etapa 1 (devolução) decidida pela camada config-first
+    // (aprovador_devolucao) — 1 aprovador só, sem distinção de prazo (decisão do
+    // Jonathan, 12/07). Sem ctx.solicitanteId: devolução não exclui quem solicitou.
+    const decDevolucao = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "devolucao");
+    if (!decDevolucao.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const { processarAprovacaoDevolucao } = await import("@/lib/devolucoes");
       const resultado = await processarAprovacaoDevolucao(
@@ -637,6 +823,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (tarefaInfo?.tipo === "compra_comercial" || tags.includes("aprovacao_compra_comercial")) {
+    // REGRA DE NEGÓCIO: compra comercial decidida pela camada config-first
+    // (aprovador_compra_comercial) — não mais pela checagem genérica do topo do
+    // PATCH. Sem ctx.solicitanteId: compra comercial não exclui quem solicitou.
+    const dec = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "compra_comercial");
+    if (!dec.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const resultado = await processarAprovacaoCompraComercial(Number(id), body.decisao, user.id, body.motivo);
       return NextResponse.json({ ok: true, compra_comercial: resultado });
@@ -646,6 +839,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (tarefaInfo?.tipo === "recebimento_metal" || tags.includes("aprovacao_recebimento_metal")) {
+    // REGRA DE NEGÓCIO: recebimento de metal decidido pela camada config-first
+    // (metal_aprovador_id) — não mais pela checagem genérica do topo do PATCH.
+    // Sem ctx.solicitanteId: metal não exclui quem cadastrou o recebimento.
+    const decisaoAutorizada = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "recebimento_metal");
+    if (!decisaoAutorizada.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const resultado = await processarAprovacaoRecebimentoMetal(Number(id), body.decisao, user.id, body.motivo);
       return NextResponse.json({ ok: true, recebimento_metal: resultado });
@@ -656,7 +856,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (tarefaInfo?.tipo === "compra_metal" || tags.includes("aprovacao_compra_metal")) {
     try {
-      const resultado = await processarAprovacaoCompraMetal(Number(id), body.decisao, user.id, body.motivo);
+      const resultado = await processarAprovacaoCompraMetal(
+        Number(id), body.decisao, { id: user.id, role: usuarioLogado?.role ?? null }, body.motivo,
+      );
       return NextResponse.json({ ok: true, compra_metal: resultado });
     } catch (err) {
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] compra_metal`, err);
@@ -664,16 +866,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   /**
-   * REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL): solicitação de
-   * frete avulso feita pela consultora vira tarefa (ver criarFreteAvulso em
-   * src/lib/entrega-venda.ts). Ao APROVAR, libera a corrida (lança o saldo da
-   * gerente); ao REJEITAR, recusa (exige motivo). Reuso puro — as libs
-   * liberarFreteAvulso/recusarFreteAvulso já fazem saldo/FOR UPDATE/motivo;
-   * este bloco só localiza a entrega pela tarefa e delega.
+   * REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — migrado pra camada
+   * central de aprovações no merge com a main, 20/07): solicitação de frete
+   * avulso feita pela consultora vira tarefa (ver criarFreteAvulso em
+   * src/lib/entrega-venda.ts). Decidida pela camada config-first (evento
+   * "frete_avulso", chave `aprovadores_frete_avulso` — ver
+   * src/lib/aprovacoes/catalogo.ts), igual a compra_comercial/recebimento_metal
+   * acima — não mais pelo pool na unha (isPoolFreteAvulso/
+   * listarAprovadoresFreteAvulso) que esta branch tinha antes do merge. Ao
+   * APROVAR, libera a corrida (lança o saldo da gerente); ao REJEITAR, recusa
+   * (exige motivo). Reuso puro — as libs liberarFreteAvulso/recusarFreteAvulso
+   * já fazem saldo/FOR UPDATE/motivo; este bloco só autoriza, localiza a
+   * entrega pela tarefa e delega.
    * IMPACTO SE ALTERADO: duplicar a lógica aqui arrisca lançar saldo em dobro
    * ou divergir do que a lib já garante com FOR UPDATE.
    */
   if (tarefaInfo?.tipo === "frete_avulso") {
+    const decFreteAvulso = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, "frete_avulso");
+    if (!decFreteAvulso.pode) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
     try {
       const [entregaFrete] = await sql`
         SELECT id FROM alissonerp.entregas_venda WHERE tarefa_aprovacao_id = ${Number(id)} LIMIT 1

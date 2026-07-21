@@ -9,6 +9,8 @@ import PagBankCobranca from "@/components/vendas/PagBankCobranca";
 import PagBankQrInline from "@/components/vendas/PagBankQrInline";
 // REGRA DE NEGOCIO: painel embutido da 2a confirmacao do vale (codigo WhatsApp, brecha #1).
 import ValeCodigoInline from "@/components/vendas/ValeCodigoInline";
+// Formas que contam como cartão pro gate de desconto (fonte única, espelha o servidor).
+import { ehFormaCartao } from "@/lib/desconto/precificar-item";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -176,8 +178,11 @@ export interface PagamentoFormProps {
   // Extra
   showAReceberWarning?: boolean;
 
-  // Bloqueio de cartão por desconto >20%
+  // Bloqueio de cartão por desconto acima do limite configurado
   cartaoBloqueado?: boolean;
+  /** Limite (%) do cartão, pra mostrar na mensagem. Vem da config
+   *  `limite_desconto_cartao_pct` via o caller. Default 20 = default do backend. */
+  limiteDescontoCartao?: number;
   onSolicitarAprovacaoCartao?: () => void;
   solicitandoAprovacaoCartao?: boolean;
 
@@ -186,6 +191,13 @@ export interface PagamentoFormProps {
   maxParcelasPromo?: number | null;
   /** Nome(s) das campanhas que impuseram o limite — exibido no aviso. */
   nomesPromosNaVenda?: string[];
+
+  /**
+   * Role do usuario logado. Hoje decide só se "Manual (PagBank)" aparece no
+   * seletor (admin/dev). "Manual (MP)" aparece pra todos desde 17/07 — ver
+   * FORMAS_RESTRITAS_ADMIN. Ausente = mostra tudo (compatibilidade).
+   */
+  role?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -194,6 +206,24 @@ const FORMAS_PAGAMENTO_BASE = [
   "Dinheiro", "Cartão de Crédito", "Pix", "Ouro",
   "Vale-Troca", "A Receber", "Múltiplas", "Manual (MP)", "Manual (PagBank)",
 ];
+
+/**
+ * Formas restritas a admin/dev no seletor.
+ *
+ * 17/07 (decisão do Jonathan): **Manual (MP) SAIU daqui — volta a aparecer pra
+ * todos.** Motivo dele: no fluxo da loja o "Manual (MP)" não é cobrança no
+ * cartão (é confirmação por ID de transação do MP), então nem entra no limite
+ * de 20% do cartão nem precisa ficar escondido. Manual (PagBank) CONTINUA
+ * restrito — não foi pedido pra liberar.
+ * (Contexto: o PR #99, 17/07, tinha escondido as DUAS de quem não é admin.)
+ *
+ * ATENÇÃO — anda junto com FORMAS_PAGAMENTO_CARTAO (precificar-item.ts): Manual
+ * (MP) está liberado E fora da trava do cartão PORQUE não é tratado como cartão.
+ * Se um dia ele voltar a ser cobrança no cartão, as duas coisas mudam juntas:
+ * volta pra trava E (se for esconder de novo) volta pra esta lista.
+ */
+export const FORMAS_RESTRITAS_ADMIN = ["Manual (PagBank)"];
+const ROLES_FORMAS_MANUAIS = ["admin", "desenvolvedor"];
 
 const CONDICOES = ["À vista", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"];
 const COM_CARTAO = ["Cartão de Crédito", "Pix"];
@@ -292,14 +322,27 @@ export default function PagamentoForm({
   onPaymentSaved: _onPaymentSaved,
   showAReceberWarning,
   cartaoBloqueado,
+  limiteDescontoCartao,
   onSolicitarAprovacaoCartao,
   solicitandoAprovacaoCartao,
   maxParcelasPromo,
   nomesPromosNaVenda,
+  role,
 }: PagamentoFormProps) {
-  const formasPagamento = FORMAS_PAGAMENTO_BASE;
+  const podeVerRestritas = role == null || ROLES_FORMAS_MANUAIS.includes(role);
+  const formasPagamento = podeVerRestritas
+    ? FORMAS_PAGAMENTO_BASE
+    : FORMAS_PAGAMENTO_BASE.filter(f => !FORMAS_RESTRITAS_ADMIN.includes(f));
   const totalMult = payments.reduce((s, p) => s + p.valor, 0);
   const restante = +(totalVenda - totalMult).toFixed(2);
+
+  /** REGRA DE NEGÓCIO (16/07, decisão do Jonathan): o bloqueio por desconto
+   *  acima do limite do cartão vale pras 3 formas de cartão (Cartão de Crédito,
+   *  Manual (MP), Manual (PagBank)) — antes só a primeira era barrada, então
+   *  bastava lançar por um dos Manual pra pular a aprovação. As demais formas
+   *  (Dinheiro/Pix/Ouro/Vale/A Receber) NÃO são afetadas por esta trava.
+   *  Espelha o gate do servidor (POST /api/vendas/[id]/pagamentos, ehFormaCartao). */
+  const bloqueioCartaoAtivo = (cartaoBloqueado ?? false) && ehFormaCartao(pagForma);
 
   return (
     <div className="space-y-4">
@@ -528,32 +571,37 @@ export default function PagamentoForm({
         />
       )}
 
-      {/* Cartão inline — Mercado Pago */}
-      {pagForma === "Cartão de Crédito" && totalVenda > 0 && mode === "criacao" && pagGateway === "Mercado Pago" && (() => {
-        if (cartaoBloqueado) {
-          return (
-            <div className="rounded-xl border p-4 space-y-3"
-              style={{ borderColor: "#FED7AA", backgroundColor: "#FFF7ED" }}>
-              <div className="flex items-start gap-2">
-                <AlertCircle size={16} className="shrink-0 mt-0.5" style={{ color: "#9A3412" }} />
-                <div className="text-xs flex-1" style={{ color: "#9A3412" }}>
-                  <p className="font-medium">Cartão de crédito bloqueado</p>
-                  <p className="mt-1">Este pedido possui itens com desconto acima de 20%. Para pagar no cartão de crédito, solicite aprovação.</p>
-                </div>
-              </div>
-              {onSolicitarAprovacaoCartao && (
-                <button
-                  onClick={onSolicitarAprovacaoCartao}
-                  disabled={solicitandoAprovacaoCartao}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-                  style={{ backgroundColor: "#C2410C", color: "#fff" }}>
-                  {solicitandoAprovacaoCartao ? <Loader2 size={14} className="animate-spin" /> : null}
-                  Solicitar Aprovação
-                </button>
-              )}
+      {/* ── Bloqueio por desconto acima do limite do cartão ──
+          Só "Cartão de Crédito" (ver FORMAS_PAGAMENTO_CARTAO). Substitui o
+          painel de cobrança da forma escolhida pelo aviso + botão de solicitar. */}
+      {bloqueioCartaoAtivo && (
+        <div className="rounded-xl border p-4 space-y-3"
+          style={{ borderColor: "#FED7AA", backgroundColor: "#FFF7ED" }}>
+          <div className="flex items-start gap-2">
+            <AlertCircle size={16} className="shrink-0 mt-0.5" style={{ color: "#9A3412" }} />
+            <div className="text-xs flex-1" style={{ color: "#9A3412" }}>
+              <p className="font-medium">Pagamento no cartão bloqueado</p>
+              <p className="mt-1">
+                Este pedido possui itens com desconto acima de {limiteDescontoCartao ?? 20}%. Para pagar em {pagForma}, solicite aprovação.
+                As outras formas seguem liberadas.
+              </p>
             </div>
-          );
-        }
+          </div>
+          {onSolicitarAprovacaoCartao && (
+            <button
+              onClick={onSolicitarAprovacaoCartao}
+              disabled={solicitandoAprovacaoCartao}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+              style={{ backgroundColor: "#C2410C", color: "#fff" }}>
+              {solicitandoAprovacaoCartao ? <Loader2 size={14} className="animate-spin" /> : null}
+              Solicitar Aprovação
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Cartão inline — Mercado Pago */}
+      {pagForma === "Cartão de Crédito" && !bloqueioCartaoAtivo && totalVenda > 0 && mode === "criacao" && pagGateway === "Mercado Pago" && (() => {
         const installments = pagCondicao === "À vista" ? 1 : parseInt(pagCondicao) || 1;
         return (
           <CartaoInline
@@ -568,7 +616,7 @@ export default function PagamentoForm({
       })()}
 
       {/* Cartão inline — PagBank */}
-      {pagForma === "Cartão de Crédito" && totalVenda > 0 && mode === "criacao" && pagGateway === "PagBank" && (
+      {pagForma === "Cartão de Crédito" && !bloqueioCartaoAtivo && totalVenda > 0 && mode === "criacao" && pagGateway === "PagBank" && (
         <PagBankCobranca
           vendaId={vendaId ?? 0}
           numeroVenda={numeroVenda || "Nova"}
@@ -589,7 +637,7 @@ export default function PagamentoForm({
       )}
 
       {/* Manual (MP) */}
-      {pagForma === "Manual (MP)" && vendaId && (
+      {pagForma === "Manual (MP)" && !bloqueioCartaoAtivo && vendaId && (
         <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
           <p className="text-xs" style={{ color: "#6B7280" }}>
             Cole o ID do pagamento do Mercado Pago. O sistema vai consultar o MP e registrar automaticamente se estiver aprovado.
@@ -618,7 +666,7 @@ export default function PagamentoForm({
       )}
 
       {/* Manual (PagBank) */}
-      {pagForma === "Manual (PagBank)" && vendaId && (
+      {pagForma === "Manual (PagBank)" && !bloqueioCartaoAtivo && vendaId && (
         <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder }}>
           <p className="text-xs" style={{ color: "#6B7280" }}>
             Cole o ID do pedido ou cobrança do PagBank. O sistema vai consultar o PagBank e registrar automaticamente se estiver aprovado.
@@ -904,8 +952,10 @@ export default function PagamentoForm({
       })()}
 
       {/* Botão Registrar (modo edição, formulário simples não-gateway).
-          Vale COM dono: o botão fica no painel ValeCodigoInline (acima) — esconde este. */}
-      {mode === "edicao" && vendaId && pagForma !== "Múltiplas" && pagForma !== "A Receber" && pagForma !== "Manual (MP)" &&
+          Vale COM dono: o botão fica no painel ValeCodigoInline (acima) — esconde este.
+          bloqueioCartaoAtivo: esconde o botão nas formas de cartão quando o desconto
+          passa do limite e ainda não foi aprovado (o servidor recusaria com 409). */}
+      {mode === "edicao" && vendaId && !bloqueioCartaoAtivo && pagForma !== "Múltiplas" && pagForma !== "A Receber" && pagForma !== "Manual (MP)" &&
         !(pagForma === "Vale-Troca" && valeValidacao?.ok && valeValidacao.cliente_id != null && onAplicarVale) && (
         <button
           onClick={() => handleAddPagamento(pagFormValor || undefined)}

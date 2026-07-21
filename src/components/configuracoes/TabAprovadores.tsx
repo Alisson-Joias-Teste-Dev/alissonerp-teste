@@ -19,6 +19,14 @@ interface AprovadorConfig {
   aprovador_devolucao_estoque?: string;
   aprovador_vale_troca_excecao?: string;
   aprovadores_devolver_peca?: string; // MULTI: UUIDs separados por vírgula
+  aprovador_conversao?: string; // Fase 3b: conversão de estoque + SKU (mesmo aprovador)
+  aprovador_precificacao?: string; // Fase 3c: alteração de markup
+  aprovador_devolucao?: string; // Fase 3e: devolução etapa 1 (1 aprovador, sem distinção de prazo)
+  aprovador_alteracao_venda?: string; // Fase 3g.1: alteração de venda (era ROLES_FINANCEIRO fixo)
+  aprovadores_conversao_reversa?: string; // MULTI: UUIDs separados por vírgula
+  aprovadores_garantia_fora_prazo?: string; // MULTI: garantia depois dos 7 dias úteis (17/07)
+  desconto_fallback_sem_cadastro_pct?: string; // Fase 5: teto (%) sem cadastro de mx_desconto_permitido
+  limite_desconto_cartao_pct?: string; // Fase 5: acima disso, cartão de crédito exige aprovação
   aprovadores_frete_avulso?: string; // MULTI: UUIDs separados por vírgula (pool frete avulso — migration 353)
 }
 
@@ -36,6 +44,9 @@ interface UsuariosPorRole {
   aprovadores_limpeza: Usuario[];
   aprovadores_entrega_sem_pagamento: Usuario[];
   todos_usuarios: Usuario[];
+  conversao_aprovadores: Usuario[];
+  precificacao_aprovadores: Usuario[];
+  devolucao_aprovadores: Usuario[];
 }
 
 const P = {
@@ -64,6 +75,14 @@ export default function TabAprovadores() {
     aprovador_devolucao_estoque: "",
     aprovador_vale_troca_excecao: "",
     aprovadores_devolver_peca: "",
+    aprovador_conversao: "",
+    aprovador_precificacao: "",
+    aprovador_devolucao: "",
+    aprovador_alteracao_venda: "",
+    aprovadores_conversao_reversa: "",
+    aprovadores_garantia_fora_prazo: "",
+    desconto_fallback_sem_cadastro_pct: "0",
+    limite_desconto_cartao_pct: "20",
     aprovadores_frete_avulso: "",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
@@ -74,6 +93,9 @@ export default function TabAprovadores() {
     aprovadores_limpeza: [],
     aprovadores_entrega_sem_pagamento: [],
     todos_usuarios: [],
+    conversao_aprovadores: [],
+    precificacao_aprovadores: [],
+    devolucao_aprovadores: [],
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -96,9 +118,17 @@ export default function TabAprovadores() {
           aprovador_devolucao_estoque: d.aprovador_devolucao_estoque ?? "",
           aprovador_vale_troca_excecao: d.aprovador_vale_troca_excecao ?? "",
           aprovadores_devolver_peca: d.aprovadores_devolver_peca ?? "",
+          aprovador_conversao: d.aprovador_conversao ?? "",
+          aprovador_precificacao: d.aprovador_precificacao ?? "",
+          aprovador_devolucao: d.aprovador_devolucao ?? "",
+          aprovador_alteracao_venda: d.aprovador_alteracao_venda ?? "",
+          aprovadores_conversao_reversa: d.aprovadores_conversao_reversa ?? "",
+          aprovadores_garantia_fora_prazo: d.aprovadores_garantia_fora_prazo ?? "",
+          desconto_fallback_sem_cadastro_pct: d.desconto_fallback_sem_cadastro_pct ?? "0",
+          limite_desconto_cartao_pct: d.limite_desconto_cartao_pct ?? "20",
           aprovadores_frete_avulso: d.aprovadores_frete_avulso ?? "",
         });
-        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [] });
+        setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [], conversao_aprovadores: [], precificacao_aprovadores: [], devolucao_aprovadores: [] });
       })
       .finally(() => setLoading(false));
   }, []);
@@ -129,7 +159,7 @@ export default function TabAprovadores() {
   function getUserName(chave: string): string {
     const id = (config as any)[chave];
     if (!id) return "";
-    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores, ...usuarios.aprovadores_limpeza, ...usuarios.aprovadores_entrega_sem_pagamento, ...usuarios.todos_usuarios];
+    const all = [...usuarios.gerentes, ...usuarios.diretores_admins, ...usuarios.admins_devs, ...usuarios.metal_aprovadores, ...usuarios.aprovadores_limpeza, ...usuarios.aprovadores_entrega_sem_pagamento, ...usuarios.todos_usuarios, ...usuarios.conversao_aprovadores, ...usuarios.precificacao_aprovadores, ...usuarios.devolucao_aprovadores];
     const u = all.find((x) => x.id === id);
     return u?.nome ?? "";
   }

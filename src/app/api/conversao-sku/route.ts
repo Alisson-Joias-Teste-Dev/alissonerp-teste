@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { zodError } from "@/lib/schemas/common";
+import { resolverAprovadores } from "@/lib/aprovacoes";
 
 const ROLES_PERMITIDOS = ["estoquista_loja", "gerente_loja", "admin", "desenvolvedor"];
 
@@ -58,6 +59,18 @@ export async function POST(req: NextRequest) {
     } else {
       fotoPath = r.path;
     }
+  }
+
+  // REGRA DE NEGÓCIO: sem aprovador configurado, a conversão SKU não nasce
+  // (política config-first — 03b-config-first-estrito.md; mesmo aprovador da
+  // conversão de estoque, decisão do Jonathan 12/07). Sem ctx.solicitanteId:
+  // conversão não exclui quem está criando.
+  const resol = await resolverAprovadores("conversao_sku");
+  if (resol.status === "nao_configurado") {
+    return NextResponse.json(
+      { error: "Aprovador de conversão não configurado. Defina em Configurações › Aprovadores." },
+      { status: 409 },
+    );
   }
 
   // Transação

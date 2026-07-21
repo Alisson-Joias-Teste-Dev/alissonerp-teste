@@ -41,6 +41,7 @@ const ProdutosPatchSchema = z.object({
   altura_aro: z.number().nullable().optional(),
   base: z.number().nullable().optional(),
   fornecedor: z.string().max(200).nullable().optional(),
+  localizacao: z.string().max(200).nullable().optional(),
   foto_base64: z.string().max(LIMITS.IMAGE_BASE64_MAX).optional(),
   aplicar_rota_padrao: z.boolean().optional(),
   preco_servico: z.number().nullable().optional(),
@@ -272,6 +273,12 @@ export async function GET(
       (produto as Record<string, unknown>).fornecedor = null;
     }
 
+    // Localização física da peça — leitura separada (migration 336)
+    const [loc] = await sql<{ localizacao: string | null }[]>`
+      SELECT localizacao FROM alissonerp.erp_produtos WHERE produto_id = ${produtoId} LIMIT 1
+    `;
+    (produto as Record<string, unknown>).localizacao = loc?.localizacao ?? null;
+
     // Faixas de markup de pedra (para preview em runtime no drawer)
     const markup_pedras = await sql<{ tamanho_min: string; tamanho_max: string; markup: string }[]>`
       SELECT tamanho_min, tamanho_max, markup
@@ -419,6 +426,11 @@ export async function PATCH(
       ? (body.fornecedor.trim() || null)
       : null;
   }
+  if (body.localizacao !== undefined) {
+    erpUpdate.localizacao = typeof body.localizacao === "string"
+      ? (body.localizacao.trim() || null)
+      : null;
+  }
 
   if (
     Object.keys(pubUpdate).length === 0 &&
@@ -513,14 +525,15 @@ export async function PATCH(
       if (temColForn) {
         await sql`
           INSERT INTO alissonerp.erp_produtos (produto_id, sku, nome,
-            largura_aro, altura_aro, base, observacao_erp, fornecedor)
+            largura_aro, altura_aro, base, observacao_erp, fornecedor, localizacao)
           SELECT
             id_produto, sku, nome,
             ${erpUpdate.largura_aro    !== undefined ? (erpUpdate.largura_aro    as number | null) : null}::numeric,
             ${erpUpdate.altura_aro     !== undefined ? (erpUpdate.altura_aro     as number | null) : null}::numeric,
             ${erpUpdate.base           !== undefined ? (erpUpdate.base           as number | null) : null}::numeric,
             ${erpUpdate.observacao_erp !== undefined ? (erpUpdate.observacao_erp as string | null) : null}::text,
-            ${erpUpdate.fornecedor     !== undefined ? (erpUpdate.fornecedor     as string | null) : null}::text
+            ${erpUpdate.fornecedor     !== undefined ? (erpUpdate.fornecedor     as string | null) : null}::text,
+            ${erpUpdate.localizacao    !== undefined ? (erpUpdate.localizacao    as string | null) : null}::text
           FROM public.produtos
           WHERE id_produto = ${produtoId}
           ON CONFLICT (produto_id) DO UPDATE SET
@@ -529,19 +542,21 @@ export async function PATCH(
             base           = CASE WHEN ${erpUpdate.base           !== undefined} THEN EXCLUDED.base           ELSE erp_produtos.base           END,
             observacao_erp = CASE WHEN ${erpUpdate.observacao_erp !== undefined} THEN EXCLUDED.observacao_erp ELSE erp_produtos.observacao_erp END,
             fornecedor     = CASE WHEN ${erpUpdate.fornecedor     !== undefined} THEN EXCLUDED.fornecedor     ELSE erp_produtos.fornecedor     END,
+            localizacao    = CASE WHEN ${erpUpdate.localizacao    !== undefined} THEN EXCLUDED.localizacao    ELSE erp_produtos.localizacao    END,
             date_updated   = NOW()
         `;
       } else {
         // Sem coluna fornecedor (migration 159 pendente) — fluxo antigo
         await sql`
           INSERT INTO alissonerp.erp_produtos (produto_id, sku, nome,
-            largura_aro, altura_aro, base, observacao_erp)
+            largura_aro, altura_aro, base, observacao_erp, localizacao)
           SELECT
             id_produto, sku, nome,
             ${erpUpdate.largura_aro    !== undefined ? (erpUpdate.largura_aro    as number | null) : null}::numeric,
             ${erpUpdate.altura_aro     !== undefined ? (erpUpdate.altura_aro     as number | null) : null}::numeric,
             ${erpUpdate.base           !== undefined ? (erpUpdate.base           as number | null) : null}::numeric,
-            ${erpUpdate.observacao_erp !== undefined ? (erpUpdate.observacao_erp as string | null) : null}::text
+            ${erpUpdate.observacao_erp !== undefined ? (erpUpdate.observacao_erp as string | null) : null}::text,
+            ${erpUpdate.localizacao    !== undefined ? (erpUpdate.localizacao    as string | null) : null}::text
           FROM public.produtos
           WHERE id_produto = ${produtoId}
           ON CONFLICT (produto_id) DO UPDATE SET
@@ -549,6 +564,7 @@ export async function PATCH(
             altura_aro     = CASE WHEN ${erpUpdate.altura_aro     !== undefined} THEN EXCLUDED.altura_aro     ELSE erp_produtos.altura_aro     END,
             base           = CASE WHEN ${erpUpdate.base           !== undefined} THEN EXCLUDED.base           ELSE erp_produtos.base           END,
             observacao_erp = CASE WHEN ${erpUpdate.observacao_erp !== undefined} THEN EXCLUDED.observacao_erp ELSE erp_produtos.observacao_erp END,
+            localizacao    = CASE WHEN ${erpUpdate.localizacao    !== undefined} THEN EXCLUDED.localizacao    ELSE erp_produtos.localizacao    END,
             date_updated   = NOW()
         `;
       }

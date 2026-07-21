@@ -44,10 +44,6 @@ export interface Tarefa {
   created_at: string;
   updated_at: string;
   concluida_em: string | null;
-  // ADITIVO (migration 353, modelo TAREFA/POOL) — só relevante quando
-  // tipo==='frete_avulso'. Calculado no servidor (GET /api/tarefas); NÃO é a
-  // autoridade final de permissão (o dispatcher revalida sempre).
-  pode_decidir_pool?: boolean;
 }
 
 export interface Usuario { id: string; nome: string; }
@@ -107,6 +103,15 @@ const TIPO_LABEL: Record<string, string> = {
   protocolo_metal: "Protocolo de metal",
   aprovacao_quebra_metal: "Aprovação de quebra de metal",
   compra_comercial: "Compra Comercial",
+  // 16/07: faltavam — a tela mostrava o código cru ("cartao_desconto",
+  // "entrega_sem_pagamento_total"...) no lugar do nome. Conferido contra os
+  // tipos que existem de fato em alissonerp.tarefas (SELECT DISTINCT tipo).
+  cartao_desconto: "Cartão de crédito com desconto",
+  entrega_sem_pagamento_total: "Entrega sem pagamento total",
+  compra_metal: "Compra de metal",
+  conversao: "Conversão de estoque",
+  conversao_sku: "Conversão de SKU",
+  conversao_reversa: "Conversão reversa (ouro → joia)",
 };
 
 type Chip = { label: string; icon: string; bg: string; color: string; href?: string };
@@ -154,6 +159,127 @@ function parsearCamposDescricao(descricao: string): {
   if (produto) out.produtoNome = produto[1].trim();
 
   return out;
+}
+
+/**
+ * "1.640g" / "1.640 g" → "1,64 g": peso em pt-BR (vírgula, 2 casas). O número
+ * vem CRU da descrição da tarefa, onde o banco gravou peso_total/peso_saida
+ * (NUMERIC(10,3): ponto decimal, 3 casas, nunca separador de milhar — são
+ * gramas de joia, valores pequenos). Aqui só reformatamos a EXIBIÇÃO; o valor
+ * armazenado não muda.
+ */
+function formatPesoBR(pesoStr: string): string {
+  const num = parseFloat(pesoStr.replace(/[^\d.]/g, ""));
+  if (!Number.isFinite(num)) return pesoStr;
+  return `${num.toFixed(2).replace(".", ",")} g`;
+}
+
+/**
+ * REGRA DE NEGÓCIO (16/07, pedido do Jonathan): no card único por venda, cada
+ * aprovação vira uma LINHA curta — o texto completo fica no "expandir".
+ * Este helper tira da descrição o número que importa pra decidir sem abrir.
+ * Se não reconhecer o formato, devolve null e a linha mostra só o tipo (sem
+ * inventar texto).
+ */
+function resumoAprovacao(t: Tarefa): string | null {
+  const d = (t.descricao ?? "").replace(/\\n/g, "\n");
+  const desc = d.match(/Desconto m[áa]ximo(?: solicitado| no cart[ãa]o)?:\s*([\d.,]+\s*%)/i);
+  if (desc) return `Desconto pedido: ${desc[1].replace(/\s/g, "")}`;
+  const saldo = d.match(/Saldo aberto:\s*(R\$\s*[\d.,]+)/i);
+  if (saldo) return `Saldo aberto: ${saldo[1]}`;
+  const aReceber = d.match(/A Receber:\s*(R\$\s*[\d.,]+)/i);
+  if (aReceber) return `A Receber: ${aReceber[1]}`;
+  const peso = d.match(/Peso Total:\s*([\d.,]+\s*g)/i);
+  if (peso) return `Peso: ${formatPesoBR(peso[1])}`;
+  return null;
+}
+
+/** Dados da venda pro cabeçalho do card — vêm da descrição de qualquer uma das
+ *  tarefas do grupo (todas são da mesma venda, então o 1º match serve). */
+function infoVendaDoGrupo(tarefas: Tarefa[]): { numero?: string; total?: string; cliente?: string } {
+  for (const t of tarefas) {
+    const d = (t.descricao ?? "").replace(/\\n/g, "\n");
+    const comTotal = d.match(/Venda\s+([\w-]+)\s*[—–-]\s*Total:\s*(R\$\s*[\d.,]+)/i);
+    if (comTotal) return { numero: comTotal[1], total: comTotal[2] };
+    const comCliente = d.match(/Venda\s+([\w-]+)\s*[—–-]\s*([^\n]+)/i);
+    if (comCliente) return { numero: comCliente[1], cliente: comCliente[2].trim() };
+    const totalVenda = d.match(/Total da venda:\s*(R\$\s*[\d.,]+)/i);
+    const soNumero = d.match(/Venda\s+([\w-]+)/i);
+    if (soNumero || totalVenda) {
+      return { numero: soNumero?.[1], total: totalVenda?.[1] };
+    }
+  }
+  return {};
+}
+
+/** Nome curto pro cabeçalho do card — o TIPO_LABEL completo ("Conversão reversa
+ *  (ouro → joia)") não cabe ao lado do número da ordem. Só os tipos SEM venda
+ *  precisam: os de venda usam "Venda {numero}". */
+const TIPO_CURTO: Record<string, string> = {
+  conversao: "Conversão",
+  conversao_sku: "Conversão SKU",
+  conversao_reversa: "Reversa",
+  compra_comercial: "Compra",
+  compra_metal: "Compra de metal",
+  protocolo_metal: "Protocolo",
+  aprovacao_quebra_metal: "Quebra de metal",
+  sangria: "Sangria",
+};
+
+/**
+ * REGRA (16/07, pedido do Jonathan: "todas as aprovações no mesmo padrão da
+ * venda"): as aprovações SEM venda também ganham cabeçalho — identificador da
+ * ordem + o número que importa — igual ao card da venda, em vez de despejar a
+ * descrição crua. Espelha infoVendaDoGrupo, só que a partir de uma tarefa só.
+ *
+ * href: SÓ pros tipos com tela de detalhe que existe de fato — conferido em
+ * src/app/(dashboard) (16/07): `conversoes/[id]` existe; compra_comercial
+ * (compras-comercial) e conversao_reversa NÃO têm rota de detalhe. Link
+ * chutado pra esses viraria 404 no clique.
+ *
+ * metrica devolve null quando não reconhece o formato da descrição — a linha
+ * fica só com o solicitante, sem inventar número.
+ */
+function cabecalhoAprovacao(t: Tarefa): {
+  titulo: string;
+  metrica: string | null;
+  href?: string;
+  hrefLabel?: string;
+} {
+  const d = (t.descricao ?? "").replace(/\\n/g, "\n");
+  const curto = t.tipo ? TIPO_CURTO[t.tipo] : undefined;
+  // Identificador: numero_ordem (C-2411 / CS-2410 / CR-2409) ou o "#15" que a
+  // compra comercial carrega no título (ela não preenche numero_ordem).
+  const ref = t.numero_ordem ?? t.titulo.match(/#\d+/)?.[0] ?? null;
+  const titulo = curto ? (ref ? `${curto} ${ref}` : curto) : t.titulo;
+
+  const pesoBruto =
+    d.match(/Peso Total:\s*([\d.,]+\s*g)/i)?.[1] ??
+    d.match(/([\d.,]+\s*g)\s*x\s*\d+/i)?.[1] ??
+    null;
+  const peso = pesoBruto ? formatPesoBR(pesoBruto) : null;
+  const valor = d.match(/Valor total:\s*(R\$\s*[\d.,]+)/i)?.[1] ?? null;
+  const pecas = d.match(/Quantidade Total:\s*(\d+)\s*pe[cç]as?/i)?.[1] ?? null;
+  const itens = d.match(/Itens:\s*(\d+)\s*item/i)?.[1] ?? null;
+
+  const qtd = pecas
+    ? `${pecas} ${pecas === "1" ? "peça" : "peças"}`
+    : itens
+      ? `${itens} ${itens === "1" ? "item" : "itens"}`
+      : null;
+
+  const partes = [peso ?? valor, qtd].filter(Boolean) as string[];
+  const metrica = partes.length > 0 ? partes.join(" · ") : null;
+
+  const idConversao = t.numero_ordem?.match(/(\d+)$/)?.[1];
+  const temDetalhe = (t.tipo === "conversao" || t.tipo === "conversao_sku") && !!idConversao;
+
+  return {
+    titulo,
+    metrica,
+    href: temDetalhe ? `/conversoes/${idConversao}` : undefined,
+    hrefLabel: temDetalhe ? "Ver ordem" : undefined,
+  };
 }
 
 function gerarChips(t: Tarefa): Chip[] {
@@ -424,6 +550,8 @@ export default function TarefasClient() {
   const [pesoMetal, setPesoMetal] = useState("");
 
   const [aprovandoId, setAprovandoId] = useState<number | null>(null);
+  /** Aprovações com a descrição completa aberta no card da venda (16/07). */
+  const [aprovExpandida, setAprovExpandida] = useState<Set<number>>(new Set());
   const [rejeitandoId, setRejeitandoId] = useState<number | null>(null);
   const [motivoRejeicao, setMotivoRejeicao] = useState("");
   const [salvandoAprov, setSalvandoAprov] = useState(false);
@@ -559,35 +687,65 @@ export default function TarefasClient() {
     setSalvando(false);
   }
 
+  /**
+   * Aprova UMA tarefa. Não mexe em loading nem recarrega a lista — quem chama
+   * cuida disso. LANÇA erro em caso de falha (o chamador decide o que fazer).
+   * Extraído de handleAprovar (16/07) pra ser reusado pelo "Aprovar todas"
+   * (handleAprovarLote) sem duplicar o roteamento por tipo.
+   */
+  /**
+   * Devolve o `aviso` do endpoint quando a decisão colou mas sobrou pendência
+   * OPERACIONAL pra alguém resolver — hoje só o crédito usa: o crédito é
+   * aprovado, o approveVenda falha (ex.: cliente sem celular) e a venda precisa
+   * ser aprovada na mão. Antes isso voltava 200 mudo e quem aprovou não ficava
+   * sabendo (a consultora era notificada; o aprovador, não).
+   */
+  async function aprovarUma(tarefaId: number, tipo: string | null): Promise<string | null> {
+    // Tarefas de conversão de estoque/SKU usam endpoints próprios — não
+    // gravam em aprovacoes_tarefa, então o fluxo genérico falha com "Aprovação não encontrada".
+    if (tipo === "conversao_sku") {
+      await apiFetch(`/api/conversao-sku/aprovar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tarefa_id: tarefaId }),
+      });
+    } else if (tipo === "conversao") {
+      await apiFetch(`/api/conversao/aprovar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tarefa_id: tarefaId }),
+      });
+    } else if (tipo === "conversao_reversa") {
+      // Conversão reversa (metal do cofre → peça no estoque) tem endpoint próprio
+      await apiFetch(`/api/conversao-reversa/aprovar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tarefa_id: tarefaId }),
+      });
+    } else {
+      // Fluxo genérico (aprovacoes_tarefa)
+      const aprovacoes = await apiFetch<{ id: number; status: string }[]>(`/api/tarefas/${tarefaId}/aprovacao`);
+      const pendente = aprovacoes.find(a => a.status === "pendente") ?? aprovacoes[0];
+      if (!pendente) throw new Error("Aprovação não encontrada");
+      const r = await apiFetch<{ aviso?: string }>(`/api/tarefas/${tarefaId}/aprovacao`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aprovacao_id: pendente.id, decisao: "aprovado" }),
+      });
+      return r?.aviso ?? null;
+    }
+    return null;
+  }
+
   async function handleAprovar(tarefaId: number, tipo: string | null) {
     setSalvandoAprov(true);
     setAprovandoId(tarefaId);
     try {
-      // Tarefas de conversão de estoque/SKU usam endpoints próprios — não
-      // gravam em aprovacoes_tarefa, então o fluxo genérico falha com "Aprovação não encontrada".
-      if (tipo === "conversao_sku") {
-        await apiFetch(`/api/conversao-sku/aprovar`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tarefa_id: tarefaId }),
-        });
-      } else if (tipo === "conversao") {
-        await apiFetch(`/api/conversao/aprovar`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tarefa_id: tarefaId }),
-        });
-      } else {
-        // Fluxo genérico (aprovacoes_tarefa)
-        const aprovacoes = await apiFetch<{ id: number; status: string }[]>(`/api/tarefas/${tarefaId}/aprovacao`);
-        const pendente = aprovacoes.find(a => a.status === "pendente") ?? aprovacoes[0];
-        if (!pendente) throw new Error("Aprovação não encontrada");
-        await apiFetch(`/api/tarefas/${tarefaId}/aprovacao`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ aprovacao_id: pendente.id, decisao: "aprovado" }),
-        });
-      }
+      const aviso = await aprovarUma(tarefaId, tipo);
+      // Laranja, não vermelho: a aprovação COLOU — o que falta é operacional
+      // (corrigir cadastro e aprovar a venda). Vermelho faria parecer que a
+      // decisão dele não valeu, e ele tentaria aprovar de novo à toa.
+      if (aviso) useErrorStore.getState().push(aviso, { level: "warning" });
       carregar();
       carregarStats();
     } catch (err) {
@@ -596,6 +754,53 @@ export default function TarefasClient() {
     }
     setSalvandoAprov(false);
     setAprovandoId(null);
+  }
+
+  /**
+   * REGRA DE NEGÓCIO (16/07, pedido do Jonathan): aprova de uma vez todas as
+   * aprovações pendentes da MESMA venda, pro aprovador não decidir uma a uma.
+   *
+   * O QUÊ: chama uma por uma, em sequência. Cada uma é INDEPENDENTE — se uma
+   *   falhar (ex.: sem estoque, venda mudou), as outras seguem e ele vê quais
+   *   falharam e por quê (decisão do Jonathan: "aprova as que deram certo,
+   *   avisa quais falharam" — não é tudo-ou-nada).
+   * O PORQUÊ: sequencial e não Promise.all de propósito — os efeitos tocam a
+   *   MESMA venda (locks, comissão, estoque); em paralelo dariam corrida.
+   * O IMPACTO: os botões individuais de cada tarefa continuam — ele pode
+   *   aprovar uma e reprovar a outra da mesma venda.
+   */
+  async function handleAprovarLote(tarefas: Tarefa[]) {
+    setSalvandoAprov(true);
+    const falhas: string[] = [];
+    const avisos: string[] = [];
+    for (const t of tarefas) {
+      setAprovandoId(t.id);
+      try {
+        const aviso = await aprovarUma(t.id, t.tipo);
+        if (aviso) avisos.push(aviso);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Erro desconhecido";
+        const label = t.tipo ? (TIPO_LABEL[t.tipo] ?? t.tipo) : `Tarefa ${t.id}`;
+        falhas.push(`${label}: ${msg}`);
+      }
+    }
+    carregar();
+    carregarStats();
+    setSalvandoAprov(false);
+    setAprovandoId(null);
+    // Avisos são independentes das falhas: uma aprovação pode ter COLADO e
+    // ainda assim deixar pendência operacional (crédito ok, venda não aprovada).
+    for (const aviso of avisos) {
+      useErrorStore.getState().push(aviso, { level: "warning" });
+    }
+    if (falhas.length > 0) {
+      useErrorStore.getState().push(
+        falhas.length === tarefas.length
+          ? `Nenhuma aprovação foi concluída — ${falhas.join(" | ")}`
+          : `${tarefas.length - falhas.length} de ${tarefas.length} aprovadas. Falhou — ${falhas.join(" | ")}`,
+        { level: "critical" },
+      );
+    }
   }
 
   async function handleRejeitar(tarefaId: number, tipo: string | null) {
@@ -614,6 +819,13 @@ export default function TarefasClient() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tarefa_id: tarefaId, motivo: motivoRejeicao }),
+        });
+      } else if (tipo === "conversao_reversa") {
+        // Conversão reversa recusa por endpoint próprio — campo motivo_recusa (não "motivo")
+        await apiFetch(`/api/conversao-reversa/recusar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tarefa_id: tarefaId, motivo_recusa: motivoRejeicao }),
         });
       } else {
         const aprovacoes = await apiFetch<{ id: number; status: string }[]>(`/api/tarefas/${tarefaId}/aprovacao`);
@@ -643,6 +855,74 @@ export default function TarefasClient() {
   // ela não vaza pra UI. Contador do header também usa este valor (vide linha ~600)
   // pra ficar SEMPRE em sync com o número de cards visível.
   const aprovacoesPendentes = tarefasFiltradas.filter(t => t.status === "aguardando_aprovacao");
+
+  /**
+   * REGRA DE NEGÓCIO (16/07, pedido do Jonathan): TUDO que é da mesma venda vira
+   * UM card só — os dados da venda (nº, cliente, total) aparecem uma vez no topo
+   * e cada aprovação é uma linha curta com seus próprios botões.
+   *
+   * O QUÊ: toda tarefa com venda_id entra no card da sua venda — inclusive
+   *   quando é só uma (decisão do Jonathan: visual consistente; nesse caso o
+   *   botão "Aprovar todas" simplesmente não aparece).
+   * O PORQUÊ: antes cada aprovação era um card grande repetindo solicitante,
+   *   total e a lista de itens da MESMA venda — poluía e não deixava claro que
+   *   eram da mesma venda.
+   * NOTA: as tarefas que chegam aqui já são só as que ESTE usuário pode ver
+   *   (o servidor filtra por responsavel_id/aprovador configurado em
+   *   /api/tarefas). Então "Aprovar todas" nunca tenta decidir a aprovação de
+   *   outra pessoa — se a venda tem 2 aprovações com aprovadores diferentes,
+   *   cada um vê (e aprova) só a sua.
+   *
+   * ATUALIZAÇÃO 16/07 (2ª rodada, pedido do Jonathan: "quero todas as
+   * aprovações no mesmo padrão da venda"): as tarefas SEM venda_id (conversão,
+   * compra, reversa, metal...) deixaram de ter card próprio e passaram a ser
+   * grupo de UMA tarefa. Assim existe UM formato de card na tela, não dois — o
+   * cabeçalho delas vem de cabecalhoAprovacao() em vez de infoVendaDoGrupo().
+   * IMPACTO SE REVERTIDO: volta o card antigo, que despeja a descrição crua
+   * inteira ("ATENCAO: ...") e repete "Solicitante/Tipo" empilhados.
+   */
+  type GrupoAprov = {
+    chave: string;
+    titulo: string;
+    metrica: string | null;
+    href?: string;
+    hrefLabel?: string;
+    tarefas: Tarefa[];
+  };
+  const listaAprovacoes: GrupoAprov[] = (() => {
+    const porVenda = new Map<number, Tarefa[]>();
+    const semVenda: Tarefa[] = [];
+    for (const t of aprovacoesPendentes) {
+      if (t.venda_id == null) { semVenda.push(t); continue; }
+      const arr = porVenda.get(t.venda_id) ?? [];
+      arr.push(t);
+      porVenda.set(t.venda_id, arr);
+    }
+    const grupos: GrupoAprov[] = [];
+    for (const [vendaId, tarefas] of porVenda.entries()) {
+      const info = infoVendaDoGrupo(tarefas);
+      grupos.push({
+        chave: `venda-${vendaId}`,
+        titulo: `Venda ${info.numero ?? `#${vendaId}`}`,
+        metrica: [info.total, info.cliente].filter(Boolean).join(" · ") || null,
+        href: `/vendas/${vendaId}`,
+        hrefLabel: "Ver venda",
+        tarefas,
+      });
+    }
+    for (const t of semVenda) {
+      const cab = cabecalhoAprovacao(t);
+      grupos.push({
+        chave: `tarefa-${t.id}`,
+        titulo: cab.titulo,
+        metrica: cab.metrica,
+        href: cab.href,
+        hrefLabel: cab.hrefLabel,
+        tarefas: [t],
+      });
+    }
+    return grupos;
+  })();
 
   const porStatus = (s: string) => tarefasFiltradas.filter(t => t.status === s);
   const activeTarefa = activeId ? tarefaById(activeId) : null;
@@ -897,129 +1177,193 @@ export default function TarefasClient() {
                 </p>
               </div>
             ) : (
-              aprovacoesPendentes.map(t => {
-                const pri = PRIORIDADE_BADGE[t.prioridade] ?? PRIORIDADE_BADGE.media;
-                const tipoLabel = t.tipo ? (TIPO_LABEL[t.tipo] ?? t.tipo) : null;
-                const estaRejeitando = rejeitandoId === t.id;
-                const estaAprovando = salvandoAprov && aprovandoId === t.id;
-                return (
-                  <div key={t.id} className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 transition-all overflow-hidden min-w-0">
-                    {/* Solicitante */}
-                    <div className="mb-2 min-w-0">
-                      <p className="text-xs" style={{ color: "#6B7280" }}>Solicitante</p>
-                      <p className="text-sm font-semibold break-words" style={{ color: "#1A1A1A" }}>
-                        {t.criador_nome ?? "—"}
-                      </p>
-                    </div>
-
-                    {/* Tipo */}
-                    {tipoLabel && (
-                      <div className="mb-2 min-w-0">
-                        <p className="text-xs" style={{ color: "#6B7280" }}>Tipo</p>
-                        <p className="text-sm font-medium break-words" style={{ color: "#1A1A1A" }}>{tipoLabel}</p>
-                      </div>
-                    )}
-
-                    {/* Título */}
-                    <p className="text-sm font-semibold leading-snug mb-2 break-words" style={{ color: "#1A1A1A" }}>
-                      {t.titulo}
-                    </p>
-
-                    {/* Descrição completa */}
-                    {t.descricao && (
-                      <p className="text-xs leading-relaxed mb-3 whitespace-pre-line break-words" style={{ color: "#6B7280", overflowWrap: "anywhere" }}>
-                        {t.descricao.replace(/\\n/g, "\n").replace(/• null\s?—?\s?/g, "• ").replace(/• null/g, "•").replace(/\*\*([^*]+)\*\*/g, "$1")}
-                      </p>
-                    )}
-
-                    {/* Chips estruturados por tipo de aprovação */}
-                    {(() => {
-                      const chips = gerarChips(t);
-                      return chips.length > 0 ? (
-                        <div className="flex flex-wrap gap-1.5 mt-1 mb-3">
-                          {chips.map((chip, i) => (
-                            chip.href ? (
-                              <a
-                                key={i}
-                                href={chip.href}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium hover:opacity-75 hover:underline transition-opacity max-w-full break-words"
-                                style={{ backgroundColor: chip.bg, color: chip.color, overflowWrap: "anywhere" }}
-                              >
-                                {chip.icon} {chip.label}
-                              </a>
-                            ) : (
-                              <span
-                                key={i}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium max-w-full break-words"
-                                style={{ backgroundColor: chip.bg, color: chip.color, overflowWrap: "anywhere" }}
-                              >
-                                {chip.icon} {chip.label}
-                              </span>
-                            )
-                          ))}
+              listaAprovacoes.map(item => {
+                /* ── Card ÚNICO por venda/ordem: um formato só na tela (16/07) ── */
+                {
+                  const solicitantes = [...new Set(item.tarefas.map(t => t.criador_nome).filter(Boolean))];
+                  return (
+                    <div key={item.chave}
+                      className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden min-w-0">
+                      {/* Cabeçalho: dados da venda/ordem uma vez só */}
+                      <div className="p-4 border-b border-gray-100">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-sm font-semibold break-words" style={{ color: "#1A1A1A" }}>
+                                {item.titulo}
+                              </p>
+                              {item.tarefas.length > 1 && (
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                                  style={{ backgroundColor: "#EDE9FE", color: "#5B21B6" }}>
+                                  {item.tarefas.length} aprovações
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs mt-1 break-words" style={{ color: "#6B7280" }}>
+                              {solicitantes.join(", ") || "—"}
+                              {item.metrica ? ` · ${item.metrica}` : ""}
+                            </p>
+                          </div>
+                          {item.href && (
+                            <a href={item.href}
+                              className="text-xs px-2 py-1 rounded-lg border shrink-0"
+                              style={{ borderColor: "#E5E7EB", color: "#6B7280" }}>
+                              {item.hrefLabel ?? "Ver"}
+                            </a>
+                          )}
                         </div>
-                      ) : null;
-                    })()}
-
-                    {/* Evidências da limpeza de ouro v2 */}
-                    {(() => {
-                      const baixaId = extrairBaixaIdLimpeza(t.tags);
-                      if (baixaId <= 0) return null;
-                      return <EvidenciasLimpeza baixaId={baixaId} compact />;
-                    })()}
-
-                    {/* Tempo */}
-                    <p className="text-xs mb-3" style={{ color: "#9CA3AF" }}>
-                      {tempoRelativo(t.created_at)}
-                      {t.numero_ordem && <span className="ml-2">#{t.numero_ordem}</span>}
-                    </p>
-
-                    {/* Botões Aprovar / Rejeitar — sempre no DOM, visibilidade via CSS */}
-                    <div className={estaRejeitando ? "hidden" : "flex gap-2"}>
-                      <button
-                        onClick={() => handleAprovar(t.id, t.tipo)}
-                        disabled={salvandoAprov}
-                        className="flex-1 py-2.5 text-sm rounded-xl font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
-                        style={{ backgroundColor: "#059669", color: "#fff" }}>
-                        {estaAprovando ? "Aguarde..." : "✓ Aprovar"}
-                      </button>
-                      <button
-                        onClick={() => { setRejeitandoId(t.id); setMotivoRejeicao(""); }}
-                        disabled={salvandoAprov}
-                        className="flex-1 py-2.5 text-sm rounded-xl font-semibold border disabled:opacity-50"
-                        style={{ borderColor: "#DC2626", color: "#DC2626", backgroundColor: "#fff" }}>
-                        ✗ Rejeitar
-                      </button>
-                    </div>
-
-                    {/* Form de rejeição — sempre no DOM, visibilidade via CSS */}
-                    <div className={estaRejeitando ? "space-y-2" : "hidden"}>
-                      <textarea
-                        placeholder="Motivo da rejeição (opcional)"
-                        value={motivoRejeicao}
-                        onChange={e => setMotivoRejeicao(e.target.value)}
-                        rows={2}
-                        className="w-full px-3 py-2 border rounded-xl text-sm outline-none resize-none"
-                        style={{ borderColor: "#E5E7EB" }}
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => { setRejeitandoId(null); setMotivoRejeicao(""); }}
-                          className="flex-1 py-2 text-sm rounded-xl border font-medium"
-                          style={{ borderColor: "#E5E7EB", color: "#6B7280" }}>
-                          Cancelar
-                        </button>
-                        <button
-                          onClick={() => handleRejeitar(t.id, t.tipo)}
-                          disabled={salvandoAprov}
-                          className="flex-1 py-2 text-sm rounded-xl font-semibold disabled:opacity-50"
-                          style={{ backgroundColor: "#DC2626", color: "#fff" }}>
-                          {salvandoAprov ? "Aguarde..." : "Confirmar"}
-                        </button>
                       </div>
+
+                      {/* Uma linha por aprovação */}
+                      {item.tarefas.map(t => {
+                        const tipoLabel = t.tipo ? (TIPO_LABEL[t.tipo] ?? t.tipo) : "Aprovação";
+                        // Esconde o resumo quando o cabeçalho JÁ mostra o mesmo número
+                        // (conversão: "0.610g" no topo + "Peso: 0.610g" na linha).
+                        const resumoBruto = resumoAprovacao(t);
+                        const valorResumo = resumoBruto?.split(": ")[1];
+                        const resumo =
+                          resumoBruto && valorResumo && item.metrica?.includes(valorResumo)
+                            ? null
+                            : resumoBruto;
+                        const aberta = aprovExpandida.has(t.id);
+                        const estaRejeitando = rejeitandoId === t.id;
+                        return (
+                          <div key={t.id} className="border-b border-gray-100 last:border-b-0">
+                            <div className="px-4 py-3 flex items-center justify-between gap-3 min-w-0">
+                              <button
+                                onClick={() => setAprovExpandida(prev => {
+                                  const n = new Set(prev);
+                                  if (n.has(t.id)) n.delete(t.id); else n.add(t.id);
+                                  return n;
+                                })}
+                                className="flex items-start gap-2 min-w-0 flex-1 text-left">
+                                <ChevronRight size={14} className="shrink-0 mt-0.5 transition-transform"
+                                  style={{ color: "#9CA3AF", transform: aberta ? "rotate(90deg)" : "none" }} />
+                                <span className="min-w-0">
+                                  <span className="block text-sm font-medium break-words" style={{ color: "#1A1A1A" }}>
+                                    {tipoLabel}
+                                  </span>
+                                  {resumo && (
+                                    <span className="block text-xs mt-0.5" style={{ color: "#6B7280" }}>{resumo}</span>
+                                  )}
+                                </span>
+                              </button>
+                              {!estaRejeitando && (
+                                <div className="flex gap-1.5 shrink-0">
+                                  <button
+                                    onClick={() => handleAprovar(t.id, t.tipo)}
+                                    disabled={salvandoAprov}
+                                    className="px-2.5 py-1.5 text-xs rounded-lg font-semibold disabled:opacity-50"
+                                    style={{ backgroundColor: "#059669", color: "#fff" }}>
+                                    {salvandoAprov && aprovandoId === t.id ? "..." : "✓"}
+                                  </button>
+                                  <button
+                                    onClick={() => setRejeitandoId(t.id)}
+                                    disabled={salvandoAprov}
+                                    className="px-2.5 py-1.5 text-xs rounded-lg font-semibold border disabled:opacity-50"
+                                    style={{ borderColor: "#FCA5A5", color: "#DC2626" }}>
+                                    ✗
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Detalhe completo (expandir). Chips/evidências/tempo vinham
+                                do card antigo — ao unificar os formatos (16/07) eles
+                                passaram pra cá, senão a conversão/limpeza perderia
+                                informação que hoje o aprovador usa pra decidir. */}
+                            {aberta && (
+                              <div className="px-4 pb-3 pl-10 space-y-2">
+                                {t.descricao && (
+                                  <p className="text-xs whitespace-pre-wrap break-words rounded-lg p-2.5"
+                                    style={{ color: "#4B5563", backgroundColor: "#F9FAFB", overflowWrap: "anywhere" }}>
+                                    {t.descricao
+                                      .replace(/\\n/g, "\n")
+                                      .replace(/• null\s?—?\s?/g, "• ")
+                                      .replace(/• null/g, "•")
+                                      .replace(/\*\*([^*]+)\*\*/g, "$1")}
+                                  </p>
+                                )}
+                                {(() => {
+                                  const chips = gerarChips(t);
+                                  return chips.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {chips.map((chip, i) => (
+                                        chip.href ? (
+                                          <a key={i} href={chip.href}
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium hover:opacity-75 hover:underline transition-opacity max-w-full break-words"
+                                            style={{ backgroundColor: chip.bg, color: chip.color, overflowWrap: "anywhere" }}>
+                                            {chip.icon} {chip.label}
+                                          </a>
+                                        ) : (
+                                          <span key={i}
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium max-w-full break-words"
+                                            style={{ backgroundColor: chip.bg, color: chip.color, overflowWrap: "anywhere" }}>
+                                            {chip.icon} {chip.label}
+                                          </span>
+                                        )
+                                      ))}
+                                    </div>
+                                  ) : null;
+                                })()}
+                                {(() => {
+                                  const baixaId = extrairBaixaIdLimpeza(t.tags);
+                                  if (baixaId <= 0) return null;
+                                  return <EvidenciasLimpeza baixaId={baixaId} compact />;
+                                })()}
+                                <p className="text-xs" style={{ color: "#9CA3AF" }}>
+                                  {tempoRelativo(t.created_at)}
+                                </p>
+                              </div>
+                            )}
+
+                            {/* Confirmação de rejeição */}
+                            {estaRejeitando && (
+                              <div className="px-4 pb-3 space-y-2">
+                                <input
+                                  type="text"
+                                  value={motivoRejeicao}
+                                  onChange={e => setMotivoRejeicao(e.target.value)}
+                                  placeholder="Motivo da rejeição (opcional)"
+                                  className="w-full px-3 py-2 text-sm border rounded-lg"
+                                  style={{ borderColor: "#E5E7EB" }} />
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => { setRejeitandoId(null); setMotivoRejeicao(""); }}
+                                    disabled={salvandoAprov}
+                                    className="flex-1 py-2 text-sm rounded-xl font-semibold border disabled:opacity-50"
+                                    style={{ borderColor: "#E5E7EB", color: "#6B7280" }}>
+                                    Cancelar
+                                  </button>
+                                  <button
+                                    onClick={() => handleRejeitar(t.id, t.tipo)}
+                                    disabled={salvandoAprov}
+                                    className="flex-1 py-2 text-sm rounded-xl font-semibold disabled:opacity-50"
+                                    style={{ backgroundColor: "#DC2626", color: "#fff" }}>
+                                    {salvandoAprov ? "Aguarde..." : "Confirmar"}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {/* Aprovar todas — só faz sentido com 2+ */}
+                      {item.tarefas.length >= 2 && (
+                        <div className="px-4 py-3 flex justify-end" style={{ backgroundColor: "#FAFAFA" }}>
+                          <button
+                            onClick={() => handleAprovarLote(item.tarefas)}
+                            disabled={salvandoAprov}
+                            className="px-3 py-2 text-xs rounded-xl font-semibold disabled:opacity-50"
+                            style={{ backgroundColor: "#059669", color: "#fff" }}>
+                            {salvandoAprov ? "Aguarde..." : `✓ Aprovar todas (${item.tarefas.length})`}
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                );
+                  );
+                }
               })
             )}
           </div>
