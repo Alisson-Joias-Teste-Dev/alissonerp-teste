@@ -29,6 +29,7 @@ import MarcarEntregaModal from "@/components/entregas/MarcarEntregaModal";
 // REGRA DE NEGÓCIO (V3): modal de solicitação de frete avulso, aberto de
 // dentro da venda com modoSolicitacao (vendaId fixado, ver props abaixo)
 import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
+import { enderecoDaVenda } from "@/components/endereco/EnderecoForm";
 import { useErrorStore } from "@/stores/errorStore";
 import { getPublicUrl } from "@/lib/storage-url";
 // REGRA DE NEGOCIO: helpers de rodio (Frente A — 30/05/2026)
@@ -2177,17 +2178,10 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const podeSolicitarFreteAvulso =
     (isFullAccess || ["gerente_loja", "diretor", "consultora"].includes(role)) &&
     ["aprovado", "em_rota", "entregue"].includes(venda.situacao);
-  // Endereço sugerido para pré-preencher o textarea editável do modal —
-  // mesma concatenação usada em FreteAvulsoModal.montarEndereco().
-  const enderecoInicialFreteAvulso = [
-    venda.endereco_entrega,
-    venda.endereco_entrega_numero ? `nº ${venda.endereco_entrega_numero}` : null,
-    venda.endereco_entrega_complemento,
-    venda.endereco_entrega_bairro,
-    venda.endereco_entrega_cidade,
-    venda.endereco_entrega_uf,
-    venda.endereco_entrega_cep,
-  ].filter((p): p is string => !!p && p.trim() !== "").join(", ");
+  // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): endereço
+  // sugerido para pré-preencher o EnderecoForm do modal de frete avulso —
+  // CAMPO A CAMPO (enderecoDaVenda), não mais concatenado num texto único.
+  const enderecoInicialFreteAvulso = enderecoDaVenda(venda);
 
   // REGRA DE NEGÓCIO (12/06 — Jonathan): reposição bloqueia a entrega POR ITEM
   // (ver temItemEntregavel/bloqueioVendaInteira acima, vindos do saldo-pendente):

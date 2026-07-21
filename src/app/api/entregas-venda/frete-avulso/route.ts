@@ -58,7 +58,19 @@ const FreteAvulsoSchema = z.object({
   // solicitação cai no pool de liberadores (ver listarAprovadoresFreteAvulso
   // em @/lib/entrega-venda).
   vendaId: z.number().int().positive().optional(),
-  enderecoEntrega: z.string().max(1000).optional(),
+  // REGRA DE NEGÓCIO (migration 355 — endereço estruturado, 21/07): antes um
+  // único texto livre (`enderecoEntrega`, concatenado no client) — agora
+  // campo a campo, espelhando vendas_erp.endereco_entrega_* (mesmos nomes,
+  // ver EnderecoForm.tsx). Mínimo exigido no modo solicitação (validado
+  // abaixo, fora do schema, porque só se aplica quando solicitar=true):
+  // logradouro + número + cidade.
+  enderecoEntregaLogradouro: z.string().max(300).optional(),
+  enderecoEntregaNumero: z.string().max(20).optional(),
+  enderecoEntregaComplemento: z.string().max(200).optional(),
+  enderecoEntregaBairro: z.string().max(150).optional(),
+  enderecoEntregaCidade: z.string().max(150).optional(),
+  enderecoEntregaCep: z.string().max(10).optional(),
+  enderecoEntregaUf: z.string().max(2).optional(),
   // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): obrigatório junto
   // com solicitar=true (validado abaixo, não no schema, porque só se aplica
   // ao modo solicitação). Decide comprovante obrigatório e o pool de
@@ -143,9 +155,18 @@ export async function POST(req: NextRequest) {
   // o fluxo de solicitação.
   const ehSolicitacao = parsed.data.solicitar === true;
   if (ehSolicitacao) {
-    if (!parsed.data.vendaId || !parsed.data.enderecoEntrega) {
+    // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): mínimo
+    // exigido é logradouro + número + cidade (mesmo padrão validado de novo
+    // em criarFreteAvulso — defesa em profundidade). Complemento/bairro/
+    // UF/CEP ajudam mas não bloqueiam a solicitação.
+    if (
+      !parsed.data.vendaId ||
+      !parsed.data.enderecoEntregaLogradouro?.trim() ||
+      !parsed.data.enderecoEntregaNumero?.trim() ||
+      !parsed.data.enderecoEntregaCidade?.trim()
+    ) {
       return NextResponse.json(
-        { error: "Venda e endereço de entrega são obrigatórios para solicitar frete avulso" },
+        { error: "Venda, logradouro, número e cidade são obrigatórios para solicitar frete avulso" },
         { status: 400 },
       );
     }

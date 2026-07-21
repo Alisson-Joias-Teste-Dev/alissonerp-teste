@@ -51,6 +51,16 @@
  * IMPACTO SE ALTERADO: sem o campo, o backend rejeita a solicitação (400);
  * sem o comprovante quando pagante='cliente', idem.
  *
+ * REGRA DE NEGÓCIO (migration 355, 21/07 — endereço estruturado): o campo de
+ * endereço deixou de ser um textarea de texto livre e virou o formulário
+ * estruturado EnderecoForm (CEP/logradouro/número/complemento/bairro/cidade/
+ * UF, com busca automática por CEP) — padrão do sistema, já usado em Nova
+ * Venda. O pré-preenchimento a partir da venda (própria ou buscada) agora
+ * mapeia CAMPO A CAMPO (enderecoDaVenda), não concatena mais num texto único.
+ * Mínimo obrigatório: logradouro + número + cidade (validado aqui E no
+ * backend, criarFreteAvulso — defesa em profundidade).
+ * IMPACTO SE ALTERADO: o backend rejeita (400) sem logradouro/número/cidade.
+ *
  * IMPACTO SE ALTERADO: delegar a criação para POST /api/entregas-venda/frete-avulso.
  * Não fazer INSERT direto.
  */
@@ -59,6 +69,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { X, Loader2, CheckCircle, Bike, MapPin, AlignLeft, User, Search, DollarSign, Store, Camera } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import { useErrorStore } from "@/stores/errorStore";
+import EnderecoForm, { type EnderecoValue, ENDERECO_VAZIO, enderecoDaVenda, type EnderecoVendaFields } from "@/components/endereco/EnderecoForm";
 
 const C = {
   esmeralda: "#184036",
@@ -95,16 +106,9 @@ interface VendaBusca {
   total_venda: number;
 }
 
-/** Campos de endereço de entrega retornados por GET /api/vendas/[id] */
-interface VendaEnderecoResp {
-  endereco_entrega: string | null;
-  endereco_entrega_numero: string | null;
-  endereco_entrega_complemento: string | null;
-  endereco_entrega_bairro: string | null;
-  endereco_entrega_cidade: string | null;
-  endereco_entrega_cep: string | null;
-  endereco_entrega_uf: string | null;
-}
+/** Campos de endereço de entrega retornados por GET /api/vendas/[id] —
+ *  mesmo formato aceito por enderecoDaVenda() (EnderecoForm.tsx). */
+type VendaEnderecoResp = EnderecoVendaFields;
 
 interface Props {
   isOpen: boolean;
@@ -127,9 +131,10 @@ interface Props {
    * modoSolicitacao=true.
    */
   vendaId?: number;
-  /** Endereço de entrega sugerido (concatenado pelo caller) para pré-preencher
-   *  o textarea editável quando `vendaId` é informado. Ignorado sem vendaId. */
-  enderecoInicial?: string;
+  /** Endereço de entrega estruturado (migration 355 — campo a campo, não
+   *  mais concatenado) para pré-preencher o EnderecoForm quando `vendaId` é
+   *  informado. Ignorado sem vendaId. Montar com enderecoDaVenda(). */
+  enderecoInicial?: EnderecoValue;
 }
 
 const REGIOES = [
@@ -140,27 +145,6 @@ const REGIOES = [
 ] as const;
 
 type Regiao = "fortaleza" | "fora_fortaleza" | "longe" | "correios";
-
-/**
- * Concatena os campos de endereço de entrega da venda num texto único editável.
- * O QUE: monta "Rua X, nº 123, Complemento, Bairro, Cidade, UF, CEP".
- * POR QUE: o endereço confirmado da ENTREGA pode divergir do cadastro (ex: o
- * cliente pediu para entregar em outro lugar) — por isso o campo é editável.
- * IMPACTO SE ALTERADO: mudar a ordem/formato aqui não afeta o banco — é só
- * o valor inicial sugerido no textarea.
- */
-function montarEndereco(v: VendaEnderecoResp): string {
-  const partes = [
-    v.endereco_entrega,
-    v.endereco_entrega_numero ? `nº ${v.endereco_entrega_numero}` : null,
-    v.endereco_entrega_complemento,
-    v.endereco_entrega_bairro,
-    v.endereco_entrega_cidade,
-    v.endereco_entrega_uf,
-    v.endereco_entrega_cep,
-  ].filter((p): p is string => !!p && p.trim() !== "");
-  return partes.join(", ");
-}
 
 export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolicitacao = false, vendaId, enderecoInicial }: Props) {
   // REGRA DE NEGÓCIO (intenção explícita — ponto de entrada decide, não o
@@ -190,7 +174,9 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   const [vendasResultado, setVendasResultado] = useState<VendaBusca[]>([]);
   const [buscandoVenda, setBuscandoVenda] = useState(false);
   const [vendaSelecionada, setVendaSelecionada] = useState<VendaBusca | null>(null);
-  const [enderecoEntrega, setEnderecoEntrega] = useState("");
+  // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): antes era um
+  // texto único (textarea); agora é o valor controlado do EnderecoForm.
+  const [enderecoEntrega, setEnderecoEntrega] = useState<EnderecoValue>(ENDERECO_VAZIO);
   const [carregandoEndereco, setCarregandoEndereco] = useState(false);
   const [freteCobradoConsultora, setFreteCobradoConsultora] = useState("");
 
@@ -279,12 +265,13 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   // Roda a cada abertura do modal (resetar() limpa ao fechar).
   useEffect(() => {
     if (isOpen && vendaFixada) {
-      setEnderecoEntrega(enderecoInicial ?? "");
+      setEnderecoEntrega(enderecoInicial ?? ENDERECO_VAZIO);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, vendaFixada, enderecoInicial]);
 
-  /** Seleciona a venda e busca o endereço de entrega para pré-preencher o textarea editável */
+  /** Seleciona a venda e busca o endereço de entrega para pré-preencher o
+   *  EnderecoForm — CAMPO A CAMPO (enderecoDaVenda), não mais concatenado. */
   async function selecionarVenda(v: VendaBusca) {
     setVendaSelecionada(v);
     setVendaBusca("");
@@ -292,7 +279,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     setCarregandoEndereco(true);
     try {
       const detalhe = await apiFetch<VendaEnderecoResp>(`/api/vendas/${v.id}`);
-      setEnderecoEntrega(montarEndereco(detalhe));
+      setEnderecoEntrega(enderecoDaVenda(detalhe));
     } catch {
       useErrorStore.getState().push("Erro ao carregar endereço da venda", { level: "warning" });
     } finally {
@@ -321,7 +308,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     setVendaBusca("");
     setVendasResultado([]);
     setVendaSelecionada(null);
-    setEnderecoEntrega("");
+    setEnderecoEntrega(ENDERECO_VAZIO);
     setFreteCobradoConsultora("");
     setPagante("");
     setComprovanteBase64("");
@@ -349,8 +336,17 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
         // cliente. Com venda fixada (V3), o id vem da prop; sem ela, do
         // buscador.
         const vendaIdEfetivo = vendaId ?? vendaSelecionada?.id;
-        if (!vendaIdEfetivo || !enderecoEntrega.trim() || freteCobradoConsultora === "") {
-          throw new Error("Preencha a venda, o endereço de entrega e o valor cobrado.");
+        // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): mínimo
+        // exigido é logradouro + número + cidade (validado aqui E no
+        // backend, criarFreteAvulso — defesa em profundidade).
+        if (
+          !vendaIdEfetivo ||
+          !enderecoEntrega.logradouro.trim() ||
+          !enderecoEntrega.numero.trim() ||
+          !enderecoEntrega.cidade.trim() ||
+          freteCobradoConsultora === ""
+        ) {
+          throw new Error("Preencha a venda, o endereço completo (logradouro, número e cidade) e o valor cobrado.");
         }
         // REGRA DE NEGÓCIO (migration 354 — "quem paga"): validado aqui
         // (front) E no backend (defesa em profundidade — ver
@@ -371,7 +367,16 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
             // ('pendente', já liberado) mesmo vindo do fluxo de solicitação.
             solicitar: true,
             vendaId: vendaIdEfetivo,
-            enderecoEntrega: enderecoEntrega.trim(),
+            // REGRA DE NEGÓCIO (migration 355): campo a campo, espelhando os
+            // nomes aceitos pelo Zod schema de route.ts (enderecoEntregaLogradouro
+            // etc.) — antes era um único texto concatenado no client.
+            enderecoEntregaLogradouro: enderecoEntrega.logradouro.trim(),
+            enderecoEntregaNumero: enderecoEntrega.numero.trim(),
+            enderecoEntregaComplemento: enderecoEntrega.complemento.trim() || undefined,
+            enderecoEntregaBairro: enderecoEntrega.bairro.trim() || undefined,
+            enderecoEntregaCidade: enderecoEntrega.cidade.trim(),
+            enderecoEntregaCep: enderecoEntrega.cep.trim() || undefined,
+            enderecoEntregaUf: enderecoEntrega.uf.trim() || undefined,
             freteCobrado: parseFloat(freteCobradoConsultora.replace(",", ".")) || 0,
             regiao,
             freteMotoboyOverride: freteNegociadoNum && freteNegociadoNum > 0 ? freteNegociadoNum : undefined,
@@ -411,8 +416,13 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   if (!isOpen) return null;
 
   // Validação de submit — cada modo tem seus próprios campos obrigatórios
+  // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): mínimo exigido
+  // é logradouro + número + cidade, mesmo padrão validado no handleSubmit e
+  // no backend (criarFreteAvulso).
   const disabledSolicitacao =
-    enviando || !(vendaId ?? vendaSelecionada) || !enderecoEntrega.trim() || freteCobradoConsultora === "" || !descricao.trim() ||
+    enviando || !(vendaId ?? vendaSelecionada) ||
+    !enderecoEntrega.logradouro.trim() || !enderecoEntrega.numero.trim() || !enderecoEntrega.cidade.trim() ||
+    freteCobradoConsultora === "" || !descricao.trim() ||
     !pagante || (pagante === "cliente" && !comprovanteBase64);
   const disabledPadrao =
     enviando || !motoboyId || !descricao.trim() ||
@@ -638,7 +648,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                           </span>
                           <button
                             type="button"
-                            onClick={() => { setVendaSelecionada(null); setEnderecoEntrega(""); }}
+                            onClick={() => { setVendaSelecionada(null); setEnderecoEntrega(ENDERECO_VAZIO); }}
                             style={{ background: "none", border: "none", cursor: "pointer", color: C.cinza }}
                           >
                             <X size={14} />
@@ -692,23 +702,22 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                     </div>
                     )}
 
-                    {/* Endereço de entrega (editável — não altera o cadastro do cliente) */}
+                    {/* Endereço de entrega — formulário estruturado com busca
+                        por CEP (migration 355). Editável: não altera o
+                        cadastro do cliente/venda, só o que fica gravado na
+                        entrega. */}
                     <div style={{ marginBottom: 14 }}>
                       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
                         <MapPin size={13} /> Endereço de entrega *
                       </label>
-                      <textarea
-                        rows={3}
-                        value={enderecoEntrega}
-                        onChange={e => setEnderecoEntrega(e.target.value)}
-                        placeholder={carregandoEndereco ? "Carregando endereço da venda..." : "Endereço completo de entrega..."}
-                        disabled={carregandoEndereco}
-                        style={{
-                          width: "100%", padding: "9px 12px", borderRadius: 8,
-                          border: `1px solid ${C.cremeBorder}`, fontSize: 13,
-                          resize: "vertical", boxSizing: "border-box",
-                        }}
-                      />
+                      {carregandoEndereco ? (
+                        <div style={{ fontSize: 12, color: C.cinza, display: "flex", alignItems: "center", gap: 6 }}>
+                          <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                          Carregando endereço da venda...
+                        </div>
+                      ) : (
+                        <EnderecoForm value={enderecoEntrega} onChange={setEnderecoEntrega} />
+                      )}
                     </div>
 
                     {campoObservacoes}

@@ -2014,6 +2014,46 @@ export async function listarAprovadoresFreteAvulsoLoja(): Promise<string[]> {
 }
 
 /**
+ * Monta uma string legível de endereço a partir dos campos estruturados de
+ * entregas_venda (endereco_entrega = logradouro + colunas endereco_entrega_*
+ * da migration 355 — número/complemento/bairro/cidade/CEP/UF).
+ *
+ * O QUE: concatena logradouro, nº, complemento, bairro, cidade, UF e CEP no
+ * MESMO formato usado no resto do módulo de vendas (ex.: montarEndereco() em
+ * FreteAvulsoModal.tsx, gerarPdf() em VendaDetalheClient.tsx).
+ *
+ * POR QUE: FONTE ÚNICA da concatenação para quem precisa exibir texto legível
+ * a partir do endereço estruturado do frete avulso — hoje usado pela
+ * descrição da tarefa de aprovação (criarFreteAvulso, logo abaixo), por
+ * GET /api/entregas-venda/motoboy/minhas (card do motoboy) e por
+ * GET /api/entregas-venda (listagem/aba Solicitações).
+ *
+ * IMPACTO SE DUPLICADO: cada tela formatando o endereço à sua maneira — uma
+ * mudança de formato (ex.: trocar vírgula por quebra de linha) exigiria achar
+ * e editar N lugares em vez de um só.
+ */
+export function formatarEnderecoEntregaAvulso(row: {
+  endereco_entrega?: string | null;
+  endereco_entrega_numero?: string | null;
+  endereco_entrega_complemento?: string | null;
+  endereco_entrega_bairro?: string | null;
+  endereco_entrega_cidade?: string | null;
+  endereco_entrega_cep?: string | null;
+  endereco_entrega_uf?: string | null;
+}): string | null {
+  const partes = [
+    row.endereco_entrega,
+    row.endereco_entrega_numero ? `nº ${row.endereco_entrega_numero}` : null,
+    row.endereco_entrega_complemento,
+    row.endereco_entrega_bairro,
+    row.endereco_entrega_cidade,
+    row.endereco_entrega_uf,
+    row.endereco_entrega_cep,
+  ].filter((p): p is string => !!p && p.trim() !== "");
+  return partes.length > 0 ? partes.join(", ") : null;
+}
+
+/**
  * Parâmetros para criação de frete avulso (corrida sem venda vinculada).
  * REGRA DE NEGÓCIO: avulso não tem venda, itens ou código de verificação.
  * Motoboy e frete_cobrado são obrigatórios. Cliente e descrição são opcionais.
@@ -2038,10 +2078,26 @@ export interface CriarFreteAvulsoParams {
   // saldo) e fica vinculado a uma venda (para herdar cliente/endereço) até
   // que QUALQUER aprovador do pool (chave de config aprovadores_frete_avulso) ou
   // admin/dev/diretor libere ou recuse — não há mais responsável designado.
-  // vendaId e enderecoEntrega são obrigatórios nesse modo — validado em
-  // criarFreteAvulso().
+  // vendaId e o endereço estruturado são obrigatórios nesse modo — validado
+  // em criarFreteAvulso().
   vendaId?: number;
-  enderecoEntrega?: string;
+  // REGRA DE NEGÓCIO (migration 355 — endereço estruturado, 21/07): antes um
+  // único campo de texto livre (`enderecoEntrega`, concatenado no client) —
+  // agora campo a campo, espelhando os nomes de vendas_erp.endereco_entrega_*.
+  // `enderecoEntregaLogradouro` grava na MESMA coluna `endereco_entrega` que
+  // já existia (migration 353) — reaproveitada como "logradouro" (ver
+  // migration 355 para a justificativa completa). Mínimo exigido no modo
+  // solicitação: logradouro + número + cidade (validado abaixo e no front).
+  // IMPACTO SE ALTERADO: motoboy/minhas e a listagem de solicitações
+  // (GET /api/entregas-venda) dependem destes nomes para montar o endereço
+  // legível via formatarEnderecoEntregaAvulso() acima.
+  enderecoEntregaLogradouro?: string;
+  enderecoEntregaNumero?: string;
+  enderecoEntregaComplemento?: string;
+  enderecoEntregaBairro?: string;
+  enderecoEntregaCidade?: string;
+  enderecoEntregaCep?: string;
+  enderecoEntregaUf?: string;
   modoSolicitacao?: boolean;
   // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): obrigatório quando
   // modoSolicitacao=true. Decide o comprovante e o aprovador:
@@ -2244,6 +2300,21 @@ export async function criarFreteAvulso(
     if (params.pagante === "cliente" && !params.comprovanteBase64) {
       throw new Error("Comprovante de pagamento é obrigatório quando o frete é pago pelo cliente.");
     }
+
+    // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): mínimo para o
+    // motoboy conseguir localizar o endereço: logradouro + número + cidade.
+    // Complemento/bairro/UF/CEP ajudam mas não bloqueiam. Validado no
+    // SERVIDOR (defesa em profundidade, mesmo padrão do campo `pagante`
+    // acima) além do front (FreteAvulsoModal + EnderecoForm).
+    // IMPACTO SE REMOVIDO: reabre o caminho de solicitar frete avulso sem
+    // endereço utilizável — motoboy recebe a corrida sem saber pra onde ir.
+    if (
+      !params.enderecoEntregaLogradouro?.trim() ||
+      !params.enderecoEntregaNumero?.trim() ||
+      !params.enderecoEntregaCidade?.trim()
+    ) {
+      throw new Error("Informe ao menos logradouro, número e cidade do endereço de entrega.");
+    }
   }
 
   // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — migration 354
@@ -2314,7 +2385,9 @@ export async function criarFreteAvulso(
         tipo, forma_entrega, situacao, regiao,
         motoboy_id, frete_cobrado, frete_motoboy,
         aprovacao_frete_necessaria, observacoes,
-        endereco_entrega,
+        endereco_entrega, endereco_entrega_numero, endereco_entrega_complemento,
+        endereco_entrega_bairro, endereco_entrega_cidade, endereco_entrega_cep,
+        endereco_entrega_uf,
         pagante, comprovante_pagante_path,
         created_by
       ) VALUES (
@@ -2324,7 +2397,10 @@ export async function criarFreteAvulso(
         'total', 'motoboy', ${situacaoInicial}, ${params.regiao},
         ${params.motoboyId ?? null}::uuid, ${freteCobrado}, ${freteMotoboy},
         false, ${params.observacoes ?? null},
-        ${params.enderecoEntrega ?? null},
+        ${params.enderecoEntregaLogradouro ?? null}, ${params.enderecoEntregaNumero ?? null},
+        ${params.enderecoEntregaComplemento ?? null}, ${params.enderecoEntregaBairro ?? null},
+        ${params.enderecoEntregaCidade ?? null}, ${params.enderecoEntregaCep ?? null},
+        ${params.enderecoEntregaUf ?? null},
         ${params.modoSolicitacao ? params.pagante! : null}, ${comprovantePath},
         ${userId}::uuid
       )
@@ -2347,9 +2423,23 @@ export async function criarFreteAvulso(
       const tituloTarefa = numeroVendaSolicitacao
         ? `Frete avulso solicitado — venda ${numeroVendaSolicitacao}`
         : `Frete avulso solicitado — entrega ${codigoEntrega}`;
+      // REGRA DE NEGÓCIO (migration 355): a descrição da tarefa mostra o
+      // endereço em texto legível — monta a partir dos campos estruturados
+      // via formatarEnderecoEntregaAvulso() (fonte única, ver comentário
+      // dela). É só uma STRING gravada na tarefa (snapshot no momento da
+      // solicitação); não muda se o endereço da entrega for editado depois.
+      const enderecoLegivel = formatarEnderecoEntregaAvulso({
+        endereco_entrega: params.enderecoEntregaLogradouro ?? null,
+        endereco_entrega_numero: params.enderecoEntregaNumero ?? null,
+        endereco_entrega_complemento: params.enderecoEntregaComplemento ?? null,
+        endereco_entrega_bairro: params.enderecoEntregaBairro ?? null,
+        endereco_entrega_cidade: params.enderecoEntregaCidade ?? null,
+        endereco_entrega_cep: params.enderecoEntregaCep ?? null,
+        endereco_entrega_uf: params.enderecoEntregaUf ?? null,
+      });
       const descricaoTarefa = [
         `Corrida ${codigoEntrega} (${params.regiao}).`,
-        params.enderecoEntrega ? `Endereço: ${params.enderecoEntrega}.` : null,
+        enderecoLegivel ? `Endereço: ${enderecoLegivel}.` : null,
         params.descricaoAvulso ? `Obs: ${params.descricaoAvulso}.` : null,
       ].filter(Boolean).join(" ");
 
@@ -2486,7 +2576,19 @@ export async function criarFreteAvulso(
     motoboyNome: motoboy?.nome ? String(motoboy.nome) : null,
     motoboyTelefone: motoboy?.telefone ? String(motoboy.telefone) : null,
     vendaId: resultado.venda_id != null ? Number(resultado.venda_id) : null,
-    enderecoEntrega: resultado.endereco_entrega ? String(resultado.endereco_entrega) : null,
+    // REGRA DE NEGÓCIO (migration 355): monta o texto legível a partir das
+    // colunas estruturadas que acabaram de ser gravadas (RETURNING * já traz
+    // todas) — mesmo helper usado pela descrição da tarefa acima e pelas APIs
+    // de listagem/motoboy, para não formatar diferente em cada lugar.
+    enderecoEntrega: formatarEnderecoEntregaAvulso({
+      endereco_entrega: resultado.endereco_entrega as string | null,
+      endereco_entrega_numero: resultado.endereco_entrega_numero as string | null,
+      endereco_entrega_complemento: resultado.endereco_entrega_complemento as string | null,
+      endereco_entrega_bairro: resultado.endereco_entrega_bairro as string | null,
+      endereco_entrega_cidade: resultado.endereco_entrega_cidade as string | null,
+      endereco_entrega_cep: resultado.endereco_entrega_cep as string | null,
+      endereco_entrega_uf: resultado.endereco_entrega_uf as string | null,
+    }),
     pagante: (resultado.pagante as "loja" | "cliente" | null) ?? null,
   };
 }

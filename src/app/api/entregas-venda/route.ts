@@ -26,7 +26,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { criarEntrega } from "@/lib/entrega-venda";
+import { criarEntrega, formatarEnderecoEntregaAvulso } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
 import { authOr401, ForbiddenError } from "@/lib/auth-server";
 import { isVendasFullAccess, requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
@@ -172,7 +172,11 @@ export async function GET(req: NextRequest) {
         mb.nome AS motoboy_nome,
         ev.is_avulso,
         ev.descricao_avulso,
-        ev.endereco_entrega,
+        -- Colunas estruturadas de endereço (migration 355) — montadas em
+        -- texto legível via formatarEnderecoEntregaAvulso() abaixo.
+        ev.endereco_entrega, ev.endereco_entrega_numero, ev.endereco_entrega_complemento,
+        ev.endereco_entrega_bairro, ev.endereco_entrega_cidade, ev.endereco_entrega_cep,
+        ev.endereco_entrega_uf,
         ev.liberada_por,
         ev.liberada_em,
         ev.motivo_recusa
@@ -235,7 +239,13 @@ export async function GET(req: NextRequest) {
       // liberação de frete avulso — usados pela aba "Solicitações" (endereço
       // pedido, quem liberou/quando, ou motivo se foi recusada). Não há mais
       // "responsável" fixo — qualquer liberador do pool decide.
-      endereco_entrega: r.endereco_entrega ? String(r.endereco_entrega) : null,
+      // REGRA DE NEGÓCIO (migration 355): endereço agora estruturado no banco
+      // — formatarEnderecoEntregaAvulso() monta o mesmo texto legível de
+      // antes (fonte única, ver src/lib/entrega-venda.ts). As colunas
+      // estruturadas (endereco_entrega_numero, _bairro, etc.) continuam
+      // disponíveis na resposta via `...r` acima, para quem precisar delas
+      // campo a campo no futuro.
+      endereco_entrega: formatarEnderecoEntregaAvulso(r as Record<string, string | null>),
       liberada_por: r.liberada_por ? String(r.liberada_por) : null,
       liberada_em: r.liberada_em ?? null,
       motivo_recusa: r.motivo_recusa ? String(r.motivo_recusa) : null,
