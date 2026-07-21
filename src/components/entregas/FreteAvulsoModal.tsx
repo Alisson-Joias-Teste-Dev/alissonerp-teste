@@ -99,10 +99,6 @@ interface Props {
   /** Endereço de entrega sugerido (concatenado pelo caller) para pré-preencher
    *  o textarea editável quando `vendaId` é informado. Ignorado sem vendaId. */
   enderecoInicial?: string;
-  /** Callback extra disparado quando a solicitação é enviada com sucesso —
-   *  além de onCriado, permite o caller (ex.: VendaDetalheClient) recarregar
-   *  só o status da venda sem fechar/atualizar toda a lista de entregas. */
-  onSolicitado?: () => void;
 }
 
 const REGIOES = [
@@ -135,7 +131,7 @@ function montarEndereco(v: VendaEnderecoResp): string {
   return partes.join(", ");
 }
 
-export default function FreteAvulsoModal({ isOpen, onClose, onCriado, userRole, vendaId, enderecoInicial, onSolicitado }: Props) {
+export default function FreteAvulsoModal({ isOpen, onClose, onCriado, userRole, vendaId, enderecoInicial }: Props) {
   // REGRA DE NEGÓCIO (modelo POOL): consultora só SOLICITA — não cria o
   // avulso já liberado e não escolhe motoboy/responsável.
   const ehConsultora = userRole === "consultora";
@@ -317,10 +313,6 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, userRole, 
             observacoes: observacoes.trim() || undefined,
           }),
         });
-        // REGRA DE NEGÓCIO (V3): avisa o caller (ex.: VendaDetalheClient) logo
-        // após o POST confirmar, para recarregar o status da venda enquanto o
-        // modal ainda mostra a animação de sucesso (1.5s antes de fechar).
-        onSolicitado?.();
       } else {
         await apiFetch("/api/entregas-venda/frete-avulso", {
           method: "POST",

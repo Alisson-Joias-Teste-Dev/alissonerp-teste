@@ -125,6 +125,11 @@ const TIPO_LABEL: Record<string, string> = {
   conversao: "Conversão de estoque",
   conversao_sku: "Conversão de SKU",
   conversao_reversa: "Conversão reversa (ouro → joia)",
+  // 21/07: faltava — a tarefa nasce com tipo 'frete_avulso' (criarFreteAvulso,
+  // src/lib/entrega-venda.ts) e sempre tem venda_id, então aparece agrupada
+  // no card da venda (aba "Aguard. Aprovação"); sem esta entrada, a linha da
+  // aprovação mostrava o texto cru "frete_avulso" em vez do nome amigável.
+  frete_avulso: "Frete avulso",
 };
 
 type Chip = { label: string; icon: string; bg: string; color: string; href?: string };

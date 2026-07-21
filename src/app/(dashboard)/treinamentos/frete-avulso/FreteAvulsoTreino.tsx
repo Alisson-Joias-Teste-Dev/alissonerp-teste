@@ -1,10 +1,10 @@
 "use client";
 
-import { Bike, MapPin, DollarSign, AlignLeft, Check, XCircle, Clock, CheckCircle } from "lucide-react";
+import { Bike, MapPin, DollarSign, AlignLeft, Check, XCircle, Clock, CheckCircle, Search } from "lucide-react";
 import TreinamentoLayout, { type ColaItem } from "@/components/treinamentos/TreinamentoLayout";
 import { type PassoTreino } from "@/components/treinamentos/TreinamentoPlayer";
 import {
-  CT, criarStatusChip, type ChipDef, Cursor, BotaoMock, CardMock, TelaMock, nb,
+  CT, criarStatusChip, type ChipDef, Cursor, BotaoMock, TelaMock, nb,
 } from "@/components/treinamentos/cenario";
 
 /**
@@ -12,27 +12,43 @@ import {
  * motoboy). Criado 21/07/2026 seguindo a receita de conversao-reversa /
  * movimentacao-interna (exemplos de referência).
  *
- * IMPACTO SE ALTERADO: os rótulos/cores/botões abaixo foram copiados da tela real:
- *   - config do pool de aprovadores ("Frete avulso solicitado (pool)", ícone
- *     🛵, descrição): `components/configuracoes/aprovadores/ListaAprovadores.tsx`
- *     (entrada `aprovadores_frete_avulso`)
- *   - botão "Solicitar frete avulso" e os 3 banners de status (solicitada
- *     aguardando / liberada / recusada com motivo): `app/(dashboard)/vendas/[id]/VendaDetalheClient.tsx`
- *     (`podeSolicitarFreteAvulso`, bloco "Frete avulso solicitado pela consultora (V3)")
- *   - chip "Aprovado"/"Em Rota"/"Entregue" da situação da venda (passo 2):
- *     `VendaDetalheClient.tsx` (SITUACAO_LABEL / SITUACAO_COLOR)
+ * ATUALIZADO 21/07/2026 (fix/tarefas+treinamento): o fluxo mudou — a
+ * solicitação passou a nascer TAMBÉM (e principalmente) no módulo Tarefas.
+ * Os rótulos abaixo foram conferidos de novo contra o código:
+ *   - botão "Frete avulso" (ícone Bike) no cabeçalho desktop do módulo
+ *     Tarefas, visível só pra `role === "consultora"`, e o 2º FAB mobile
+ *     (aria-label "Solicitar frete avulso", empilhado acima do FAB "Nova
+ *     tarefa"): `app/(dashboard)/tarefas/TarefasClient.tsx` (state
+ *     `showFreteAvulso`, botão ~L1104-1110, FAB ~L1460-1468)
+ *   - busca de venda dentro do modal (label "Venda *", placeholder "Buscar
+ *     por número da venda ou cliente...", resultado "{numero_venda} —
+ *     {cliente_nome}") e mensagem de sucesso "Solicitação enviada —
+ *     aguardando liberação": `components/entregas/FreteAvulsoModal.tsx`
+ *     (busca ~L462-505, sucesso ~L392-401)
+ *   - atalho ALTERNATIVO — botão "Solicitar frete avulso" de dentro da
+ *     própria venda (Aprovado/Em Rota/Entregue), que abre o MESMO modal já
+ *     com a venda escolhida (pula a busca): `app/(dashboard)/vendas/[id]/VendaDetalheClient.tsx`
+ *     (`podeSolicitarFreteAvulso`, botão ~L2682-2691)
+ *   - a venda NÃO mostra mais nenhum status da solicitação (os banners
+ *     aguardando/liberada/recusada foram removidos — comentário no próprio
+ *     `VendaDetalheClient.tsx` ~L4710-4716: "Não recarrega mais a venda ao
+ *     solicitar... não há mais nada aqui que dependa desse refresh"); o
+ *     acompanhamento é só em Tarefas.
+ *   - guarda de solicitação duplicada ("Já existe uma solicitação de frete
+ *     avulso aguardando decisão para esta venda."): `lib/entrega-venda.ts`
+ *     (`criarFreteAvulso`, guard ~L2175-2188)
  *   - modal de solicitação (header "Solicitar Frete Avulso", campos Descrição
  *     da corrida / Endereço de entrega / Valor cobrado do cliente / Região /
- *     Observações, botão "Solicitar frete avulso", mensagem de sucesso
- *     "Solicitação enviada — aguardando liberação"): `components/entregas/FreteAvulsoModal.tsx`
+ *     Observações, botão "Solicitar frete avulso"): `components/entregas/FreteAvulsoModal.tsx`
  *   - título/descrição da tarefa ("Frete avulso solicitado — venda {numero}",
  *     "Corrida {codigo} ({regiao}). Endereço: ... Obs: ..."), prioridade "alta"
  *     e o estado 'solicitada': `lib/entrega-venda.ts` (`criarFreteAvulso`)
- *   - cabeçalho da tarefa (título, badge de prioridade "Alta", badge de status
- *     "Aguard. Aprovação") e o bloco genérico Aprovar/Rejeitar com o textarea
- *     "Motivo (obrigatório para rejeitar)": `app/(dashboard)/tarefas/TarefaDrawer.tsx`
- *     (linha ~353 cabeçalho; ~757 bloco de decisão) + `TarefasClient.tsx`
- *     (PRIORIDADE_BADGE, STATUS_COLS)
+ *   - card da tarefa agrupado por venda (título "Venda {numero}", linha por
+ *     aprovação com o nome amigável do tipo — agora "Frete avulso" — e os
+ *     botões ✓/✗) e o bloco genérico Aprovar/Rejeitar com o textarea "Motivo
+ *     (obrigatório para rejeitar)": `app/(dashboard)/tarefas/TarefasClient.tsx`
+ *     (mapa `TIPO_LABEL`, aba "aguardando" ~L1215-1399) + `TarefaDrawer.tsx`
+ *     (~757 bloco de decisão)
  *   - liberação (solicitada→pendente, lança o saldo) e recusa (solicitada→cancelada,
  *     motivo obrigatório): `lib/entrega-venda.ts` (`liberarFreteAvulso`, `recusarFreteAvulso`)
  *   - os 3 casos do motoboy ("Aceitar corrida", "Finalizar entrega",
@@ -45,23 +61,16 @@ import {
  *
  * RÓTULOS NÃO ENCONTRADOS NO CÓDIGO (reportado, não inventado): não existe um
  * chip curto de UMA palavra para os estados 'solicitada' e 'cancelada' em
- * lugar nenhum da tela (a venda mostra frase inteira no banner, e o app do
- * motoboy não tem badge pra esses dois — o fallback de `statusBadge()`
- * devolveria a string crua). Os chips "Solicitada" e "Recusada" abaixo foram
- * construídos a partir do texto do banner ("Frete avulso solicitado —
- * aguardando decisão..." / "Frete avulso recusado...") usando as MESMAS cores
- * dos banners reais — não são cópia literal de um chip existente. Também: o
- * board de Tarefas (`TarefasClient.tsx`, mapa `TIPO_LABEL`) não tem entrada
- * para o tipo "frete_avulso" — na coluna "Aguard. Aprovação" a linha da
- * aprovação mostraria hoje o texto cru "frete_avulso" em vez de um nome
- * amigável (gap pré-existente, fora do escopo deste treino). Por isso o passo
- * 6 usa o CABEÇALHO da tarefa (tarefa.titulo, que É formatado corretamente)
- * em vez da lista agrupada por venda, que tropeça nesse gap.
+ * lugar nenhum da tela (esses estados só existem no banco/backend agora — a
+ * venda não mostra mais status nenhum, e o app do motoboy não tem badge pra
+ * esses dois). Os chips "Solicitada" e "Recusada" abaixo são só o indicador
+ * genérico "o registro vira X" do próprio player de treinamento — não
+ * simulam nenhum elemento real de tela.
  */
 
 // ─── Chips: cópia fiel do que existe (badges "Pendente"/"Em Rota"/"Entregue"
-// são literais de MotoboyAppClient.statusBadge(); "Solicitada"/"Recusada" são
-// construídos a partir das cores dos banners de VendaDetalheClient — ver nota acima) ──
+// são literais de MotoboyAppClient.statusBadge(); "Solicitada"/"Recusada" não
+// têm chip real na tela — ver nota "RÓTULOS NÃO ENCONTRADOS" acima) ──
 type StatusKey = "solicitada" | "pendente" | "em_rota" | "confirmada" | "cancelada";
 const STATUS: Record<StatusKey, ChipDef> = {
   solicitada: { label: "Solicitada", bg: "#EFF6FF", color: "#1E40AF" },
@@ -71,9 +80,6 @@ const STATUS: Record<StatusKey, ChipDef> = {
   cancelada:  { label: "Recusada",  bg: "#FEF2F2", color: "#991B1B" },
 };
 const StatusChip = criarStatusChip(STATUS);
-
-/** Chip da situação da venda (SITUACAO_LABEL/SITUACAO_COLOR de VendaDetalheClient). */
-const VENDA_CHIP: ChipDef = { label: "Aprovado", bg: "#D1FAE5", color: "#065F46" };
 
 // ─── Os 12 passos ──────────────────────────────────────────────────────────────
 const PASSOS: PassoTreino[] = [
@@ -109,31 +115,44 @@ const PASSOS: PassoTreino[] = [
   },
   {
     quem: "Consultora",
-    titulo: "Abrir a venda",
-    narracao: <>A solicitação sai de {nb("DENTRO da venda")} — não tem atalho pelo menu Entregas. Só aparece com a venda {nb("Aprovado, Em Rota ou Entregue")}.</>,
-    porque: "Venda ainda rascunho (ou já cancelada/virou crédito) não mostra o botão — nem no servidor a solicitação é aceita fora dessa janela.",
+    titulo: "Abrir Tarefas e clicar em Frete avulso",
+    narracao: <>No módulo {nb("Tarefas")}, clique no botão {nb("Frete avulso")} (ícone de moto) no cabeçalho — esse é o caminho PRINCIPAL agora. Só aparece pra quem é {nb("consultora")} (no celular é o 2º botão flutuante, empilhado sobre o de Nova tarefa).</>,
+    porque: "O atalho de dentro da própria venda (Aprovado/Em Rota/Entregue) continua existindo e abre o mesmo modal — mas já com a venda escolhida, pulando a busca (ver nota do passo 3). O Tarefas virou o ponto de entrada principal porque não depende de já estar na venda certa.",
     tela: (
-      <CardMock titulo="Venda #15412 · Larissa Freitas" sub="Total R$ 2.480,00" chip={
-        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: VENDA_CHIP.bg, color: VENDA_CHIP.color }}>{VENDA_CHIP.label}</span>
-      } />
-    ),
-  },
-  {
-    quem: "Consultora",
-    titulo: "Clicar em Solicitar frete avulso",
-    narracao: <>Dentro da venda, clique em {nb("Solicitar frete avulso")}.</>,
-    tela: (
-      <div className="relative w-full px-4 py-2.5 rounded-lg border flex items-center gap-2" style={{ backgroundColor: "#FAFAF7", borderColor: CT.cremeBorder, color: CT.esmeralda }}>
-        <Bike size={15} />
-        <span className="text-sm font-medium">Solicitar frete avulso</span>
-        <Cursor />
+      <div className="flex items-center justify-between gap-2 rounded-xl border p-2.5" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
+        <span className="text-[13px] font-semibold" style={{ color: CT.esmeralda }}>Tarefas</span>
+        <span className="relative inline-flex">
+          <BotaoMock label="Frete avulso" Icon={Bike} primario={false} cursor />
+        </span>
       </div>
     ),
   },
   {
     quem: "Consultora",
+    titulo: "Buscar e escolher a venda",
+    narracao: <>O modal {nb("Solicitar Frete Avulso")} abre com o campo {nb("Venda")} vazio. Digite o {nb("número da venda ou o nome do cliente")} e escolha na lista.</>,
+    porque: "Nota: se em vez disso ela clicar no atalho \"Solicitar frete avulso\" de DENTRO da venda, este passo some — o mesmo modal já abre com a venda fixada.",
+    tela: (
+      <TelaMock titulo="Solicitar Frete Avulso" acessorio={<Bike size={14} style={{ color: CT.esmeralda }} />}>
+        <p className="text-[10px] font-semibold uppercase mb-1 flex items-center gap-1" style={{ color: "#9CA3AF" }}>
+          <Search size={10} /> Venda <span style={{ color: "#DC2626" }}>*</span>
+        </p>
+        <div className="rounded-lg border px-2.5 py-2 text-[12px] mb-1" style={{ borderColor: CT.cremeBorder, color: "#9CA3AF" }}>
+          Buscar por número da venda ou cliente...
+        </div>
+        <div className="relative rounded-lg border" style={{ borderColor: CT.cremeBorder }}>
+          <div className="px-2.5 py-1.5 text-[12px]" style={{ color: "#111827" }}>
+            <b>15412</b> — Larissa Freitas
+          </div>
+          <Cursor />
+        </div>
+      </TelaMock>
+    ),
+  },
+  {
+    quem: "Consultora",
     titulo: "Conferir o endereço",
-    narracao: <>O modal {nb("Solicitar Frete Avulso")} abre com o {nb("Endereço de entrega")} já preenchido com o cadastro da venda. Pode editar aqui — {nb("não muda o cadastro do cliente")}.</>,
+    narracao: <>Ao escolher a venda, o {nb("Endereço de entrega")} carrega sozinho a partir do cadastro dela. Pode editar aqui — {nb("não muda o cadastro do cliente")}.</>,
     tela: (
       <TelaMock titulo="Solicitar Frete Avulso" acessorio={<Bike size={14} style={{ color: CT.esmeralda }} />}>
         <p className="text-[10px] font-semibold uppercase mb-1 flex items-center gap-1" style={{ color: "#9CA3AF" }}>
@@ -150,7 +169,7 @@ const PASSOS: PassoTreino[] = [
     quem: "Consultora",
     titulo: "Preencher valor e enviar",
     narracao: <>Informe a {nb("Descrição da corrida")}, o {nb("Valor cobrado do cliente (R$)")} e a {nb("Região")} (Fortaleza / Fora de Fortaleza / Longe / Correios). Observações é opcional. Depois clique em {nb("Solicitar frete avulso")}.</>,
-    porque: "A consultora NÃO escolhe motoboy nem responsável — a solicitação cai no pool configurado no passo 1. Qualquer um deles decide.",
+    porque: "A consultora NÃO escolhe motoboy nem responsável — a solicitação cai no pool configurado no passo 1. Enquanto ninguém decide, um novo pedido pra MESMA venda é barrado: \"Já existe uma solicitação de frete avulso aguardando decisão para esta venda.\"",
     resultado: <StatusChip s="solicitada" />,
     tela: (
       <div className="space-y-2">
@@ -165,24 +184,31 @@ const PASSOS: PassoTreino[] = [
             </span>
           </div>
         </TelaMock>
-        <CardMock titulo="Venda #15412 · Larissa Freitas" sub="Total R$ 2.480,00" chip={<StatusChip s="solicitada" />} />
+        <div className="rounded-xl border p-4 text-center" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
+          <CheckCircle size={26} style={{ color: "#059669" }} className="mx-auto mb-1" />
+          <p className="text-[12px] font-bold" style={{ color: CT.esmeralda }}>Solicitação enviada — aguardando liberação</p>
+        </div>
       </div>
     ),
   },
   {
     quem: "Liberador (pool)",
     titulo: "A solicitação chega como tarefa",
-    narracao: <>Quem estiver no pool recebe a tarefa em {nb("Tarefas")}: {nb("“Frete avulso solicitado — venda 15412”")}. {nb("Qualquer um do pool vê")} — não é só o 1º da lista.</>,
+    narracao: <>Quem estiver no pool vê em {nb("Tarefas → Aguard. Aprovação")} o card da {nb("Venda 15412")} com a linha {nb("“Frete avulso”")} — nome amigável, não o código cru. {nb("Qualquer um do pool decide")} — não é só o 1º da lista.</>,
     tela: (
-      <TelaMock titulo="Frete avulso solicitado — venda 15412">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: "#FEF3C7", color: "#92400E" }}>Alta</span>
-          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: "#EDE9FE", color: "#7C3AED" }}>Aguard. Aprovação</span>
+      <div className="rounded-xl border overflow-hidden" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
+        <div className="p-3 border-b" style={{ borderColor: "#F3F4F6" }}>
+          <p className="text-[13px] font-semibold" style={{ color: "#1A1A1A" }}>Venda 15412</p>
+          <p className="text-[11px] mt-0.5" style={{ color: "#6B7280" }}>Larissa Freitas</p>
         </div>
-        <p className="text-[11px]" style={{ color: "#374151" }}>
-          Corrida FA-0231 (fortaleza). Endereço: Rua das Flores, nº 210, Aldeota, Fortaleza, CE.
-        </p>
-      </TelaMock>
+        <div className="px-3 py-2.5 flex items-center justify-between gap-2">
+          <span className="text-[12px] font-medium" style={{ color: "#1A1A1A" }}>Frete avulso</span>
+          <div className="flex gap-1.5">
+            <span className="px-2 py-1 text-[11px] rounded-lg font-semibold" style={{ background: "#059669", color: "#fff" }}>✓</span>
+            <span className="px-2 py-1 text-[11px] rounded-lg font-semibold border" style={{ borderColor: "#FCA5A5", color: "#DC2626" }}>✗</span>
+          </div>
+        </div>
+      </div>
     ),
   },
   {
@@ -214,7 +240,7 @@ const PASSOS: PassoTreino[] = [
     quem: "Liberador (pool)",
     titulo: "Desfecho B — Recusar com motivo",
     narracao: <>Achou algo errado (endereço estranho, valor fora do padrão)? Escreva o {nb("Motivo (obrigatório para rejeitar)")} e clique em {nb("Rejeitar")}.</>,
-    porque: "O motivo é obrigatório — a consultora vê exatamente por que foi recusado no banner da própria venda, com o botão \"Solicitar novamente\".",
+    porque: "O motivo é obrigatório — fica gravado na tarefa. A venda não mostra mais status da solicitação; a consultora acompanha o desfecho em Tarefas e, se quiser, solicita de novo pelo mesmo caminho (passo 2).",
     resultado: <StatusChip s="cancelada" />,
     tela: (
       <div className="rounded-xl border p-3" style={{ borderColor: CT.cremeBorder }}>
@@ -317,7 +343,7 @@ const COLA: ColaItem[] = [
   { chip: <StatusChip s="pendente" />, txt: "Liberado — o frete já foi lançado no saldo da gerente, mas nenhum motoboy aceitou ainda." },
   { chip: <StatusChip s="em_rota" />, txt: "Um motoboy aceitou e está a caminho." },
   { chip: <StatusChip s="confirmada" />, txt: "Entregue — entra no acerto do motoboy." },
-  { chip: <StatusChip s="cancelada" />, txt: "Recusado com motivo. A consultora vê o motivo na própria venda e pode solicitar de novo." },
+  { chip: <StatusChip s="cancelada" />, txt: "Recusado com motivo. A consultora vê o motivo em Tarefas e pode solicitar de novo." },
 ];
 
 interface TreinoProps { videoUrl: string | null; isDev: boolean; treinamentoKey: string }
@@ -327,7 +353,7 @@ export default function FreteAvulsoTreino(props: TreinoProps) {
     <TreinamentoLayout
       {...props}
       titulo="Frete Avulso (solicitação)"
-      subtitulo="A consultora solicita um motoboy avulso de dentro da própria venda. A solicitação cai num pool de liberadores (qualquer um decide) e, depois de liberada, num pool de motoboys (o primeiro que aceitar leva a corrida)."
+      subtitulo="A consultora solicita um motoboy avulso pelo módulo Tarefas (ou pelo atalho de dentro da própria venda). A solicitação cai num pool de liberadores (qualquer um decide) e, depois de liberada, num pool de motoboys (o primeiro que aceitar leva a corrida)."
       regraDeOuro={<>a consultora {nb("nunca escolhe motoboy nem responsável")} — a solicitação sempre cai no pool. Sem ninguém configurado em Aprovadores, ela nem consegue enviar.</>}
       passos={PASSOS}
       cola={COLA}
