@@ -308,12 +308,14 @@ function TransferirModal({
  * para sempre. E a unica baixa manual do ERP e so o master admin (o dono) faz —
  * quem controla isso e o backend; aqui a tela so nao mostra o botao pros demais.
  *
- * Tres freios de mao antes de gravar:
+ * Dois freios de mao antes de gravar:
  *   1) historico de faltas em inventario (a prova de que a peca sumiu mesmo);
- *   2) motivo escrito, minimo 10 caracteres;
- *   3) a palavra PERDA digitada — impede baixa por clique acidental.
+ *   2) a palavra PERDA digitada — impede baixa por clique acidental.
  *
- * IMPACTO SE REMOVIDOS: baixa de joia vira um clique, sem rastro do porque.
+ * O motivo escrito e OPCIONAL (decisao do Jonathan, 21/07/2026): quem/quando/
+ * quanto ja fica gravado no movimento e no audit_log.
+ *
+ * IMPACTO SE REMOVIDO O FREIO DA PALAVRA: baixa de joia vira um clique.
  */
 function PerdaModal({
   produtoId, saldoPorLocal, faltas, onClose, onDone,
@@ -338,7 +340,6 @@ function PerdaModal({
   const podeGravar =
     localId > 0 &&
     Number(quantidade) > 0 &&
-    motivo.trim().length >= 10 &&
     confirmacao.trim().toUpperCase() === CONFIRMACAO_PERDA;
 
   async function handleGravar() {
@@ -440,7 +441,7 @@ function PerdaModal({
 
             <div className="mb-3">
               <label className="block text-xs font-semibold mb-1 text-gray-500">
-                O que aconteceu <span className="text-red-400">*</span>
+                O que aconteceu <span className="font-normal text-gray-400">(opcional)</span>
               </label>
               <textarea
                 rows={2}

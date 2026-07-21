@@ -32,7 +32,10 @@ const PerdaPostSchema = z.object({
   produto_id:       z.coerce.number().int().positive(),
   local_estoque_id: z.coerce.number().int().positive(),
   quantidade:       z.coerce.number().int().positive(),
-  motivo:           z.string().trim().min(10, "Descreva o que aconteceu (minimo 10 caracteres)"),
+  // Motivo é OPCIONAL (decisão do Jonathan, 21/07/2026). O freio que segura a
+  // baixa acidental é a palavra PERDA digitada; o rastro de quem/quando/quanto
+  // fica gravado de qualquer jeito no movimento e no audit_log.
+  motivo:           z.string().trim().optional(),
   confirmacao:      z.string(),
 });
 
@@ -98,7 +101,10 @@ export async function POST(req: NextRequest) {
   const raw = await req.json().catch(() => ({}));
   const parsed = PerdaPostSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
-  const { produto_id, local_estoque_id, quantidade, motivo, confirmacao } = parsed.data;
+  const { produto_id, local_estoque_id, quantidade, confirmacao } = parsed.data;
+  // Sem motivo escrito grava NULL (nao string vazia), pra tela nao renderizar
+  // uma observacao em branco embaixo da linha do extrato.
+  const observacao = parsed.data.motivo?.trim() || null;
 
   if (confirmacao.trim().toUpperCase() !== CONFIRMACAO_PERDA) {
     return NextResponse.json(
@@ -134,7 +140,7 @@ export async function POST(req: NextRequest) {
         (produto_id, tipo, quantidade, motivo, local_estoque_id, status, observacao, created_by)
       VALUES
         (${produto_id}, 'saida', ${quantidade}, ${MOTIVO_PERDA},
-         ${local_estoque_id}, 'efetivado', ${motivo}, ${user.id})
+         ${local_estoque_id}, 'efetivado', ${observacao}, ${user.id})
       RETURNING id, created_at
     `;
 
@@ -143,7 +149,7 @@ export async function POST(req: NextRequest) {
       operacao: "INSERT",
       registro_id: mov.id,
       usuario_id: user.id,
-      dados_depois: { motivo: MOTIVO_PERDA, produto_id, local_estoque_id, quantidade, observacao: motivo },
+      dados_depois: { motivo: MOTIVO_PERDA, produto_id, local_estoque_id, quantidade, observacao },
     });
 
     return [mov];

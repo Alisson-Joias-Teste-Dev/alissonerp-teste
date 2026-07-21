@@ -17,7 +17,7 @@ Havia 7 admins e 3 devs na base — permissão por role daria a chave para 10 pe
 - Endpoint novo e separado `GET|POST /api/estoque-comercial/perda`. A trava da v2.81.3 em
   `/api/estoque-comercial/movimentos` (403 em qualquer saída manual) **continua intacta** — perda é
   exceção nomeada e auditada, não buraco na trava.
-- Três freios: histórico de faltas na tela + motivo com mín. 10 caracteres + palavra `PERDA` digitada.
+- Dois freios: histórico de faltas na tela + palavra `PERDA` digitada. Motivo escrito é opcional.
 - Baixa limitada ao **disponível** (físico − reservado), nunca ao físico — 409 se exceder, para não
   sumir com peça já prometida a uma venda.
 - Estorno de movimento `perda_extravio` também restrito ao master (senão a trava vazaria pelo outro lado);
