@@ -50,6 +50,9 @@ const SNAPSHOT_ESPERADO: Record<
   // Migration 354 (21/07): irmão de frete_avulso pra pagante='loja' — chave
   // própria (aprovadores_frete_avulso_loja), autoriza o CUSTO da loja.
   frete_avulso_loja: { configKeys: ["aprovadores_frete_avulso_loja"], configMulti: true },
+  // BLOCO 4 (21/07): rotina automática do dia 01 — fechamento mensal do saldo
+  // de frete grátis. Saldo negativo cria esta tarefa (src/lib/frete-fechamento.ts).
+  fechamento_frete_negativo: { configKeys: ["aprovadores_fechamento_frete"], configMulti: true },
 };
 
 describe("snapshot do CATALOGO — trava a política; qualquer mudança quebra este teste", () => {
@@ -69,7 +72,7 @@ describe("snapshot do CATALOGO — trava a política; qualquer mudança quebra e
     },
   );
 
-  it("cobre exatamente os 22 eventos do catálogo, sem sobra nem falta", () => {
+  it("cobre exatamente os 23 eventos do catálogo, sem sobra nem falta", () => {
     expect(Object.keys(CATALOGO).sort()).toEqual(Object.keys(SNAPSHOT_ESPERADO).sort());
   });
 

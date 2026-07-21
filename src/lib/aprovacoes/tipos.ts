@@ -34,7 +34,8 @@ export type EventoAprovacao =
   | "alteracao_venda"
   | "garantia_fora_prazo"
   | "frete_avulso"
-  | "frete_avulso_loja";
+  | "frete_avulso_loja"
+  | "fechamento_frete_negativo";
 
 export interface RegraAutoridade {
   evento: EventoAprovacao;

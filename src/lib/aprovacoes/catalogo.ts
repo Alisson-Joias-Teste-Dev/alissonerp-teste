@@ -286,4 +286,28 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
       "`frete_pagante:loja` gravada na criação (BLOCO 2, jul/2026: tag editável pelo solicitante " +
       "via PATCH /api/tarefas/[id], deixou de ser fonte de verdade).",
   },
+  fechamento_frete_negativo: {
+    evento: "fechamento_frete_negativo",
+    rotulo: "Fechamento mensal de frete grátis com saldo negativo",
+    configKeys: ["aprovadores_fechamento_frete"],
+    configMulti: true,
+    camposLock: [
+      "fechamentos_frete.status",
+      "fechamentos_frete.tarefa_aprovacao_id",
+      "fechamentos_frete.conta_pagar_id",
+    ],
+    observacao:
+      "BLOCO 4 (verba de frete grátis, 21/07): rotina automática do dia 01 " +
+      "(src/lib/frete-fechamento.ts, POST /api/entregas-venda/fechamento-frete-cron) fecha o " +
+      "mês anterior e, se o saldo da gerente fechar NEGATIVO, cria esta tarefa (tipo " +
+      "'fechamento_frete_negativo', exclusivo desse fluxo — não compete com nenhum outro tipo/tag). " +
+      "Aprovar gera contas_pagar (venc. dia 10) e marca fechamentos_frete.status='pago'; recusar exige " +
+      "motivo e marca status='recusado' (nenhuma conta lançada). " +
+      "SEGREGAÇÃO: quem decide (pool 'aprovadores_fechamento_frete') é DIFERENTE de quem recebe a " +
+      "conta a pagar (a gerente do saldo, gerente_frete_gratis) — se a gerente também estiver nesse " +
+      "pool, ela é excluída da lista de decisão para ESTA tarefa (mesmo princípio de " +
+      "'aprovador_e_o_proprio_solicitante' usado em frete_avulso, mas a exclusão aqui é pela GERENTE " +
+      "do fechamento, não por quem tecnicamente criou a tarefa — a criação é do cron/admin do sistema, " +
+      "não da gerente). Ver `ctx.solicitanteId` em PATCH /api/tarefas/[id]/aprovacao.",
+  },
 };

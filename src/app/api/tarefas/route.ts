@@ -155,6 +155,14 @@ export async function GET(req: NextRequest) {
       SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovadores_frete_avulso_loja' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
+    -- fechamento mensal de frete grátis com saldo negativo (BLOCO 4, jul/2026,
+    -- src/lib/frete-fechamento.ts): tarefa nasce com tipo
+    -- 'fechamento_frete_negativo', exclusiva desse fluxo (não compete com
+    -- outros tipos/tags). Chave: 'aprovadores_fechamento_frete'.
+    OR (t.tipo = 'fechamento_frete_negativo' AND EXISTS (
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
+      WHERE cs.chave = 'aprovadores_fechamento_frete' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
+    ))
     -- credito_loja: tags = ['credito_loja', 'gerente'|'diretor'] (vendas-credito-aprovar.ts) — tipo NULL.
     --
     -- ASSIMETRIA CONHECIDA (20/07) entre este SQL e o TS (eventoDaTarefa,

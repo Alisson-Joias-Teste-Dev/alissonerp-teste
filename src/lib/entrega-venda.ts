@@ -2181,7 +2181,22 @@ export async function resolverGerenteFreteGratisId(db: DbSql, fallbackUserId: st
   return (gerente?.id as string | undefined) ?? fallbackUserId;
 }
 
-async function obterSaldoFreteGerenteNoTx(tx: DbSql, gerenteId: string): Promise<number> {
+/**
+ * REGRA DE NEGÓCIO: saldo ATUAL (running total) do frete grátis da gerente —
+ * soma TODOS os lançamentos de saldo_frete_gratis (créditos − débitos), sem
+ * filtrar por fechamento_id. Isso é intencional: um fechamento mensal nunca
+ * apaga/estorna lançamentos antigos, ele só GRAVA um contra-lançamento novo
+ * (mesma tabela, fechamento_id preenchido) que zera o saldo — então a soma de
+ * TUDO já reflete o histórico de fechamentos corretamente (telescópico).
+ *
+ * EXPORTADA (BLOCO 4, 21/07) para reuso por `src/lib/frete-fechamento.ts`
+ * (rotina automática do dia 01) — a apuração do saldo a fechar usa esta MESMA
+ * função (dentro da própria transação do fechamento, passando `tx`) em vez de
+ * duplicar a soma credito−debito.
+ * IMPACTO SE DUPLICADA: uma 2ª soma de saldo que pode divergir desta (ex.: um
+ * dos dois lados esquecer de contar um tipo de lançamento novo no futuro).
+ */
+export async function obterSaldoFreteGerenteNoTx(tx: DbSql, gerenteId: string): Promise<number> {
   const [row] = await tx`
     SELECT
       COALESCE(SUM(CASE WHEN tipo = 'credito' THEN valor ELSE 0 END), 0)

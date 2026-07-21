@@ -224,6 +224,14 @@ const CONFIG_ITENS: ConfigItem[] = [
     usuariosKey: "gerentes",
     icone: "🚚",
   },
+  {
+    chave: "aprovadores_fechamento_frete",
+    titulo: "Fechamento de frete grátis — saldo negativo",
+    descricao: "Quem aprova o fechamento mensal (dia 01) quando o saldo de frete grátis da gerente fecha negativo. Aprovar gera a conta a pagar da gerente; recusar não lança nada. A própria gerente do saldo não decide a própria tarefa. Pode marcar vários.",
+    usuariosKey: "diretores_admins",
+    icone: "📅",
+    multi: true,
+  },
 ];
 
 // ─── Componente ───────────────────────────────────────────────────────────────

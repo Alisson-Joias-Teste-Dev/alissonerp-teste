@@ -43,7 +43,10 @@
  *       de domínio, mais abaixo no route.ts, chama podeDecidir direto — este
  *       mapeamento serve só pro portão genérico saber que existe evento E qual
  *       dos dois — ver bloco próprio abaixo)
- *   14. qualquer outro (geral, sangria, inventario_solicitacao, conversao*) → null
+ *   14. fechamento_frete_negativo (BLOCO 4, jul/2026): tarefa nasce com tipo
+ *       'fechamento_frete_negativo', exclusivo da rotina automática do dia 01
+ *       (src/lib/frete-fechamento.ts) — mesmo desenho do frete_avulso (13).
+ *   15. qualquer outro (geral, sangria, inventario_solicitacao, conversao*) → null
  *
  * `inventario_solicitacao` devolve null DE PROPÓSITO: existe a chave
  *   aprovador_inventario no banco, mas o evento não foi modelado no CATALOGO —
@@ -175,6 +178,15 @@ export function eventoDaTarefa(
   // num pool vazio).
   if (tipo === "frete_avulso") {
     return tarefaInfo?.frete_pagante === "loja" ? "frete_avulso_loja" : "frete_avulso";
+  }
+
+  // Fechamento mensal de frete grátis com saldo negativo (BLOCO 4, jul/2026):
+  // a rotina automática do dia 01 (src/lib/frete-fechamento.ts) cria a tarefa
+  // com tipo 'fechamento_frete_negativo', exclusivo desse fluxo — igual ao
+  // frete_avulso acima, não compete com nenhum outro tipo/tag, então entrar
+  // no final da cadeia é seguro.
+  if (tipo === "fechamento_frete_negativo") {
+    return "fechamento_frete_negativo";
   }
 
   return null;

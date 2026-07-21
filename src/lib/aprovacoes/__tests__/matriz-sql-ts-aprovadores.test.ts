@@ -102,6 +102,7 @@ describe("Simetria SQL (multiAprovadorCond) x TS (eventoDaTarefa)", () => {
     },
     { nome: "devolucao_estoque (chave aprovador_devolucao_estoque)", tipo: null, tags: ["devolucao_estoque"] },
     { nome: "devolucao sem devolucao_estoque (chave aprovador_devolucao)", tipo: null, tags: ["devolucao"] },
+    { nome: "fechamento_frete_negativo (chave aprovadores_fechamento_frete, BLOCO 4)", tipo: "fechamento_frete_negativo", tags: [] },
   ];
 
   it.each(matrizCobertaPeloSQL)("$nome → eventoDaTarefa devolve evento NÃO-NULO", ({ tipo, tags, tarefaInfo }) => {

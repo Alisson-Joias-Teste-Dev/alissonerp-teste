@@ -81,6 +81,13 @@ const CHAVES = [
   // (src/lib/entrega-venda.ts), com fallback ao comportamento antigo quando
   // vazia (zero impacto até o Jonathan configurar).
   "gerente_frete_gratis",
+  // MULTI (BLOCO 4, 21/07): quem aprova o fechamento mensal do dia 01 quando o
+  // saldo de frete grátis da gerente fecha NEGATIVO (evento
+  // 'fechamento_frete_negativo' em src/lib/aprovacoes/catalogo.ts). Aprovar gera
+  // a conta a pagar da gerente; recusar não lança nada (motivo obrigatório).
+  // Segregação: esta lista decide, a gerente (gerente_frete_gratis) só recebe —
+  // se ela também estiver aqui, é excluída da decisão da PRÓPRIA tarefa.
+  "aprovadores_fechamento_frete",
 ] as const;
 
 // Chaves NUMÉRICAS (%) — não são UUID de aprovador, são o limiar que decide
@@ -210,6 +217,8 @@ export async function GET() {
       aprovadores_frete_avulso_loja: configMap.get("aprovadores_frete_avulso_loja") ?? "",
       // SINGLE: gerente dona do saldo de frete grátis (verba mensal 0,1% do faturamento).
       gerente_frete_gratis: configMap.get("gerente_frete_gratis") ?? "",
+      // MULTI (BLOCO 4): pool de quem aprova o fechamento mensal com saldo negativo.
+      aprovadores_fechamento_frete: configMap.get("aprovadores_fechamento_frete") ?? "",
       // Fase 5 (15/07): limites numéricos (%), não são UUID de aprovador — ver CHAVES_NUMERICAS.
       desconto_fallback_sem_cadastro_pct: configMap.get("desconto_fallback_sem_cadastro_pct") ?? "0",
       limite_desconto_cartao_pct: configMap.get("limite_desconto_cartao_pct") ?? "20",
@@ -359,6 +368,14 @@ export async function PUT(req: NextRequest) {
     // (ORDER BY created_at) em resolverGerenteFreteGratisId.
     if (body.gerente_frete_gratis !== undefined) {
       updates.push({ chave: "gerente_frete_gratis", valor: body.gerente_frete_gratis });
+    }
+    // MULTI (BLOCO 4, 21/07): aprovadores do fechamento mensal com saldo negativo.
+    // Normaliza igual aos demais blocos MULTI acima.
+    if (body.aprovadores_fechamento_frete !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_fechamento_frete).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_fechamento_frete", valor: lista });
     }
     // Fase 5 (15/07, tela adicionada 16/07): limites em % — valida 0-100, número.
     // Sem isso gravado errado, o fallback do código (0 / 20) nunca é sobrescrito

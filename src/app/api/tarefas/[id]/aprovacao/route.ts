@@ -26,6 +26,7 @@ import { processarAprovacaoQuebraLimpeza } from "@/lib/limpeza-ouro-aprovacao";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } from "@/lib/entrega-sem-pagamento";
 import { liberarFreteAvulsoNoTx, recusarFreteAvulsoNoTx } from "@/lib/entrega-venda";
+import { aprovarFechamentoFreteNoTx, recusarFechamentoFreteNoTx } from "@/lib/frete-fechamento";
 import { podeDecidir, eventoDaTarefa } from "@/lib/aprovacoes";
 
 /**
@@ -72,8 +73,24 @@ class ErroComStatus extends Error {
  * IMPACTO SE REMOVIDO: quem solicita e é o único aprovador configurado vê
  * "Sem permissão" sem entender que a solução é configurar mais um aprovador.
  */
-function mensagemNegacaoAprovacao(motivo: string | undefined): string {
+/**
+ * REGRA DE NEGÓCIO (BLOCO 4, jul/2026 — segregação do fechamento de frete):
+ * ganhou o parâmetro `contexto` porque o MESMO motivo
+ * "aprovador_e_o_proprio_solicitante" agora pode vir de dois eventos
+ * diferentes (frete_avulso e fechamento_frete_negativo) — sem isto, a gerente
+ * barrada de aprovar o PRÓPRIO fechamento veria uma mensagem falando de
+ * "frete avulso", que não é o caso dela.
+ */
+function mensagemNegacaoAprovacao(
+  motivo: string | undefined,
+  contexto: "frete_avulso" | "fechamento_frete" = "frete_avulso",
+): string {
   if (motivo === "aprovador_e_o_proprio_solicitante") {
+    if (contexto === "fechamento_frete") {
+      return "Você é a gerente deste saldo de frete grátis — quem recebe a conta a pagar não pode " +
+        "aprovar o próprio fechamento. No momento não há outro aprovador configurado nesse pool; " +
+        "peça para adicionar mais alguém em Configurações › Aprovadores.";
+    }
     return "Você solicitou este frete avulso — quem solicita não pode aprovar o próprio pedido. " +
       "No momento não há outro aprovador configurado nesse pool; peça para adicionar mais alguém " +
       "em Configurações › Aprovadores.";
@@ -443,10 +460,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     SELECT t.venda_id, t.tags, t.tipo,
            ve.aprovacao_credito_tipo,
            ve.situacao AS venda_situacao,
-           evfa.pagante AS frete_pagante
+           evfa.pagante AS frete_pagante,
+           fmf.gerente_id AS fechamento_gerente_id
     FROM alissonerp.tarefas t
     LEFT JOIN alissonerp.vendas_erp ve ON ve.id = t.venda_id
     LEFT JOIN alissonerp.entregas_venda evfa ON evfa.tarefa_aprovacao_id = t.id
+    -- REGRA DE NEGÓCIO (BLOCO 4, jul/2026 — segregação do fechamento de frete):
+    -- traz a GERENTE dona do saldo (não quem tecnicamente criou a tarefa — a
+    -- criação é do cron/admin do sistema) para excluí-la do pool de decisão
+    -- desta tarefa específica, se ela também estiver configurada em
+    -- aprovadores_fechamento_frete. Mesmo vínculo 1:1 por tarefa_aprovacao_id
+    -- já usado para frete_avulso (evfa) acima.
+    LEFT JOIN alissonerp.fechamentos_frete fmf ON fmf.tarefa_aprovacao_id = t.id
     WHERE t.id = ${Number(id)}
   `;
   const tagsRaw = tarefaInfo?.tags;
@@ -484,19 +509,32 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // IMPACTO SE REMOVIDO: quem está no pool solicita e aprova o PRÓPRIO pedido
   // de frete avulso sozinho, sem segregação de função nenhuma.
   const ehFreteAvulsoTipo = tarefaInfo?.tipo === "frete_avulso";
+  // REGRA DE NEGÓCIO (BLOCO 4, jul/2026 — segregação do fechamento de frete):
+  // exclui a GERENTE do saldo (fechamento_gerente_id, não o solicitante
+  // gravado — a tarefa é criada pelo cron/admin do sistema) do bypass do
+  // aprovador gravado, mesmo princípio do ehFreteAvulsoTipo acima.
+  const ehFechamentoFreteTipo = tarefaInfo?.tipo === "fechamento_frete_negativo";
   const ehAprovadorGravado =
     String(aprovacao.aprovador_id) === user.id &&
-    !(ehFreteAvulsoTipo && String(aprovacao.solicitante_id) === user.id);
+    !(ehFreteAvulsoTipo && String(aprovacao.solicitante_id) === user.id) &&
+    !(ehFechamentoFreteTipo && String(tarefaInfo?.fechamento_gerente_id ?? "") === user.id);
   let autorizado = ehAprovadorGravado;
   let motivoNegado: string | undefined;
   if (!autorizado && evento) {
-    const ctxPodeDecidir = ehFreteAvulsoTipo ? { solicitanteId: String(aprovacao.solicitante_id) } : undefined;
+    const ctxPodeDecidir = ehFreteAvulsoTipo
+      ? { solicitanteId: String(aprovacao.solicitante_id) }
+      : ehFechamentoFreteTipo
+        ? { solicitanteId: String(tarefaInfo?.fechamento_gerente_id ?? "") }
+        : undefined;
     const decisaoGenerica = await podeDecidir({ id: user.id, role: usuarioLogado?.role ?? null }, evento, ctxPodeDecidir);
     autorizado = decisaoGenerica.pode;
     motivoNegado = decisaoGenerica.motivo;
   }
   if (!autorizado) {
-    return NextResponse.json({ error: mensagemNegacaoAprovacao(motivoNegado) }, { status: 403 });
+    return NextResponse.json(
+      { error: mensagemNegacaoAprovacao(motivoNegado, ehFechamentoFreteTipo ? "fechamento_frete" : "frete_avulso") },
+      { status: 403 },
+    );
   }
 
   // REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — frete avulso, pré-checagens ANTES de
@@ -530,6 +568,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
     if (body.decisao === "rejeitado" && !body.motivo?.trim()) {
       return NextResponse.json({ error: "Motivo é obrigatório para recusar o frete avulso" }, { status: 400 });
+    }
+  }
+
+  // REGRA DE NEGÓCIO (BLOCO 4, jul/2026): fechamento de frete grátis negativo —
+  // motivo obrigatório na recusa, ANTES de qualquer escrita (mesmo padrão do
+  // frete_avulso acima).
+  if (tarefaInfo?.tipo === "fechamento_frete_negativo") {
+    if (body.decisao === "rejeitado" && !body.motivo?.trim()) {
+      return NextResponse.json({ error: "Motivo é obrigatório para recusar o fechamento de frete grátis" }, { status: 400 });
     }
   }
 
@@ -578,6 +625,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // em produção. Generalizar este padrão para os demais tipos é candidata a
   // PR PRÓPRIO — não faz parte deste fix (escopo combinado: só frete avulso).
   let entregaFreteIdDecidida: number | null = null;
+  let fechamentoFreteDecidido: { fechamentoId: number; contaPagarId?: number; valor?: number } | null = null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await sql.begin(async (tx: any) => {
@@ -615,6 +663,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           await recusarFreteAvulsoNoTx(tx, entregaFreteIdDecidida, user.id, body.motivo!);
         }
       }
+
+      // REGRA DE NEGÓCIO (BLOCO 4, jul/2026 — ação de domínio do fechamento de
+      // frete grátis DENTRO da transação, mesmo desenho do frete_avulso acima):
+      // aprovar cria a conta a pagar; recusar só marca 'recusado'. Se a ação
+      // lançar, a transação INTEIRA reverte (aprovacoes_tarefa volta a
+      // 'pendente', tarefas volta a 'aguardando_aprovacao') — nunca fica
+      // "aprovada" sem a conta a pagar ter sido gravada.
+      if (tarefaInfo?.tipo === "fechamento_frete_negativo") {
+        const [fechamentoExiste] = await tx`
+          SELECT id FROM alissonerp.fechamentos_frete WHERE tarefa_aprovacao_id = ${Number(id)} LIMIT 1
+        `;
+        if (!fechamentoExiste) {
+          throw new ErroComStatus("Fechamento de frete grátis não encontrado para esta tarefa", 404);
+        }
+        if (body.decisao === "aprovado") {
+          fechamentoFreteDecidido = await aprovarFechamentoFreteNoTx(tx, Number(id), user.id);
+        } else {
+          // body.motivo já validado (não-vazio) na pré-checagem acima.
+          fechamentoFreteDecidido = await recusarFechamentoFreteNoTx(tx, Number(id), body.motivo!);
+        }
+      }
     });
   } catch (err) {
     if (err instanceof AprovacaoJaRespondidaError) {
@@ -647,6 +716,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({
       ok: true,
       frete_avulso: { entrega_id: entregaFreteIdDecidida, decisao: body.decisao },
+    });
+  }
+
+  // REGRA DE NEGÓCIO (BLOCO 4): resposta do fechamento de frete grátis — mesmo
+  // desenho do bloco frete_avulso acima (a transação já fez tudo que precisa
+  // ser atômico; notificação fica FORA, best-effort).
+  if (tarefaInfo?.tipo === "fechamento_frete_negativo" && fechamentoFreteDecidido) {
+    const decidido = fechamentoFreteDecidido as { fechamentoId: number; contaPagarId?: number; valor?: number };
+    if (tarefaInfo?.fechamento_gerente_id) {
+      await criarNotificacao({
+        usuarioId: String(tarefaInfo.fechamento_gerente_id),
+        tipo: "aprovacao",
+        titulo: body.decisao === "aprovado" ? "Fechamento de frete grátis aprovado" : "Fechamento de frete grátis recusado",
+        mensagem: body.decisao === "aprovado"
+          ? "O fechamento negativo foi aprovado — a conta a pagar foi gerada."
+          : (body.motivo ?? "O fechamento negativo foi recusado."),
+        remetenteId: user.id,
+        link: `/tarefas?abrir=${Number(id)}`,
+      }).catch(() => {});
+    }
+
+    return NextResponse.json({
+      ok: true,
+      fechamento_frete: {
+        fechamento_id: decidido.fechamentoId,
+        decisao: body.decisao,
+        ...(decidido.contaPagarId ? { conta_pagar_id: decidido.contaPagarId, valor: decidido.valor } : {}),
+      },
     });
   }
 
