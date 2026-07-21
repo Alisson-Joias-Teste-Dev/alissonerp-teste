@@ -33,7 +33,12 @@ import { isVendasFullAccess, requireVendaOwnership, NotFoundError } from "@/lib/
 
 // REGRA DE NEGÓCIO: papéis que podem visualizar a lista de entregas.
 // "consultora" tem visibilidade restrita (apenas entregas de suas vendas).
-const ROLES_ENTREGAS = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
+//
+// BLOCO 5 (jul/2026) — `estoquista_loja` entrou aqui, espelhando o mesmo gate
+// de `page.tsx` (SSR). Sem isso, a paginação/filtro client-side (que bate
+// nesta rota depois da primeira página SSR) devolveria 403 pra esse papel
+// mesmo com a tela já carregada. Ver docs/regras-negocio/entregas.md §8/§3.5.
+const ROLES_ENTREGAS = ["desenvolvedor", "admin", "gerente_loja", "consultora", "estoquista_loja"];
 
 // ─── Zod Schema para criação de entrega ─────────────────────────────────────
 // REGRA DE NEGÓCIO: valida os campos obrigatórios antes de delegar para a lib.

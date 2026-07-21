@@ -13,9 +13,10 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   Plus, Circle, Clock, CheckCircle2, XCircle, ShieldCheck,
   Search, Loader2, Zap, ListTodo, Users, AlertTriangle, Settings,
-  SlidersHorizontal, ChevronRight, LayoutGrid, Bike,
+  SlidersHorizontal, ChevronRight, LayoutGrid, Bike, Send,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import TarefaDrawer from "./TarefaDrawer";
 import AutomacoesTab from "./AutomacoesTab";
@@ -524,10 +525,19 @@ type ViewOption = {
 };
 
 const VIEW_OPTIONS: ViewOption[] = [
-  { key: "aguardando", label: "Aprovações pendentes", icon: ShieldCheck },
-  { key: "minhas",     label: "Minhas tarefas",       icon: ListTodo },
-  { key: "time",       label: "Tarefas do time",      icon: Users, requireGerente: true },
-  { key: "concluidas", label: "Concluídas",           icon: CheckCircle2 },
+  { key: "aguardando",  label: "Aprovações pendentes",  icon: ShieldCheck },
+  { key: "minhas",      label: "Minhas tarefas",        icon: ListTodo },
+  // BLOCO 5 (jul/2026), P2 — visão NOVA e escopada (ver comentário em
+  // src/app/api/tarefas/route.ts, filtro `visao === "solicitadas"`): mostra
+  // pra quem CRIOU a tarefa tudo que ele pediu, em qualquer status, inclusive
+  // rejeitada. Fica dentro do painel "Filtros" (não é `hidden md:` — funciona
+  // no celular, ao contrário do Kanban) porque é onde a consultora está.
+  // IMPACTO SE REMOVIDO: quem solicita (frete avulso e outros tipos) perde de
+  // novo o único lugar que mostra o próprio pedido depois que ele some da
+  // fila do aprovador (ex.: recusado).
+  { key: "solicitadas", label: "Minhas solicitações",   icon: Send },
+  { key: "time",        label: "Tarefas do time",       icon: Users, requireGerente: true },
+  { key: "concluidas",  label: "Concluídas",            icon: CheckCircle2 },
 ];
 
 function labelDaAba(aba: string): string {
@@ -541,6 +551,8 @@ function labelDaAba(aba: string): string {
 
 export default function TarefasClient() {
   const { user, role } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [tarefas, setTarefas] = useState<Tarefa[]>([]);
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState("");
@@ -608,7 +620,9 @@ export default function TarefasClient() {
       let url = "/api/tarefas";
       const params = new URLSearchParams();
 
-      const visaoAtiva = filtroVisao || (["minhas", "time", "aguardando", "concluidas", "vencidas"].includes(aba) && aba !== "kanban" ? aba : "");
+      // BLOCO 5: "solicitadas" (Minhas solicitações) entrou na lista de abas
+      // que viram parâmetro `visao` na API — mesmo padrão das demais.
+      const visaoAtiva = filtroVisao || (["minhas", "solicitadas", "time", "aguardando", "concluidas", "vencidas"].includes(aba) && aba !== "kanban" ? aba : "");
 
       if (visaoAtiva) params.set("visao", visaoAtiva);
 
@@ -634,6 +648,34 @@ export default function TarefasClient() {
 
   useEffect(() => { carregar(); }, [carregar]);
   useEffect(() => { carregarStats(); }, [carregarStats]);
+
+  // BLOCO 5 (jul/2026), P3(a) — deep link `?abrir=<id>` das notificações.
+  // O QUE: TODAS as notificações de tarefa/aprovação (entrega-sem-pagamento,
+  // garantia, metal, compra comercial, frete avulso, etc. — ~15 pontos de
+  // criação, ver grep por "/tarefas?abrir=") apontam pra esta URL, mas
+  // NINGUÉM lia `searchParams` aqui — o clique caía em /tarefas puro e nada
+  // abria. Busca a tarefa DIRETO por id (GET /api/tarefas/[id], que já libera
+  // pra dono/criador/aprovador — não depende da visão/filtro ativos, então
+  // funciona mesmo se a tarefa não estiver na lista carregada agora) e abre
+  // o mesmo TarefaDrawer usado ao clicar num card. Limpa o parâmetro da URL
+  // depois (router.replace) pra não reabrir ao atualizar a página ou voltar.
+  // IMPACTO SE REMOVIDO: volta o link morto — toda notificação de tarefa vira
+  // um clique que não leva a lugar nenhum.
+  const abrirProcessado = useRef<string | null>(null);
+  useEffect(() => {
+    const abrirId = searchParams.get("abrir");
+    if (!abrirId || abrirProcessado.current === abrirId) return;
+    abrirProcessado.current = abrirId;
+    apiFetch<Tarefa>(`/api/tarefas/${abrirId}`)
+      .then((t) => setDrawerTarefa(t))
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : "Não foi possível abrir a tarefa da notificação";
+        useErrorStore.getState().push(msg, { level: "warning" });
+      })
+      .finally(() => {
+        router.replace("/tarefas");
+      });
+  }, [searchParams, router]);
 
   useEffect(() => {
     apiFetch<Usuario[]>("/api/usuarios/busca?q=").then(setUsuarios)
@@ -1528,12 +1570,26 @@ export default function TarefasClient() {
                             {safeFmtDate(t.data_limite)}
                           </span>
                         )}
-                        {colInfo && (
+                        {colInfo ? (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
                             style={{ backgroundColor: colInfo.bg, color: colInfo.color }}>
                             {colInfo.label}
                           </span>
-                        )}
+                        ) : t.status === "rejeitada" ? (
+                          // BLOCO 5, P2 — 'rejeitada' NÃO está em STATUS_COLS
+                          // (esse array também monta as colunas do Kanban —
+                          // não adicionamos lá de propósito, pra não abrir uma
+                          // coluna "Rejeitada" pro board inteiro sem avaliar o
+                          // impacto geral). Aqui, só nesta lista simples, é um
+                          // fallback pontual: sem ele, uma tarefa rejeitada
+                          // aparece na aba "Minhas solicitações" sem NENHUM
+                          // selo de status — a consultora vê o título mas não
+                          // o desfecho. IMPACTO SE REMOVIDO: volta a lacuna.
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                            style={{ backgroundColor: "#FEE2E2", color: "#DC2626" }}>
+                            Rejeitada
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   </div>

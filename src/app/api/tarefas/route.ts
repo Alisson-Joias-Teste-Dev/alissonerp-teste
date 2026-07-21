@@ -253,13 +253,31 @@ export async function GET(req: NextRequest) {
       -- reais ficaram invisíveis em PRODUÇÃO por causa disso (achado 16/07,
       -- corrigido na mesma sessão). COALESCE trata o NULL como "não é reversa".
       ${sql`AND (COALESCE(t.tipo, '') <> 'conversao_reversa' OR ${reversaAprovadorCond})`}
+      -- BLOCO 5 (jul/2026), P2 — 'Minhas solicitações': visão NOVA e ESCOPADA
+      -- (não mexe em 'minhas'). O QUE: quem CRIOU a tarefa (coluna criado_por)
+      -- vê TUDO que pediu, em QUALQUER status — inclusive 'rejeitada' (sem
+      -- essa visão, uma solicitação recusada some de vez: 'concluidas' só
+      -- aceita status IN ('concluida','aprovada'), e 'minhas'/'aguardando'
+      -- nunca olham criado_por). POR QUE NÃO estender 'minhas': 'minhas' é
+      -- responsavel_id-based e é a FILA DE TRABALHO de todo mundo (inclusive
+      -- quem aprova) — misturar criado_por ali faria QUALQUER usuário que já
+      -- criou uma tarefa pra outra pessoa (ex.: gerente delegando) ver essas
+      -- tarefas para sempre na própria fila, poluindo um fluxo usado por
+      -- TODOS os tipos de tarefa, não só frete avulso. Escopar numa visão
+      -- própria evita esse efeito colateral. IMPACTO SE REMOVIDO: quem
+      -- solicita (ex.: consultora pedindo frete avulso) fica sem NENHUMA tela
+      -- que mostre o próprio pedido depois que ele sai da fila do aprovador —
+      -- achado original: "a permissão existe, mas a porta não" (4a ocorrência
+      -- desta classe de bug no módulo).
       ${visao === "minhas"
           ? sql`AND (t.responsavel_id = ${userId}::uuid)`
-          : visao === "time"
-            ? sql``
-            : !isAdmin
-              ? sql`AND (t.responsavel_id = ${userId}::uuid OR t.criado_por = ${userId}::uuid OR ${multiAprovadorCond})`
-              : sql``}
+          : visao === "solicitadas"
+            ? sql`AND (t.criado_por = ${userId}::uuid)`
+            : visao === "time"
+              ? sql``
+              : !isAdmin
+                ? sql`AND (t.responsavel_id = ${userId}::uuid OR t.criado_por = ${userId}::uuid OR ${multiAprovadorCond})`
+                : sql``}
       -- BUGFIX (16/07 — achado pelo Jonathan testando o front): "Aprovações
       -- pendentes" mostrava a tarefa pra QUALQUER admin/desenvolvedor, mesmo
       -- fora da lista configurada — clicar em Aprovar já dava 403 corretamente

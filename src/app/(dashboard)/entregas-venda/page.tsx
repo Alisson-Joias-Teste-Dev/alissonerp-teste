@@ -28,7 +28,19 @@ export const dynamic = "force-dynamic";
 
 // REGRA DE NEGÓCIO: papéis que podem acessar a listagem de entregas.
 // "consultora" tem visibilidade restrita (apenas entregas de suas vendas).
-const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
+//
+// BLOCO 5 (jul/2026) — `estoquista_loja` entrou aqui. O papel já podia CRIAR
+// frete avulso direto desde o BLOCO 3 (`podeCriarFreteAvulsoDireto`), mas não
+// tinha CAMINHO até a tela (403 neste gate — achado registrado em
+// docs/regras-negocio/entregas.md §8, resolvido agora). PEDIDO DO JONATHAN:
+// "o usuário do estoque tenha acesso às entregas avulsas... que toda entrega
+// chegue pra ele acompanhar". DECISÃO (mais simples e reversível, tomada sem
+// resposta a tempo do Jonathan — revisar se ele quiser recorte mais estrito):
+// como não existe filtro por tipo/ownership pra este papel (só `isConsultora`
+// filtra por vendedor, abaixo), `estoquista_loja` passa a ver TODAS as
+// entregas (avulsas e normais), não só as avulsas. IMPACTO SE REMOVIDO: volta
+// o 403 e o estoque perde visibilidade das corridas.
+const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_loja", "consultora", "estoquista_loja"];
 
 // ── Tipos ──────────────────────────────────────────────────────────────────────
 
