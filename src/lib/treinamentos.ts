@@ -1,4 +1,4 @@
-import { PackageOpen, Gem, type LucideIcon } from "lucide-react";
+import { PackageOpen, Gem, Bike, type LucideIcon } from "lucide-react";
 
 /**
  * REGISTRO DOS TREINAMENTOS — fonte única da Central de Treinamentos.
@@ -43,6 +43,14 @@ export const TREINAMENTOS: TreinamentoMeta[] = [
     desc: "Como transformar um ouro que está no cofre em uma joia no estoque da Loja — com foto do peso e aprovação.",
     publico: "Estoque, gerência e aprovadores",
     Icon: Gem,
+  },
+  {
+    key: "frete-avulso",
+    href: "/treinamentos/frete-avulso",
+    titulo: "Frete Avulso (solicitação)",
+    desc: "Como a consultora solicita um motoboy avulso de dentro da venda — liberação por tarefa (pool de aprovadores) e aceite pelo pool de motoboys.",
+    publico: "Consultoras, liberadores e motoboys",
+    Icon: Bike,
   },
 ];
 

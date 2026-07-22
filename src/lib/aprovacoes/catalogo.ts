@@ -237,13 +237,14 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
   },
   frete_avulso: {
     evento: "frete_avulso",
-    rotulo: "Frete avulso solicitado",
+    rotulo: "Frete avulso solicitado (pago pelo cliente)",
     configKeys: ["aprovadores_frete_avulso"],
     configMulti: true,
     camposLock: [
       "entregas_venda.tarefa_aprovacao_id",
       "entregas_venda.liberada_por",
       "entregas_venda.liberada_em",
+      "entregas_venda.pagante",
     ],
     observacao:
       "Migração do frete-avulso-solicitacao (migration 353) pra camada central — decisão do " +
@@ -251,6 +252,62 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
       "pontos do módulo Tarefas) pela política config-first já testada aqui. Tarefa tipo " +
       "'frete_avulso' é exclusiva desse fluxo (não compartilha tipo com outro evento) — " +
       "qualquer um da lista 'aprovadores_frete_avulso' decide a MESMA tarefa: aprovar libera a " +
-      "corrida (motoboy_id NULL, pool) e lança o saldo de frete; recusar exige motivo, sem custo.",
+      "corrida (motoboy_id NULL, pool) e lança o saldo de frete; recusar exige motivo, sem custo. " +
+      "REGRA 'QUEM PAGA' (migration 359, 21/07): este evento agora cobre só o pagante='cliente' " +
+      "(a lista serve para ACOMPANHAR a entrega, já paga pelo cliente) — quando pagante='loja' o " +
+      "evento é 'frete_avulso_loja' (autoriza o CUSTO). A escolha do evento é feita em " +
+      "eventoDaTarefa (src/lib/aprovacoes/evento-da-tarefa.ts) por `tarefaInfo.frete_pagante` " +
+      "(entregas_venda.pagante, join por tarefa_aprovacao_id feito pelo caller) — NÃO mais pela " +
+      "tag `frete_pagante:loja` (BLOCO 2, jul/2026: a tag era editável pelo próprio solicitante " +
+      "via PATCH /api/tarefas/[id] e deixava de ser fonte de verdade confiável). SEM pagante='loja' " +
+      "(tarefas antigas, migration 353, ou solicitação com pagante='cliente') cai aqui, mantendo " +
+      "compatibilidade com o que já existia.",
+  },
+  frete_avulso_loja: {
+    evento: "frete_avulso_loja",
+    rotulo: "Frete avulso solicitado (custo da loja)",
+    configKeys: ["aprovadores_frete_avulso_loja"],
+    configMulti: true,
+    camposLock: [
+      "entregas_venda.tarefa_aprovacao_id",
+      "entregas_venda.liberada_por",
+      "entregas_venda.liberada_em",
+      "entregas_venda.pagante",
+    ],
+    observacao:
+      "Regra 'QUEM PAGA' (migration 359, 21/07, decisão do Jonathan): quando a solicitação de " +
+      "frete avulso é paga pela LOJA (pagante='loja', sem comprovante obrigatório), a decisão " +
+      "some para uma lista PRÓPRIA e separada da usada em 'frete_avulso' (pagante='cliente') — " +
+      "esta lista autoriza o CUSTO que a loja assume, não só acompanha a corrida. Continua sendo " +
+      "UMA etapa só de aprovação (não duas): o que muda é exclusivamente QUEM decide. Evento " +
+      "irmão de 'frete_avulso' — mesma tarefa (tipo='frete_avulso'), mesmo fluxo de liberar/" +
+      "recusar (liberarFreteAvulso/recusarFreteAvulso em entrega-venda.ts); eventoDaTarefa escolhe " +
+      "entre os dois por `tarefaInfo.frete_pagante` (entregas_venda.pagante) — NÃO mais pela tag " +
+      "`frete_pagante:loja` gravada na criação (BLOCO 2, jul/2026: tag editável pelo solicitante " +
+      "via PATCH /api/tarefas/[id], deixou de ser fonte de verdade).",
+  },
+  fechamento_frete_negativo: {
+    evento: "fechamento_frete_negativo",
+    rotulo: "Fechamento mensal de frete grátis com saldo negativo",
+    configKeys: ["aprovadores_fechamento_frete"],
+    configMulti: true,
+    camposLock: [
+      "fechamentos_frete.status",
+      "fechamentos_frete.tarefa_aprovacao_id",
+      "fechamentos_frete.conta_pagar_id",
+    ],
+    observacao:
+      "BLOCO 4 (verba de frete grátis, 21/07): rotina automática do dia 01 " +
+      "(src/lib/frete-fechamento.ts, POST /api/entregas-venda/fechamento-frete-cron) fecha o " +
+      "mês anterior e, se o saldo da gerente fechar NEGATIVO, cria esta tarefa (tipo " +
+      "'fechamento_frete_negativo', exclusivo desse fluxo — não compete com nenhum outro tipo/tag). " +
+      "Aprovar gera contas_pagar (venc. dia 10) e marca fechamentos_frete.status='pago'; recusar exige " +
+      "motivo e marca status='recusado' (nenhuma conta lançada). " +
+      "SEGREGAÇÃO: quem decide (pool 'aprovadores_fechamento_frete') é DIFERENTE de quem recebe a " +
+      "conta a pagar (a gerente do saldo, gerente_frete_gratis) — se a gerente também estiver nesse " +
+      "pool, ela é excluída da lista de decisão para ESTA tarefa (mesmo princípio de " +
+      "'aprovador_e_o_proprio_solicitante' usado em frete_avulso, mas a exclusão aqui é pela GERENTE " +
+      "do fechamento, não por quem tecnicamente criou a tarefa — a criação é do cron/admin do sistema, " +
+      "não da gerente). Ver `ctx.solicitanteId` em PATCH /api/tarefas/[id]/aprovacao.",
   },
 };

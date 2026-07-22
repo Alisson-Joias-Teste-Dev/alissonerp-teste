@@ -3,71 +3,62 @@
 /**
  * EntregasVendaClient.tsx — Componente client-side da listagem de entregas.
  *
- * REGRA DE NEGÓCIO: exibe a lista paginada de entregas de venda com cards
- * de stats (pendentes, em andamento, confirmadas, total), filtros por
- * situação, busca por código/venda, tabela com colunas clicáveis e
- * drawer de detalhe ao clicar em uma entrega.
+ * REGRA DE NEGÓCIO (reforma da tela, 21/07 — mockup aprovado pelo Jonathan):
+ * a tela virou 3 ABAS (ver AbaEntrega em page.tsx) — Retirada em loja,
+ * Entregas motoboy e Pagamento do motoboy — substituindo a lista única que
+ * misturava retirada e motoboy na mesma tabela. Filtros (situação/período)
+ * viraram SELECT (antes eram chips) e a paginação passou de 50 para 10 por
+ * página. O arquivo foi COMPONENTIZADO — a tabela, os cards, os filtros, as
+ * abas e o painel de pagamento moraram para
+ * src/components/entregas/lista/ (+ PagamentoMotoboyPainel.tsx) — este
+ * arquivo agora só ORQUESTRA: mantém o estado (aba/filtros/paginação na URL,
+ * igual antes), busca dados e decide o que renderizar.
  *
- * A paginação é server-side via URL (usando o componente Paginacao com Link).
- * Filtros de situação e busca atualizam a URL, disparando nova renderização SSR.
- * Após ações no drawer (confirmar, cancelar), os dados são recarregados
- * client-side via apiFetch para refletir as mudanças sem full page reload.
+ * A paginação é server-side via URL (usando o componente Paginacao com Link,
+ * reusado de @/components/ui/Paginacao — já existia, não recriado).
+ * Filtros de aba/situação/busca/período atualizam a URL, disparando nova
+ * renderização SSR. Após ações no drawer (confirmar, cancelar), os dados são
+ * recarregados client-side via apiFetch para refletir as mudanças sem full
+ * page reload.
  *
  * O QUE: renderiza a UI completa da tela /entregas-venda com todos os
- * estados (carregando, vazio, erro, dados).
+ * estados (carregando, vazio, erro, dados) nas 3 abas.
  *
  * IMPACTO SE ALTERADO: a UI é o ponto central de visualização de entregas.
- * Alterar colunas, filtros ou ações pode quebrar o fluxo de logística.
+ * Alterar abas, colunas, filtros ou ações pode quebrar o fluxo de logística.
  */
 
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Package,
-  Truck,
-  Clock,
-  CheckCircle,
-  AlertTriangle,
-  Search,
-  X,
-  Loader2,
-  Bike,
-  Store,
-  ExternalLink,
-  DollarSign,
-} from "lucide-react";
+import { Truck, Bike, Package, Loader2 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
-import { useErrorStore } from "@/stores/errorStore";
 import Paginacao from "@/components/ui/Paginacao";
 import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
 import MotoboyDrawer from "@/components/entregas/MotoboyDrawer";
 import PagarMotoboyModal from "@/components/entregas/PagarMotoboyModal";
+import PagamentoMotoboyPainel from "@/components/entregas/PagamentoMotoboyPainel";
+import FechamentosFretePainel from "@/components/entregas/FechamentosFretePainel";
+import type { RelatorioPagamentoMotoboyListItem } from "@/lib/pagamento-motoboy";
+import type { FechamentoFreteListItem } from "@/lib/frete-fechamento";
 import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
-import type { EntregaItem, ContagensEntregas } from "./page";
-
-// ── Paleta ──────────────────────────────────────────────────────────────────────
-const C = {
-  esmeralda:   "#184036",
-  esmeraldaLt: "#18403612",
-  creme:       "#F3EADA",
-  cremeBorder: "#E8DCC8",
-  cremeBg:     "#FAFAF7",
-  vermelho:    "#DC2626",
-  vermelhoLt:  "#FEE2E2",
-  ambar:       "#D97706",
-  ambarLt:     "#FEF3C7",
-  verde:       "#059669",
-  verdeLt:     "#D1FAE5",
-  cinza:       "#6B7280",
-  cinzaBorder: "#E5E7EB",
-};
+// REGRA DE NEGÓCIO (BLOCO 3 — fonte única de permissão): quem pode CRIAR
+// frete avulso DIRETO (o botão desta tela) vem de
+// src/lib/permissoes/frete-avulso.ts — backend (route.ts) e este front usam
+// o MESMO predicado. NUNCA reescrever a lista aqui.
+import { podeCriarFreteAvulsoDireto } from "@/lib/permissoes/frete-avulso";
+import AbasEntrega from "@/components/entregas/lista/AbasEntrega";
+import FiltrosEntrega from "@/components/entregas/lista/FiltrosEntrega";
+import TabelaEntregas from "@/components/entregas/lista/TabelaEntregas";
+import CardsResumo from "@/components/entregas/lista/CardsResumo";
+import { C } from "@/components/entregas/lista/formatters";
+import type { EntregaItem, ContagensEntregas, AbaEntrega } from "./page";
 
 // ── Props ───────────────────────────────────────────────────────────────────────
 
 interface EntregasVendaClientProps {
-  /** Itens da página atual (pré-carregados via SSR) */
+  /** Itens da página atual (pré-carregados via SSR) — [] na aba "pagamento" */
   items: EntregaItem[];
-  /** Contagens para os cards de stats */
+  /** Contagens para os cards de stats — zeradas na aba "pagamento" */
   contagens: ContagensEntregas;
   /** Página atual (1-indexed) */
   currentPage: number;
@@ -87,6 +78,20 @@ interface EntregasVendaClientProps {
   dataFimFiltro: string;
   /** Role do usuário logado */
   userRole: string;
+  /** Aba ativa (retirada | motoboy | pagamento) — vinda da URL (?aba=) */
+  aba: AbaEntrega;
+  /**
+   * Relatórios de pagamento do motoboy (aba "pagamento") — SSR paginado,
+   * MESMO padrão de `items` para as outras abas. [] nas demais abas.
+   * Ver docs/regras-negocio/entregas.md §12.8 (relatórios PERSISTIDOS).
+   */
+  relatoriosPagamento: RelatorioPagamentoMotoboyListItem[];
+  /**
+   * Fechamentos mensais da verba de frete grátis (aba "fechamentos", BLOCO 5)
+   * — SSR paginado, MESMO padrão de `relatoriosPagamento`. [] nas demais abas.
+   * Ver docs/regras-negocio/entregas.md §10.6.
+   */
+  fechamentosFrete: FechamentoFreteListItem[];
 }
 
 /** Formato de resposta da API de listagem de entregas */
@@ -96,108 +101,6 @@ interface EntregasListResponse {
   page: number;
   limit: number;
   totalPages: number;
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────────────────
-
-/** Formata valor monetário em BRL */
-function fmtBRL(v: number) {
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-/** Formata data ISO para dd/mm/aaaa */
-function fmtData(s: string | null) {
-  if (!s) return "—";
-  const d = s.slice(0, 10);
-  const [y, m, day] = d.split("-");
-  if (!y || !m || !day) return s;
-  return `${day}/${m}/${y}`;
-}
-
-/** Formata data ISO para dd/mm/aaaa HH:MM */
-function fmtDtHr(s: string) {
-  if (!s) return "—";
-  try {
-    return new Date(s).toLocaleString("pt-BR", {
-      dateStyle: "short",
-      timeStyle: "short",
-    });
-  } catch {
-    return s;
-  }
-}
-
-/** Label amigável para forma de entrega */
-function labelForma(f: string): string {
-  return f === "retirada" ? "Retirada" : "Motoboy";
-}
-
-/**
- * Renderiza a coluna de data conforme o status da entrega.
- * REGRA DE NEGÓCIO: entrega confirmada mostra data de entrega/retirada,
- * em rota mostra data de saída, pendente mostra data de criação.
- */
-function renderDataColuna(item: EntregaItem) {
-  if (item.situacao === "confirmada" && item.data_entrega_realizada) {
-    return (
-      <>
-        <div style={{ fontSize: 12, color: "#16A34A", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3 }}>
-          {fmtData(item.data_entrega_realizada)}
-        </div>
-        <div style={{ fontSize: 10, color: C.cinza, marginTop: 2 }}>
-          Entregue {fmtDtHr(item.data_entrega_realizada)}
-        </div>
-      </>
-    );
-  }
-  if (item.situacao === "confirmada" && item.data_retirada) {
-    return (
-      <>
-        <div style={{ fontSize: 12, color: "#16A34A", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3 }}>
-          {fmtData(item.data_retirada)}
-        </div>
-        <div style={{ fontSize: 10, color: C.cinza, marginTop: 2 }}>
-          Retirada {fmtDtHr(item.data_retirada)}
-        </div>
-      </>
-    );
-  }
-  if (item.situacao === "em_rota" && item.data_saida) {
-    return (
-      <>
-        <div style={{ fontSize: 12, color: "#9A3412", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3 }}>
-          {fmtData(item.data_saida)}
-        </div>
-        <div style={{ fontSize: 10, color: C.cinza, marginTop: 2 }}>
-          Saiu {fmtDtHr(item.data_saida)}
-        </div>
-      </>
-    );
-  }
-  return (
-    <>
-      <div style={{ fontSize: 12, color: "#1f2937" }}>
-        {fmtData(item.created_at)}
-      </div>
-      <div style={{ fontSize: 10, color: C.cinza, marginTop: 2 }}>
-        {fmtDtHr(item.created_at)}
-      </div>
-    </>
-  );
-}
-
-/** Badge de status com cores */
-function statusBadge(situacao: string) {
-  switch (situacao) {
-    case "pendente":
-      return { text: "Pendente", color: C.ambar, bg: C.ambarLt };
-    case "confirmada":
-      return { text: "Confirmada", color: C.verde, bg: C.verdeLt };
-    case "cancelada":
-      return { text: "Cancelada", color: C.cinza, bg: C.cremeBg };
-    default:
-      return { text: situacao, color: C.cinza, bg: C.cremeBg };
-  }
 }
 
 // ── Componente principal ────────────────────────────────────────────────────────
@@ -214,6 +117,9 @@ export default function EntregasVendaClient({
   dataInicioFiltro,
   dataFimFiltro,
   userRole,
+  aba,
+  relatoriosPagamento,
+  fechamentosFrete,
 }: EntregasVendaClientProps) {
   const router = useRouter();
 
@@ -227,7 +133,7 @@ export default function EntregasVendaClient({
   const [loading, setLoading] = useState(false);
 
   // REGRA DE NEGÓCIO: sincroniza estado local com props do SSR quando a URL muda
-  // (router.push com novos filtros). Sem isso, o estado fica preso nos dados iniciais.
+  // (router.push com novos filtros/aba). Sem isso, o estado fica preso nos dados iniciais.
   useEffect(() => {
     setItems(ssrItems);
     setContagens(ssrContagens);
@@ -246,10 +152,20 @@ export default function EntregasVendaClient({
 
   // Drawer de motoboys
   const [motoboyDrawerOpen, setMotoboyDrawerOpen] = useState(false);
-  // Modal de pagamento em lote
+  // Modal de pagamento em lote (acessado pelo drawer de Motoboys — ver §
+  // "Pagamento do motoboy" no relato: reusa PagamentoMotoboyPainel, igual à aba)
   const [pagarMotoboyOpen, setPagarMotoboyOpen] = useState(false);
   // Modal de frete avulso
   const [freteAvulsoOpen, setFreteAvulsoOpen] = useState(false);
+  // REGRA DE NEGÓCIO (BLOCO 3 — fonte única de permissão): este botão cria
+  // frete avulso DIRETO (já liberado, lança saldo na hora) — antes não
+  // checava cargo nenhum aqui (qualquer um que chegasse até a página via
+  // page.tsx via a lista antiga). Agora usa o MESMO predicado do backend
+  // (route.ts) — se um papel for removido/adicionado, os dois lados mudam
+  // juntos (fonte única em src/lib/permissoes/frete-avulso.ts).
+  // IMPACTO SE REMOVIDO: o botão volta a aparecer pra quem o backend recusa
+  // com 403 (UX ruim — clique sem efeito), ou some pra quem deveria ver.
+  const podeCriarDireto = podeCriarFreteAvulsoDireto(userRole);
 
   // ── Saldo de frete grátis ──────────────────────────────────────────────────
   const [saldoFrete, setSaldoFrete] = useState<number | null>(null);
@@ -263,14 +179,17 @@ export default function EntregasVendaClient({
   // ── Recarregar dados via API (client-side) ──────────────────────────────────
   // REGRA DE NEGÓCIO: função usada para refresh após ações no drawer
   // (confirmação de retirada, registro de saída, cancelamento).
-  // Mantém a página e filtros atuais para consistência com a URL.
+  // Mantém a página, aba e filtros atuais para consistência com a URL.
   // Usa apiFetch que lança erro em falhas de rede e respostas não-2xx.
+  // Nunca roda nas abas "pagamento"/"fechamentos" (não há lista de entregas lá).
   const recarregar = useCallback(async () => {
+    if (aba === "pagamento" || aba === "fechamentos") return;
     setLoading(true);
     try {
       const params = new URLSearchParams({
         page: String(currentPage),
         limit: String(pageSize),
+        forma_entrega: aba,
       });
       if (situacaoFiltro) params.set("situacao", situacaoFiltro);
       if (dataInicioFiltro) params.set("data_inicio", dataInicioFiltro);
@@ -304,17 +223,30 @@ export default function EntregasVendaClient({
     } finally {
       setLoading(false);
     }
-  }, [currentPage, pageSize, situacaoFiltro]);
+  }, [aba, currentPage, pageSize, situacaoFiltro, dataInicioFiltro, dataFimFiltro]);
 
-  // ── Handlers de filtro (SSR-based via URL) ─────────────────────────────────
-  // REGRA DE NEGÓCIO: filtros de situação e busca atualizam a URL,
+  // ── Handlers de filtro/aba (SSR-based via URL) ─────────────────────────────
+  // REGRA DE NEGÓCIO: aba, filtros de situação e busca atualizam a URL,
   // disparando uma nova renderização SSR com os dados filtrados.
   // Isso mantém a URL compartilhável e o comportamento previsível.
+
+  /** Troca de aba preservando os demais filtros ativos, volta para a página 1. */
+  function handleAbaChange(novaAba: AbaEntrega) {
+    const params = new URLSearchParams();
+    params.set("page", "1");
+    params.set("aba", novaAba);
+    if (situacaoFiltro) params.set("situacao", situacaoFiltro);
+    if (buscaInput.trim()) params.set("busca", buscaInput.trim());
+    if (dataInicioFiltro) params.set("data_inicio", dataInicioFiltro);
+    if (dataFimFiltro) params.set("data_fim", dataFimFiltro);
+    router.push(`/entregas-venda?${params.toString()}`);
+  }
 
   /** Altera o filtro de situação e recarrega a página 1 */
   function handleSituacaoChange(novaSituacao: string) {
     const params = new URLSearchParams();
     params.set("page", "1");
+    params.set("aba", aba);
     if (novaSituacao) params.set("situacao", novaSituacao);
     if (buscaInput.trim()) params.set("busca", buscaInput.trim());
     router.push(`/entregas-venda?${params.toString()}`);
@@ -324,6 +256,7 @@ export default function EntregasVendaClient({
   function handleBuscaSubmit() {
     const params = new URLSearchParams();
     params.set("page", "1");
+    params.set("aba", aba);
     if (situacaoFiltro) params.set("situacao", situacaoFiltro);
     if (buscaInput.trim()) params.set("busca", buscaInput.trim());
     router.push(`/entregas-venda?${params.toString()}`);
@@ -334,6 +267,7 @@ export default function EntregasVendaClient({
     setBuscaInput("");
     const params = new URLSearchParams();
     params.set("page", "1");
+    params.set("aba", aba);
     if (situacaoFiltro) params.set("situacao", situacaoFiltro);
     if (dataInicioFiltro) params.set("data_inicio", dataInicioFiltro);
     if (dataFimFiltro) params.set("data_fim", dataFimFiltro);
@@ -370,6 +304,7 @@ export default function EntregasVendaClient({
 
     const params = new URLSearchParams();
     params.set("page", "1");
+    params.set("aba", aba);
     if (situacaoFiltro) params.set("situacao", situacaoFiltro);
     if (ini) params.set("data_inicio", ini);
     if (fim) params.set("data_fim", fim);
@@ -379,6 +314,7 @@ export default function EntregasVendaClient({
   function handleAplicarPersonalizado() {
     const params = new URLSearchParams();
     params.set("page", "1");
+    params.set("aba", aba);
     if (situacaoFiltro) params.set("situacao", situacaoFiltro);
     if (dataInicioInput) params.set("data_inicio", dataInicioInput);
     if (dataFimInput) params.set("data_fim", dataFimInput);
@@ -391,6 +327,7 @@ export default function EntregasVendaClient({
     setDataFimInput("");
     const params = new URLSearchParams();
     params.set("page", "1");
+    params.set("aba", aba);
     if (situacaoFiltro) params.set("situacao", situacaoFiltro);
     router.push(`/entregas-venda?${params.toString()}`);
   }
@@ -404,38 +341,17 @@ export default function EntregasVendaClient({
 
   // ── Construção do extraParams para Paginacao ────────────────────────────────
   // REGRA DE NEGÓCIO: Paginacao usa Links com query params. Precisamos
-  // preservar os filtros atuais nos links de paginação para que a navegação
-  // entre páginas mantenha os filtros aplicados.
+  // preservar aba + filtros atuais nos links de paginação para que a
+  // navegação entre páginas mantenha a aba e os filtros aplicados.
+  // Reusa o componente @/components/ui/Paginacao já existente no projeto —
+  // não foi criado um novo (pedido de reuso, ver relato).
   const paginacaoExtraParams = [
+    `aba=${encodeURIComponent(aba)}`,
     situacaoFiltro ? `situacao=${encodeURIComponent(situacaoFiltro)}` : "",
     buscaFiltro ? `busca=${encodeURIComponent(buscaFiltro)}` : "",
     dataInicioFiltro ? `data_inicio=${encodeURIComponent(dataInicioFiltro)}` : "",
     dataFimFiltro ? `data_fim=${encodeURIComponent(dataFimFiltro)}` : "",
   ].filter(Boolean).join("&");
-
-  // ── Dados da UI ────────────────────────────────────────────────────────────
-
-  const situacoes = [
-    { value: "",            label: "Todas" },
-    { value: "pendente",    label: "Pendentes" },
-    { value: "em_rota",     label: "Em Rota" },
-    { value: "confirmada",  label: "Confirmadas" },
-  ];
-
-  const meses = [
-    { value: "mes_0",  label: "Janeiro" },
-    { value: "mes_1",  label: "Fevereiro" },
-    { value: "mes_2",  label: "Março" },
-    { value: "mes_3",  label: "Abril" },
-    { value: "mes_4",  label: "Maio" },
-    { value: "mes_5",  label: "Junho" },
-    { value: "mes_6",  label: "Julho" },
-    { value: "mes_7",  label: "Agosto" },
-    { value: "mes_8",  label: "Setembro" },
-    { value: "mes_9",  label: "Outubro" },
-    { value: "mes_10", label: "Novembro" },
-    { value: "mes_11", label: "Dezembro" },
-  ];
 
   return (
     <div style={{ background: C.cremeBg, minHeight: "100vh", padding: "20px 16px" }}>
@@ -459,18 +375,20 @@ export default function EntregasVendaClient({
             </p>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-            <button
-              onClick={() => setFreteAvulsoOpen(true)}
-              style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "8px 14px", borderRadius: 8,
-                border: `1px solid ${C.esmeralda}`,
-                background: C.esmeralda, color: "#fff", fontSize: 13, fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              <Bike size={16} /> Frete Avulso
-            </button>
+            {podeCriarDireto && (
+              <button
+                onClick={() => setFreteAvulsoOpen(true)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "8px 14px", borderRadius: 8,
+                  border: `1px solid ${C.esmeralda}`,
+                  background: C.esmeralda, color: "#fff", fontSize: 13, fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <Bike size={16} /> Frete Avulso
+              </button>
+            )}
             <button
               onClick={() => setMotoboyDrawerOpen(true)}
               style={{
@@ -485,508 +403,127 @@ export default function EntregasVendaClient({
           </div>
         </div>
 
-        {/* ── Cards de Stats ─────────────────────────────────────────────────── */}
-        {/* REGRA DE NEGÓCIO: 4 cards resumindo a situação das entregas.
-            Pendentes = aguardando ação (retirada ou saída do motoboy).
-            Em Andamento = motoboy já retirou (data_saida preenchida) mas não entregou.
-            Confirmadas = entrega finalizada.
-            Total = soma de todas as situações considerando os filtros ativos. */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-          gap: 12, marginBottom: 20,
-        }}>
-          {/* Saldo de Frete Grátis — exibido antes dos cards de contagem */}
-          {saldoFrete !== null && (
-            <div style={{
-              background: "#fff", border: `1px solid ${C.cremeBorder}`,
-              borderRadius: 10, padding: "14px 16px",
-            }}>
-              <div style={{
-                fontSize: 11, color: C.cinza, marginBottom: 4,
-                display: "flex", alignItems: "center", gap: 5,
-              }}>
-                <DollarSign size={12} /> Saldo Frete Grátis
-              </div>
-              <div style={{
-                fontWeight: 700, fontSize: 24,
-                color: saldoFrete >= 0 ? C.verde : C.vermelho,
-              }}>
-                {fmtBRL(saldoFrete)}
-              </div>
-            </div>
-          )}
-          {/* Pendentes */}
-          <div style={{
-            background: "#fff", border: `1px solid ${C.cremeBorder}`,
-            borderRadius: 10, padding: "14px 16px",
-          }}>
-            <div style={{
-              fontSize: 11, color: C.cinza, marginBottom: 4,
-              display: "flex", alignItems: "center", gap: 5,
-            }}>
-              <Clock size={12} /> Pendentes
-            </div>
-            <div style={{ fontWeight: 700, fontSize: 24, color: C.ambar }}>
-              {contagens.pendente}
-            </div>
-          </div>
+        {/* ── Abas ──────────────────────────────────────────────────────────── */}
+        <AbasEntrega abaAtual={aba} onChange={handleAbaChange} userRole={userRole} />
 
-          {/* Em Andamento */}
-          <div style={{
-            background: "#fff", border: `1px solid ${C.cremeBorder}`,
-            borderRadius: 10, padding: "14px 16px",
-          }}>
-            <div style={{
-              fontSize: 11, color: C.cinza, marginBottom: 4,
-              display: "flex", alignItems: "center", gap: 5,
-            }}>
-              <Bike size={12} /> Em Andamento
-            </div>
-            <div style={{ fontWeight: 700, fontSize: 24, color: C.esmeralda }}>
-              {contagens.em_andamento}
-            </div>
-          </div>
-
-          {/* Confirmadas */}
-          <div style={{
-            background: "#fff", border: `1px solid ${C.cremeBorder}`,
-            borderRadius: 10, padding: "14px 16px",
-          }}>
-            <div style={{
-              fontSize: 11, color: C.cinza, marginBottom: 4,
-              display: "flex", alignItems: "center", gap: 5,
-            }}>
-              <CheckCircle size={12} /> Confirmadas
-            </div>
-            <div style={{ fontWeight: 700, fontSize: 24, color: C.verde }}>
-              {contagens.confirmada}
-            </div>
-          </div>
-
-          {/* Total */}
-          <div style={{
-            background: "#fff", border: `1px solid ${C.cremeBorder}`,
-            borderRadius: 10, padding: "14px 16px",
-          }}>
-            <div style={{
-              fontSize: 11, color: C.cinza, marginBottom: 4,
-              display: "flex", alignItems: "center", gap: 5,
-            }}>
-              <Package size={12} /> Total
-            </div>
-            <div style={{ fontWeight: 700, fontSize: 24, color: C.cinza }}>
-              {contagens.total}
-            </div>
-          </div>
-        </div>
-
-        {/* ── Filtros ───────────────────────────────────────────────────────── */}
-        <div style={{
-          display: "flex", gap: 8, alignItems: "center",
-          marginBottom: 14, flexWrap: "wrap",
-        }}>
-          {/* Botões de situação */}
-          {situacoes.map(s => (
-            <button
-              key={s.value}
-              onClick={() => handleSituacaoChange(s.value)}
-              style={{
-                padding: "6px 14px", borderRadius: 20, border: "none",
-                cursor: "pointer", fontSize: 13, fontWeight: 600,
-                background: situacaoFiltro === s.value ? C.esmeralda : "#fff",
-                color:      situacaoFiltro === s.value ? "#fff" : C.cinza,
-                boxShadow:  situacaoFiltro === s.value ? "none" : `0 0 0 1px ${C.cremeBorder}`,
-              }}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        {/* ── Filtros de período ───────────────────────────────────────────── */}
-        <div style={{
-          display: "flex", gap: 6, alignItems: "center",
-          marginBottom: 14, flexWrap: "wrap",
-        }}>
-          {[
-            { val: "hoje", label: "Hoje" },
-            { val: "ontem", label: "Ontem" },
-            { val: "7dias", label: "7 dias" },
-            { val: "mes", label: "Este mês" },
-          ].map(p => (
-            <button key={p.val}
-              onClick={() => handlePeriodoChange(p.val)}
-              style={{
-                padding: "5px 12px", borderRadius: 20, border: "none",
-                cursor: "pointer", fontSize: 12, fontWeight: 600,
-                background: periodo === p.val ? C.esmeralda : "#fff",
-                color: periodo === p.val ? "#fff" : C.cinza,
-                boxShadow: periodo === p.val ? "none" : `0 0 0 1px ${C.cremeBorder}`,
-              }}>
-              {p.label}
-            </button>
-          ))}
-
-          <select
-            value={periodo.startsWith("mes_") ? periodo : ""}
-            onChange={(e) => { if (e.target.value) handlePeriodoChange(e.target.value); }}
-            style={{
-              padding: "5px 10px", borderRadius: 20, border: `1px solid ${C.cremeBorder}`,
-              background: "#fff", color: C.cinza, fontSize: 12, fontWeight: 600, cursor: "pointer",
-            }}>
-            <option value="">Mês...</option>
-            {meses.map(m => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
-          </select>
-
-          <button
-            onClick={() => setPeriodo("personalizado")}
-            style={{
-              padding: "5px 12px", borderRadius: 20, border: "none",
-              cursor: "pointer", fontSize: 12, fontWeight: 600,
-              background: periodo === "personalizado" ? C.esmeralda : "#fff",
-              color: periodo === "personalizado" ? "#fff" : C.cinza,
-              boxShadow: periodo === "personalizado" ? "none" : `0 0 0 1px ${C.cremeBorder}`,
-            }}>
-            Personalizado
-          </button>
-
-          {(dataInicioFiltro || dataFimFiltro) && (
-            <button onClick={handleLimparData}
-              style={{
-                padding: "5px 10px", borderRadius: 20, border: "none",
-                background: C.vermelhoLt, color: C.vermelho, fontSize: 12, fontWeight: 600, cursor: "pointer",
-              }}>
-              ✕ Limpar
-            </button>
-          )}
-        </div>
-
-        {/* ── Inputs de data personalizada ─────────────────────────────────── */}
-        {periodo === "personalizado" && (
-          <div style={{
-            display: "flex", gap: 8, alignItems: "center",
-            marginBottom: 14, flexWrap: "wrap",
-          }}>
-            <label style={{ fontSize: 12, color: C.cinza, fontWeight: 600 }}>De:</label>
-            <input type="date" value={dataInicioInput}
-              onChange={e => setDataInicioInput(e.target.value)}
-              style={{
-                padding: "6px 10px", borderRadius: 6, border: `1px solid ${C.cremeBorder}`,
-                fontSize: 12, background: "#fff", color: "#1f2937",
-              }} />
-            <label style={{ fontSize: 12, color: C.cinza, fontWeight: 600 }}>Até:</label>
-            <input type="date" value={dataFimInput}
-              onChange={e => setDataFimInput(e.target.value)}
-              style={{
-                padding: "6px 10px", borderRadius: 6, border: `1px solid ${C.cremeBorder}`,
-                fontSize: 12, background: "#fff", color: "#1f2937",
-              }} />
-            <button onClick={handleAplicarPersonalizado}
-              style={{
-                padding: "6px 14px", borderRadius: 6, border: "none",
-                background: C.esmeralda, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
-              }}>
-              Filtrar
-            </button>
-          </div>
-        )}
-
-        {/* ── Busca ─────────────────────────────────────────────────────────── */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          background: "#fff", border: `1px solid ${C.cremeBorder}`,
-          borderRadius: 8, padding: "8px 12px", marginBottom: 16,
-        }}>
-          <Search size={15} color={C.cinza} />
-          <input
-            value={buscaInput}
-            onChange={e => setBuscaInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "Enter") handleBuscaSubmit();
-            }}
-            placeholder="Buscar por código ou número da venda..."
-            style={{
-              border: "none", outline: "none", flex: 1, fontSize: 13,
-              background: "transparent", color: "#1f2937",
-            }}
-          />
-          {buscaInput && (
-            <button
-              onClick={handleLimparBusca}
-              style={{
-                background: "none", border: "none", cursor: "pointer",
-                padding: "2px 4px",
-              }}
-              aria-label="Limpar busca"
-            >
-              <X size={14} color={C.cinza} />
-            </button>
-          )}
-          <button
-            onClick={handleBuscaSubmit}
-            style={{
-              padding: "5px 12px", background: C.esmeralda, color: "#fff",
-              border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Buscar
-          </button>
-        </div>
-
-        {/* ── Tabela / Loading / Empty State ─────────────────────────────────── */}
-        {loading ? (
-          <div style={{
-            display: "flex", justifyContent: "center", padding: 40,
-          }}>
-            <Loader2 size={24} color={C.esmeralda}
-              style={{ animation: "spin 1s linear infinite" }} />
-          </div>
-        ) : items.length === 0 ? (
-          /* ── Empty State ──────────────────────────────────────────────────── */
-          <div style={{
-            textAlign: "center", padding: 64, color: C.cinza,
-            background: "#fff", borderRadius: 12,
-            border: `1px solid ${C.cremeBorder}`,
-          }}>
-            <Package size={40} style={{ opacity: 0.25, marginBottom: 12 }} />
-            <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: C.cinza }}>
-              Nenhuma entrega encontrada
-            </p>
-            <p style={{ margin: "4px 0 0", fontSize: 13, color: C.cinza }}>
-              {situacaoFiltro
-                ? `Não há entregas com situação "${situacaoFiltro}"`
-                : buscaFiltro
-                ? `Nenhum resultado para "${buscaFiltro}"`
-                : "Nenhuma entrega registrada no sistema"}
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* ── Tabela ────────────────────────────────────────────────────── */}
-            {/* REGRA DE NEGÓCIO: a tabela lista as colunas: Código, Venda,
-                Cliente, Status, Forma, Motoboy, Frete, Data.
-                Cada linha é clicável e abre o drawer de detalhe.
-                O link da venda é independente (abre a página da venda). */}
-            <div style={{
-              overflowX: "auto",
-              background: "#fff", borderRadius: 10,
-              border: `1px solid ${C.cremeBorder}`,
-            }}>
-              <table style={{
-                width: "100%", borderCollapse: "collapse",
-                fontSize: 13,
-              }}>
-                <thead>
-                  <tr style={{
-                    background: C.cremeBg,
-                    borderBottom: `1px solid ${C.cremeBorder}`,
-                  }}>
-                    <ThC label="Código" />
-                    <ThC label="Venda" />
-                    <ThC label="Cliente" />
-                    <ThC label="Status" />
-                    <ThC label="Forma" />
-                    <ThC label="Motoboy" />
-                    <ThC label="Frete" align="right" />
-                    <ThC label="Data" align="right" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => {
-                    const badge = statusBadge(item.situacao);
-                    return (
-                      <tr
-                        key={item.id}
-                        onClick={() => setSelectedEntregaId(item.id)}
-                        style={{
-                          cursor: "pointer",
-                          borderBottom: `1px solid ${C.cremeBorder}`,
-                          transition: "background 0.15s",
-                        }}
-                        onMouseEnter={e => {
-                          (e.currentTarget as HTMLElement).style.background = C.cremeBg;
-                        }}
-                        onMouseLeave={e => {
-                          (e.currentTarget as HTMLElement).style.background = "#fff";
-                        }}
-                      >
-                        {/* Código */}
-                        <td style={{
-                          padding: "10px 14px", whiteSpace: "nowrap",
-                        }}>
-                          <span style={{
-                            fontFamily: "monospace", fontWeight: 600,
-                            color: C.esmeralda, fontSize: 12,
-                            cursor: "pointer",
-                          }}>
-                            {item.codigo_entrega}
-                          </span>
-                        </td>
-
-                        {/* Venda */}
-                        <td style={{
-                          padding: "10px 14px", whiteSpace: "nowrap",
-                        }}>
-                          {item.is_avulso ? (
-                            <span style={{
-                              display: "inline-block",
-                              fontSize: 10, fontWeight: 700,
-                              padding: "2px 8px", borderRadius: 20,
-                              background: "#EDE9FE", color: "#6D28D9",
-                            }}>
-                              Avulso
-                            </span>
-                          ) : item.numero_venda ? (
-                            <a
-                              href={`/vendas/${item.venda_id}`}
-                              onClick={e => e.stopPropagation()}
-                              style={{
-                                color: C.esmeralda, textDecoration: "none",
-                                fontWeight: 600, fontSize: 12,
-                                display: "inline-flex", alignItems: "center", gap: 4,
-                              }}
-                            >
-                              {item.numero_venda}
-                              <ExternalLink size={10} />
-                            </a>
-                          ) : (
-                            <span style={{ color: C.cinza, fontSize: 12 }}>
-                              #{item.venda_id}
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Cliente */}
-                        <td style={{
-                          padding: "10px 14px", whiteSpace: "nowrap",
-                          maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis",
-                        }}>
-                          <div>
-                            <span style={{ color: "#1f2937", fontSize: 13 }}>
-                              {item.cliente_nome ?? "—"}
-                            </span>
-                            {item.is_avulso && item.descricao_avulso && (
-                              <div style={{ fontSize: 11, color: C.cinza, marginTop: 2 }}>
-                                {item.descricao_avulso}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* Status */}
-                        <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
-                          <span style={{
-                            display: "inline-block",
-                            fontSize: 11, fontWeight: 700,
-                            padding: "3px 10px", borderRadius: 20,
-                            background: badge.bg,
-                            color: badge.color,
-                          }}>
-                            {badge.text}
-                          </span>
-                        </td>
-
-                        {/* Forma */}
-                        <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
-                          <span style={{
-                            display: "flex", alignItems: "center", gap: 4,
-                            fontSize: 12, color: "#1f2937",
-                          }}>
-                            {item.forma_entrega === "retirada"
-                              ? <Store size={12} color={C.cinza} />
-                              : <Bike size={12} color={C.cinza} />
-                            }
-                            {labelForma(item.forma_entrega)}
-                          </span>
-                        </td>
-
-                        {/* Motoboy */}
-                        <td style={{
-                          padding: "10px 14px", whiteSpace: "nowrap",
-                        }}>
-                          <span style={{
-                            color: item.motoboy_nome ? "#1f2937" : C.cinza,
-                            fontSize: 12,
-                          }}>
-                            {item.motoboy_nome ?? "—"}
-                          </span>
-                        </td>
-
-                        {/* Frete */}
-                        <td style={{
-                          padding: "10px 14px", whiteSpace: "nowrap",
-                          textAlign: "right",
-                        }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#1f2937" }}>
-                            {fmtBRL(item.frete_cobrado)}
-                          </div>
-                          {item.frete_motoboy > 0 && (
-                            <div style={{
-                              fontSize: 10, color: C.cinza,
-                            }}>
-                              Motoboy: {fmtBRL(item.frete_motoboy)}
-                            </div>
-                          )}
-                          {item.aprovacao_frete_necessaria && (
-                            <div style={{
-                              display: "flex", alignItems: "center", gap: 3,
-                              justifyContent: "flex-end", marginTop: 2,
-                            }}>
-                              <AlertTriangle size={9} color={C.ambar} />
-                              <span style={{ fontSize: 9, color: C.ambar, fontWeight: 600 }}>
-                                Pendente
-                              </span>
-                            </div>
-                          )}
-                        </td>
-
-                        {/* Data */}
-                        {/* REGRA DE NEGÓCIO: mostra a data mais relevante conforme o status.
-                            Pendente → data de criação. Em rota → data de saída.
-                            Confirmada → data de entrega (ou retirada). */}
-                        <td style={{
-                          padding: "10px 14px", whiteSpace: "nowrap",
-                          textAlign: "right",
-                        }}>
-                          {renderDataColuna(item)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-
-        {/* ── Paginação ──────────────────────────────────────────────────────── */}
-        {/* REGRA DE NEGÓCIO: Paginacao usa Link do Next.js para navegação
-            server-side. Os parâmetros de filtro são preservados via extraParams.
-            Só exibe se houver mais de uma página. */}
-        {totalPages > 1 && (
-          <Paginacao
+        {aba === "pagamento" ? (
+          /* ── Aba: Pagamento do motoboy ───────────────────────────────────────
+             REGRA DE NEGÓCIO (reforma 21/07/2026 — relatórios PERSISTIDOS,
+             mockup aprovado pelo Jonathan; ver
+             docs/regras-negocio/entregas.md §12.8): o seletor de motoboy
+             solto + pagamento em lote por checkbox SAIU desta aba (voltou a
+             morar só no modal `PagarMotoboyModal.tsx`, aberto pelo drawer de
+             Motoboys). Esta aba agora é SÓ `PagamentoMotoboyPainel`: form
+             "Criar relatório" (entregador+período) + lista paginada (10/pg,
+             SSR via `relatoriosPagamento`) que NUNCA some (aguardando E
+             pagos) + "Abrir"/"Confirmar pagamento" por linha. */
+          <PagamentoMotoboyPainel
+            relatoriosSSR={relatoriosPagamento}
             currentPage={currentPage}
             totalPages={totalPages}
             totalItems={totalItems}
             pageSize={pageSize}
-            baseUrl="/entregas-venda"
-            extraParams={paginacaoExtraParams || undefined}
           />
-        )}
+        ) : aba === "fechamentos" ? (
+          /* ── Aba: Fechamentos de frete (BLOCO 5, 21/07/2026) ──────────────────
+             REGRA DE NEGÓCIO (mockup aprovado pelo Jonathan; ver
+             docs/regras-negocio/entregas.md §10.6): relatório 100% READ-ONLY
+             dos fechamentos mensais da verba de frete grátis — mês mais
+             recente primeiro, SSR via `fechamentosFrete`. Só chega aqui quem
+             passou pelo gate de papel em page.tsx (ROLES_PAGAMENTO_MOTOBOY) —
+             ver também o filtro de visibilidade da própria aba em
+             AbasEntrega.tsx. */
+          <FechamentosFretePainel
+            fechamentosSSR={fechamentosFrete}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            pageSize={pageSize}
+          />
+        ) : (
+          <>
+            {/* ── Cards de Stats ───────────────────────────────────────────────
+                REGRA DE NEGÓCIO: contagens já vêm ESCOPADAS à aba atual (SSR
+                filtra por forma_entrega). Saldo de Frete Grátis só na aba
+                "Entregas motoboy" (retirada não tem frete). */}
+            <CardsResumo
+              contagens={contagens}
+              saldoFrete={saldoFrete}
+              mostrarSaldoFrete={aba === "motoboy"}
+            />
 
-        {/* ── Footer com resumo ─────────────────────────────────────────────── */}
-        {items.length > 0 && (
-          <p style={{
-            textAlign: "center", fontSize: 12, color: C.cinza, marginTop: 12,
-          }}>
-            {items.length} entrega{items.length !== 1 ? "s" : ""} nesta página
-            {situacaoFiltro && ` · situação: ${situacaoFiltro}`}
-            {buscaFiltro && ` · busca: "${buscaFiltro}"`}
-          </p>
+            {/* ── Filtros (situação/período em SELECT + busca) ─────────────── */}
+            <FiltrosEntrega
+              situacaoFiltro={situacaoFiltro}
+              onSituacaoChange={handleSituacaoChange}
+              periodo={periodo}
+              onPeriodoChange={handlePeriodoChange}
+              dataInicioInput={dataInicioInput}
+              dataFimInput={dataFimInput}
+              onDataInicioChange={setDataInicioInput}
+              onDataFimChange={setDataFimInput}
+              onAplicarPersonalizado={handleAplicarPersonalizado}
+              temFiltroData={!!(dataInicioFiltro || dataFimFiltro)}
+              onLimparData={handleLimparData}
+              buscaInput={buscaInput}
+              onBuscaInputChange={setBuscaInput}
+              onBuscaSubmit={handleBuscaSubmit}
+              onLimparBusca={handleLimparBusca}
+            />
+
+            {/* ── Tabela / Loading / Empty State ───────────────────────────── */}
+            {loading ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
+                <Loader2 size={24} color={C.esmeralda} style={{ animation: "spin 1s linear infinite" }} />
+              </div>
+            ) : items.length === 0 ? (
+              <div style={{
+                textAlign: "center", padding: 64, color: C.cinza,
+                background: "#fff", borderRadius: 12,
+                border: `1px solid ${C.cremeBorder}`,
+              }}>
+                <Package size={40} style={{ opacity: 0.25, marginBottom: 12 }} />
+                <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: C.cinza }}>
+                  Nenhuma entrega encontrada
+                </p>
+                <p style={{ margin: "4px 0 0", fontSize: 13, color: C.cinza }}>
+                  {situacaoFiltro
+                    ? `Não há entregas com situação "${situacaoFiltro}"`
+                    : buscaFiltro
+                    ? `Nenhum resultado para "${buscaFiltro}"`
+                    : "Nenhuma entrega registrada nesta aba"}
+                </p>
+              </div>
+            ) : (
+              <TabelaEntregas
+                items={items}
+                onRowClick={setSelectedEntregaId}
+                mostrarMotoboy={aba === "motoboy"}
+                mostrarFrete={aba === "motoboy"}
+              />
+            )}
+
+            {/* ── Paginação (reusa @/components/ui/Paginacao, 10 por página) ── */}
+            {totalPages > 1 && (
+              <Paginacao
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={totalItems}
+                pageSize={pageSize}
+                baseUrl="/entregas-venda"
+                extraParams={paginacaoExtraParams || undefined}
+              />
+            )}
+
+            {/* ── Footer com resumo ─────────────────────────────────────────── */}
+            {items.length > 0 && (
+              <p style={{ textAlign: "center", fontSize: 12, color: C.cinza, marginTop: 12 }}>
+                {items.length} entrega{items.length !== 1 ? "s" : ""} nesta página
+                {situacaoFiltro && ` · situação: ${situacaoFiltro}`}
+                {buscaFiltro && ` · busca: "${buscaFiltro}"`}
+              </p>
+            )}
+          </>
         )}
       </div>
 
@@ -1014,46 +551,32 @@ export default function EntregasVendaClient({
         onPagar={() => { setMotoboyDrawerOpen(false); setPagarMotoboyOpen(true); }}
       />
 
-      {/* ── Modal de Pagamento em Lote ──────────────────────────────────────── */}
+      {/* ── Modal de Pagamento em Lote (atalho do drawer de Motoboys) ───────── */}
       <PagarMotoboyModal
         isOpen={pagarMotoboyOpen}
         onClose={() => setPagarMotoboyOpen(false)}
       />
 
-      {/* ── Modal de Frete Avulso ──────────────────────────────────────────── */}
+      {/* ── Modal de Frete Avulso ────────────────────────────────────────────
+          REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07 — decisão do
+          Jonathan: "mesmo formulário da tarefa, mas criação DIRETA"): o botão
+          "Frete Avulso" desta tela abre o MESMO formulário completo da
+          solicitação (`formularioCompleto`) — venda opcional, endereço
+          estruturado, quem paga + comprovante, valor cobrado, região,
+          observação — mas SEM `modoSolicitacao`, então continua criando
+          DIRETO ('pendente', sem tarefa/pool). Ver comentário completo em
+          FreteAvulsoModal.tsx.
+          IMPACTO SE MUDAR PRA modoSolicitacao=true: o botão passaria a gerar
+          uma solicitação/tarefa em vez de criar o avulso liberado na hora —
+          quebra o uso real desta tela (loja cria corrida avulsa direto). */}
       <FreteAvulsoModal
         isOpen={freteAvulsoOpen}
         onClose={() => setFreteAvulsoOpen(false)}
         onCriado={() => { setFreteAvulsoOpen(false); router.refresh(); }}
-        userRole={userRole}
+        formularioCompleto
       />
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
-  );
-}
-
-// ── Subcomponente: cabeçalho de coluna da tabela ──────────────────────────────
-
-/**
- * ThC — Célula de cabeçalho da tabela de entregas.
- *
- * O QUE: renderiza um <th> estilizado consistentemente com a paleta do projeto.
- * Segue o padrão de design dos componentes de tabela do ERP.
- */
-function ThC({ label, align }: { label: string; align?: "left" | "right" }) {
-  return (
-    <th style={{
-      padding: "10px 14px",
-      fontSize: 11,
-      fontWeight: 600,
-      color: C.cinza,
-      textTransform: "uppercase",
-      letterSpacing: 0.5,
-      textAlign: align ?? "left",
-      whiteSpace: "nowrap",
-    }}>
-      {label}
-    </th>
   );
 }

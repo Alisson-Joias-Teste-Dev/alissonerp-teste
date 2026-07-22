@@ -26,14 +26,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { criarEntrega } from "@/lib/entrega-venda";
+import { criarEntrega, formatarEnderecoEntregaAvulso } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
 import { authOr401, ForbiddenError } from "@/lib/auth-server";
 import { isVendasFullAccess, requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 
 // REGRA DE NEGÓCIO: papéis que podem visualizar a lista de entregas.
 // "consultora" tem visibilidade restrita (apenas entregas de suas vendas).
-const ROLES_ENTREGAS = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
+//
+// BLOCO 5 (jul/2026) — `estoquista_loja` entrou aqui, espelhando o mesmo gate
+// de `page.tsx` (SSR). Sem isso, a paginação/filtro client-side (que bate
+// nesta rota depois da primeira página SSR) devolveria 403 pra esse papel
+// mesmo com a tela já carregada. Ver docs/regras-negocio/entregas.md §8/§3.5.
+const ROLES_ENTREGAS = ["desenvolvedor", "admin", "gerente_loja", "consultora", "estoquista_loja"];
 
 // ─── Zod Schema para criação de entrega ─────────────────────────────────────
 // REGRA DE NEGÓCIO: valida os campos obrigatórios antes de delegar para a lib.
@@ -92,6 +97,17 @@ export async function GET(req: NextRequest) {
   const motoboyId = url.searchParams.get("motoboy_id");
   const dataInicio = url.searchParams.get("data_inicio") ?? "";
   const dataFim = url.searchParams.get("data_fim") ?? "";
+  // REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07 — 3 abas: Retirada em
+  // loja / Entregas motoboy / Pagamento do motoboy): filtro opcional por
+  // forma_entrega, usado pelo recarregar() client-side de
+  // EntregasVendaClient.tsx para manter a aba atual ao atualizar a lista
+  // depois de uma ação no drawer (mesmo filtro já aplicado no SSR de
+  // page.tsx). Só aceita os 2 valores reais da coluna — qualquer outra coisa
+  // é ignorada (sem filtro), nunca vira SQL livre.
+  // IMPACTO SE REMOVIDO: recarregar() voltaria a misturar retirada+motoboy
+  // na aba errada depois de fechar o drawer.
+  const formaEntregaParam = url.searchParams.get("forma_entrega") ?? "";
+  const formaEntrega = ["retirada", "motoboy"].includes(formaEntregaParam) ? formaEntregaParam : "";
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 50));
   const offset = (page - 1) * limit;
@@ -130,6 +146,10 @@ export async function GET(req: NextRequest) {
 
   const whereMotoboy = motoboyId
     ? sql`AND ev.motoboy_id = ${Number(motoboyId)}`
+    : sql``;
+
+  const whereFormaEntrega = formaEntrega
+    ? sql`AND ev.forma_entrega = ${formaEntrega}`
     : sql``;
 
   const whereDataInicio = dataInicio
@@ -172,7 +192,11 @@ export async function GET(req: NextRequest) {
         mb.nome AS motoboy_nome,
         ev.is_avulso,
         ev.descricao_avulso,
-        ev.endereco_entrega,
+        -- Colunas estruturadas de endereço (migration 355) — montadas em
+        -- texto legível via formatarEnderecoEntregaAvulso() abaixo.
+        ev.endereco_entrega, ev.endereco_entrega_numero, ev.endereco_entrega_complemento,
+        ev.endereco_entrega_bairro, ev.endereco_entrega_cidade, ev.endereco_entrega_cep,
+        ev.endereco_entrega_uf,
         ev.liberada_por,
         ev.liberada_em,
         ev.motivo_recusa
@@ -186,6 +210,7 @@ export async function GET(req: NextRequest) {
         ${whereVenda}
         ${whereSituacao}
         ${whereMotoboy}
+        ${whereFormaEntrega}
         ${whereDataInicio}
         ${whereDataFim}
       ORDER BY ev.created_at DESC, ev.id DESC
@@ -200,6 +225,7 @@ export async function GET(req: NextRequest) {
         ${whereVenda}
         ${whereSituacao}
         ${whereMotoboy}
+        ${whereFormaEntrega}
         ${whereDataInicio}
         ${whereDataFim}
     `,
@@ -235,7 +261,13 @@ export async function GET(req: NextRequest) {
       // liberação de frete avulso — usados pela aba "Solicitações" (endereço
       // pedido, quem liberou/quando, ou motivo se foi recusada). Não há mais
       // "responsável" fixo — qualquer liberador do pool decide.
-      endereco_entrega: r.endereco_entrega ? String(r.endereco_entrega) : null,
+      // REGRA DE NEGÓCIO (migration 355): endereço agora estruturado no banco
+      // — formatarEnderecoEntregaAvulso() monta o mesmo texto legível de
+      // antes (fonte única, ver src/lib/entrega-venda.ts). As colunas
+      // estruturadas (endereco_entrega_numero, _bairro, etc.) continuam
+      // disponíveis na resposta via `...r` acima, para quem precisar delas
+      // campo a campo no futuro.
+      endereco_entrega: formatarEnderecoEntregaAvulso(r as Record<string, string | null>),
       liberada_por: r.liberada_por ? String(r.liberada_por) : null,
       liberada_em: r.liberada_em ?? null,
       motivo_recusa: r.motivo_recusa ? String(r.motivo_recusa) : null,

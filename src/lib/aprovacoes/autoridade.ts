@@ -114,25 +114,48 @@ async function candidatoAutoAprovacao(regra: RegraAutoridade, ctx?: ContextoApro
   return null;
 }
 
-/** Resolve quem decide o evento: config ativa (≠ solicitante) → auto-aprovação (exceção) → "nao_configurado". */
+/**
+ * Resolve quem decide o evento: config ativa (≠ solicitante) → auto-aprovação (exceção) →
+ * "nao_configurado".
+ *
+ * REGRA DE NEGÓCIO (BLOCO 2, jul/2026 — mensagem clara de auto-aprovação): guarda se a
+ * config TINHA gente antes de excluir o solicitante (`configUUIDsBrutos`) — se sobrou
+ * vazio só por causa dessa exclusão (não porque a config em si estava vazia), marca
+ * `apenasSolicitante: true` na resolução. Ver comentário de `ResolucaoAprovador` em
+ * tipos.ts para o motivo de distinguir os dois casos.
+ * IMPACTO SE REMOVIDO: `podeDecidir` não tem como diferenciar "ninguém configurado" de
+ * "só tinha o solicitante configurado" — mensagem ao usuário fica genérica demais.
+ */
 export async function resolverAprovadores(
   evento: EventoAprovacao,
   ctx?: ContextoAprovacao,
 ): Promise<ResolucaoAprovador> {
   const regra = CATALOGO[evento];
 
-  let configUUIDs = await buscarUUIDsDaConfig(regra, ctx);
+  const configUUIDsBrutos = await buscarUUIDsDaConfig(regra, ctx);
+  let configUUIDs = configUUIDsBrutos;
   if (!regra.solicitantePodeAprovar && ctx?.solicitanteId) {
     configUUIDs = configUUIDs.filter((id) => id !== ctx.solicitanteId);
   }
+  const apenasSolicitante = configUUIDsBrutos.length > 0 && configUUIDs.length === 0;
   const autoConsultoraId = (await candidatoAutoAprovacao(regra, ctx)) ?? undefined;
 
-  return resolverPorConfig(regra, configUUIDs, autoConsultoraId);
+  const resolucao = resolverPorConfig(regra, configUUIDs, autoConsultoraId);
+  if (resolucao.status === "nao_configurado" && apenasSolicitante) {
+    return { ...resolucao, apenasSolicitante: true };
+  }
+  return resolucao;
 }
 
 /**
  * Autoridade = config ATUAL, não snapshot da tarefa: re-resolve os aprovadores agora
  * e checa se `user` está na lista. Sem config configurada, ninguém decide.
+ *
+ * REGRA DE NEGÓCIO (BLOCO 2, jul/2026): motivo "aprovador_e_o_proprio_solicitante"
+ * (em vez do genérico "aprovador_nao_configurado") quando a resolução veio vazia
+ * PORQUE o único configurado era quem está solicitando — ver resolverAprovadores.
+ * IMPACTO SE REMOVIDO: o endpoint (aprovacao/route.ts) não tem como montar uma
+ * mensagem que explique a segregação de função pro solicitante.
  */
 export async function podeDecidir(
   user: UsuarioAprovacao,
@@ -141,7 +164,10 @@ export async function podeDecidir(
 ): Promise<ResultadoDecisao> {
   const r = await resolverAprovadores(evento, ctx);
   if (r.status === "nao_configurado") {
-    return { pode: false, motivo: "aprovador_nao_configurado" };
+    return {
+      pode: false,
+      motivo: r.apenasSolicitante ? "aprovador_e_o_proprio_solicitante" : "aprovador_nao_configurado",
+    };
   }
   return avaliarDecisao(user.id, r.aprovadores);
 }

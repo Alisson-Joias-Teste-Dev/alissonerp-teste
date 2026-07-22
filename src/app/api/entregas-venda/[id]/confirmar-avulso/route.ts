@@ -10,17 +10,28 @@
  *
  * IMPACTO SE ALTERADO: esta rota é exclusiva para is_avulso=true.
  * Entregas normais continuam usando /confirmar com código de verificação.
+ *
+ * FOTOS (migration 357 — decisão Jonathan 21/07): body aceita fotos_base64
+ * OPCIONAL (várias, até MAX_FOTOS_ENTREGA) — comprovante da corrida avulsa,
+ * mesmo padrão de /confirmar. Nunca bloqueia a finalização.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
-import { confirmarFreteAvulso } from "@/lib/entrega-venda";
+import { confirmarFreteAvulso, MAX_FOTOS_ENTREGA } from "@/lib/entrega-venda";
+import { zodError } from "@/lib/schemas/common";
+import { LIMITS, checkArrayLength, checkBase64Length, payloadTooLargeResponse } from "@/lib/payload-limits";
+
+const ConfirmarAvulsoSchema = z.object({
+  fotos_base64: z.array(z.string().max(LIMITS.IMAGE_BASE64_MAX)).max(MAX_FOTOS_ENTREGA).optional(),
+});
 
 // REGRA: motoboy só confirma a própria corrida; admin/gerente confirma qualquer uma
 const ROLES_ADMIN = ["desenvolvedor", "admin", "gerente_loja"];
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const supabase = await createServerSupabase();
@@ -72,8 +83,26 @@ export async function POST(
     }
   }
 
+  // Body opcional — fotos_base64 (comprovante). Corpo vazio/ausente é válido
+  // (nada obrigatório aqui; a checagem de estado da corrida é feita na lib).
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ConfirmarAvulsoSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { fotos_base64 } = parsed.data;
+
+  if (fotos_base64) {
+    try {
+      checkArrayLength("fotos_base64", fotos_base64, MAX_FOTOS_ENTREGA);
+      fotos_base64.forEach((f, i) => checkBase64Length(`fotos_base64[${i}]`, f, LIMITS.IMAGE_BASE64_MAX));
+    } catch (e) {
+      const r = payloadTooLargeResponse(e);
+      if (r) return r;
+      throw e;
+    }
+  }
+
   try {
-    await confirmarFreteAvulso(entregaId, user.id);
+    await confirmarFreteAvulso(entregaId, user.id, fotos_base64);
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erro ao confirmar";

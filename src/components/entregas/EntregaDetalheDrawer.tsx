@@ -51,7 +51,9 @@ import {
 import ConfirmarPagamentoMotoboyModal from "./ConfirmarPagamentoMotoboyModal";
 import { apiFetch } from "@/lib/apiFetch";
 import ConfirmarEntregaModal from "./ConfirmarEntregaModal";
+import FinalizarAvulsoModal from "./FinalizarAvulsoModal";
 import CorreiosRastreioModal from "./CorreiosRastreioModal";
+import { getPublicUrl } from "@/lib/storage-url";
 
 // ── Paleta ──────────────────────────────────────────────────────────────────────
 const C = {
@@ -97,6 +99,8 @@ interface EntregaDetalhe {
   created_at: string;
   updated_at: string | null;
   foto_entrega_path: string | null;
+  /** MULTIFOTO (migration 357): lista já unificada — ver buscarFotosEntrega. */
+  fotos_entrega: string[];
   numero_venda: string | null;
   total_venda: number | null;
   venda_situacao: string | null;
@@ -106,6 +110,10 @@ interface EntregaDetalhe {
   cliente_celular: string | null;
   cliente_telefone: string | null;
   vendedor_id: number | null;
+  // BLOCO 4 (jul/2026), P1: já vem RESOLVIDO pelo backend — endereço da
+  // ENTREGA (confirmado na solicitação) se ela tiver algum campo próprio
+  // preenchido, senão o da VENDA. Ver resolverEnderecoEntrega,
+  // src/lib/entrega-venda.ts, e o GET /api/entregas-venda/[id].
   endereco_entrega: string | null;
   endereco_entrega_numero: string | null;
   endereco_entrega_complemento: string | null;
@@ -246,8 +254,10 @@ export default function EntregaDetalheDrawer({
   const [cancelando, setCancelando] = useState(false);
   const [mostrarCancelarConfirm, setMostrarCancelarConfirm] = useState(false);
 
-  // Confirmação de frete avulso (sem código de verificação)
-  const [confirmandoAvulso, setConfirmandoAvulso] = useState(false);
+  // REGRA DE NEGÓCIO (migration 357): finalizar corrida avulsa abre o modal
+  // que pergunta se quer anexar fotos (opcional) — antes era um clique direto
+  // sem nenhuma pergunta (ver FinalizarAvulsoModal).
+  const [modalFinalizarAvulso, setModalFinalizarAvulso] = useState(false);
 
   // Toggle visibilidade dos códigos (mascarados → completos)
   const [mostrarCodigos, setMostrarCodigos] = useState(false);
@@ -319,20 +329,10 @@ export default function EntregaDetalheDrawer({
     }
   }
 
-  /** Confirmar frete avulso (sem código — botão simples) */
-  async function handleConfirmarAvulso() {
+  /** Abre o modal de finalizar corrida avulsa (pergunta opcional de fotos). */
+  function handleConfirmarAvulso() {
     if (!entregaId) return;
-    setConfirmandoAvulso(true);
-    try {
-      await apiFetch(`/api/entregas-venda/${entregaId}/confirmar-avulso`, {
-        method: "POST",
-      });
-      await carregar();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro ao confirmar corrida.");
-    } finally {
-      setConfirmandoAvulso(false);
-    }
+    setModalFinalizarAvulso(true);
   }
 
   /** Callback após confirmação ou rastreio bem-sucedidos */
@@ -658,8 +658,15 @@ export default function EntregaDetalheDrawer({
             </div>
 
             {/* ── Endereço de Entrega (apenas motoboy) ─────────────────────── */}
-            {/* REGRA DE NEGÓCIO: endereço de entrega é crítico para o motoboy.
-                A venda pode ter um endereço diferente do cadastro do cliente.
+            {/* REGRA DE NEGÓCIO (BLOCO 4, jul/2026, P1): endereço de entrega é
+                crítico para o motoboy. Os campos `detalhe.endereco_entrega*`
+                abaixo já vêm RESOLVIDOS pelo backend (GET /api/entregas-venda/[id]
+                → resolverEnderecoEntrega, src/lib/entrega-venda.ts): é o
+                endereço CONFIRMADO na solicitação de frete avulso quando a
+                entrega tem QUALQUER campo próprio preenchido (nunca mistura
+                com o da venda); senão, o da VENDA (entrega normal/não-avulsa,
+                que nunca grava endereço próprio). O cadastro do CLIENTE é o
+                fallback final, só quando nem entrega nem venda têm nada.
                 Exibido com destaque para o entregador não errar a rota. */}
             {detalhe.forma_entrega === "motoboy" && (
               <div style={{
@@ -677,8 +684,11 @@ export default function EntregaDetalheDrawer({
                 {(detalhe.endereco_entrega || detalhe.endereco_entrega_bairro ||
                   detalhe.cliente_endereco || detalhe.cliente_bairro) ? (
                   (() => {
-                    // REGRA DE NEGÓCIO: prioriza endereço da venda. Se vazio,
-                    // usa o cadastro do cliente como fallback.
+                    // REGRA DE NEGÓCIO (BLOCO 4, P1): `detalhe.endereco_entrega*`
+                    // já é o conjunto RESOLVIDO pelo backend (entrega confirmada
+                    // OU venda — nunca misturado campo a campo). Cadastro do
+                    // cliente é só o último fallback, quando nem entrega nem
+                    // venda têm nenhum campo preenchido.
                     const rua = detalhe.endereco_entrega || detalhe.cliente_endereco;
                     const num = detalhe.endereco_entrega_numero || detalhe.cliente_numero;
                     const comp = detalhe.endereco_entrega_complemento || detalhe.cliente_complemento;
@@ -704,8 +714,12 @@ export default function EntregaDetalheDrawer({
                     );
                   })()
                 ) : (
+                  // BLOCO 4, P1: mensagem neutra — o endereço pode faltar na
+                  // entrega, na venda (ou não haver venda, caso avulso) ou no
+                  // cadastro do cliente; "não informado na venda" era enganoso
+                  // quando o avulso nem tem venda vinculada.
                   <div style={{ fontSize: 12, color: "#9A3412" }}>
-                    Endereço não informado na venda.
+                    Endereço não informado.
                   </div>
                 )}
               </div>
@@ -1186,10 +1200,14 @@ export default function EntregaDetalheDrawer({
             </div>
             )}
 
-            {/* ── Foto de comprovação ───────────────────────────────────── */}
-            {/* REGRA DE NEGÓCIO: foto anexada na confirmação da entrega
-                como comprovante visual. Acessível via proxy autenticado. */}
-            {detalhe.foto_entrega_path && (
+            {/* ── Fotos de comprovação (migration 357 — várias) ─────────── */}
+            {/* REGRA DE NEGÓCIO: fotos anexadas (opcionalmente) na confirmação
+                da entrega, como comprovante visual pro relatório de pagamento
+                do motoboy. Lista já unificada pelo backend (buscarFotosEntrega
+                — cobre tanto confirmações novas, com várias fotos, quanto
+                antigas, com uma foto só na coluna congelada). Acessível via
+                proxy autenticado (getPublicUrl NUNCA gera signed URL nova). */}
+            {detalhe.fotos_entrega.length > 0 && (
               <div style={{ marginBottom: 20 }}>
                 <div
                   style={{
@@ -1202,18 +1220,32 @@ export default function EntregaDetalheDrawer({
                     gap: 5,
                   }}
                 >
-                  <Camera size={13} /> Foto da entrega
+                  <Camera size={13} />
+                  {detalhe.fotos_entrega.length > 1 ? `Fotos da entrega (${detalhe.fotos_entrega.length})` : "Foto da entrega"}
                 </div>
-                <img
-                  src={`/api/storage/pagamento-fotos/${detalhe.foto_entrega_path}`}
-                  alt="Foto da entrega"
-                  style={{
-                    width: "100%",
-                    maxWidth: 320,
-                    borderRadius: 8,
-                    border: `1px solid ${C.cremeBorder}`,
-                  }}
-                />
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {detalhe.fotos_entrega.map((path, idx) => (
+                    <a
+                      key={idx}
+                      href={getPublicUrl("pagamento-fotos", path)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`Abrir foto ${idx + 1} em tamanho real`}
+                    >
+                      <img
+                        src={getPublicUrl("pagamento-fotos", path)}
+                        alt={`Foto ${idx + 1} da entrega`}
+                        style={{
+                          width: 110,
+                          height: 110,
+                          objectFit: "cover",
+                          borderRadius: 8,
+                          border: `1px solid ${C.cremeBorder}`,
+                        }}
+                      />
+                    </a>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -1450,11 +1482,10 @@ export default function EntregaDetalheDrawer({
                 </button>
               )}
 
-              {/* Confirmar Corrida Avulsa (sem código) */}
+              {/* Confirmar Corrida Avulsa (sem código) — abre modal (fotos opcionais) */}
               {podeConfirmarAvulso && (
                 <button
                   onClick={handleConfirmarAvulso}
-                  disabled={confirmandoAvulso}
                   style={{
                     padding: "10px 12px",
                     background: C.verde,
@@ -1463,16 +1494,15 @@ export default function EntregaDetalheDrawer({
                     borderRadius: 8,
                     fontSize: 12,
                     fontWeight: 600,
-                    cursor: confirmandoAvulso ? "not-allowed" : "pointer",
+                    cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     gap: 6,
-                    opacity: confirmandoAvulso ? 0.6 : 1,
                   }}
                 >
                   <CheckCircle size={14} />
-                  {confirmandoAvulso ? "Confirmando..." : "Confirmar Entrega"}
+                  Confirmar Entrega
                 </button>
               )}
 
@@ -1560,6 +1590,15 @@ export default function EntregaDetalheDrawer({
             setModalConfirmar((prev) => ({ ...prev, aberto: false }))
           }
           onSuccess={handleRefresh}
+        />
+      )}
+
+      {modalFinalizarAvulso && entregaId && (
+        <FinalizarAvulsoModal
+          entregaId={entregaId}
+          isOpen={modalFinalizarAvulso}
+          onClose={() => setModalFinalizarAvulso(false)}
+          onSuccess={() => { setModalFinalizarAvulso(false); handleRefresh(); }}
         />
       )}
 

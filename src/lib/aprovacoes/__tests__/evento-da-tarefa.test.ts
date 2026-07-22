@@ -145,8 +145,30 @@ describe("eventoDaTarefa — mapa tipo/tag → evento (espelha route.ts linha a 
     expect(eventoDaTarefa("conversao_reversa", [], {})).toBeNull();
   });
 
-  it("frete_avulso: pelo tipo (tarefa exclusiva, migration 353)", () => {
+  it("frete_avulso: pelo tipo, SEM frete_pagante='loja' (pagante='cliente' ou ausente, migration 353/354)", () => {
     expect(eventoDaTarefa("frete_avulso", [], {})).toBe("frete_avulso");
+    expect(eventoDaTarefa("frete_avulso", [], { frete_pagante: "cliente" })).toBe("frete_avulso");
+    expect(eventoDaTarefa("frete_avulso", [], { frete_pagante: null })).toBe("frete_avulso");
+  });
+
+  it("frete_avulso_loja: mesmo tipo, COM tarefaInfo.frete_pagante='loja' (entregas_venda.pagante, migration 359)", () => {
+    expect(eventoDaTarefa("frete_avulso", [], { frete_pagante: "loja" })).toBe("frete_avulso_loja");
+  });
+
+  /**
+   * ANTI-VOLTA (BLOCO 2, jul/2026 — P2): a tag `frete_pagante:loja` em `tags`
+   * NÃO decide mais o evento — só `tarefaInfo.frete_pagante` (entregas_venda.
+   * pagante) decide. Prova que adulterar a TAG (que o solicitante conseguia
+   * editar via PATCH /api/tarefas/[id], tags é array livre) não muda mais
+   * pra qual pool a tarefa vai — só o DADO (que o solicitante não edita) muda.
+   */
+  it("ANTI-VOLTA: tag frete_pagante:loja SOZINHA (sem o dado) não vira frete_avulso_loja — tag foi desativada como fonte de verdade", () => {
+    expect(eventoDaTarefa("frete_avulso", ["frete_pagante:loja"], {})).toBe("frete_avulso");
+    expect(eventoDaTarefa("frete_avulso", ["frete_pagante:loja"], { frete_pagante: "cliente" })).toBe("frete_avulso");
+  });
+
+  it("ANTI-VOLTA: SEM a tag mas COM o dado pagante='loja' ainda vira frete_avulso_loja — o dado manda, não a tag", () => {
+    expect(eventoDaTarefa("frete_avulso", [], { frete_pagante: "loja" })).toBe("frete_avulso_loja");
   });
 
   it("tipo/tags ausentes (undefined/vazio) e sem tarefaInfo → null, sem lançar erro", () => {

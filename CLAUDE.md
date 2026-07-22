@@ -237,7 +237,8 @@ inventario comercial: "conferido" != "contado" — marcar conferido NUNCA grava 
 inventario comercial: NAO ajusta estoque ao concluir (auditoria pura); roles em ROLES_INVENTARIO_* de src/lib/roles.ts; regras em docs/regras-negocio/comercial.md §7
 inventario comercial: PECA PRONTA filtrada na LEITURA via condPecaPronta() de src/lib/inventario-peca-pronta.ts (GET/concluir/contar/app) — vale ate para inventario aberto antes da regra; snapshot novo tambem exclui (v2.81.4)
 inventario comercial: fechar pendencia como resolvida EXIGE desfecho_tipo (mig 338) — venda_sem_baixa valida a venda e EFETIVA a reserva junto com a saida (senao disponivel cai em dobro); desfecho com movimento nao se desfaz (409, exige estorno)
-baixa manual de estoque NAO EXISTE para ninguem (v2.81.3) — movimento so por CONCILIACAO com documento conferido (falta<->venda sem baixa, sobra<->devolucao sem entrada), exclusiva de ROLES_BAIXA_MANUAL (admin/dev) + dupla confirmacao; perda = so registro, SEM baixa; mecanismo TEMPORARIO ate organizar o sistema
+baixa manual de estoque NAO EXISTE por cargo (v2.81.3) — /movimentos recusa QUALQUER saida (403, ate admin/dev); movimento so por CONCILIACAO com documento conferido (falta<->venda sem baixa, sobra<->devolucao sem entrada), exclusiva de ROLES_BAIXA_MANUAL (admin/dev) + dupla confirmacao; desfecho 'perda' do INVENTARIO = so registro, SEM baixa
+PERDA/EXTRAVIO (354, 21/07/2026): UNICA baixa manual do ERP, endpoint proprio /api/estoque-comercial/perda, gate por IDENTIDADE (isMasterAdmin -> parametros_sistema.MASTER_ADMIN_USER_ID), NUNCA por role — nem admin nem dev; estorno de perda tambem so o master; limitada ao DISPONIVEL; motivo 'perda_extravio' em src/lib/perda-extravio.ts; ver docs/regras-negocio/comercial.md §11
 ```
 
 ---

@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
+import FinalizarAvulsoModal from "@/components/entregas/FinalizarAvulsoModal";
+import { useErrorStore } from "@/stores/errorStore";
 
 const C = {
   esmeralda: "#184036",
@@ -82,6 +84,20 @@ function fmtBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+// REGRA DE NEGÓCIO: chave única para reativar o auto-registro de corrida pelo
+// motoboy (PR #75).
+// O QUÊ: controla se o botão "Nova corrida" e o modal de registro aparecem
+//   nesta tela. Com false, ambos ficam ocultos — o motoboy só vê/aceita/
+//   confirma corridas já criadas pela loja/pool (modelo POOL, migration 353).
+// POR QUÊ: decisão do Jonathan (21/07) — a corrida deve nascer na loja/pool,
+//   não no motoboy. O backend (rota /api/entregas-venda/frete-avulso,
+//   FreteAvulsoMotoboySchema) e as corridas auto-registradas já existentes em
+//   produção continuam funcionando normalmente (guard auto_criado inalterado).
+// IMPACTO: para reativar o auto-registro na tela, basta trocar para true —
+//   nada além disso precisa mudar. NÃO remover o estado/handlers do modal:
+//   o objetivo é manter a reversão trivial.
+const MOTOBOY_PODE_REGISTRAR_CORRIDA = false;
+
 function statusBadge(situacao: string) {
   switch (situacao) {
     case "pendente": return { text: "Pendente", color: C.ambar, bg: C.ambarLt };
@@ -101,11 +117,14 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
   // Drawer de detalhe
   const [selectedEntregaId, setSelectedEntregaId] = useState<number | null>(null);
 
-  // Confirmação de avulso (finalizar entrega — POST /confirmar-avulso)
-  const [confirmandoAvulso, setConfirmandoAvulso] = useState<number | null>(null);
+  // REGRA DE NEGÓCIO (migration 357): finalizar corrida avulsa abre um modal
+  // perguntando se quer anexar fotos (opcional) antes de chamar
+  // /confirmar-avulso — antes era um clique direto sem nenhuma pergunta.
+  const [finalizandoAvulsoId, setFinalizandoAvulsoId] = useState<number | null>(null);
   // REGRA DE NEGÓCIO (modelo POOL — migration 353): "Aceitar corrida" é o
   // passo novo entre a liberação (situacao='pendente') e a finalização —
-  // espelha confirmandoAvulso, mas chama /aceitar-avulso (pendente → em_rota).
+  // chama /aceitar-avulso (pendente → em_rota), antes de abrir o modal de
+  // finalização acima.
   const [aceitandoAvulso, setAceitandoAvulso] = useState<number | null>(null);
 
   // Nova corrida avulsa (registrada pelo próprio motoboy → nasce pendente p/ loja)
@@ -230,17 +249,21 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
               {motoboyNome}
             </p>
           </div>
-          <button
-            onClick={() => { setNovaErro(""); setNovaOpen(true); }}
-            style={{
-              marginLeft: "auto", padding: "9px 14px", borderRadius: 10,
-              background: C.esmeralda, color: "#fff", border: "none",
-              fontSize: 13, fontWeight: 700, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
-            }}
-          >
-            <Plus size={16} /> Nova corrida
-          </button>
+          {/* Botão "Nova corrida" (auto-registro do motoboy) — oculto por
+              decisão do Jonathan, ver MOTOBOY_PODE_REGISTRAR_CORRIDA acima. */}
+          {MOTOBOY_PODE_REGISTRAR_CORRIDA && (
+            <button
+              onClick={() => { setNovaErro(""); setNovaOpen(true); }}
+              style={{
+                marginLeft: "auto", padding: "9px 14px", borderRadius: 10,
+                background: C.esmeralda, color: "#fff", border: "none",
+                fontSize: 13, fontWeight: 700, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+              }}
+            >
+              <Plus size={16} /> Nova corrida
+            </button>
+          )}
         </div>
 
         {/* Cards */}
@@ -455,7 +478,9 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                             await apiFetch(`/api/entregas-venda/${item.id}/aceitar-avulso`, { method: "POST" });
                             await carregar();
                           } catch (e) {
-                            alert(e instanceof Error ? e.message : "Erro ao aceitar corrida");
+                            // Pitfall §3 (CLAUDE.md): nada de alert() nativo — o resto do
+                            // sistema usa o toast global do useErrorStore.
+                            useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao aceitar corrida");
                           } finally {
                             setAceitandoAvulso(null);
                           }
@@ -478,37 +503,22 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                     </div>
                   )}
 
-                  {/* Caso 3: corrida já em rota (motoboy aceitou) — finalizar
-                      a entrega (POST /confirmar-avulso: 'em_rota' -> 'confirmada'). */}
+                  {/* Caso 3: corrida já em rota (motoboy aceitou) — abre o modal
+                      que pergunta se quer anexar fotos (opcional) antes de
+                      finalizar (POST /confirmar-avulso: 'em_rota' -> 'confirmada'). */}
                   {item.is_avulso && item.situacao === "em_rota" && (
                     <div style={{ marginTop: 10 }} onClick={e => e.stopPropagation()}>
                       <button
-                        disabled={confirmandoAvulso === item.id}
-                        onClick={async () => {
-                          setConfirmandoAvulso(item.id);
-                          try {
-                            const { apiFetch } = await import("@/lib/apiFetch");
-                            await apiFetch(`/api/entregas-venda/${item.id}/confirmar-avulso`, { method: "POST" });
-                            await carregar();
-                          } catch (e) {
-                            alert(e instanceof Error ? e.message : "Erro ao confirmar");
-                          } finally {
-                            setConfirmandoAvulso(null);
-                          }
-                        }}
+                        onClick={() => setFinalizandoAvulsoId(item.id)}
                         style={{
                           width: "100%", padding: "8px 0",
                           background: C.esmeralda, color: "#fff",
                           border: "none", borderRadius: 8,
                           fontSize: 13, fontWeight: 700, cursor: "pointer",
                           display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                          opacity: confirmandoAvulso === item.id ? 0.6 : 1,
                         }}
                       >
-                        {confirmandoAvulso === item.id
-                          ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
-                          : <CheckCircle size={14} />
-                        }
+                        <CheckCircle size={14} />
                         Finalizar entrega
                       </button>
                     </div>
@@ -531,8 +541,19 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
         />
       )}
 
+      {/* ── Modal: finalizar corrida avulsa (pergunta opcional de fotos) ─────── */}
+      {finalizandoAvulsoId !== null && (
+        <FinalizarAvulsoModal
+          entregaId={finalizandoAvulsoId}
+          isOpen={finalizandoAvulsoId !== null}
+          onClose={() => setFinalizandoAvulsoId(null)}
+          onSuccess={() => { setFinalizandoAvulsoId(null); carregar(); }}
+        />
+      )}
+
       {/* ── Modal: nova corrida avulsa (registrada pelo motoboy) ─────────────── */}
-      {novaOpen && (
+      {/* Oculto junto com o botão — ver MOTOBOY_PODE_REGISTRAR_CORRIDA acima. */}
+      {MOTOBOY_PODE_REGISTRAR_CORRIDA && novaOpen && (
         <div
           onClick={() => { if (!novaSalvando) setNovaOpen(false); }}
           style={{

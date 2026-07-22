@@ -27,6 +27,8 @@ const TODOS_EVENTOS: EventoAprovacao[] = [
   "alteracao_venda",
   "garantia_fora_prazo",
   "frete_avulso",
+  "frete_avulso_loja",
+  "fechamento_frete_negativo",
 ];
 
 describe("resolverPorConfig", () => {

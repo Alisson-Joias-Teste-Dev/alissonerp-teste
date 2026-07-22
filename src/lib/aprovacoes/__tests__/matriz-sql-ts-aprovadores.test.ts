@@ -78,7 +78,16 @@ describe("Simetria SQL (multiAprovadorCond) x TS (eventoDaTarefa)", () => {
     { nome: "recebimento_metal (chave metal_aprovador_id)", tipo: "recebimento_metal", tags: [] },
     { nome: "aprovacao_quebra_metal (chave aprovador_limpeza)", tipo: "aprovacao_quebra_metal", tags: [] },
     { nome: "garantia_fora_prazo (chave aprovadores_garantia_fora_prazo)", tipo: "garantia_fora_prazo", tags: [] },
-    { nome: "frete_avulso (chave aprovadores_frete_avulso)", tipo: "frete_avulso", tags: [] },
+    { nome: "frete_avulso (chave aprovadores_frete_avulso, pagante='cliente')", tipo: "frete_avulso", tags: [] },
+    {
+      nome: "frete_avulso_loja (chave aprovadores_frete_avulso_loja, migration 359, pagante='loja')",
+      tipo: "frete_avulso",
+      tags: [],
+      // BLOCO 2 (jul/2026): o SQL (multiAprovadorCond) casa por evfa.pagante
+      // (join com entregas_venda) — o TS espelha isso via tarefaInfo.frete_pagante,
+      // NÃO mais pela tag. Ver evento-da-tarefa.ts.
+      tarefaInfo: { frete_pagante: "loja" },
+    },
     {
       nome: "credito_loja + tag gerente (chave aprovadora_credito_gerente) — venda ATIVA",
       tipo: null,
@@ -93,6 +102,7 @@ describe("Simetria SQL (multiAprovadorCond) x TS (eventoDaTarefa)", () => {
     },
     { nome: "devolucao_estoque (chave aprovador_devolucao_estoque)", tipo: null, tags: ["devolucao_estoque"] },
     { nome: "devolucao sem devolucao_estoque (chave aprovador_devolucao)", tipo: null, tags: ["devolucao"] },
+    { nome: "fechamento_frete_negativo (chave aprovadores_fechamento_frete, BLOCO 4)", tipo: "fechamento_frete_negativo", tags: [] },
   ];
 
   it.each(matrizCobertaPeloSQL)("$nome → eventoDaTarefa devolve evento NÃO-NULO", ({ tipo, tags, tarefaInfo }) => {

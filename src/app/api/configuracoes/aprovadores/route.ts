@@ -67,6 +67,27 @@ const CHAVES = [
   // aprovação (ver módulo Tarefas, tipo 'frete_avulso'). Espelha exatamente o
   // padrão de aprovadores_devolver_peca.
   "aprovadores_frete_avulso",
+  // MULTI (migration 359, 21/07 — regra "quem paga"): lista SEPARADA de quem
+  // autoriza o CUSTO quando o frete avulso solicitado é pago pela LOJA (não
+  // pelo cliente) — evento 'frete_avulso_loja' em
+  // src/lib/aprovacoes/catalogo.ts. Espelha exatamente o padrão de
+  // aprovadores_frete_avulso (mesma tarefa, chave diferente conforme quem paga).
+  "aprovadores_frete_avulso_loja",
+  // SINGLE (UUID único — não é MULTI): gerente dona do saldo de frete grátis
+  // (verba de 0,1% do faturamento mensal). Antes escolhida arbitrariamente
+  // por `WHERE role='gerente_loja' AND ativo=true ORDER BY created_at LIMIT
+  // 1` em 2 lugares (bug latente com múltiplas gerentes ativas) — agora
+  // configurável aqui. Fonte única de leitura: resolverGerenteFreteGratisId
+  // (src/lib/entrega-venda.ts), com fallback ao comportamento antigo quando
+  // vazia (zero impacto até o Jonathan configurar).
+  "gerente_frete_gratis",
+  // MULTI (BLOCO 4, 21/07): quem aprova o fechamento mensal do dia 01 quando o
+  // saldo de frete grátis da gerente fecha NEGATIVO (evento
+  // 'fechamento_frete_negativo' em src/lib/aprovacoes/catalogo.ts). Aprovar gera
+  // a conta a pagar da gerente; recusar não lança nada (motivo obrigatório).
+  // Segregação: esta lista decide, a gerente (gerente_frete_gratis) só recebe —
+  // se ela também estiver aqui, é excluída da decisão da PRÓPRIA tarefa.
+  "aprovadores_fechamento_frete",
 ] as const;
 
 // Chaves NUMÉRICAS (%) — não são UUID de aprovador, são o limiar que decide
@@ -210,6 +231,12 @@ export async function GET() {
       aprovadores_garantia_fora_prazo: configMap.get("aprovadores_garantia_fora_prazo") ?? "",
       // MULTI: pool de liberadores do frete avulso solicitado (migration 353).
       aprovadores_frete_avulso: configMap.get("aprovadores_frete_avulso") ?? "",
+      // MULTI (migration 359): pool de quem autoriza o CUSTO quando pagante='loja'.
+      aprovadores_frete_avulso_loja: configMap.get("aprovadores_frete_avulso_loja") ?? "",
+      // SINGLE: gerente dona do saldo de frete grátis (verba mensal 0,1% do faturamento).
+      gerente_frete_gratis: configMap.get("gerente_frete_gratis") ?? "",
+      // MULTI (BLOCO 4): pool de quem aprova o fechamento mensal com saldo negativo.
+      aprovadores_fechamento_frete: configMap.get("aprovadores_fechamento_frete") ?? "",
       // Fase 5 (15/07): limites numéricos (%), não são UUID de aprovador — ver CHAVES_NUMERICAS.
       desconto_fallback_sem_cadastro_pct: configMap.get("desconto_fallback_sem_cadastro_pct") ?? "0",
       limite_desconto_cartao_pct: configMap.get("limite_desconto_cartao_pct") ?? "20",
@@ -346,6 +373,28 @@ export async function PUT(req: NextRequest) {
         String(body.aprovadores_frete_avulso).split(",").map((s) => s.trim()).filter(Boolean)
       )).join(",");
       updates.push({ chave: "aprovadores_frete_avulso", valor: lista });
+    }
+    // MULTI (migration 359, regra "quem paga"): pool separado de quem autoriza
+    // o custo do frete avulso quando pagante='loja'. Normaliza igual ao bloco acima.
+    if (body.aprovadores_frete_avulso_loja !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_frete_avulso_loja).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_frete_avulso_loja", valor: lista });
+    }
+    // SINGLE (BLOCO 1, 21/07): gerente do saldo de frete grátis — 1 UUID só,
+    // sem normalização de lista (não é MULTI). Vazio = fallback antigo
+    // (ORDER BY created_at) em resolverGerenteFreteGratisId.
+    if (body.gerente_frete_gratis !== undefined) {
+      updates.push({ chave: "gerente_frete_gratis", valor: body.gerente_frete_gratis });
+    }
+    // MULTI (BLOCO 4, 21/07): aprovadores do fechamento mensal com saldo negativo.
+    // Normaliza igual aos demais blocos MULTI acima.
+    if (body.aprovadores_fechamento_frete !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_fechamento_frete).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_fechamento_frete", valor: lista });
     }
     // Fase 5 (15/07, tela adicionada 16/07): limites em % — valida 0-100, número.
     // Sem isso gravado errado, o fallback do código (0 / 20) nunca é sobrescrito

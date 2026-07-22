@@ -28,6 +28,9 @@ interface AprovadorConfig {
   desconto_fallback_sem_cadastro_pct?: string; // Fase 5: teto (%) sem cadastro de mx_desconto_permitido
   limite_desconto_cartao_pct?: string; // Fase 5: acima disso, cartão de crédito exige aprovação
   aprovadores_frete_avulso?: string; // MULTI: UUIDs separados por vírgula (pool frete avulso — migration 353)
+  aprovadores_frete_avulso_loja?: string; // MULTI: custo do frete avulso quando pagante='loja' (migration 359)
+  gerente_frete_gratis?: string; // SINGLE: gerente do saldo de frete grátis (BLOCO 1, 21/07) — vazio = fallback antigo
+  aprovadores_fechamento_frete?: string; // MULTI: aprova o fechamento mensal com saldo negativo (BLOCO 4, 21/07)
 }
 
 interface Usuario {
@@ -84,6 +87,9 @@ export default function TabAprovadores() {
     desconto_fallback_sem_cadastro_pct: "0",
     limite_desconto_cartao_pct: "20",
     aprovadores_frete_avulso: "",
+    aprovadores_frete_avulso_loja: "",
+    gerente_frete_gratis: "",
+    aprovadores_fechamento_frete: "",
   });
   const [usuarios, setUsuarios] = useState<UsuariosPorRole>({
     gerentes: [],
@@ -127,6 +133,9 @@ export default function TabAprovadores() {
           desconto_fallback_sem_cadastro_pct: d.desconto_fallback_sem_cadastro_pct ?? "0",
           limite_desconto_cartao_pct: d.limite_desconto_cartao_pct ?? "20",
           aprovadores_frete_avulso: d.aprovadores_frete_avulso ?? "",
+          aprovadores_frete_avulso_loja: d.aprovadores_frete_avulso_loja ?? "",
+          gerente_frete_gratis: d.gerente_frete_gratis ?? "",
+          aprovadores_fechamento_frete: d.aprovadores_fechamento_frete ?? "",
         });
         setUsuarios(d.usuarios ?? { gerentes: [], diretores_admins: [], admins_devs: [], metal_aprovadores: [], aprovadores_limpeza: [], aprovadores_entrega_sem_pagamento: [], todos_usuarios: [], conversao_aprovadores: [], precificacao_aprovadores: [], devolucao_aprovadores: [] });
       })
