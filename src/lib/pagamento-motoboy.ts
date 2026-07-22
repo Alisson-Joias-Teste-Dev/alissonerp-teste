@@ -211,13 +211,16 @@ export async function listarRelatoriosPagamentoMotoboy(
     id: Number(r.id),
     motoboy_id: String(r.motoboy_id),
     motoboy_nome: (r.motoboy_nome as string | null) ?? "—",
-    data_inicio: String(r.data_inicio),
-    data_fim: String(r.data_fim),
+    // O driver devolve colunas DATE/TIMESTAMP como objeto Date; String(date) geraria
+    // "Wed Jul 21 2026 ..." e quebraria o fmtData da tela. Normaliza para ISO
+    // (mesmo padrão de entregas-venda/page.tsx). DATE só a parte da data.
+    data_inicio: new Date(String(r.data_inicio)).toISOString().slice(0, 10),
+    data_fim: new Date(String(r.data_fim)).toISOString().slice(0, 10),
     status: r.status as "aguardando" | "pago",
     total_sugerido: Number(r.total_sugerido ?? 0),
     quantidade_corridas: Number(r.quantidade_corridas ?? 0),
-    created_at: String(r.created_at),
-    pago_em: r.pago_em ? String(r.pago_em) : null,
+    created_at: r.created_at ? new Date(String(r.created_at)).toISOString() : "",
+    pago_em: r.pago_em ? new Date(String(r.pago_em)).toISOString() : null,
   }));
 
   return { items, total: Number(countRows[0]?.total ?? 0) };

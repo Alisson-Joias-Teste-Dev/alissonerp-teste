@@ -1,6 +1,6 @@
 "use client";
 
-import { Bike, MapPin, DollarSign, AlignLeft, Check, XCircle, Clock, CheckCircle, Search, Plus, Store, Camera, Send, AlertTriangle } from "lucide-react";
+import { Bike, MapPin, DollarSign, AlignLeft, Check, XCircle, Clock, CheckCircle, Search, Plus, Store, Camera, Send, AlertTriangle, Receipt } from "lucide-react";
 import TreinamentoLayout, { type ColaItem } from "@/components/treinamentos/TreinamentoLayout";
 import { type PassoTreino } from "@/components/treinamentos/TreinamentoPlayer";
 import {
@@ -83,6 +83,22 @@ import {
  *     `ROLE_MENUS.estoquista_loja` ~L112), `components/Sidebar.tsx`
  *     (`ROLES_ENTREGAS_VENDA` ~L148), confirmado pelo teste
  *     `src/__tests__/entregas-venda-estoquista-acesso.test.ts`.
+ *   - o botão "Nova corrida" (auto-registro pelo motoboy) NÃO aparece mais na
+ *     tela dele: fica atrás da flag `MOTOBOY_PODE_REGISTRAR_CORRIDA = false`
+ *     (decisão Jonathan 21/07) — `MotoboyAppClient.tsx` (~L99, ~L252-266).
+ *   - ao "Finalizar entrega" abre o modal `FinalizarAvulsoModal.tsx`
+ *     (migration 357) que PERGUNTA se quer anexar foto (opcional): título
+ *     "Finalizar entrega", texto "Quer anexar um comprovante (foto) desta
+ *     corrida? É opcional — você pode finalizar sem foto.", botão "Anexar
+ *     fotos (opcional)" e botão final "Finalizar sem foto"/"Finalizar com
+ *     fotos" (~L135, L148, L186, L243).
+ *   - a tela "Entregas" tem 4 abas — "Retirada em loja", "Entregas motoboy",
+ *     "Pagamento do motoboy" e "Fechamentos de frete" (esta só pra quem vê
+ *     Pagamento): `components/entregas/lista/AbasEntrega.tsx` (`ABAS_BASE`
+ *     ~L44-48, `ABA_FECHAMENTOS` ~L50-52). Filtros são `<select>` ("Todas as
+ *     situações"/"Todo período"): `FiltrosEntrega.tsx` (~L26, L111-132);
+ *     paginação de 10 por página: `entregas-venda/page.tsx` (`const limit = 10`
+ *     ~L156).
  *
  * RÓTULOS NÃO ENCONTRADOS NO CÓDIGO (reportado, não inventado): continua sem
  * existir um chip curto de UMA palavra para os estados 'solicitada' e
@@ -106,7 +122,7 @@ const STATUS: Record<StatusKey, ChipDef> = {
 };
 const StatusChip = criarStatusChip(STATUS);
 
-// ─── Os 12 passos ──────────────────────────────────────────────────────────────
+// ─── Os 13 passos ──────────────────────────────────────────────────────────────
 const PASSOS: PassoTreino[] = [
   {
     quem: "Admin",
@@ -399,19 +415,46 @@ const PASSOS: PassoTreino[] = [
   },
   {
     quem: "Motoboy",
-    titulo: "Finalizar entrega",
-    narracao: <>Depois de entregar, clique em {nb("Finalizar entrega")}.</>,
-    porque: "Entrega confirmada entra no acerto do motoboy — é o corte que decide o que ele recebe. Quem também acompanha essas entregas pelo caminho normal: o estoque (papel estoquista_loja) agora tem acesso ao menu \"Entregas\" e vê TODAS as avulsas, sem filtro por vendedor. (Caso à parte não detalhado neste treino: se o PRÓPRIO motoboy registra a corrida, ela nasce esperando a LOJA confirmar, não o pool — o card mostra \"Aguardando confirmação da loja\" no lugar do botão Aceitar.)",
+    titulo: "Finalizar entrega — e a pergunta opcional de foto",
+    narracao: <>Depois de entregar, clique em {nb("Finalizar entrega")}. Abre uma janelinha perguntando {nb("Quer anexar um comprovante (foto) desta corrida?")} — é {nb("opcional")}. Anexe pelo botão {nb("Anexar fotos (opcional)")} se quiser, ou finalize direto em {nb("Finalizar sem foto")}.</>,
+    porque: "A pergunta de foto é sempre opcional — pular é um clique, o comprovante não trava a finalização. Entrega confirmada entra no acerto do motoboy, o corte que decide o que ele recebe. (Caso à parte não detalhado neste treino: se o PRÓPRIO motoboy registra a corrida, ela nasce esperando a LOJA confirmar, não o pool — o card mostra \"Aguardando confirmação da loja\" no lugar do botão Aceitar.)",
     resultado: <StatusChip s="confirmada" />,
     tela: (
-      <div className="rounded-xl border p-3" style={{ borderColor: CT.cremeBorder, background: "#fff" }}>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[13px] font-bold" style={{ color: CT.esmeralda }}>FA-0231</span>
-          <span className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ background: "#FFF7ED", color: "#9A3412" }}>Em Rota</span>
+      <TelaMock titulo="Finalizar entrega" acessorio={<CheckCircle size={14} style={{ color: CT.esmeralda }} />}>
+        <p className="text-[11px] text-center mb-2" style={{ color: "#6B7280" }}>
+          Quer anexar um comprovante (foto) desta corrida? É opcional — você pode finalizar sem foto.
+        </p>
+        <div className="flex justify-center mb-2">
+          <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-[11px] font-semibold" style={{ borderColor: CT.cremeBorder, color: "#6B7280" }}>
+            <Camera size={12} /> Anexar fotos (opcional)
+          </span>
         </div>
-        <div className="mt-2 relative inline-flex">
-          <BotaoMock label="Finalizar entrega" Icon={CheckCircle} cursor />
+        <div className="relative inline-flex w-full">
+          <BotaoMock label="Finalizar sem foto" Icon={CheckCircle} cursor />
         </div>
+      </TelaMock>
+    ),
+  },
+  {
+    quem: "Loja / Estoque",
+    titulo: "Onde tudo isso aparece — a tela de Entregas",
+    narracao: <>A tela {nb("Entregas")} reúne tudo em abas: {nb("Retirada em loja")}, {nb("Entregas motoboy")} (onde ficam as avulsas), {nb("Pagamento do motoboy")} e {nb("Fechamentos de frete")}. Os filtros são {nb("listas suspensas")} (situação e período) e a lista mostra {nb("10 por página")}.</>,
+    porque: "O estoque (papel estoquista_loja) tem acesso ao menu \"Entregas\" e vê TODAS as avulsas, sem filtro por vendedor. \"Pagamento do motoboy\" é o acerto/relatório do que o entregador recebe; \"Fechamentos de frete\" é o relatório mensal (só leitura) da verba de frete grátis — features à parte, fora do fluxo da solicitação em si.",
+    tela: (
+      <div className="flex gap-1.5 flex-wrap">
+        <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border" style={{ borderColor: CT.cremeBorder, color: "#6B7280", background: "#fff" }}>
+          <Store size={12} /> Retirada em loja
+        </span>
+        <span className="relative inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold" style={{ color: "#fff", background: CT.esmeralda }}>
+          <Bike size={12} /> Entregas motoboy
+          <Cursor />
+        </span>
+        <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border" style={{ borderColor: CT.cremeBorder, color: "#6B7280", background: "#fff" }}>
+          <DollarSign size={12} /> Pagamento do motoboy
+        </span>
+        <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border" style={{ borderColor: CT.cremeBorder, color: "#6B7280", background: "#fff" }}>
+          <Receipt size={12} /> Fechamentos de frete
+        </span>
       </div>
     ),
   },
