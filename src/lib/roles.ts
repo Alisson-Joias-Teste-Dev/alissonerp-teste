@@ -113,3 +113,23 @@ export function hasRole(role: string | null | undefined, permitidas: readonly st
   if (!role) return false;
   return permitidas.includes(role);
 }
+
+/**
+ * REGRA DE NEGÓCIO (fecha buraco de autorização, 21/07): "Tarefas do time"
+ * (GET /api/tarefas?visao=time) é a visão de SUPERVISÃO GERAL — mostra
+ * tarefas de QUALQUER usuário, sem filtro de dono/responsável. Antes só o
+ * FRONT escondia a aba (TarefasClient.tsx) pra quem não é gerência; a API
+ * não validava nada, então qualquer autenticado lia a lista completa
+ * (inclusive dados sensíveis, como endereço de cliente em tarefas de frete
+ * avulso). Fonte ÚNICA: front (TarefasClient.tsx) e API
+ * (app/api/tarefas/route.ts) importam esta mesma constante — antes a lista
+ * de roles estava hardcoded só no front, sem espelho na API.
+ * POR QUE: quem pode ver "o time inteiro" é a mesma gerência que já
+ * enxergava o botão da aba — não é uma lista nova, é o valor que já existia.
+ * IMPACTO SE REMOVIDO/DIVERGENTE: front e API voltam a poder dessincronizar
+ * (front esconde, API libera) — reabre o vazamento.
+ */
+export const ROLES_TAREFAS_GERENCIAR = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"] as const;
+export function podeGerenciarTarefas(role: string | null | undefined): boolean {
+  return ROLES_TAREFAS_GERENCIAR.includes(role as typeof ROLES_TAREFAS_GERENCIAR[number]);
+}
