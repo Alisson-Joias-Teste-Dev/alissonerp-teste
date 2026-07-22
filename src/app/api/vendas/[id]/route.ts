@@ -378,8 +378,21 @@ export async function PATCH(
 
   // Gate financeiro por campo — vendedora/gerente abre solicitação ao tentar
   // alterar campos protegidos. Frontend usa flag `solicitar` pra abrir modal.
-  const CAMPOS_ADMIN_ONLY = ["cliente_id", "vendedor_id", "data_venda"];
+  //
+  // REGRA DE NEGÓCIO (cliente_id liberado para a loja — jul/2026):
+  //   - vendedor_id (afeta comissão) e data_venda: continuam SÓ admin/dev/diretor.
+  //   - cliente_id (trocar o cliente da venda): agora também pode ser alterado por
+  //     gerente_loja e consultora — mas SÓ em rascunho (o guard "Campos restritos
+  //     a rascunho" abaixo devolve 409 depois disso, para TODOS) e SÓ na venda da
+  //     própria consultora (requireVendaOwnership acima). Motivo: corrigir o
+  //     cliente de um rascunho é rotina da loja e não tem efeito financeiro antes
+  //     da aprovação — exigir aprovação do admin só pra isso travava o dia a dia.
+  //   IMPACTO SE ALTERADO: se cliente_id voltar pra CAMPOS_ADMIN_ONLY,
+  //   consultora/gerente_loja voltam a cair no modal de solicitação de alteração.
+  const CAMPOS_ADMIN_ONLY = ["vendedor_id", "data_venda"];
   const ROLES_FINANCEIRO = ["admin", "desenvolvedor", "diretor"];
+  // Quem pode trocar o cliente da venda (em rascunho): financeiro + loja.
+  const ROLES_TROCA_CLIENTE = [...ROLES_FINANCEIRO, "gerente_loja", "consultora"];
   if (!ROLES_FINANCEIRO.includes(usuario.role)) {
     for (const campo of CAMPOS_ADMIN_ONLY) {
       if ((rawBody as Record<string, unknown>)[campo] !== undefined) {
@@ -389,6 +402,16 @@ export async function PATCH(
         );
       }
     }
+  }
+  // cliente_id segue a mesma mecânica de "solicitar aprovação", porém com uma
+  // allow-list ampliada para a loja (gerente_loja/consultora). Só bloqueia quem
+  // está FORA da lista (ex.: gerente_fabrica), que continua abrindo solicitação.
+  if (!ROLES_TROCA_CLIENTE.includes(usuario.role) &&
+      (rawBody as Record<string, unknown>).cliente_id !== undefined) {
+    return NextResponse.json(
+      { error: `O campo "cliente_id" só pode ser alterado pela loja ou admin. Envie uma solicitação.`, solicitar: true },
+      { status: 403 },
+    );
   }
   // Cast pra preservar tipos legados (situacao mutavel etc).
   const body = parsedBody.data as {
