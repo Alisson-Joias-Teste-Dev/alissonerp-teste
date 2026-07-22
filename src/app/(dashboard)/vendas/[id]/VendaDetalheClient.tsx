@@ -1828,7 +1828,17 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     try {
       const patch: Record<string, unknown> = {};
       if (edit.full) {
-        if (cliente?.id !== venda.cliente_id) patch.cliente_id = cliente?.id ?? null;
+        // REGRA DE NEGÓCIO (troca de cliente em rascunho — jul/2026):
+        // Só mandar cliente_id quando um cliente DE VERDADE está selecionado.
+        // O QUÊ: nunca autosalvar cliente_id nulo.
+        // POR QUÊ: ao trocar o cliente a consultora primeiro LIMPA o campo (cliente = null)
+        //   e só depois busca/escolhe o novo — isso leva mais que os 1,5s do autosave.
+        //   Se o autosave disparasse com cliente vazio, mandava cliente_id=null; o backend
+        //   faz COALESCE(null, cliente_id) e MANTÉM o cliente antigo, e o reload seguinte
+        //   "volta" o cliente antigo no meio da edição (a tela parecia recarregar sozinha
+        //   e não deixava trocar). Cliente é obrigatório, então null nunca é um save válido.
+        // IMPACTO SE ALTERADO: volta o bug de o campo Cliente resetar/recarregar ao trocar.
+        if (cliente?.id && cliente.id !== venda.cliente_id) patch.cliente_id = cliente.id;
         if ((vendedorSel || null) !== (venda.vendedor_id ?? null)) patch.vendedor_id = vendedorSel || null;
         if (dataVenda !== (venda.data_venda?.slice(0, 10) ?? "")) patch.data_venda = dataVenda;
       }
