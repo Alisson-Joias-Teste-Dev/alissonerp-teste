@@ -80,7 +80,7 @@ describe("Simetria SQL (multiAprovadorCond) x TS (eventoDaTarefa)", () => {
     { nome: "garantia_fora_prazo (chave aprovadores_garantia_fora_prazo)", tipo: "garantia_fora_prazo", tags: [] },
     { nome: "frete_avulso (chave aprovadores_frete_avulso, pagante='cliente')", tipo: "frete_avulso", tags: [] },
     {
-      nome: "frete_avulso_loja (chave aprovadores_frete_avulso_loja, migration 354, pagante='loja')",
+      nome: "frete_avulso_loja (chave aprovadores_frete_avulso_loja, migration 359, pagante='loja')",
       tipo: "frete_avulso",
       tags: [],
       // BLOCO 2 (jul/2026): o SQL (multiAprovadorCond) casa por evfa.pagante

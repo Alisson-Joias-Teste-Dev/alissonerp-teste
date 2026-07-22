@@ -84,7 +84,7 @@ const FreteAvulsoSchema = z.object({
   enderecoEntregaCidade: z.string().max(150).optional(),
   enderecoEntregaCep: z.string().max(10).optional(),
   enderecoEntregaUf: z.string().max(2).optional(),
-  // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): obrigatório junto
+  // REGRA DE NEGÓCIO (migration 359, 21/07 — "quem paga"): obrigatório junto
   // com solicitar=true (validado abaixo, não no schema, porque só se aplica
   // ao modo solicitação). Decide comprovante obrigatório e o pool de
   // aprovador — ver criarFreteAvulso em @/lib/entrega-venda.
@@ -240,7 +240,7 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    // REGRA DE NEGÓCIO (migration 354 — "quem paga"; estendido ao modo
+    // REGRA DE NEGÓCIO (migration 359 — "quem paga"; estendido ao modo
     // DIRETO com formulário completo): validado no SERVIDOR, não só no
     // front (FreteAvulsoModal). "loja" não exige comprovante; "cliente"
     // exige — criarFreteAvulso valida de novo (defesa em profundidade,

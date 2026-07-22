@@ -68,7 +68,7 @@ interface Anexo {
  *   Aprovação precisa pra mostrar quem paga, o valor cobrado/pago ao
  *   motoboy e (se cliente) a foto do comprovante ANTES do aprovador clicar
  *   Aprovar/Rejeitar.
- * POR QUÊ: sem isso o comprovante (obrigatório desde a migration 354) fica
+ * POR QUÊ: sem isso o comprovante (obrigatório desde a migration 359) fica
  *   salvo mas nunca conferido por ninguém — esvazia a regra de negócio; e
  *   sem o valor, uma solicitação cara chega visualmente igual a uma barata.
  * IMPACTO SE REMOVIDO: aprovador volta a decidir "às cegas" sobre quem
@@ -714,7 +714,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
                 tarefa de frete avulso (tipo 'frete_avulso'/'frete_avulso_loja')
                 precisa VER quem paga e, se for o cliente, a FOTO do
                 comprovante ANTES de decidir — senão a exigência de comprovante
-                (migration 354) vira arquivo morto que ninguém confere.
+                (migration 359) vira arquivo morto que ninguém confere.
                 O QUÊ: bloco condicional, mesmo padrão visual do card de
                   "Evidências da Limpeza" logo abaixo (foto em <a target="_blank">
                   pra ampliar + <img> de preview), servida pelo MESMO proxy

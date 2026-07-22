@@ -1,4 +1,4 @@
--- Migration 354: quem paga o frete avulso solicitado (loja x cliente)
+-- Migration 359: quem paga o frete avulso solicitado (loja x cliente)
 -- REGRA DE NEGÓCIO (decisão do Jonathan, 21/07):
 --   O que faz: adiciona à SOLICITAÇÃO de frete avulso (migration 353) o campo
 --     "quem paga" — 'loja' ou 'cliente' — e a coluna do comprovante de

@@ -253,7 +253,7 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
       "'frete_avulso' é exclusiva desse fluxo (não compartilha tipo com outro evento) — " +
       "qualquer um da lista 'aprovadores_frete_avulso' decide a MESMA tarefa: aprovar libera a " +
       "corrida (motoboy_id NULL, pool) e lança o saldo de frete; recusar exige motivo, sem custo. " +
-      "REGRA 'QUEM PAGA' (migration 354, 21/07): este evento agora cobre só o pagante='cliente' " +
+      "REGRA 'QUEM PAGA' (migration 359, 21/07): este evento agora cobre só o pagante='cliente' " +
       "(a lista serve para ACOMPANHAR a entrega, já paga pelo cliente) — quando pagante='loja' o " +
       "evento é 'frete_avulso_loja' (autoriza o CUSTO). A escolha do evento é feita em " +
       "eventoDaTarefa (src/lib/aprovacoes/evento-da-tarefa.ts) por `tarefaInfo.frete_pagante` " +
@@ -275,7 +275,7 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
       "entregas_venda.pagante",
     ],
     observacao:
-      "Regra 'QUEM PAGA' (migration 354, 21/07, decisão do Jonathan): quando a solicitação de " +
+      "Regra 'QUEM PAGA' (migration 359, 21/07, decisão do Jonathan): quando a solicitação de " +
       "frete avulso é paga pela LOJA (pagante='loja', sem comprovante obrigatório), a decisão " +
       "some para uma lista PRÓPRIA e separada da usada em 'frete_avulso' (pagante='cliente') — " +
       "esta lista autoriza o CUSTO que a loja assume, não só acompanha a corrida. Continua sendo " +

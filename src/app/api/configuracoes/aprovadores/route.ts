@@ -67,7 +67,7 @@ const CHAVES = [
   // aprovação (ver módulo Tarefas, tipo 'frete_avulso'). Espelha exatamente o
   // padrão de aprovadores_devolver_peca.
   "aprovadores_frete_avulso",
-  // MULTI (migration 354, 21/07 — regra "quem paga"): lista SEPARADA de quem
+  // MULTI (migration 359, 21/07 — regra "quem paga"): lista SEPARADA de quem
   // autoriza o CUSTO quando o frete avulso solicitado é pago pela LOJA (não
   // pelo cliente) — evento 'frete_avulso_loja' em
   // src/lib/aprovacoes/catalogo.ts. Espelha exatamente o padrão de
@@ -213,7 +213,7 @@ export async function GET() {
       aprovadores_garantia_fora_prazo: configMap.get("aprovadores_garantia_fora_prazo") ?? "",
       // MULTI: pool de liberadores do frete avulso solicitado (migration 353).
       aprovadores_frete_avulso: configMap.get("aprovadores_frete_avulso") ?? "",
-      // MULTI (migration 354): pool de quem autoriza o CUSTO quando pagante='loja'.
+      // MULTI (migration 359): pool de quem autoriza o CUSTO quando pagante='loja'.
       aprovadores_frete_avulso_loja: configMap.get("aprovadores_frete_avulso_loja") ?? "",
       // SINGLE: gerente dona do saldo de frete grátis (verba mensal 0,1% do faturamento).
       gerente_frete_gratis: configMap.get("gerente_frete_gratis") ?? "",
@@ -355,7 +355,7 @@ export async function PUT(req: NextRequest) {
       )).join(",");
       updates.push({ chave: "aprovadores_frete_avulso", valor: lista });
     }
-    // MULTI (migration 354, regra "quem paga"): pool separado de quem autoriza
+    // MULTI (migration 359, regra "quem paga"): pool separado de quem autoriza
     // o custo do frete avulso quando pagante='loja'. Normaliza igual ao bloco acima.
     if (body.aprovadores_frete_avulso_loja !== undefined) {
       const lista = Array.from(new Set(

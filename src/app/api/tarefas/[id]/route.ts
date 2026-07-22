@@ -46,7 +46,7 @@ export async function GET(
         ur.nome AS responsavel_nome, uc.nome AS criador_nome, o.numero_ordem,
         ve.aprovacao_credito_tipo, ve.situacao AS venda_situacao,
         -- REGRA DE NEGÓCIO (21/07 — aprovador precisa VER o comprovante antes
-        -- de decidir, migration 354): entregas_venda.tarefa_aprovacao_id
+        -- de decidir, migration 359): entregas_venda.tarefa_aprovacao_id
         -- (migration 353) é o vínculo tarefa→entrega gravado por
         -- criarFreteAvulso (src/lib/entrega-venda.ts) — join reverso pelo
         -- índice idx_entregas_tarefa_aprovacao (já existe, mig 353). Só

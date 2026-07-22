@@ -69,7 +69,7 @@ Modelo **TAREFA/POOL** (migration 353, consolidado nas fases V1-V3): não existe
   - **Atomicidade (jul/2026):** a decisão da tarefa (`aprovacoes_tarefa` + `tarefas`) e a ação de domínio (liberar/recusar) rodam agora dentro da **MESMA transação** no dispatcher — variantes `liberarFreteAvulsoNoTx`/`recusarFreteAvulsoNoTx` (recebem o `tx` de fora) fazem o trabalho de verdade; `liberarFreteAvulso`/`recusarFreteAvulso` viraram cascas finas que abrem a própria transação só para quem chamar fora de uma tx existente. Se a ação de domínio falhar, a transação inteira reverte — a tarefa **continua** `aguardando_aprovacao` (nunca fica "aprovada" com a entrega ainda `solicitada`). Escopo restrito a `frete_avulso`/`frete_avulso_loja`; os demais ~11 tipos de aprovação continuam com a ação de domínio fora da transação, sem mudança.
   - **Guard de idempotência:** o `UPDATE aprovacoes_tarefa` do dispatcher exige `status = 'pendente'`; se 0 linhas forem afetadas (aprovação já decidida por outra requisição/aprovador concorrente), a rota devolve **409** e não reprocessa nada. O front (`TarefaDrawer.tsx`) mostra esse erro (e qualquer outro) via `useErrorStore` — o `catch` deixou de ser silencioso.
 
-### 3.1. "Quem paga" — dois pools (migration 354, 21/07)
+### 3.1. "Quem paga" — dois pools (migration 359, 21/07)
 
 A solicitação passou a exigir `pagante` (`'cliente'` ou `'loja'`), gravado em `entregas_venda.pagante`:
 
@@ -225,8 +225,8 @@ O próprio motoboy registra a própria corrida pelo app (`MotoboyAppClient` → 
 - Migration base do módulo: `285_modulo_entrega.sql` (tabelas `entregas_venda`, `entregas_venda_itens`, `saldo_frete_gratis`, `fechamentos_frete`, `motoboys`; views `vw_entregas_pendentes` e `vw_motoboy_entregas`, ambas hardcoded para `situacao='confirmada'`). `fechamentos_frete` ficou sem nenhum código usá-la até ser reaproveitada pela migration 356 (ver §10.2).
 - Migration do frete avulso original: `293_frete_avulso.sql` (+ `294`/`295`/`298` para nullable de códigos e blindagem).
 - Migration da solicitação/pool: **`353_frete_avulso_solicitacao.sql`** — enum `solicitada` (inserido antes de `pendente`), colunas `endereco_entrega`/`liberada_por`/`liberada_em`/`motivo_recusa`/`tarefa_aprovacao_id`, constraint `chk_entrega_origem` recriada. **Já aplicada em homolog; produção pendente.**
-- Migration "quem paga": **`354_frete_avulso_pagante.sql`** — colunas `pagante` (`'loja'`|`'cliente'`, `chk_entrega_frete_avulso_pagante`) e `comprovante_pagante_path` em `entregas_venda`. Só arquivo criado nesta branch — **banco (local/homolog/produção) ainda não rodou esta migration.**
-- Migration do endereço estruturado (BLOCO 4): **`355_frete_avulso_endereco_estruturado.sql`** — colunas `endereco_entrega_numero`/`_complemento`/`_bairro`/`_cidade`/`_cep`/`_uf` em `entregas_venda` (a `endereco_entrega` TEXT já existia desde a 353, reaproveitada como "logradouro"). Espelha os nomes de `vendas_erp`. Só arquivo criado nesta branch — **banco ainda não rodou esta migration.**
+- Migration "quem paga": **`359_frete_avulso_pagante.sql`** — colunas `pagante` (`'loja'`|`'cliente'`, `chk_entrega_frete_avulso_pagante`) e `comprovante_pagante_path` em `entregas_venda`. APLICADA em homolog e produção (22/07); banco local (teste) pendente de rebuild.
+- Migration do endereço estruturado (BLOCO 4): **`355_frete_avulso_endereco_estruturado.sql`** — colunas `endereco_entrega_numero`/`_complemento`/`_bairro`/`_cidade`/`_cep`/`_uf` em `entregas_venda` (a `endereco_entrega` TEXT já existia desde a 353, reaproveitada como "logradouro"). Espelha os nomes de `vendas_erp`. APLICADA em homolog e produção (22/07).
 - Lib principal: `src/lib/entrega-venda.ts` (`criarFreteAvulso`, `liberarFreteAvulso`/`liberarFreteAvulsoNoTx`, `recusarFreteAvulso`/`recusarFreteAvulsoNoTx`, `aceitarFreteAvulso`, `confirmarFreteAvulso`, `listarAprovadoresFreteAvulso`, `lancarSaldoFreteAvulsoNoTx`, `formatarEnderecoEntregaAvulso`, `resolverEnderecoEntrega` — BLOCO 4, ver §3.4).
 - **Permissão (BLOCO 3, 21/07):** `src/lib/permissoes/frete-avulso.ts` — fonte única de quem solicita/cria direto (ver §3.3).
 - **Aviso de valor alto (BLOCO 4):** `src/lib/frete-avulso-alerta.ts` — `LIMITE_ALERTA_FRETE_MOTOBOY` e `precisaAlertaFreteMotoboy` (ver §3.4).
@@ -261,7 +261,7 @@ Antes, "a gerente" do saldo de frete grátis (avulso) era escolhida por `SELECT 
 - **NÃO cobre `criarEntrega`** (entrega normal, não-avulso) — esse fluxo tem sua PRÓPRIA busca arbitrária de `gerente_loja` (mesmo padrão antigo, `src/lib/entrega-venda.ts` ~linha 878) para o saldo de frete grátis das entregas normais (sobra/falta de frete cobrado vs motoboy). **Reportado ao Jonathan, não alterado** — fora do escopo combinado (só os 2 lugares do frete AVULSO). Se um dia for unificado, usar a mesma `resolverGerenteFreteGratisId`.
 - **Teste anti-volta**: `src/__tests__/frete-gerente-configuravel.test.ts` — chave preenchida usa o UUID configurado (sem nem consultar o fallback); chave vazia/em branco cai no fallback antigo; sem config e sem gerente_loja ativo usa o `fallbackUserId`.
 
-### 10.2. BLOCO 2 — migration 356 (arquivo criado, NÃO executada)
+### 10.2. BLOCO 2 — migration 356 (APLICADA em homolog e produção 22/07)
 
 `supabase/migrations/356_verba_frete_gratis_fechamento.sql` reaproveita `alissonerp.fechamentos_frete` (criada na migration 285, **nunca usada por nenhum código** até esta sessão — 0 linhas em produção). Já tinha `UNIQUE(gerente_id, mes_referencia)` (idempotência) e `saldo_frete_gratis.fechamento_id` já era FK pra ela.
 
@@ -297,14 +297,14 @@ Antes, "a gerente" do saldo de frete grátis (avulso) era escolhida por `SELECT 
 
 ### 10.5. Referência (Blocos 0-4)
 
-- Migration: `supabase/migrations/356_verba_frete_gratis_fechamento.sql` (arquivo criado, **NÃO executada** em nenhum ambiente).
+- Migration: `supabase/migrations/356_verba_frete_gratis_fechamento.sql` (APLICADA em homolog e produção 22/07).
 - Lib: `src/lib/frete-verba.ts` (`calcularFaturamentoMes`, `obterPercentualVerbaFrete`, `calcularVerbaFreteGratis`); `resolverGerenteFreteGratisId`/`obterSaldoFreteGerenteNoTx` (exportada no BLOCO 4) em `src/lib/entrega-venda.ts`; `src/lib/frete-fechamento.ts` (BLOCO 4 — `fecharMesFreteGratisAutomatico`, `listarAprovadoresFechamentoFrete`, `aprovarFechamentoFreteNoTx`, `recusarFechamentoFreteNoTx`).
 - Rotas: `src/app/api/entregas-venda/saldo-frete/route.ts` (usa `resolverGerenteFreteGratisId`), `src/app/api/entregas-venda/fechamento-frete-cron/route.ts` (BLOCO 4, cron), `src/app/api/configuracoes/aprovadores/route.ts` (chaves `gerente_frete_gratis` e `aprovadores_fechamento_frete`), `src/app/api/tarefas/route.ts` (pool no filtro de listagem) + `src/app/api/tarefas/[id]/aprovacao/route.ts` (dispatcher da decisão, BLOCO 4).
 - Aprovações: `src/lib/aprovacoes/catalogo.ts`/`tipos.ts`/`evento-da-tarefa.ts` — evento `fechamento_frete_negativo` (BLOCO 4).
 - Front: `src/components/configuracoes/aprovadores/ListaAprovadores.tsx` (cards "Gerente do saldo de frete grátis" e "Fechamento de frete grátis — saldo negativo"), `src/components/configuracoes/TabAprovadores.tsx`.
 - Componente limpo (BLOCO 0): `src/components/entregas/FreteAvulsoModal.tsx` (formulário enxuto removido — ver comentário "LIMPEZA" no topo do arquivo).
 - Testes: `src/__tests__/frete-gerente-configuravel.test.ts` (BLOCO 1), `src/__tests__/frete-verba-equivalente-dashboard.test.ts` (BLOCO 3), `src/__tests__/frete-fechamento-mensal.test.ts` + `src/__tests__/fechamento-frete-cron.test.ts` (BLOCO 4).
-- **Fora do escopo (ainda pendente)**: a busca arbitrária de `gerente_loja` em `criarEntrega` (entrega normal — ver §10.1) continua sem unificar com `resolverGerenteFreteGratisId`; migration 356 continua **não executada** em nenhum ambiente; agendamento real do cron (n8n/similar disparando `POST .../fechamento-frete-cron` todo dia 01) fica para o Jonathan configurar — ver comando manual abaixo.
+- **Fora do escopo (ainda pendente)**: a busca arbitrária de `gerente_loja` em `criarEntrega` (entrega normal — ver §10.1) continua sem unificar com `resolverGerenteFreteGratisId`; migration 356 APLICADA em homolog e produção (22/07); agendamento real do cron (n8n/similar disparando `POST .../fechamento-frete-cron` todo dia 01) fica para o Jonathan configurar — ver comando manual abaixo.
 
 ### 10.6. BLOCO 5 (21/07) — aba "Fechamentos de frete" (relatório mensal, READ-ONLY)
 
@@ -338,7 +338,7 @@ A coluna existente `entregas_venda.foto_entrega_path` (migration 287) só guarda
 - **Tabela nova**: `alissonerp.entregas_venda_fotos` (`id`, `entrega_id` FK → `entregas_venda` `ON DELETE CASCADE`, `foto_path`, `criado_por_id`, `criado_em`). **Sem coluna `etapa`** (diferença vs. `solicitacao_peca_fotos`): lá existem 3 momentos físicos por solicitação (entrega/recebimento/devolução); aqui existe **um único momento** por entrega (a confirmação) — coluna `etapa` seria sempre a mesma constante, sem benefício.
 - **`foto_entrega_path` fica CONGELADA** (não removida — Database Safety; não é mais escrita pelo código novo) — continua válida pra ler os registros ANTIGOS (confirmados antes desta migration).
 - **Sem cópia de dados históricos** (diferença vs. migration 349, que copiou os `foto_*` antigos pra tabela filha): o pagamento do motoboy foi acertado até 19/07 e recomeça do zero (decisão Jonathan) — não há necessidade de migrar fotos antigas pra tabela nova pra efeito de acerto financeiro. O fallback de LEITURA (abaixo) já cobre exibir fotos antigas sem duplicar o dado fisicamente.
-- **Migration criada como ARQUIVO, NÃO executada** — `supabase/migrations/357_entregas_venda_fotos.sql`. Confirmado número livre contra `main` (que tinha até `354_perda_extravio_stock_ledger.sql` — **conteúdo diferente** do `354_frete_avulso_pagante.sql` desta branch; ver §11.5 "atenção" abaixo) e contra este branch (`353`–`356` já usados aqui).
+- **Migration `357_entregas_venda_fotos.sql` — APLICADA em homolog e produção (22/07)**. Número livre confirmado contra `main` (que tinha até `354_perda_extravio_stock_ledger.sql`); a colisão do `354_frete_avulso_pagante` desta branch foi resolvida renomeando-o para `359` (ver §11.5 "atenção").
 
 ### 11.2. Leitura unificada — helper único (`buscarFotosEntrega`)
 
@@ -371,11 +371,11 @@ A coluna existente `entregas_venda.foto_entrega_path` (migration 287) só guarda
 - **`FinalizarAvulsoModal.tsx`** (NOVO — confirmação SEM código, corrida avulsa): antes, o botão "Finalizar entrega" chamava `POST /confirmar-avulso` direto, sem nenhuma pergunta. Agora abre este modal perguntando *"Quer anexar um comprovante (foto)? É opcional"* — pular é **1 clique** (o botão principal funciona igual com ou sem foto anexada) e o clique fica desabilitado durante o envio (trava duplo clique). Reusado nos dois pontos onde existia o botão direto: `MotoboyAppClient.tsx` (lista de corridas do app) e `EntregaDetalheDrawer.tsx` ("Confirmar Corrida Avulsa").
 - **`src/lib/fotos-base64.ts`** (NOVO, client-safe): `lerArquivosComoBase64` — extraído pra não duplicar a leitura de múltiplos arquivos (FileReader + Promise.all) entre os dois modais acima.
 - **Exibição**: `EntregaDetalheDrawer.tsx` mostra a galeria de `fotos_entrega` (grade de miniaturas, clique abre em nova aba) via `getPublicUrl("pagamento-fotos", path)` (`src/lib/storage-url.ts`) — proxy autenticado, sem gerar signed URL nova.
-- **⚠️ Atenção separada (não é sobre fotos)**: ao pesquisar o número livre da migration, esta branch (`353`–`356`) diverge de `main` a partir da 354 — `main` tem `354_perda_extravio_stock_ledger.sql` (conteúdo diferente do `354_frete_avulso_pagante.sql` local). É uma colisão de numeração PRÉ-EXISTENTE nesta branch (não introduzida por este bloco) que precisa de renumeração/rebase antes do merge para `main` — reportado ao Jonathan, não resolvido aqui (fora do escopo combinado desta tarefa).
+- **✅ Colisão de numeração RESOLVIDA (22/07)**: `main` tem `353_frete_avulso_solicitacao.sql` + `354_perda_extravio_stock_ledger.sql`; esta branch adicionava um `354_frete_avulso_pagante.sql` (conteúdo diferente) — dois `354` no mesmo diretório após o merge. Correção mínima: o arquivo colidente foi renomeado para **`359_frete_avulso_pagante.sql`** (próximo número livre), já que só ele colidia (as `355`–`358` desta branch não colidem) e o `pagante` só adiciona 2 colunas em `entregas_venda`, sem dependência das demais — rodar por último é seguro. Sequência final na main após o merge: `353,354(perda),355,356,357,358,359(pagante)`. As referências em comentários/testes ("migration 354" → "migration 359") foram ajustadas junto.
 
 ### 11.6. Referência (§11)
 
-- Migration: `supabase/migrations/357_entregas_venda_fotos.sql` (arquivo criado, **NÃO executada**).
+- Migration: `supabase/migrations/357_entregas_venda_fotos.sql` (APLICADA em homolog e produção 22/07).
 - Lib: `src/lib/entrega-venda.ts` (`MAX_FOTOS_ENTREGA`, `buscarFotosEntrega`, `uploadFotosEntrega`, `inserirFotosEntrega` — privada; `confirmarEntrega`/`confirmarFreteAvulso` estendidos com `fotosBase64?: string[]`).
 - Util front: `src/lib/fotos-base64.ts` (`lerArquivosComoBase64`).
 - Rotas: `src/app/api/entregas-venda/[id]/confirmar/route.ts` (`fotos_base64` no body, código intocado), `src/app/api/entregas-venda/[id]/confirmar-avulso/route.ts` (passou a ler o body — antes ignorava), `src/app/api/entregas-venda/[id]/route.ts` (expõe `fotos_entrega`).
@@ -460,7 +460,7 @@ Duas opções foram avaliadas:
 - **(a) Estender `pagamentos_motoboy`** com `status` ('rascunho'/'pago') e relaxar o `CHECK (valor_total > 0)`. REJEITADA: a EXISTÊNCIA de uma linha em `pagamentos_motoboy_itens` já significa "entrega paga" em vários pontos do código (`motoboy/pagar`, `motoboy/minhas`, o antigo `motoboy/relatorio-pagamento`, todos com `EXISTS`/`NOT EXISTS` nessa tabela). Inserir itens de RASCUNHO ali (antes de confirmar) faria uma corrida "revisar"/"não pagar" ainda não confirmada aparecer como JÁ PAGA em qualquer consulta que reuse esse critério — contaminando a trava anti-duplo-pagamento e o próprio relatório. Mexer no `CHECK` de uma tabela financeira em produção também pede cuidado extra (`DROP CONSTRAINT` + `ADD` nova condição) para algo que tem alternativa mais segura.
 - **(b) Tabela NOVA `relatorios_pagamento_motoboy`/`..._itens`** (ESCOLHIDA): um estágio de CONFERÊNCIA (rascunho/aguardando → confirmação), totalmente separado do LIVRO de pagamento de fato. `pagamentos_motoboy`/`..._itens` continuam sendo a ÚNICA fonte de verdade sobre "o que já foi pago" — nenhuma mudança nelas (nem no schema, nem no comportamento de quem já as consulta). Ao confirmar, a rota CRIA o `pagamentos_motoboy` de verdade, reusando a MESMA transação/validação de `motoboy/pagar`.
 
-Migration 358 (arquivo criado, **NÃO executada**): `relatorios_pagamento_motoboy` (motoboy_id, data_inicio, data_fim, status `aguardando`/`pago`, total_sugerido, pagamento_id FK opcional, created_by/at, pago_em/pago_por) + `relatorios_pagamento_motoboy_itens` (relatorio_id, entrega_id, classificacao, decisao, frete_motoboy — `UNIQUE(relatorio_id, entrega_id)`, não global: a mesma entrega pode estar em relatórios-rascunho diferentes; a trava anti-duplo-pagamento real continua sendo a `UNIQUE(entrega_id)` de `pagamentos_motoboy_itens`).
+Migration 358 (APLICADA em homolog e produção 22/07): `relatorios_pagamento_motoboy` (motoboy_id, data_inicio, data_fim, status `aguardando`/`pago`, total_sugerido, pagamento_id FK opcional, created_by/at, pago_em/pago_por) + `relatorios_pagamento_motoboy_itens` (relatorio_id, entrega_id, classificacao, decisao, frete_motoboy — `UNIQUE(relatorio_id, entrega_id)`, não global: a mesma entrega pode estar em relatórios-rascunho diferentes; a trava anti-duplo-pagamento real continua sendo a `UNIQUE(entrega_id)` de `pagamentos_motoboy_itens`).
 
 #### 12.8.2. Confirmar pagamento reusa `motoboy/pagar` — nenhum segundo caminho
 
@@ -474,7 +474,7 @@ Migration 358 (arquivo criado, **NÃO executada**): `relatorios_pagamento_motobo
 
 #### 12.8.3. Referência (§12.8)
 
-- Migration: `supabase/migrations/358_relatorios_pagamento_motoboy.sql` (criada, **NÃO executada**).
+- Migration: `supabase/migrations/358_relatorios_pagamento_motoboy.sql` (APLICADA em homolog e produção 22/07).
 - Lib compartilhada: `src/lib/pagamento-motoboy.ts` (`ROLES_PAGAMENTO_MOTOBOY`, `buscarEntregasValidasParaPagar`, `criarPagamentoMotoboyTx`, `vencimentoPadrao`, `listarRelatoriosPagamentoMotoboy`, `PAGE_SIZE_RELATORIOS_PAGAMENTO_MOTOBOY`, `RelatorioPagamentoMotoboyListItem`).
 - Rotas: `motoboy/relatorio-pagamento/route.ts` (`GET` lista paginada, `POST` cria); `motoboy/relatorio-pagamento/[id]/route.ts` (`GET` detalhe); `motoboy/relatorio-pagamento/[id]/confirmar/route.ts` (`POST` confirma — trava `status='pago'`); `motoboy/pagar/route.ts` (refatorada para chamar a lib compartilhada, contrato inalterado).
 - SSR: `src/app/(dashboard)/entregas-venda/page.tsx` (query paginada de relatórios quando `aba==='pagamento'`, reusando `listarRelatoriosPagamentoMotoboy`).

@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
     -- frete avulso solicitado (migration 353, camada central — evento 'frete_avulso'
     -- em src/lib/aprovacoes/catalogo.ts): tarefa nasce com tipo 'frete_avulso' em
     -- criarFreteAvulso (src/lib/entrega-venda.ts). Chave: 'aprovadores_frete_avulso'.
-    -- REGRA "QUEM PAGA" (migration 354, 21/07): a MESMA tarefa (tipo='frete_avulso')
+    -- REGRA "QUEM PAGA" (migration 359, 21/07): a MESMA tarefa (tipo='frete_avulso')
     -- espelha os 2 eventos do catálogo (frete_avulso / frete_avulso_loja, ver
     -- eventoDaTarefa) por evfa.pagante (entregas_venda, join abaixo) — NULL/
     -- 'cliente' = pagante='cliente' (chave de sempre); 'loja' = pagante='loja'

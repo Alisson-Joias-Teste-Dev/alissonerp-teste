@@ -28,7 +28,7 @@ interface AprovadorConfig {
   desconto_fallback_sem_cadastro_pct?: string; // Fase 5: teto (%) sem cadastro de mx_desconto_permitido
   limite_desconto_cartao_pct?: string; // Fase 5: acima disso, cartão de crédito exige aprovação
   aprovadores_frete_avulso?: string; // MULTI: UUIDs separados por vírgula (pool frete avulso — migration 353)
-  aprovadores_frete_avulso_loja?: string; // MULTI: custo do frete avulso quando pagante='loja' (migration 354)
+  aprovadores_frete_avulso_loja?: string; // MULTI: custo do frete avulso quando pagante='loja' (migration 359)
   gerente_frete_gratis?: string; // SINGLE: gerente do saldo de frete grátis (BLOCO 1, 21/07) — vazio = fallback antigo
   aprovadores_fechamento_frete?: string; // MULTI: aprova o fechamento mensal com saldo negativo (BLOCO 4, 21/07)
 }

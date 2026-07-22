@@ -449,7 +449,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // REGRA DE NEGÓCIO (BLOCO 2, jul/2026 — pool decidido pelo DADO, não pela tag):
   // join com entregas_venda pelo mesmo vínculo tarefa_aprovacao_id (migration 353)
   // que já é usado em tarefas/[id]/route.ts (GET) e listarAprovadoresFreteAvulso* —
-  // traz `pagante` (migration 354) pra dentro de tarefaInfo, com o MESMO alias
+  // traz `pagante` (migration 359) pra dentro de tarefaInfo, com o MESMO alias
   // `frete_pagante` do GET, pra alimentar eventoDaTarefa. Substitui a leitura da
   // tag `frete_pagante:loja`, que o próprio solicitante podia editar via PATCH
   // /api/tarefas/[id] (tags é array livre, sem validação) e assim escolher qual

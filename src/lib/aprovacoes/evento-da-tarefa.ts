@@ -36,7 +36,7 @@
  *   11. compra_metal
  *   12. garantia_fora_prazo
  *   13. frete_avulso / frete_avulso_loja (tipo exclusivo, migration 353; split por
- *       "quem paga" na migration 354, decidido por `tarefaInfo.frete_pagante`
+ *       "quem paga" na migration 359, decidido por `tarefaInfo.frete_pagante`
  *       — entregas_venda.pagante, NÃO mais pela tag `frete_pagante:loja`, que
  *       era editável pelo solicitante — ver BLOCO 2, jul/2026, comentário no
  *       próprio bloco abaixo). Sem handler de efeito neste PATCH; o handler
@@ -68,7 +68,7 @@ export interface TarefaInfoParaEvento {
   venda_situacao?: string | null;
   aprovacao_credito_tipo?: string | null;
   // REGRA DE NEGÓCIO (BLOCO 2, jul/2026 — pool decidido pelo DADO, não pela tag):
-  // `entregas_venda.pagante` (migration 354) da entrega ligada a esta tarefa
+  // `entregas_venda.pagante` (migration 359) da entrega ligada a esta tarefa
   // (join por tarefa_aprovacao_id, feito pelo caller — ver aprovacao/route.ts e
   // tarefas/[id]/route.ts, que já espelham o padrão de aprovacao_credito_tipo
   // abaixo). Substitui a tag `frete_pagante:loja`, que era editável pelo próprio
@@ -152,7 +152,7 @@ export function eventoDaTarefa(
   // exclusivo desse fluxo — não compete com nenhum outro tipo/tag acima, então a
   // posição no final da cadeia é segura (não rouba tarefa de ninguém).
   //
-  // REGRA "QUEM PAGA" (migration 354, 21/07, decisão do Jonathan): a MESMA tarefa
+  // REGRA "QUEM PAGA" (migration 359, 21/07, decisão do Jonathan): a MESMA tarefa
   // (tipo='frete_avulso') tem 2 eventos possíveis no catálogo — a diferença é só
   // QUEM decide, não o fluxo.
   //
@@ -162,7 +162,7 @@ export function eventoDaTarefa(
   // podia editar via PATCH /api/tarefas/[id] (isOwner inclui criado_por, sem
   // nenhuma validação de campo). Trocar/remover a tag mudava qual pool decidia
   // (ou zerava os dois, se a tag sumisse). Agora usa `tarefaInfo.frete_pagante`
-  // — o valor de `entregas_venda.pagante` (migration 354), gravado UMA vez em
+  // — o valor de `entregas_venda.pagante` (migration 359), gravado UMA vez em
   // criarFreteAvulso e nunca reexposto como editável por este endpoint. SEM o
   // campo (pagante='cliente', ou tarefa antiga da migration 353 antes deste
   // campo existir) cai no evento original 'frete_avulso' (chave

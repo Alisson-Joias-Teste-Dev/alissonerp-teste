@@ -42,7 +42,7 @@ import {
  *   - bloco "Quem paga *" (botões "Loja"/"Cliente") + "Comprovante de
  *     pagamento *" (obrigatório só quando Cliente), textos de apoio ("Cliente
  *     pagou — anexe o comprovante abaixo...", "Custo da loja — sem
- *     comprovante..."): `FreteAvulsoModal.tsx` (~L748-826, migration 354).
+ *     comprovante..."): `FreteAvulsoModal.tsx` (~L748-826, migration 359).
  *   - "Descrição da corrida *", "Valor cobrado do cliente (R$) *" (só quando
  *     pagante === 'cliente' — some com 'loja', ajuste 21/07,
  *     `precisaValorCobradoDoCliente` em `lib/frete-avulso-valor-cobrado.ts`),

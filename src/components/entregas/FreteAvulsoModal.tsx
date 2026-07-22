@@ -44,7 +44,7 @@
  * o mesmo modal, aberto do mesmo lugar, mudando de comportamento conforme
  * quem está logado.
  *
- * REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga", só no modo
+ * REGRA DE NEGÓCIO (migration 359, 21/07 — "quem paga", só no modo
  * solicitação): a consultora informa QUEM PAGA o frete — 'loja' ou 'cliente'.
  * Se 'cliente', o comprovante de pagamento (foto) é OBRIGATÓRIO (validado
  * aqui E no backend, criarFreteAvulso). O aprovador muda conforme a escolha
@@ -222,7 +222,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   const [carregandoEndereco, setCarregandoEndereco] = useState(false);
   const [freteCobradoConsultora, setFreteCobradoConsultora] = useState("");
 
-  // REGRA DE NEGÓCIO (migration 354 — "quem paga"): só existe no modo
+  // REGRA DE NEGÓCIO (migration 359 — "quem paga"): só existe no modo
   // solicitação. `comprovanteBase64` só é exigido quando pagante='cliente'.
   const [pagante, setPagante] = useState<"loja" | "cliente" | "">("");
   const [comprovanteBase64, setComprovanteBase64] = useState("");
@@ -374,7 +374,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
         if (precisaValorCobradoDoCliente(pagante) && freteCobradoConsultora === "") {
           throw new Error("Informe o valor cobrado do cliente.");
         }
-        // REGRA DE NEGÓCIO (migration 354 — "quem paga"): validado aqui
+        // REGRA DE NEGÓCIO (migration 359 — "quem paga"): validado aqui
         // (front) E no backend (defesa em profundidade — ver
         // criarFreteAvulso). Comprovante só é exigido quando pagante='cliente'.
         if (!pagante) {
@@ -791,7 +791,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                   <div>
                     <div style={tituloSecao}>PAGAMENTO</div>
 
-                    {/* Quem paga (migration 354) + Comprovante — bloco destacado:
+                    {/* Quem paga (migration 359) + Comprovante — bloco destacado:
                         ANTES o comprovante nascia solto mais abaixo na lista de
                         campos, longe do campo que o obriga (pagante==='cliente'). */}
                     <div style={{ padding: 12, borderRadius: 10, background: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}>

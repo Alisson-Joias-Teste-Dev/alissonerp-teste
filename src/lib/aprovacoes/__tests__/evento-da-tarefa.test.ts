@@ -151,7 +151,7 @@ describe("eventoDaTarefa — mapa tipo/tag → evento (espelha route.ts linha a 
     expect(eventoDaTarefa("frete_avulso", [], { frete_pagante: null })).toBe("frete_avulso");
   });
 
-  it("frete_avulso_loja: mesmo tipo, COM tarefaInfo.frete_pagante='loja' (entregas_venda.pagante, migration 354)", () => {
+  it("frete_avulso_loja: mesmo tipo, COM tarefaInfo.frete_pagante='loja' (entregas_venda.pagante, migration 359)", () => {
     expect(eventoDaTarefa("frete_avulso", [], { frete_pagante: "loja" })).toBe("frete_avulso_loja");
   });
 

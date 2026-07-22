@@ -2305,7 +2305,7 @@ export async function listarAprovadoresFreteAvulso(): Promise<string[]> {
  * Lê o pool de aprovadores do frete avulso pago pela LOJA (chave MULTI
  * `aprovadores_frete_avulso_loja`, Config › Aprovadores).
  *
- * REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): irmã de
+ * REGRA DE NEGÓCIO (migration 359, 21/07 — "quem paga"): irmã de
  * listarAprovadoresFreteAvulso — mesma FONTE ÚNICA da lista, só que para o
  * pool que autoriza o CUSTO quando a solicitação é paga pela loja (pagante
  * ='loja'), não o que acompanha a corrida já paga pelo cliente.
@@ -2461,7 +2461,7 @@ export interface CriarFreteAvulsoParams {
   enderecoEntregaCep?: string;
   enderecoEntregaUf?: string;
   modoSolicitacao?: boolean;
-  // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"; estendido na
+  // REGRA DE NEGÓCIO (migration 359, 21/07 — "quem paga"; estendido na
   // reforma da tela Entregas para o modo DIRETO com formulário completo):
   // obrigatório sempre que `usaFormularioCompleto` for true (modoSolicitacao=
   // true OU o caller mandou este campo — ver `usaFormularioCompleto` em
@@ -2480,7 +2480,7 @@ export interface CriarFreteAvulsoParams {
   // IMPACTO SE REMOVIDO: sem saber quem paga não dá para escolher comprovante
   // obrigatório nem (na solicitação) o pool certo de aprovadores.
   pagante?: "loja" | "cliente";
-  // REGRA DE NEGÓCIO (migration 354): comprovante de pagamento do frete,
+  // REGRA DE NEGÓCIO (migration 359): comprovante de pagamento do frete,
   // OBRIGATÓRIO quando pagante='cliente'. Base64 (data URL ou puro — uploadFile
   // remove o prefixo data:...;base64, se existir). Reusa o bucket
   // `pagamento-fotos` (mesmo de foto_entrega_path e compras de metal) — coluna
@@ -2511,7 +2511,7 @@ export interface FreteAvulso {
   motoboyTelefone: string | null;
   vendaId: number | null;
   enderecoEntrega: string | null;
-  // migration 354 — "quem paga" a solicitação (null nas criações diretas, que
+  // migration 359 — "quem paga" a solicitação (null nas criações diretas, que
   // continuam sem esse campo — ver criarFreteAvulso).
   pagante: "loja" | "cliente" | null;
 }
@@ -2719,7 +2719,7 @@ export async function criarFreteAvulso(
   }
 
   if (usaFormularioCompleto) {
-    // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"; estendido na
+    // REGRA DE NEGÓCIO (migration 359, 21/07 — "quem paga"; estendido na
     // reforma da tela Entregas para o modo DIRETO com formulário completo):
     // obrigatório sempre que `usaFormularioCompleto`, COM ou SEM venda, e
     // independente de `modoSolicitacao` — o campo é o mesmo formulário nos
@@ -2757,7 +2757,7 @@ export async function criarFreteAvulso(
     }
   }
 
-  // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — migration 354
+  // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — migration 359
   // acrescenta o split por "quem paga"): a solicitação vira TAREFA DE
   // APROVAÇÃO para o pool configurado — mesma engrenagem de compra comercial e
   // solicitações de inventário (ver src/lib/inventario-solicitacoes.ts).
@@ -2784,7 +2784,7 @@ export async function criarFreteAvulso(
     }
   }
 
-  // REGRA DE NEGÓCIO (migration 354; estendido para o modo DIRETO com
+  // REGRA DE NEGÓCIO (migration 359; estendido para o modo DIRETO com
   // formulário completo): upload do comprovante ANTES de abrir a transação —
   // se o Storage falhar, nada é gravado no banco (fail-fast, sem linha órfã
   // sem comprovante, seja 'solicitada' ou 'pendente'). Reusa o bucket
@@ -2885,7 +2885,7 @@ export async function criarFreteAvulso(
         params.descricaoAvulso ? `Obs: ${params.descricaoAvulso}.` : null,
       ].filter(Boolean).join(" ");
 
-      // REGRA DE NEGÓCIO (migration 354, 21/07 — "quem paga"): a tag
+      // REGRA DE NEGÓCIO (migration 359, 21/07 — "quem paga"): a tag
       // `frete_pagante:loja` é o que eventoDaTarefa (src/lib/aprovacoes/
       // evento-da-tarefa.ts) lê para escolher entre os eventos 'frete_avulso'
       // (cliente, sem tag) e 'frete_avulso_loja' (loja, com tag) — mesma tarefa
