@@ -24,6 +24,12 @@
 import { useState, useRef, useEffect } from "react";
 import { X, Loader2, CheckCircle, Shield, AlertTriangle, Camera } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
+import { lerArquivosComoBase64 } from "@/lib/fotos-base64";
+
+// REGRA DE NEGÓCIO (migration 357): limite de fotos por confirmação — mesmo
+// valor usado no backend (MAX_FOTOS_ENTREGA, src/lib/entrega-venda.ts) e no
+// padrão já existente do projeto (solicitação de peça, migration 349).
+const MAX_FOTOS = 5;
 
 // ── Paleta ──────────────────────────────────────────────────────────────────────
 const C = {
@@ -75,7 +81,9 @@ export default function ConfirmarEntregaModal({
   const [submetendo, setSubmetendo] = useState(false);
   const [erro, setErro] = useState("");
   const [sucesso, setSucesso] = useState<ConfirmacaoResponse | null>(null);
-  const [fotoBase64, setFotoBase64] = useState("");
+  // MULTIFOTO (migration 357): várias fotos opcionais, até MAX_FOTOS.
+  const [fotosBase64, setFotosBase64] = useState<string[]>([]);
+  const [fotoErro, setFotoErro] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const fotoInputRef = useRef<HTMLInputElement>(null);
 
@@ -85,7 +93,8 @@ export default function ConfirmarEntregaModal({
       setCodigo("");
       setErro("");
       setSucesso(null);
-      setFotoBase64("");
+      setFotosBase64([]);
+      setFotoErro("");
       // Pequeno timeout para garantir que o modal está renderizado
       setTimeout(() => inputRef.current?.focus(), 100);
     }
@@ -124,8 +133,12 @@ export default function ConfirmarEntregaModal({
     setErro("");
 
     try {
-      const body: Record<string, string> = { codigo: code };
-      if (fotoBase64) body.foto_base64 = fotoBase64;
+      // REGRA DE NEGÓCIO (alerta Jonathan): fotos NUNCA condicionam nem
+      // antecipam a validação do código — o backend valida `codigo` primeiro,
+      // sempre; `fotos_base64` só é processado depois de aprovado (best-effort,
+      // opcional). Este front só empacota o que foi digitado/anexado.
+      const body: Record<string, unknown> = { codigo: code };
+      if (fotosBase64.length > 0) body.fotos_base64 = fotosBase64;
 
       const result = await apiFetch<ConfirmacaoResponse>(
         `/api/entregas-venda/${entregaId}/confirmar`,
@@ -166,13 +179,29 @@ export default function ConfirmarEntregaModal({
     }
   }
 
-  /** Lê arquivo de foto como base64 para envio ao backend. */
-  function handleFotoSelecionada(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => setFotoBase64(reader.result as string);
-    reader.readAsDataURL(file);
+  /**
+   * Lê os arquivos selecionados (1 ou vários) como base64 para envio.
+   * REGRA DE NEGÓCIO: soma com as fotos já anexadas, até MAX_FOTOS — o
+   * excedente é descartado com um aviso (não trava a tela, só informa).
+   */
+  async function handleFotoSelecionada(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    e.target.value = ""; // permite re-selecionar o mesmo arquivo depois
+    if (!files || files.length === 0) return;
+
+    const vagas = MAX_FOTOS - fotosBase64.length;
+    if (vagas <= 0) {
+      setFotoErro(`Máximo de ${MAX_FOTOS} fotos.`);
+      return;
+    }
+    const excedente = files.length > vagas;
+    const novas = await lerArquivosComoBase64(files, vagas);
+    setFotosBase64((prev) => [...prev, ...novas]);
+    setFotoErro(excedente ? `Só cabiam mais ${vagas} foto(s) — o restante foi ignorado.` : "");
+  }
+
+  function removerFoto(idx: number) {
+    setFotosBase64((prev) => prev.filter((_, i) => i !== idx));
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -350,43 +379,71 @@ export default function ConfirmarEntregaModal({
                 </div>
               )}
 
-              {/* ── Foto de comprovação ────────────────────────────── */}
-              {/* REGRA DE NEGÓCIO: foto opcional como comprovante
-                  visual da retirada/entrega. */}
+              {/* ── Fotos de comprovação (opcional, migration 357) ──── */}
+              {/* REGRA DE NEGÓCIO: até MAX_FOTOS fotos, OPCIONAIS, como
+                  comprovante visual da retirada/entrega. Nunca bloqueia a
+                  confirmação — só o código (acima) é obrigatório. */}
               <div style={{ marginBottom: 16, textAlign: "center" }}>
                 <input
                   ref={fotoInputRef}
                   type="file"
                   accept="image/*"
                   capture="environment"
+                  multiple
                   onChange={handleFotoSelecionada}
                   style={{ display: "none" }}
                 />
                 <button
                   onClick={() => fotoInputRef.current?.click()}
-                  disabled={submetendo}
+                  disabled={submetendo || fotosBase64.length >= MAX_FOTOS}
                   style={{
                     display: "inline-flex", alignItems: "center", gap: 6,
                     padding: "6px 12px", borderRadius: 6,
                     border: `1px solid ${C.cremeBorder}`,
-                    background: fotoBase64 ? C.verdeLt : "#fff",
-                    color: fotoBase64 ? C.verde : C.cinza,
-                    fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    background: fotosBase64.length > 0 ? C.verdeLt : "#fff",
+                    color: fotosBase64.length > 0 ? C.verde : C.cinza,
+                    fontSize: 12, fontWeight: 600,
+                    cursor: submetendo || fotosBase64.length >= MAX_FOTOS ? "not-allowed" : "pointer",
                   }}
                 >
                   <Camera size={14} />
-                  {fotoBase64 ? "Foto anexada" : "Anexar foto da entrega"}
+                  {fotosBase64.length > 0
+                    ? `${fotosBase64.length} foto(s) anexada(s) (opcional)`
+                    : "Anexar fotos da entrega (opcional)"}
                 </button>
-                {fotoBase64 && (
-                  <div style={{ marginTop: 8 }}>
-                    <img
-                      src={fotoBase64}
-                      alt="Foto da entrega"
-                      style={{
-                        width: "100%", maxWidth: 200, borderRadius: 8,
-                        border: `1px solid ${C.cremeBorder}`, margin: "0 auto",
-                      }}
-                    />
+                {fotoErro && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: C.ambar }}>{fotoErro}</div>
+                )}
+                {fotosBase64.length > 0 && (
+                  <div style={{
+                    marginTop: 8, display: "flex", flexWrap: "wrap",
+                    gap: 8, justifyContent: "center",
+                  }}>
+                    {fotosBase64.map((foto, idx) => (
+                      <div key={idx} style={{ position: "relative" }}>
+                        <img
+                          src={foto}
+                          alt={`Foto ${idx + 1} da entrega`}
+                          style={{
+                            width: 72, height: 72, objectFit: "cover", borderRadius: 8,
+                            border: `1px solid ${C.cremeBorder}`,
+                          }}
+                        />
+                        <button
+                          onClick={() => removerFoto(idx)}
+                          disabled={submetendo}
+                          aria-label={`Remover foto ${idx + 1}`}
+                          style={{
+                            position: "absolute", top: -6, right: -6,
+                            width: 18, height: 18, borderRadius: "50%",
+                            background: C.vermelho, color: "#fff", border: "none",
+                            fontSize: 11, lineHeight: "18px", cursor: "pointer", padding: 0,
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

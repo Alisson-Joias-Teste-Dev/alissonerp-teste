@@ -21,6 +21,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { formatarEnderecoEntregaAvulso } from "@/lib/entrega-venda";
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase();
@@ -107,7 +108,12 @@ export async function GET(req: NextRequest) {
         -- REGRA DE NEGÓCIO (migration 353): corrida avulsa liberada de uma
         -- solicitação da consultora carrega endereço de entrega (a solicitação
         -- parte de uma venda) e observações — o motoboy precisa ver pra onde ir.
-        ev.endereco_entrega, ev.observacoes,
+        -- Colunas estruturadas (migration 355) — montadas em texto legível
+        -- via formatarEnderecoEntregaAvulso() abaixo (fonte única).
+        ev.endereco_entrega, ev.endereco_entrega_numero, ev.endereco_entrega_complemento,
+        ev.endereco_entrega_bairro, ev.endereco_entrega_cidade, ev.endereco_entrega_cep,
+        ev.endereco_entrega_uf,
+        ev.observacoes,
         ev.motoboy_id,
         (ev.created_by = ev.motoboy_id) AS auto_criado,
         ve.numero_venda, ve.total_venda,
@@ -207,7 +213,11 @@ export async function GET(req: NextRequest) {
       cliente_nome: r.cliente_nome,
       is_avulso: Boolean(r.is_avulso),
       descricao_avulso: r.descricao_avulso ? String(r.descricao_avulso) : null,
-      endereco_entrega: r.endereco_entrega ? String(r.endereco_entrega) : null,
+      // REGRA DE NEGÓCIO (migration 355): endereço agora vem estruturado no
+      // banco — formatarEnderecoEntregaAvulso() monta o mesmo texto legível
+      // de antes (fonte única, compartilhada com a listagem de solicitações
+      // e a descrição da tarefa de aprovação).
+      endereco_entrega: formatarEnderecoEntregaAvulso(r as Record<string, string | null>),
       observacoes: r.observacoes ? String(r.observacoes) : null,
       // REGRA DE NEGÓCIO (pool — patch A2): motoboy_id null = corrida de pool
       // ainda sem dono (o frontend usa isso pro selo "disponível").

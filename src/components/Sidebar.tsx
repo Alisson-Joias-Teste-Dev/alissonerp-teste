@@ -136,7 +136,16 @@ export default function Sidebar() {
   const ROLES_GESTAO_ESTOQUE = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
   const ROLES_SITE = ["desenvolvedor", "admin", "gerente_loja"];
   const ROLES_CREDIARIO_SIDEBAR = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
-  const ROLES_ENTREGAS_VENDA = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica"];
+  // BLOCO 5 (jul/2026) — `estoquista_loja` entrou aqui pra fechar o menu junto
+  // com o gate da página (`entregas-venda/page.tsx` ROLES_PERMITIDOS) e da API
+  // (`api/entregas-venda/route.ts` ROLES_ENTREGAS). Pedido do Jonathan: "toda
+  // entrega chegue pro estoque acompanhar". Isto só injeta o módulo no client
+  // quando `modulos_leitura` do banco já tem ALGO pra esse papel (ver
+  // `modulosEfetivos.length > 0` abaixo) — se `role_permissoes` não tiver
+  // NENHUMA linha `entregas_venda`/estoquista_loja, quem decide é o fallback
+  // hardcoded (`ROLE_MENUS.estoquista_loja` em src/lib/auth/permissions.ts,
+  // também atualizado). Ver docs/regras-negocio/entregas.md §3.5.
+  const ROLES_ENTREGAS_VENDA = ["desenvolvedor", "admin", "gerente_loja", "gerente_fabrica", "estoquista_loja"];
   // REGRA DE NEGÓCIO: Movimentação Interna (retirada/devolução de peça entre
   // estoquista e consultora) é aberta pra quem de fato lida com isso na loja —
   // sem checagem de role própria na API, só visibilidade de menu aqui.

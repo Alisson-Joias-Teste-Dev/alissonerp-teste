@@ -44,12 +44,34 @@ export async function GET(
         t.responsavel_id, t.criado_por,
         t.created_at, t.updated_at, t.concluida_em,
         ur.nome AS responsavel_nome, uc.nome AS criador_nome, o.numero_ordem,
-        ve.aprovacao_credito_tipo, ve.situacao AS venda_situacao
+        ve.aprovacao_credito_tipo, ve.situacao AS venda_situacao,
+        -- REGRA DE NEGÓCIO (21/07 — aprovador precisa VER o comprovante antes
+        -- de decidir, migration 359): entregas_venda.tarefa_aprovacao_id
+        -- (migration 353) é o vínculo tarefa→entrega gravado por
+        -- criarFreteAvulso (src/lib/entrega-venda.ts) — join reverso pelo
+        -- índice idx_entregas_tarefa_aprovacao (já existe, mig 353). Só
+        -- exposto aqui no GET SINGULAR (aberto 1x por tarefa, ao abrir o
+        -- drawer) — não na listagem (GET /api/tarefas), pra não somar mais um
+        -- LEFT JOIN numa query já rodada em massa (até 200 linhas).
+        -- IMPACTO SE REMOVIDO: aprovador decide (Aprovar/Rejeitar) sem ver
+        -- quem paga nem a foto do comprovante — regra do comprovante vira
+        -- letra morta (arquivo salvo que ninguém confere).
+        ev.pagante AS frete_pagante,
+        ev.comprovante_pagante_path AS frete_comprovante_pagante_path,
+        -- BLOCO 4 (jul/2026), P2 — aprovador precisa ver o VALOR antes de
+        -- decidir, não só quem paga/a foto. Mesmo JOIN acima (por
+        -- tarefa_aprovacao_id), só mais duas colunas — sem custo extra de
+        -- query. IMPACTO SE REMOVIDO: uma solicitação de valor alto chega
+        -- visualmente idêntica a uma de R$20 — aprovador libera "no
+        -- automático" e o débito vai pro saldo da gerente sem conferência.
+        ev.frete_cobrado AS frete_cobrado,
+        ev.frete_motoboy AS frete_motoboy
       FROM alissonerp.tarefas t
       LEFT JOIN alissonerp.usuarios ur ON ur.id = t.responsavel_id
       LEFT JOIN alissonerp.usuarios uc ON uc.id = t.criado_por
       LEFT JOIN alissonerp.ordens o ON o.id = t.ordem_id
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = t.venda_id
+      LEFT JOIN alissonerp.entregas_venda ev ON ev.tarefa_aprovacao_id = t.id
       WHERE t.id = ${tarefaId}
     `;
     if (!tarefa) return NextResponse.json({ error: "Tarefa não encontrada" }, { status: 404 });
@@ -114,6 +136,13 @@ export async function GET(
 
     return NextResponse.json({
       ...tarefa,
+      // BLOCO 4, P2 — NUMERIC vem como string do postgres.js; converter pra
+      // number aqui (e não deixar cru) porque o front compara o valor com a
+      // constante do aviso (LIMITE_ALERTA_FRETE_MOTOBOY,
+      // src/lib/frete-avulso-alerta.ts, consumida por TarefaDrawer.tsx) —
+      // comparação numérica precisa, não string.
+      frete_cobrado: tarefa.frete_cobrado != null ? Number(tarefa.frete_cobrado) : null,
+      frete_motoboy: tarefa.frete_motoboy != null ? Number(tarefa.frete_motoboy) : null,
       comentarios,
       pode_decidir: podeDecidirTarefa || isOwnerDaAprovacao,
     });
@@ -135,7 +164,7 @@ export async function PATCH(
   if (isNaN(tarefaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [tarefaPatch] = await sql`
-    SELECT responsavel_id, criado_por, status, titulo
+    SELECT responsavel_id, criado_por, status, titulo, tipo
     FROM alissonerp.tarefas WHERE id = ${tarefaId} LIMIT 1
   `;
   if (!tarefaPatch) return NextResponse.json({ error: "Tarefa não encontrada" }, { status: 404 });
@@ -173,6 +202,34 @@ export async function PATCH(
   const parsed = TarefaPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;
+
+  // REGRA DE NEGÓCIO (BLOCO 2, jul/2026 — trava tags/tipo do frete avulso com
+  // aprovação pendente): `isOwner` (acima) inclui `criado_por` — o PRÓPRIO
+  // solicitante do frete avulso — e este PATCH deixava `tags`/`tipo` livres,
+  // sem nenhuma validação de conteúdo (COALESCE simples, ver UPDATE abaixo).
+  // eventoDaTarefa (BLOCO 2) já parou de ler a tag `frete_pagante:loja` pra
+  // decidir o pool (usa entregas_venda.pagante agora — ver evento-da-tarefa.ts),
+  // mas o CAMPO `tipo` ainda decide SE existe evento nenhum: trocar
+  // tipo='frete_avulso' por outra coisa faz eventoDaTarefa devolver null e
+  // `ehAprovadorGravado` (aprovacao/route.ts) deixar de excluir o solicitante
+  // — reabrindo, por outra porta, o mesmo auto-aprovação do P1. Trava aqui:
+  // com aprovação pendente e tipo ATUAL (no banco) = 'frete_avulso', PATCH que
+  // tenta mexer em `tags` OU `tipo` é recusado.
+  // ESCOPO: só frete_avulso — mesmo raciocínio de não generalizar sem avaliar
+  // os outros ~11 tipos (ver aprovacao/route.ts, BLOCO 2).
+  // IMPACTO SE REMOVIDO: reabre o caminho de driblar a exclusão de
+  // auto-aprovação editando tags/tipo antes de decidir a própria tarefa.
+  if (tarefaPatch.tipo === "frete_avulso" && (body.tags !== undefined || body.tipo !== undefined)) {
+    const [aprovPendente] = await sql`
+      SELECT 1 FROM alissonerp.aprovacoes_tarefa WHERE tarefa_id = ${tarefaId} AND status = 'pendente' LIMIT 1
+    `;
+    if (aprovPendente) {
+      return NextResponse.json(
+        { error: "Esta tarefa tem aprovação de frete avulso pendente — tags e tipo não podem ser alterados até a decisão." },
+        { status: 409 },
+      );
+    }
+  }
 
   const novoResponsavel = body.responsavel_id;
   const responsavelAnterior = tarefaPatch.responsavel_id;

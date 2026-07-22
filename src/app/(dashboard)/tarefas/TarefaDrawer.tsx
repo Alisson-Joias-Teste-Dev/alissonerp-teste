@@ -4,12 +4,13 @@ import { useState, useEffect, useCallback } from "react";
 import {
   X, Loader2, Send, ShieldCheck, Check, XCircle,
   Trash2, Calendar, User, Tag, MessageSquare, Edit3,
-  Paperclip, History, ArrowRightLeft,
+  Paperclip, History, ArrowRightLeft, AlertTriangle,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import { getPublicUrl } from "@/lib/storage-url";
 import { useErrorStore } from "@/stores/errorStore";
 import { type Tarefa, type Usuario, PRIORIDADE_BADGE, STATUS_COLS } from "./TarefasClient";
+import { precisaAlertaFreteMotoboy } from "@/lib/frete-avulso-alerta";
 
 const C = {
   esmeralda:   "#184036",
@@ -58,6 +59,31 @@ interface Anexo {
   created_at: string;
 }
 
+/**
+ * REGRA DE NEGÓCIO (21/07 — decisão do Jonathan; ampliada no BLOCO 4,
+ * jul/2026, P2): dados de "quem paga", do comprovante e do VALOR do frete
+ * avulso solicitado, vindos do GET singular de tarefa (join com
+ * entregas_venda por tarefa_aprovacao_id — ver src/app/api/tarefas/[id]/route.ts).
+ * O QUÊ: representa o subset de campos que o bloco de frete avulso na aba
+ *   Aprovação precisa pra mostrar quem paga, o valor cobrado/pago ao
+ *   motoboy e (se cliente) a foto do comprovante ANTES do aprovador clicar
+ *   Aprovar/Rejeitar.
+ * POR QUÊ: sem isso o comprovante (obrigatório desde a migration 359) fica
+ *   salvo mas nunca conferido por ninguém — esvazia a regra de negócio; e
+ *   sem o valor, uma solicitação cara chega visualmente igual a uma barata.
+ * IMPACTO SE REMOVIDO: aprovador volta a decidir "às cegas" sobre quem
+ *   assume o custo do frete e sobre o valor em si.
+ */
+interface FreteAvulsoInfo {
+  frete_pagante: "loja" | "cliente" | null;
+  frete_comprovante_pagante_path: string | null;
+  // BLOCO 4 (jul/2026), P2 — aprovador precisa ver o VALOR antes de decidir
+  // (não só quem paga/o comprovante). Vem do mesmo GET singular, mesmo JOIN
+  // por tarefa_aprovacao_id (ver route.ts) — já convertido pra number lá.
+  frete_cobrado: number | null;
+  frete_motoboy: number | null;
+}
+
 interface EvidenciaLimpeza {
   id: number;
   gramas: number;
@@ -102,6 +128,10 @@ function fmtHora(d: string | null | undefined): string {
   return date.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+function fmtBRL(v: number): string {
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
 function statusLabel(acao: string): { label: string; color: string; bg: string } {
   const map: Record<string, { label: string; color: string; bg: string }> = {
     criada: { label: "Criada", color: "#6B7280", bg: "#F3F4F6" },
@@ -126,6 +156,7 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
   const [historico, setHistorico] = useState<HistoricoEntry[]>([]);
   const [anexos, setAnexos] = useState<Anexo[]>([]);
   const [evidenciaLimpeza, setEvidenciaLimpeza] = useState<EvidenciaLimpeza | null>(null);
+  const [freteInfo, setFreteInfo] = useState<FreteAvulsoInfo | null>(null);
   const [novoComentario, setNovoComentario] = useState("");
   const [sendingComment, setSendingComment] = useState(false);
   const [aba, setAba] = useState<"detalhes" | "comentarios" | "aprovacao" | "historico" | "anexos">("detalhes");
@@ -158,8 +189,21 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
 
   const carregarComentarios = useCallback(async () => {
     try {
-      const data = await apiFetch<Tarefa & { comentarios?: Comentario[] }>(`/api/tarefas/${tarefa.id}`);
+      // REGRA DE NEGÓCIO (21/07; ampliada BLOCO 4/P2): este GET singular já
+      // traz frete_pagante, frete_comprovante_pagante_path, frete_cobrado e
+      // frete_motoboy (join com entregas_venda no backend) — reaproveita a
+      // MESMA chamada em vez de criar um fetch novo só pra isso.
+      // IMPACTO SE REMOVIDO: o bloco de aprovação do frete avulso não teria
+      // dado nenhum (nem comprovante, nem valor) pra exibir.
+      const data = await apiFetch<Tarefa & Partial<FreteAvulsoInfo> & { comentarios?: Comentario[] }>(`/api/tarefas/${tarefa.id}`);
       setComentarios(data.comentarios ?? []);
+      setFreteInfo({
+        frete_pagante: data.frete_pagante ?? null,
+        frete_comprovante_pagante_path: data.frete_comprovante_pagante_path ?? null,
+        // BLOCO 4, P2 — valor cobrado/pago ao motoboy (ver comentário da interface acima)
+        frete_cobrado: data.frete_cobrado ?? null,
+        frete_motoboy: data.frete_motoboy ?? null,
+      });
     } catch { /* silencioso */ }
   }, [tarefa.id]);
 
@@ -297,7 +341,24 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
       onUpdated({ id: tarefa.id, status: novoStatus });
       carregarAprovacoes();
       setMotivoRejeicao("");
-    } catch { /* silencioso */ }
+    } catch (e) {
+      // REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — erro visível pro aprovador):
+      // O QUE: mostra a mensagem real do backend (ex.: 409 "esta aprovação já
+      //   foi respondida", ou o erro da ação de domínio que fez a transação
+      //   reverter) via useErrorStore. NÃO chama onUpdated/carregarAprovacoes/
+      //   limpa motivo — o estado no banco NÃO MUDOU (rollback), então o card
+      //   tem que continuar mostrando a aprovação como estava.
+      // POR QUÊ: este catch era silencioso — o aprovador via o spinner parar
+      //   e o card voltar a "Pendente" como se nada tivesse acontecido, sem
+      //   saber que a decisão dele não foi gravada.
+      // IMPACTO SE REMOVIDO: volta o erro mudo; aprovador acha que é bug de
+      //   tela e clica de novo, quando o backend já recusou (409) ou falhou
+      //   de verdade.
+      useErrorStore.getState().push(
+        e instanceof Error ? e.message : "Erro ao registrar a decisão da aprovação.",
+        { level: "critical" },
+      );
+    }
     setRespondendoAprovacao(null);
   }
 
@@ -648,6 +709,101 @@ export default function TarefaDrawer({ tarefa, usuarios, currentUserId, role, po
           {/* ─── Aprovação ─── */}
           {aba === "aprovacao" && (
             <div className="p-5 space-y-4">
+              {/*
+                REGRA DE NEGÓCIO (21/07 — decisão do Jonathan): o aprovador da
+                tarefa de frete avulso (tipo 'frete_avulso'/'frete_avulso_loja')
+                precisa VER quem paga e, se for o cliente, a FOTO do
+                comprovante ANTES de decidir — senão a exigência de comprovante
+                (migration 359) vira arquivo morto que ninguém confere.
+                O QUÊ: bloco condicional, mesmo padrão visual do card de
+                  "Evidências da Limpeza" logo abaixo (foto em <a target="_blank">
+                  pra ampliar + <img> de preview), servida pelo MESMO proxy
+                  autenticado /api/storage/pagamento-fotos/... já usado pela
+                  foto de entrega (getPublicUrl, src/lib/storage-url.ts).
+                POR QUÊ: reusa o mecanismo de imagem privada existente — não
+                  inventa signed URL nem expõe o bucket.
+                IMPACTO SE REMOVIDO: comprovante fica salvo mas invisível na
+                  decisão; tarefa antiga com pagante NULL (migration 353,
+                  antes da 354) não mostra nada — não quebra a tela.
+              */}
+              {tarefa.tipo === "frete_avulso" && freteInfo &&
+                (freteInfo.frete_pagante || freteInfo.frete_cobrado != null || freteInfo.frete_motoboy != null) && (
+                <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={16} style={{ color: C.esmeralda }} />
+                    <p className="text-sm font-semibold" style={{ color: C.esmeralda }}>Pagamento do Frete Avulso</p>
+                  </div>
+
+                  {/*
+                    BLOCO 4 (jul/2026), P2 — decisão do Jonathan: aprovador vê
+                    o valor cobrado do cliente e o valor pago ao motoboy ANTES
+                    de decidir. SEM teto (nunca bloqueia); acima de
+                    LIMITE_ALERTA_FRETE_MOTOBOY o card do motoboy fica
+                    vermelho/com ícone de alerta — só aviso visual.
+                  */}
+                  {(freteInfo.frete_cobrado != null || freteInfo.frete_motoboy != null) && (() => {
+                    const alerta = precisaAlertaFreteMotoboy(freteInfo.frete_motoboy);
+                    return (
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="rounded-lg bg-white p-2 border" style={{ borderColor: C.cremeBorder }}>
+                          <p style={{ color: "#6B7280" }}>Frete cobrado</p>
+                          <p className="font-bold" style={{ color: "#111827" }}>
+                            {freteInfo.frete_cobrado != null ? fmtBRL(freteInfo.frete_cobrado) : "-"}
+                          </p>
+                        </div>
+                        <div
+                          className="rounded-lg p-2 border"
+                          style={
+                            alerta
+                              ? { borderColor: "#FCA5A5", backgroundColor: "#FEF2F2" }
+                              : { borderColor: C.cremeBorder, backgroundColor: "#fff" }
+                          }
+                        >
+                          <p style={{ color: "#6B7280" }}>Frete motoboy</p>
+                          <p
+                            className="font-bold flex items-center gap-1"
+                            style={{ color: alerta ? "#DC2626" : "#111827" }}
+                          >
+                            {alerta && <AlertTriangle size={12} />}
+                            {freteInfo.frete_motoboy != null ? fmtBRL(freteInfo.frete_motoboy) : "-"}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {freteInfo.frete_pagante && (
+                  <p className="text-xs" style={{ color: "#6B7280" }}>
+                    Quem paga:{" "}
+                    <span className="font-semibold" style={{ color: "#1A1A1A" }}>
+                      {freteInfo.frete_pagante === "cliente" ? "Cliente" : "Loja"}
+                    </span>
+                  </p>
+                  )}
+                  {freteInfo.frete_pagante === "cliente" && (
+                    freteInfo.frete_comprovante_pagante_path ? (
+                      <a
+                        href={getPublicUrl("pagamento-fotos", freteInfo.frete_comprovante_pagante_path)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block rounded-xl overflow-hidden border bg-white w-40"
+                        style={{ borderColor: C.cremeBorder }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={getPublicUrl("pagamento-fotos", freteInfo.frete_comprovante_pagante_path)}
+                          alt="Comprovante de pagamento do cliente"
+                          className="w-full h-32 object-cover"
+                        />
+                        <p className="text-[11px] font-semibold px-2 py-1" style={{ color: C.esmeralda }}>Ver comprovante</p>
+                      </a>
+                    ) : (
+                      <p className="text-xs italic" style={{ color: "#DC2626" }}>Comprovante não encontrado.</p>
+                    )
+                  )}
+                </div>
+              )}
+
               {isLimpezaOuro && evidenciaLimpeza && (
                 <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "#7C3AED33", backgroundColor: "#F5F3FF" }}>
                   <div className="flex items-center gap-2">

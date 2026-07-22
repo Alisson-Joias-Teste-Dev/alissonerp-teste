@@ -20,6 +20,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { resolverEnderecoEntrega, buscarFotosEntrega } from "@/lib/entrega-venda";
 
 const ROLES_ENTREGAS = ["desenvolvedor", "admin", "gerente_loja", "consultora", "entregador"];
 
@@ -47,7 +48,7 @@ export async function GET(
   // Três queries em paralelo para montar o detalhe completo da entrega
   // REGRA DE NEGÓCIO: queries separadas permitem exibição progressiva
   // no frontend (cabeçalho primeiro, itens depois).
-  const [entrega, itens, countRow, naEntregaRow] = await Promise.all([
+  const [entrega, itens, countRow, naEntregaRow, fotosEntrega] = await Promise.all([
     // Query 1 — Cabeçalho da entrega com venda, motoboy e usuários
     // JOIN com vendas_erp para dados comerciais (número, total, situação, cliente)
     // JOIN com motoboys para nome/telefone do entregador
@@ -89,7 +90,7 @@ export async function GET(
         c.celular AS cliente_celular,
         c.telefone AS cliente_telefone,
         ve.vendedor_id,
-        -- Endereço de entrega da venda
+        -- Endereço de entrega da VENDA (fallback — ver resolverEnderecoEntrega abaixo)
         ve.endereco_entrega,
         ve.endereco_entrega_numero,
         ve.endereco_entrega_complemento,
@@ -97,6 +98,19 @@ export async function GET(
         ve.endereco_entrega_cidade,
         ve.endereco_entrega_cep,
         ve.endereco_entrega_uf,
+        -- BLOCO 4 (jul/2026), P1 — endereço da ENTREGA (migration 355), aliasado
+        -- pra não colidir com as colunas de mesmo nome de ve.* acima. É este
+        -- conjunto que manda quando preenchido (ver resolverEnderecoEntrega,
+        -- src/lib/entrega-venda.ts) — o que a consultora CONFIRMOU na
+        -- solicitação de frete avulso, que pode divergir do endereço
+        -- cadastrado na venda (ou nem ter venda vinculada).
+        ev.endereco_entrega AS entrega_endereco_entrega,
+        ev.endereco_entrega_numero AS entrega_endereco_entrega_numero,
+        ev.endereco_entrega_complemento AS entrega_endereco_entrega_complemento,
+        ev.endereco_entrega_bairro AS entrega_endereco_entrega_bairro,
+        ev.endereco_entrega_cidade AS entrega_endereco_entrega_cidade,
+        ev.endereco_entrega_cep AS entrega_endereco_entrega_cep,
+        ev.endereco_entrega_uf AS entrega_endereco_entrega_uf,
         -- Endereço do cadastro do cliente (fallback)
         c.endereco AS cliente_endereco,
         c.numero AS cliente_numero,
@@ -158,6 +172,10 @@ export async function GET(
       JOIN alissonerp.entregas_venda ev ON ev.venda_id = p.venda_id
       WHERE ev.id = ${entregaId} AND p.forma = 'Na Entrega' AND p.status = 'pendente'
     `,
+    // Query 5 — Fotos da confirmação (migration 357): helper único que
+    // unifica a tabela nova (entregas_venda_fotos) com o fallback pra coluna
+    // antiga (foto_entrega_path) de entregas confirmadas antes da migration.
+    buscarFotosEntrega(entregaId),
   ]);
 
   if (!entrega[0]) {
@@ -189,6 +207,33 @@ export async function GET(
   const podeVerCodigos = ["admin", "desenvolvedor"].includes(usuario.role as string);
   const mascarar = (c: unknown) => (c ? "••••••" : null);
 
+  // BLOCO 4 (jul/2026), P1 — resolve qual conjunto de endereço o drawer
+  // recebe: o da ENTREGA (entregas_venda, migration 355) se ela tiver
+  // QUALQUER campo próprio preenchido, senão o da VENDA (fallback — cobre
+  // entrega normal/não-avulsa, que nunca grava endereço próprio).
+  // Ver resolverEnderecoEntrega (src/lib/entrega-venda.ts) para a regra
+  // completa e a justificativa de não fazer COALESCE campo a campo.
+  const enderecoResolvido = resolverEnderecoEntrega(
+    {
+      endereco_entrega: e.entrega_endereco_entrega ?? null,
+      endereco_entrega_numero: e.entrega_endereco_entrega_numero ?? null,
+      endereco_entrega_complemento: e.entrega_endereco_entrega_complemento ?? null,
+      endereco_entrega_bairro: e.entrega_endereco_entrega_bairro ?? null,
+      endereco_entrega_cidade: e.entrega_endereco_entrega_cidade ?? null,
+      endereco_entrega_cep: e.entrega_endereco_entrega_cep ?? null,
+      endereco_entrega_uf: e.entrega_endereco_entrega_uf ?? null,
+    },
+    {
+      endereco_entrega: e.endereco_entrega ?? null,
+      endereco_entrega_numero: e.endereco_entrega_numero ?? null,
+      endereco_entrega_complemento: e.endereco_entrega_complemento ?? null,
+      endereco_entrega_bairro: e.endereco_entrega_bairro ?? null,
+      endereco_entrega_cidade: e.endereco_entrega_cidade ?? null,
+      endereco_entrega_cep: e.endereco_entrega_cep ?? null,
+      endereco_entrega_uf: e.endereco_entrega_uf ?? null,
+    },
+  );
+
   // Monta o objeto de resposta com conversão de NUMERIC e junção dos itens
   // REGRA DE NEGÓCIO: campos NUMERIC vêm como string do PostgreSQL;
   // converter com Number() para o frontend manipular como número nativo.
@@ -217,6 +262,9 @@ export async function GET(
     created_at: e.created_at,
     updated_at: e.updated_at,
     foto_entrega_path: e.foto_entrega_path ?? null,
+    // MULTIFOTO (migration 357): lista já unificada (nova tabela + fallback
+    // pra coluna antiga) — ver buscarFotosEntrega em src/lib/entrega-venda.ts.
+    fotos_entrega: fotosEntrega,
     is_avulso: Boolean(e.is_avulso),
     descricao_avulso: e.descricao_avulso ?? null,
     auto_criado: Boolean(e.auto_criado),
@@ -231,14 +279,9 @@ export async function GET(
     cliente_celular: e.cliente_celular ?? null,
     cliente_telefone: e.cliente_telefone ?? null,
     vendedor_id: e.vendedor_id ? Number(e.vendedor_id) : null,
-    // Endereço de entrega da venda
-    endereco_entrega: e.endereco_entrega ?? null,
-    endereco_entrega_numero: e.endereco_entrega_numero ?? null,
-    endereco_entrega_complemento: e.endereco_entrega_complemento ?? null,
-    endereco_entrega_bairro: e.endereco_entrega_bairro ?? null,
-    endereco_entrega_cidade: e.endereco_entrega_cidade ?? null,
-    endereco_entrega_cep: e.endereco_entrega_cep ?? null,
-    endereco_entrega_uf: e.endereco_entrega_uf ?? null,
+    // Endereço de entrega RESOLVIDO — entrega manda, venda é fallback (ver
+    // resolverEnderecoEntrega acima e o comentário de regra de negócio).
+    ...enderecoResolvido,
     // Endereço do cadastro (fallback se venda não tiver)
     cliente_endereco: e.cliente_endereco ?? null,
     cliente_numero: e.cliente_numero ?? null,

@@ -13,15 +13,21 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   Plus, Circle, Clock, CheckCircle2, XCircle, ShieldCheck,
   Search, Loader2, Zap, ListTodo, Users, AlertTriangle, Settings,
-  SlidersHorizontal, ChevronRight, LayoutGrid,
+  SlidersHorizontal, ChevronRight, LayoutGrid, Bike, Send,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiFetch";
 import TarefaDrawer from "./TarefaDrawer";
 import AutomacoesTab from "./AutomacoesTab";
 import ConfigTab from "./ConfigTab";
 import { useErrorStore } from "@/stores/errorStore";
 import { EvidenciasLimpeza, extrairBaixaIdLimpeza } from "@/components/EvidenciasLimpeza";
+// REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): Tarefas passa a ser TAMBÉM
+// ponto de entrada da solicitação de frete avulso (além do atalho na própria
+// venda) — ver uso mais abaixo (botão/FAB "Frete avulso", visível para
+// qualquer papel que acessa Tarefas — ver TIPOS_SOLICITACAO).
+import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
 
 export interface Tarefa {
   id: number;
@@ -121,6 +127,15 @@ const TIPO_LABEL: Record<string, string> = {
   conversao: "Conversão de estoque",
   conversao_sku: "Conversão de SKU",
   conversao_reversa: "Conversão reversa (ouro → joia)",
+  // 21/07: faltava — a tarefa nasce com tipo 'frete_avulso' (criarFreteAvulso,
+  // src/lib/entrega-venda.ts); sem esta entrada, a linha da aprovação
+  // mostrava o texto cru "frete_avulso" em vez do nome amigável.
+  // ATUALIZAÇÃO (fix 21/07 — venda deixa de ser obrigatória): venda_id NÃO é
+  // mais garantido — a corrida pode não ter venda (ex.: "levar material à
+  // loja"). Quando tem, entra agrupada no card da venda (aba "Aguard.
+  // Aprovação"); sem venda_id, cai no grupo "semVenda" (card próprio, título
+  // vindo de cabecalhoAprovacao) — ver listaAprovacoes mais abaixo.
+  frete_avulso: "Frete avulso",
 };
 
 type Chip = { label: string; icon: string; bg: string; color: string; href?: string };
@@ -510,10 +525,19 @@ type ViewOption = {
 };
 
 const VIEW_OPTIONS: ViewOption[] = [
-  { key: "aguardando", label: "Aprovações pendentes", icon: ShieldCheck },
-  { key: "minhas",     label: "Minhas tarefas",       icon: ListTodo },
-  { key: "time",       label: "Tarefas do time",      icon: Users, requireGerente: true },
-  { key: "concluidas", label: "Concluídas",           icon: CheckCircle2 },
+  { key: "aguardando",  label: "Aprovações pendentes",  icon: ShieldCheck },
+  { key: "minhas",      label: "Minhas tarefas",        icon: ListTodo },
+  // BLOCO 5 (jul/2026), P2 — visão NOVA e escopada (ver comentário em
+  // src/app/api/tarefas/route.ts, filtro `visao === "solicitadas"`): mostra
+  // pra quem CRIOU a tarefa tudo que ele pediu, em qualquer status, inclusive
+  // rejeitada. Fica dentro do painel "Filtros" (não é `hidden md:` — funciona
+  // no celular, ao contrário do Kanban) porque é onde a consultora está.
+  // IMPACTO SE REMOVIDO: quem solicita (frete avulso e outros tipos) perde de
+  // novo o único lugar que mostra o próprio pedido depois que ele some da
+  // fila do aprovador (ex.: recusado).
+  { key: "solicitadas", label: "Minhas solicitações",   icon: Send },
+  { key: "time",        label: "Tarefas do time",       icon: Users, requireGerente: true },
+  { key: "concluidas",  label: "Concluídas",            icon: CheckCircle2 },
 ];
 
 function labelDaAba(aba: string): string {
@@ -527,6 +551,8 @@ function labelDaAba(aba: string): string {
 
 export default function TarefasClient() {
   const { user, role } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [tarefas, setTarefas] = useState<Tarefa[]>([]);
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState("");
@@ -550,6 +576,24 @@ export default function TarefasClient() {
 
   const [drawerTarefa, setDrawerTarefa] = useState<Tarefa | null>(null);
   const [showNova, setShowNova] = useState(false);
+  // REGRA DE NEGÓCIO (decisão do Jonathan, 21/07 — intenção explícita):
+  // Tarefas é o lugar ÚNICO das solicitações de frete avulso — a venda
+  // mantém só o atalho contextual (botão na própria tela, venda já
+  // definida). Aqui quem solicita escolhe a venda DENTRO do modal
+  // (FreteAvulsoModal sem vendaId mostra o buscador).
+  // O QUÊ MUDOU: essa entrada abre o modal com modoSolicitacao={true} —
+  // decide o modo pelo PONTO DE ENTRADA (este menu), não mais pelo cargo de
+  // quem clicou (antes só consultora via). Qualquer papel que acessa Tarefas
+  // pode solicitar (ver podeVer em TIPOS_SOLICITACAO).
+  // IMPACTO SE REMOVIDO: quem solicita fica dependente do atalho de dentro
+  // da venda — e nem toda venda tem frete avulso, então esse atalho sozinho
+  // não cobre quem ainda não abriu a venda certa.
+  const [showFreteAvulso, setShowFreteAvulso] = useState(false);
+  // REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): o botão "+ Nova" do topo
+  // (desktop) e o FAB (mobile) viraram MENU único — este estado controla se
+  // o menu está aberto. Unifica o que antes eram 2 botões/FABs separados
+  // (Nova Tarefa + Frete avulso).
+  const [novoMenuOpen, setNovoMenuOpen] = useState(false);
   const [novaForm, setNovaForm] = useState({ titulo: "", descricao: "", prioridade: "media", data_limite: "", tags: "", tipo: "" });
   const [responsavelId, setResponsavelId] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -576,7 +620,9 @@ export default function TarefasClient() {
       let url = "/api/tarefas";
       const params = new URLSearchParams();
 
-      const visaoAtiva = filtroVisao || (["minhas", "time", "aguardando", "concluidas", "vencidas"].includes(aba) && aba !== "kanban" ? aba : "");
+      // BLOCO 5: "solicitadas" (Minhas solicitações) entrou na lista de abas
+      // que viram parâmetro `visao` na API — mesmo padrão das demais.
+      const visaoAtiva = filtroVisao || (["minhas", "solicitadas", "time", "aguardando", "concluidas", "vencidas"].includes(aba) && aba !== "kanban" ? aba : "");
 
       if (visaoAtiva) params.set("visao", visaoAtiva);
 
@@ -602,6 +648,34 @@ export default function TarefasClient() {
 
   useEffect(() => { carregar(); }, [carregar]);
   useEffect(() => { carregarStats(); }, [carregarStats]);
+
+  // BLOCO 5 (jul/2026), P3(a) — deep link `?abrir=<id>` das notificações.
+  // O QUE: TODAS as notificações de tarefa/aprovação (entrega-sem-pagamento,
+  // garantia, metal, compra comercial, frete avulso, etc. — ~15 pontos de
+  // criação, ver grep por "/tarefas?abrir=") apontam pra esta URL, mas
+  // NINGUÉM lia `searchParams` aqui — o clique caía em /tarefas puro e nada
+  // abria. Busca a tarefa DIRETO por id (GET /api/tarefas/[id], que já libera
+  // pra dono/criador/aprovador — não depende da visão/filtro ativos, então
+  // funciona mesmo se a tarefa não estiver na lista carregada agora) e abre
+  // o mesmo TarefaDrawer usado ao clicar num card. Limpa o parâmetro da URL
+  // depois (router.replace) pra não reabrir ao atualizar a página ou voltar.
+  // IMPACTO SE REMOVIDO: volta o link morto — toda notificação de tarefa vira
+  // um clique que não leva a lugar nenhum.
+  const abrirProcessado = useRef<string | null>(null);
+  useEffect(() => {
+    const abrirId = searchParams.get("abrir");
+    if (!abrirId || abrirProcessado.current === abrirId) return;
+    abrirProcessado.current = abrirId;
+    apiFetch<Tarefa>(`/api/tarefas/${abrirId}`)
+      .then((t) => setDrawerTarefa(t))
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : "Não foi possível abrir a tarefa da notificação";
+        useErrorStore.getState().push(msg, { level: "warning" });
+      })
+      .finally(() => {
+        router.replace("/tarefas");
+      });
+  }, [searchParams, router]);
 
   useEffect(() => {
     apiFetch<Usuario[]>("/api/usuarios/busca?q=").then(setUsuarios)
@@ -936,6 +1010,73 @@ export default function TarefasClient() {
   const porStatus = (s: string) => tarefasFiltradas.filter(t => t.status === s);
   const activeTarefa = activeId ? tarefaById(activeId) : null;
 
+  /**
+   * REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): catálogo dos tipos de
+   * SOLICITAÇÃO que nascem aqui em Tarefas — hoje só "Frete avulso", mas a
+   * lista vai CRESCER (o Jonathan pediu explicitamente extensível).
+   * O QUÊ: cada entrada descreve um tipo — rótulo, descrição curta, ícone,
+   *   quem pode ver (podeVer, por role) e o que abrir ao escolher (abrir).
+   * O PORQUÊ: adicionar um tipo novo deve ser 1 ENTRADA NESTA LISTA, sem
+   *   mexer no menu/dropdown em si (desktop ou mobile).
+   * IMPACTO SE VIRAR CÓDIGO ESPALHADO: cada tipo novo vira retrabalho (achar
+   *   o botão certo, o FAB, o gate de papel — um por um, em vários lugares).
+   * Fica DENTRO do componente (não no topo do arquivo) porque "abrir" precisa
+   * fechar sobre os setters de estado (ex.: setShowFreteAvulso) — se a lista
+   * crescer e isso virar um problema, extrair pra um módulo próprio que
+   * recebe os callbacks via parâmetro.
+   */
+  const TIPOS_SOLICITACAO = [
+    {
+      key: "frete_avulso",
+      label: "Frete avulso",
+      descricao: "Solicitar frete fora do fluxo normal da venda",
+      Icon: Bike,
+      // REGRA DE NEGÓCIO (decisão do Jonathan, 21/07 — intenção explícita):
+      // antes só consultora via este item (o cargo decidia se a SOLICITAÇÃO
+      // era sequer possível). Agora quem decide é o PONTO DE ENTRADA — este
+      // item já abre o modal em modoSolicitacao={true} — então visível para
+      // QUALQUER papel que acessa Tarefas (a própria página não tem gate de
+      // role; ver src/app/(dashboard)/tarefas/page.tsx).
+      // IMPACTO SE RESTRINGIR DE VOLTA: admin/dev voltam a não conseguir
+      // testar o fluxo de solicitação por este menu.
+      podeVer: (_r: string | null) => true,
+      abrir: () => { setShowFreteAvulso(true); setNovoMenuOpen(false); },
+    },
+  ];
+  const solicitacoesVisiveis = TIPOS_SOLICITACAO.filter(t => t.podeVer(role));
+
+  /** Conteúdo do menu "+ Nova" (Solicitações + Tarefa avulsa) — usado tanto no
+   *  dropdown desktop quanto no painel do FAB mobile, pra não duplicar a
+   *  lista em dois lugares. Seção "Solicitações" some inteira (sem cabeçalho
+   *  vazio) quando ninguém do papel atual tem tipo visível. */
+  const menuNovoConteudo = (
+    <>
+      {solicitacoesVisiveis.length > 0 && (
+        <>
+          <p className="text-[10px] font-bold uppercase tracking-wide px-2 pt-1 pb-1" style={{ color: "#9CA3AF" }}>
+            Solicitações
+          </p>
+          {solicitacoesVisiveis.map(tipo => (
+            <button key={tipo.key} onClick={tipo.abrir}
+              className="w-full flex items-start gap-2 px-2.5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 text-left transition-colors">
+              <tipo.Icon size={14} className="flex-shrink-0 mt-0.5" style={{ color: C.esmeralda }} />
+              <span className="min-w-0">
+                <span className="block" style={{ color: "#1A1A1A" }}>{tipo.label}</span>
+                <span className="block text-[11px] font-normal" style={{ color: "#9CA3AF" }}>{tipo.descricao}</span>
+              </span>
+            </button>
+          ))}
+          <div className="border-t my-1" style={{ borderColor: C.cremeBorder }} />
+        </>
+      )}
+      <button onClick={() => { setShowNova(true); setNovoMenuOpen(false); }}
+        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 text-left transition-colors">
+        <Plus size={14} className="flex-shrink-0" style={{ color: C.esmeralda }} />
+        <span style={{ color: "#1A1A1A" }}>Tarefa avulsa</span>
+      </button>
+    </>
+  );
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -1069,6 +1210,10 @@ export default function TarefasClient() {
                           <option value="protocolo_metal">Protocolo metal</option>
                           <option value="aprovacao_quebra_metal">Aprovação quebra metal</option>
                           <option value="compra_comercial">Compra comercial</option>
+                          {/* 21/07 — faltava: a tarefa nasce com tipo 'frete_avulso'
+                              (TIPO_LABEL já tinha o rótulo, só não estava na lista
+                              deste filtro) */}
+                          <option value="frete_avulso">Frete avulso</option>
                         </select>
                       </div>
                       {(filtro || filtroPrioridade || filtroTipo) && (
@@ -1083,12 +1228,29 @@ export default function TarefasClient() {
               )}
             </div>
 
-            {/* Botão Nova: só desktop; mobile usa FAB */}
-            <button onClick={() => setShowNova(true)}
-              className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
-              style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-              <Plus size={13} /> Nova
-            </button>
+            {/* Menu "+ Nova": Solicitações (extensível via TIPOS_SOLICITACAO,
+                hoje só Frete avulso, visível pra qualquer papel) + Tarefa
+                avulsa (criação manual — preservada, ~74/mês em produção). Unifica os 2
+                botões antigos (Nova + Frete avulso). Só desktop; mobile usa
+                o FAB único abaixo. Reusa o padrão visual do dropdown
+                "Filtros" (relative + overlay fixed + painel absolute). */}
+            <div className="relative hidden md:block">
+              <button onClick={() => setNovoMenuOpen(v => !v)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+                <Plus size={13} /> Nova
+              </button>
+
+              {novoMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setNovoMenuOpen(false)} />
+                  <div className="absolute right-0 top-full mt-2 z-40 w-64 bg-white rounded-xl shadow-xl border p-2 space-y-1"
+                    style={{ borderColor: C.cremeBorder }}>
+                    {menuNovoConteudo}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1412,12 +1574,26 @@ export default function TarefasClient() {
                             {safeFmtDate(t.data_limite)}
                           </span>
                         )}
-                        {colInfo && (
+                        {colInfo ? (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
                             style={{ backgroundColor: colInfo.bg, color: colInfo.color }}>
                             {colInfo.label}
                           </span>
-                        )}
+                        ) : t.status === "rejeitada" ? (
+                          // BLOCO 5, P2 — 'rejeitada' NÃO está em STATUS_COLS
+                          // (esse array também monta as colunas do Kanban —
+                          // não adicionamos lá de propósito, pra não abrir uma
+                          // coluna "Rejeitada" pro board inteiro sem avaliar o
+                          // impacto geral). Aqui, só nesta lista simples, é um
+                          // fallback pontual: sem ele, uma tarefa rejeitada
+                          // aparece na aba "Minhas solicitações" sem NENHUM
+                          // selo de status — a consultora vê o título mas não
+                          // o desfecho. IMPACTO SE REMOVIDO: volta a lacuna.
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                            style={{ backgroundColor: "#FEE2E2", color: "#DC2626" }}>
+                            Rejeitada
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -1428,15 +1604,30 @@ export default function TarefasClient() {
         </div>
       )}
 
-      {/* FAB Nova Tarefa — só mobile, escondido nas abas config/automacoes (que têm botão próprio) */}
+      {/* FAB único (mobile): abre o MESMO menu do dropdown desktop
+          (Solicitações + Tarefa avulsa) — unifica os 2 FABs antigos (Nova
+          tarefa + Frete avulso). Escondido nas abas config/automacoes (que
+          têm botão próprio no header). Painel abre PRA CIMA do botão
+          (bottom-24), mesmo padrão overlay+painel do dropdown desktop. */}
       {aba !== "config" && aba !== "automacoes" && (
-        <button
-          onClick={() => setShowNova(true)}
-          aria-label="Nova tarefa"
-          className="md:hidden fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full shadow-xl flex items-center justify-center active:scale-95 transition-transform"
-          style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-          <Plus size={26} />
-        </button>
+        <div className="md:hidden">
+          {novoMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setNovoMenuOpen(false)} />
+              <div className="fixed bottom-24 right-6 z-40 w-64 bg-white rounded-xl shadow-xl border p-2 space-y-1"
+                style={{ borderColor: C.cremeBorder }}>
+                {menuNovoConteudo}
+              </div>
+            </>
+          )}
+          <button
+            onClick={() => setNovoMenuOpen(v => !v)}
+            aria-label="Nova"
+            className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
+            <Plus size={26} />
+          </button>
+        </div>
       )}
 
       {/* Drawer de detalhe */}
@@ -1585,6 +1776,27 @@ export default function TarefasClient() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal Solicitar Frete Avulso (sem venda pré-definida — mostra o
+       * buscador de venda dentro do próprio modal). REGRA DE NEGÓCIO: ao
+       * concluir, a solicitação vira tarefa tipo 'frete_avulso' e precisa
+       * aparecer pro pool de aprovadores — por isso recarrega a lista
+       * (carregar) e as estatísticas (carregarStats), igual ao criarTarefa().
+       * modoSolicitacao={true} porque este é o ponto de entrada "Tarefas →
+       * Solicitações" — sempre SOLICITAÇÃO, independente do cargo (ver
+       * FreteAvulsoModal e route.ts). */}
+      {showFreteAvulso && (
+        <FreteAvulsoModal
+          isOpen={showFreteAvulso}
+          onClose={() => setShowFreteAvulso(false)}
+          onCriado={() => {
+            setShowFreteAvulso(false);
+            carregar();
+            carregarStats();
+          }}
+          modoSolicitacao
+        />
       )}
     </div>
   );

@@ -407,7 +407,18 @@ export function AprovacaoBottomSheet({ tarefaId, onClose, onDecisao }: Props) {
           )}
         </div>
 
-        {detalhes && aprov && (
+        {/* BLOCO 5 (jul/2026), P3(b) — `aprov` fazia fallback pra
+            `aprovacoes[0]` (a mais recente) MESMO quando ela já tinha sido
+            decidida (carregarDetalhes acima: `.find(status==='pendente') ??
+            aprovacoes[0]`), então uma notificação de DESFECHO (ex.: "Frete
+            avulso recusado", enviada pro solicitante — mesma `tipo:
+            'aprovacao'` da notificação original, ver NotificacoesDrawer.tsx)
+            abria este sheet e mostrava os botões Aprovar/Rejeitar de novo,
+            mesmo sem nada pendente — clicar batia em `AprovacaoJaRespondidaError`
+            (409) no PATCH. Fix: só mostra os botões quando a aprovação
+            carregada REALMENTE está pendente. IMPACTO SE REMOVIDO: volta o
+            botão fantasma numa aprovação já respondida. */}
+        {detalhes && aprov && aprov.status === "pendente" && (
           <div
             className="px-5 py-4 border-t flex flex-col gap-2"
             style={{ borderColor: "#e5e7eb" }}
@@ -454,6 +465,15 @@ export function AprovacaoBottomSheet({ tarefaId, onClose, onDecisao }: Props) {
                 </button>
               </>
             )}
+          </div>
+        )}
+
+        {/* BLOCO 5, P3(b) — aviso curto quando não há mais nada a decidir
+            (ver comentário acima do bloco de botões). Sem isto, o rodapé de
+            ação simplesmente desaparece e a tela fica sem explicação. */}
+        {detalhes && aprov && aprov.status !== "pendente" && (
+          <div className="px-5 py-3 border-t text-xs" style={{ borderColor: "#e5e7eb", color: "#9ca3af" }}>
+            Esta aprovação já foi respondida ({aprov.status}).
           </div>
         )}
       </div>

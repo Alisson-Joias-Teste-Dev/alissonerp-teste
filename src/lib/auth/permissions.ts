@@ -100,7 +100,16 @@ const ROLE_MENUS: Record<Role, string[]> = {
   // - O que faz: estoquista de loja pode operar compra comercial para entrada de produto acabado.
   // - Por que: essa funcao pertence ao fluxo operacional de loja/estoque comercial.
   // - Impacto se removido: loja nao consegue registrar compras comerciais no modulo dedicado.
-  estoquista_loja:    ["/estoque", "/estoque-comercial", "/compras-comercial", "/editor-ia", "/movimentacao-interna"],
+  //
+  // BLOCO 5 (jul/2026): "/entregas-venda" entrou na lista. Este e o fallback
+  // hardcoded usado SO quando role_permissoes nao tem NENHUMA linha pra este
+  // papel (getMenuGroupsForRole, ver permissions.ts). Confirmado em homolog
+  // (21/07): estoquista_loja TEM linhas em role_permissoes (pode_ler=true em
+  // estoque/estoque_comercial/editor_ia/promocoes/tarefas), entao normalmente
+  // quem decide e o caminho via banco + injecao client (Sidebar.tsx
+  // ROLES_ENTREGAS_VENDA) - esta linha e so a rede de seguranca caso o banco
+  // um dia fique zerado pra este papel (ambiente novo, reset de permissoes).
+  estoquista_loja:    ["/estoque", "/estoque-comercial", "/compras-comercial", "/editor-ia", "/movimentacao-interna", "/entregas-venda"],
   pcp:                ["/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/quebra", "/editor-ia"],
   // REGRA DE NEGOCIO (v2.83.0): operador de inventario (Ytalo/Geovana) VE tudo
   // do estoque (conta via RFID), mas NAO edita direto — acoes de inventario
