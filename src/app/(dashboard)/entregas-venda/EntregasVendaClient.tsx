@@ -37,7 +37,9 @@ import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
 import MotoboyDrawer from "@/components/entregas/MotoboyDrawer";
 import PagarMotoboyModal from "@/components/entregas/PagarMotoboyModal";
 import PagamentoMotoboyPainel from "@/components/entregas/PagamentoMotoboyPainel";
+import FechamentosFretePainel from "@/components/entregas/FechamentosFretePainel";
 import type { RelatorioPagamentoMotoboyListItem } from "@/lib/pagamento-motoboy";
+import type { FechamentoFreteListItem } from "@/lib/frete-fechamento";
 import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
 // REGRA DE NEGÓCIO (BLOCO 3 — fonte única de permissão): quem pode CRIAR
 // frete avulso DIRETO (o botão desta tela) vem de
@@ -84,6 +86,12 @@ interface EntregasVendaClientProps {
    * Ver docs/regras-negocio/entregas.md §12.8 (relatórios PERSISTIDOS).
    */
   relatoriosPagamento: RelatorioPagamentoMotoboyListItem[];
+  /**
+   * Fechamentos mensais da verba de frete grátis (aba "fechamentos", BLOCO 5)
+   * — SSR paginado, MESMO padrão de `relatoriosPagamento`. [] nas demais abas.
+   * Ver docs/regras-negocio/entregas.md §10.6.
+   */
+  fechamentosFrete: FechamentoFreteListItem[];
 }
 
 /** Formato de resposta da API de listagem de entregas */
@@ -111,6 +119,7 @@ export default function EntregasVendaClient({
   userRole,
   aba,
   relatoriosPagamento,
+  fechamentosFrete,
 }: EntregasVendaClientProps) {
   const router = useRouter();
 
@@ -172,9 +181,9 @@ export default function EntregasVendaClient({
   // (confirmação de retirada, registro de saída, cancelamento).
   // Mantém a página, aba e filtros atuais para consistência com a URL.
   // Usa apiFetch que lança erro em falhas de rede e respostas não-2xx.
-  // Nunca roda na aba "pagamento" (não há lista de entregas lá).
+  // Nunca roda nas abas "pagamento"/"fechamentos" (não há lista de entregas lá).
   const recarregar = useCallback(async () => {
-    if (aba === "pagamento") return;
+    if (aba === "pagamento" || aba === "fechamentos") return;
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -395,7 +404,7 @@ export default function EntregasVendaClient({
         </div>
 
         {/* ── Abas ──────────────────────────────────────────────────────────── */}
-        <AbasEntrega abaAtual={aba} onChange={handleAbaChange} />
+        <AbasEntrega abaAtual={aba} onChange={handleAbaChange} userRole={userRole} />
 
         {aba === "pagamento" ? (
           /* ── Aba: Pagamento do motoboy ───────────────────────────────────────
@@ -410,6 +419,22 @@ export default function EntregasVendaClient({
              pagos) + "Abrir"/"Confirmar pagamento" por linha. */
           <PagamentoMotoboyPainel
             relatoriosSSR={relatoriosPagamento}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            pageSize={pageSize}
+          />
+        ) : aba === "fechamentos" ? (
+          /* ── Aba: Fechamentos de frete (BLOCO 5, 21/07/2026) ──────────────────
+             REGRA DE NEGÓCIO (mockup aprovado pelo Jonathan; ver
+             docs/regras-negocio/entregas.md §10.6): relatório 100% READ-ONLY
+             dos fechamentos mensais da verba de frete grátis — mês mais
+             recente primeiro, SSR via `fechamentosFrete`. Só chega aqui quem
+             passou pelo gate de papel em page.tsx (ROLES_PAGAMENTO_MOTOBOY) —
+             ver também o filtro de visibilidade da própria aba em
+             AbasEntrega.tsx. */
+          <FechamentosFretePainel
+            fechamentosSSR={fechamentosFrete}
             currentPage={currentPage}
             totalPages={totalPages}
             totalItems={totalItems}

@@ -374,3 +374,99 @@ export async function recusarFechamentoFreteNoTx(
 
   return { fechamentoId };
 }
+
+// ─── BLOCO 5 (21/07) — relatório mensal (aba "Fechamentos de frete") ──────────
+
+/**
+ * PAGE_SIZE_FECHAMENTOS_FRETE — paginação da aba "Fechamentos de frete"
+ * (mockup aprovado pelo Jonathan): 10 por página, MESMO padrão de
+ * PAGE_SIZE_RELATORIOS_PAGAMENTO_MOTOBOY (src/lib/pagamento-motoboy.ts).
+ */
+export const PAGE_SIZE_FECHAMENTOS_FRETE = 10;
+
+export interface FechamentoFreteListItem {
+  id: number;
+  gerenteId: string;
+  /** Nome da gerente (LEFT JOIN alissonerp.usuarios) — "—" se o usuário não existir mais. */
+  gerenteNome: string;
+  /** YYYY-MM-DD — primeiro dia do mês de referência do fechamento. */
+  mesReferencia: string;
+  saldoAnterior: number;
+  totalCreditos: number;
+  totalDebitos: number;
+  saldoFinal: number;
+  verbaCreditada: number;
+  faturamentoBase: number;
+  percentualVerba: number;
+  status: "fechado" | "aguardando_aprovacao" | "pago" | "recusado";
+  /** Tarefa de aprovação vinculada (saldo negativo) — null se o fechamento fechou positivo/zero. */
+  tarefaAprovacaoId: number | null;
+  /** Conta a pagar gerada quando a tarefa acima foi APROVADA — null enquanto aguarda decisão, ou se recusada. */
+  contaPagarId: number | null;
+  /** ISO 8601 completo (timestamp) — hora da gravação do fechamento. */
+  createdAt: string;
+}
+
+/**
+ * Lista PAGINADA (10/página) dos fechamentos mensais já gravados por
+ * `fecharMesFreteGratisAutomatico` — mês mais recente primeiro. Usada tanto
+ * pelo SSR (`page.tsx`, primeira carga + navegação de página via
+ * Paginacao/Link) quanto pela rota `GET /api/entregas-venda/fechamentos` —
+ * MESMA função nos dois lugares (padrão de `listarRelatoriosPagamentoMotoboy`,
+ * src/lib/pagamento-motoboy.ts), evita duas cópias da mesma consulta.
+ *
+ * SEM N+1: nome da gerente vem de um LEFT JOIN na própria consulta paginada
+ * (1 SELECT), não uma query por fechamento. `status`/`tarefa_aprovacao_id`/
+ * `conta_pagar_id` já vêm prontos da tabela (migration 356) — não precisa
+ * recalcular nada aqui, só ler e formatar.
+ *
+ * ⚠️ `mes_referencia`/`created_at` são colunas DATE/TIMESTAMP — o driver
+ * (postgres.js) devolve isso como objeto `Date`, não string (parser default
+ * do driver, ver `node_modules/postgres/cjs/src/types.js`). Formatar com
+ * `String(...)` direto (sem reembrulhar em `new Date()`) quebra o formato
+ * esperado (`YYYY-MM-DD`) — MESMO padrão seguro já usado em
+ * `src/app/(dashboard)/entregas-venda/page.tsx` para `data_saida`/
+ * `created_at` (`new Date(String(valor)).toISOString()`), aplicado aqui.
+ */
+export async function listarFechamentosFrete(
+  db: DbSql,
+  { page, limit }: { page: number; limit: number },
+): Promise<{ items: FechamentoFreteListItem[]; total: number }> {
+  const offset = (page - 1) * limit;
+
+  const [rows, countRows]: [Record<string, unknown>[], Record<string, unknown>[]] = await Promise.all([
+    db`
+      SELECT
+        f.id, f.gerente_id, f.mes_referencia, f.saldo_anterior, f.total_creditos,
+        f.total_debitos, f.saldo_final, f.verba_creditada, f.faturamento_base,
+        f.percentual_verba, f.status, f.tarefa_aprovacao_id, f.conta_pagar_id,
+        f.created_at,
+        u.nome AS gerente_nome
+      FROM alissonerp.fechamentos_frete f
+      LEFT JOIN alissonerp.usuarios u ON u.id = f.gerente_id
+      ORDER BY f.mes_referencia DESC, f.id DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `,
+    db`SELECT COUNT(*)::integer AS total FROM alissonerp.fechamentos_frete`,
+  ]);
+
+  const items: FechamentoFreteListItem[] = rows.map((r) => ({
+    id: Number(r.id),
+    gerenteId: String(r.gerente_id),
+    gerenteNome: (r.gerente_nome as string | null) ?? "—",
+    mesReferencia: r.mes_referencia ? new Date(String(r.mes_referencia)).toISOString().slice(0, 10) : "",
+    saldoAnterior: Number(r.saldo_anterior ?? 0),
+    totalCreditos: Number(r.total_creditos ?? 0),
+    totalDebitos: Number(r.total_debitos ?? 0),
+    saldoFinal: Number(r.saldo_final ?? 0),
+    verbaCreditada: Number(r.verba_creditada ?? 0),
+    faturamentoBase: Number(r.faturamento_base ?? 0),
+    percentualVerba: Number(r.percentual_verba ?? 0),
+    status: r.status as FechamentoFreteListItem["status"],
+    tarefaAprovacaoId: r.tarefa_aprovacao_id != null ? Number(r.tarefa_aprovacao_id) : null,
+    contaPagarId: r.conta_pagar_id != null ? Number(r.conta_pagar_id) : null,
+    createdAt: r.created_at ? new Date(String(r.created_at)).toISOString() : "",
+  }));
+
+  return { items, total: Number(countRows[0]?.total ?? 0) };
+}
