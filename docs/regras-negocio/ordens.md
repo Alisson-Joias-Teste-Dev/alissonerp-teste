@@ -6,6 +6,8 @@
 > `servico_interno`, `reposicao_venda`, `reposicao_loja`, `compra_fornecedor`,
 > `conversao*`) **ainda não têm regra documentada** — se for mexer neles, vale o
 > protocolo do `README.md` deste diretório: **para e captura a regra primeiro**.
+>
+> **Exceção:** a §6 (fim do fluxo) vale para **todos** os tipos de ordem.
 
 ---
 
@@ -214,3 +216,56 @@ porta única. O modal antecipa o aviso para a pessoa não perder trabalho, mas
 - **Garantia legada sem venda:** 191 das 629 (30%) não têm `venda_id`, todas até
   março/2026 (legado Directus). De abril em diante, 100% têm venda — a exigência
   de venda já valia na prática antes desta regra.
+
+---
+
+## 6. Fim do fluxo da ordem — aprovação da consultora (23/07/2026)
+
+> Vale para **TODOS** os tipos de ordem, não só garantia.
+
+**A regra:** quando a consultora aprova a peça (`aprovacoes_consultora.etapas =
+'aprovado'`), a ordem **já é concluída no mesmo instante** — `ordens.status =
+'concluido'`. O aceite da consultora é o fim do fluxo.
+
+**Como era antes (até 22/07/2026):** a aprovação criava uma *preparação de
+entrega* `pendente` e a ordem só fechava quando alguém abrisse a tela
+`/entrega` e clicasse concluir. Na prática ninguém fazia: **480 preparações
+pendentes** e **48 ordens presas** nesse passo. As ordens ficavam "em andamento"
+com todos os passos da timeline verdes.
+
+**O que mudou (migration 361):** `fn_aprovacao_para_entrega` passou a criar a
+preparação **já concluída** e a encerrar a ordem. O registro de preparação
+continua existindo — histórico, tela `/entrega` e passo 8 da
+`vw_timeline_ordem`. O que sumiu foi a *pendência*, não a etapa.
+
+**Blindagens do gatilho:**
+- ordem `cancelado` nunca é ressuscitada;
+- ordem já `concluido` não é reescrita;
+- `data_conclusao` usa `COALESCE` — carimbo anterior não é sobrescrito;
+- só dispara na **transição** para `aprovado` (re-aprovar não duplica).
+
+**Não mexe em estoque.** A entrada da peça no estoque comercial acontece no
+**protocolo de volta** (`fn_reposicao_entrada_estoque`), *antes* da aprovação da
+consultora. Nenhum gatilho de `ordens` reage a `status='concluido'`.
+
+**Retroativo (migration 361, parte 2):** as 480 preparações pendentes foram
+fechadas e as 48 ordens que já tinham aprovação da consultora foram concluídas,
+herdando a `data_conclusao` da própria aprovação (não "hoje"). Canceladas ficaram
+de fora.
+
+**Duas telas parecidas — não confundir:**
+
+| Menu | Rota | O que é |
+|------|------|---------|
+| Preparação de Entrega | `/entrega` | passo da **ORDEM** (fábrica) — agora só histórico |
+| Entregas | `/entregas-venda` | entrega da **VENDA** ao cliente (motoboy/retirada) |
+
+Os rótulos eram "Entrega" e "Entregas" e ninguém achava a tela certa. O primeiro
+foi renomeado para **Preparação de Entrega** (`src/lib/auth/permissions.ts`) —
+o `href` não mudou, porque a permissão é ligada à rota.
+
+| Peça | Onde |
+|------|------|
+| Gatilho | `alissonerp.fn_aprovacao_para_entrega` (migration 361) |
+| Timeline | `alissonerp.vw_timeline_ordem` (migration 125) — 8 passos, inalterada |
+| Conclusão forçada (contingência do dono) | `PATCH /api/ordens/[id]/concluir-sistema` |
