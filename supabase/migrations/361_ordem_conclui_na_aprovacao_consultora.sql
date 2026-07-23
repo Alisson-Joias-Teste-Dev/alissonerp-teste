@@ -60,14 +60,25 @@ COMMENT ON FUNCTION alissonerp.fn_aprovacao_para_entrega IS
 
 -- ─── PARTE 2 — Retroativo: limpar o acúmulo do passo antigo ───
 
--- O QUE: fecha toda preparação de entrega que ficou pendente.
--- POR QUE: 480 registros parados na tela /entrega — 431 deles de ordens que já
+-- O QUE: fecha as preparações de entrega pendentes — SÓ das ordens que já
+--   passaram pela aprovação da consultora.
+-- POR QUE: registros parados na tela /entrega, a maioria de ordens que já
 --   estavam concluídas por outro caminho (conclusão forçada pelo admin).
+-- A EXIGÊNCIA DA APROVAÇÃO (decisão do Jonathan, 23/07/2026): o retroativo não
+--   pode fechar preparação de ordem que NÃO chegou na aprovação da consultora.
+--   Na auditoria de 23/07 as 455 pendentes tinham 100% aprovação aprovada — o
+--   filtro é redundante hoje e proposital: blinda contra dado que mude entre
+--   escrever e aplicar, e vale igual em homolog/local.
 -- IMPACTO: nenhuma movimentação de estoque/financeiro; é status administrativo.
-UPDATE alissonerp.preparacoes_entrega
+UPDATE alissonerp.preparacoes_entrega pe
 SET etapas     = 'concluido',
     updated_at = now()
-WHERE etapas <> 'concluido';
+WHERE pe.etapas <> 'concluido'
+  AND EXISTS (
+    SELECT 1 FROM alissonerp.aprovacoes_consultora ac
+    WHERE ac.ordem_id = pe.ordem_id
+      AND ac.etapas = 'aprovado'
+  );
 
 -- O QUE: conclui as ordens que já tinham aprovação da consultora e ficaram
 --   presas em andamento (48 na data desta migration).
