@@ -2,6 +2,33 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(ordens): aprovação da consultora conclui a ordem — fim do passo "preparação de entrega" (vX.Y.Z (a definir no merge))
+
+**O quê:** quando a consultora aprova a peça, a ordem **já sai concluída**. Antes a aprovação
+criava uma "preparação de entrega" pendente e a ordem só fechava se alguém abrisse a tela
+`/entrega` e clicasse concluir — o que ninguém fazia. Resultado: **480 preparações pendentes**
+e **48 ordens presas** em andamento com todos os passos da timeline verdes.
+
+**O que mudou:** `fn_aprovacao_para_entrega` (migration 361) cria a preparação **já concluída**
+e encerra a ordem (`status='concluido'`) no mesmo instante da aprovação. O passo 8 da
+`vw_timeline_ordem` continua existindo e a tela `/entrega` continua no menu — vira histórico.
+
+**Retroativo:** as 480 preparações pendentes foram fechadas e as 48 ordens concluídas, herdando
+a `data_conclusao` da própria aprovação (não "hoje"). Ordens canceladas ficaram de fora.
+
+**Não mexe em estoque:** a entrada da peça acontece no protocolo de volta
+(`fn_reposicao_entrada_estoque`), antes da aprovação. Nenhum gatilho de `ordens` reage a
+`status='concluido'`.
+
+**Menu:** o item "Entrega" (`/entrega`, passo da ORDEM) virou **"Preparação de Entrega"** para
+parar de ser confundido com "Entregas" (`/entregas-venda`, entrega da VENDA ao cliente). O `href`
+não mudou — a permissão é ligada à rota.
+
+**Arquivos:** `supabase/migrations/361_ordem_conclui_na_aprovacao_consultora.sql`,
+`src/lib/auth/permissions.ts`, `docs/regras-negocio/ordens.md` §6.
+
+---
+
 ## feat(estoque): baixa por perda / extravio — a única baixa manual do ERP, exclusiva do dono (vX.Y.Z (a definir no merge))
 
 **O quê:** peça que sumiu (não localizada, quebrada, extraviada) agora **sai do estoque de verdade**.

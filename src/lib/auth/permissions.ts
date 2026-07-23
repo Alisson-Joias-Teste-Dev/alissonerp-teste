@@ -45,7 +45,10 @@ const ALL_MENUS: MenuItem[] = [
   { label: "Protocolo",          href: "/protocolo",          icon: "FileText"        },
   { label: "Movimentação Interna", href: "/movimentacao-interna", icon: "ArrowLeftRight" },
   { label: "Conferência",        href: "/conferencia",        icon: "ClipboardCheck"  },
-  { label: "Entrega",            href: "/entrega",            icon: "PackageCheck"    },
+  // "Preparação de Entrega" = passo da ORDEM (fábrica); "Entregas" = entrega da
+  // VENDA ao cliente. Os dois rótulos eram "Entrega"/"Entregas" e ninguém achava
+  // a tela certa. Renomear NUNCA muda o href — a permissão é ligada à rota.
+  { label: "Preparação de Entrega", href: "/entrega",         icon: "PackageCheck"    },
   { label: "Entregas",           href: "/entregas-venda",    icon: "Truck"           },
   { label: "Financeiro",         href: "/financeiro",         icon: "DollarSign"      },
   { label: "A Pagar",            href: "/financeiro/a-pagar",   icon: "ArrowUpCircle"   },
