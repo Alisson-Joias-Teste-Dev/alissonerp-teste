@@ -256,9 +256,30 @@ export async function sendToTiny(vendaId: number): Promise<void> {
 // Criação automática de ordem a partir de orçamento (extraído do PATCH)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * REGRA DE NEGÓCIO (27/07/2026, Jonathan) — ORDEM DE ALIANÇA NÃO NASCE SOZINHA.
+ *
+ * O QUE: orçamento de aliança (`orcamentos.tipo = 'alianca'`) só gera ordem
+ * quando `opts.aroConfirmado` é true — o que acontece exclusivamente pelo
+ * endpoint POST /api/vendas/[id]/abrir-ordem, depois de alguém confirmar a
+ * numeração do aro de cada aliança. A aprovação da venda (approveVenda) chama
+ * esta função SEM a flag, então a aliança sai daqui sem ordem, de propósito.
+ *
+ * POR QUE: o aro é obrigatório no orçamento, mas na venda o cliente muitas
+ * vezes ainda não sabe o tamanho do dedo. A consultora digitava um número
+ * qualquer para conseguir fechar a venda e a ordem nascia aqui no mesmo
+ * instante — a fábrica recebia a numeração chutada e produzia no tamanho
+ * errado.
+ *
+ * IMPACTO SE A FLAG FOR REMOVIDA/IGNORADA: volta a criação automática e o bug
+ * do tamanho errado na fábrica volta com ela. Peça personalizada
+ * (`tipo != 'alianca'`) NÃO passa por esta trava — continua automática, porque
+ * não tem aro para confirmar.
+ */
 export async function criarOrdemDoOrcamento(
   vendaId: number,
-  userId: string
+  userId: string,
+  opts: { aroConfirmado?: boolean } = {}
 ): Promise<{ id: number; numero_ordem: string } | null> {
   // Ficha técnica COMPLETA (mesmos campos do antigo inline do PATCH /api/vendas/[id]):
   // sem os campos de perfil/friso/canal/pedra a ordem nasce com ficha incompleta
@@ -278,13 +299,33 @@ export async function criarOrdemDoOrcamento(
            ft.friso_largura, ft.friso_profundidade, ft.friso_offset,
            ft.canal_largura, ft.canal_borda_altura, ft.chanfro_tamanho,
            ft.pedra_fileiras, ft.pedra_drill, ft.pedra_meia_lua,
-           ft.pedra_volta_completa, ft.tipo_pedra
+           ft.pedra_volta_completa, ft.tipo_pedra,
+           -- Peso das FICHAS (anel 1 + anel 2). Para aliança é a mesma conta que
+           -- alimenta orcamentos.peso (pricing.weight + pricing2.weight), com uma
+           -- diferença que importa: quando o aro é confirmado diferente do orçado,
+           -- as fichas já estão com o peso do aro REAL e o orcamentos.peso segue
+           -- sendo o do orçamento (base do preço, que não muda). A ordem tem que
+           -- sair com o peso da ficha, senão o ourives recebe grama que não fecha.
+           (SELECT COALESCE(SUM(f.peso_estimado), 0)
+              FROM alissonerp.orcamento_fichas_tecnicas f
+             WHERE f.id IN (o.ficha_tecnica_id, o.ficha_tecnica_2_id)) AS peso_fichas_total
     FROM alissonerp.vendas_erp v
     LEFT JOIN alissonerp.orcamentos o ON o.id = v.orcamento_id
     LEFT JOIN alissonerp.orcamento_fichas_tecnicas ft ON ft.id = o.ficha_tecnica_id
     WHERE v.id = ${vendaId} AND v.orcamento_id IS NOT NULL
   `;
   if (!vendaOrc?.orc_id) return null;
+
+  // Trava da aliança (ver bloco de regra acima da função). Fica ANTES de tudo:
+  // nenhuma escrita acontece quando a ordem não pode nascer ainda.
+  if (vendaOrc.tipo === "alianca" && !opts.aroConfirmado) {
+    console.log(
+      `[criarOrdemDoOrcamento] venda=${vendaId}: orçamento de aliança — ordem NÃO criada automaticamente. ` +
+      `Aguardando confirmação do aro em /api/vendas/${vendaId}/abrir-ordem.`
+    );
+    return null;
+  }
+
   if (vendaOrc.ordem_gerada_id) {
     // Ordem já foi criada — idempotente
     const [existente] = await sql`
@@ -318,7 +359,13 @@ export async function criarOrdemDoOrcamento(
     const numeroOrdem = "C-" + String(nextNum).padStart(4, "0");
     const isPar = Number(vendaOrc.quantidade) === 2;
     const pesoItem1 = Number(vendaOrc.peso_estimado ?? vendaOrc.peso ?? 0);
-    const pesoNeg = Number(vendaOrc.peso ?? vendaOrc.peso_estimado ?? 0);
+    // Aliança: peso da ORDEM = soma das fichas (peso do aro confirmado).
+    // Peça personalizada: segue no orcamentos.peso, comportamento original.
+    // Fallback no orcamentos.peso protege ficha legada sem peso_estimado.
+    const pesoFichas = Number(vendaOrc.peso_fichas_total ?? 0);
+    const pesoNeg = vendaOrc.tipo === "alianca" && pesoFichas > 0
+      ? pesoFichas
+      : Number(vendaOrc.peso ?? vendaOrc.peso_estimado ?? 0);
 
     const [ordem] = await tx`
       INSERT INTO alissonerp.ordens (

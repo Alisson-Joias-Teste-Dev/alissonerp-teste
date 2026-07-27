@@ -223,6 +223,7 @@ Estoque comercial: inserir item de venda CRIA RESERVA (nunca saida direta) — r
 Curva precificacao: chamar aplicarCurvaProduto() apos criar/editar produto com peso+categoria (src/lib/aplicar-curva-produto.ts)
 Vale-troca: vale > total venda gera NOVO vale com troco (vale_origem_id rastreia cadeia) — cada vale usado UMA vez
 Orcamento rascunho QuadradoCanal (Bordas Elevadas): 6 useEffects de auto-ajuste em OrcamentoClient.tsx (linhas ~911, ~968, ~988, ~1082, ~1135, ~1153) DEVEM começar com `if (isHydratingRef.current) return;` — sem isso, ao reabrir rascunho o sistema recalcula canalWidth/stoneRows/stoneCount e sobrescreve modelo/valor/peso negociados. Bug recorrente desde v2.42 — NUNCA REMOVER OS GATES.
+ORDEM DE ALIANCA NAO NASCE SOZINHA (362, 27/07/2026): approveVenda NAO cria ordem quando orcamentos.tipo='alianca' — criarOrdemDoOrcamento so cria com opts.aroConfirmado, flag passada SO por POST /api/vendas/[id]/abrir-ordem (confirmacao do aro de cada alianca). Peca personalizada segue automatica. Trocar o aro recalcula peso (src/lib/orcamento-aro-peso.ts, por DELTA) e altera ordens.peso_metal_negociado, NUNCA orcamentos.peso/valor (base do preco). Ficha 2 so conta se quantidade=2. Ver docs/regras-negocio/comercial.md §12
 ABC: classificar por receita_total_12m (ultimos 12 meses), NUNCA por capital (estoque * preco) — produto sem venda em 12m = C automatico
 parametros_sistema: usar PARAM.X de src/lib/parametros.ts, NUNCA literals como deposito_id=1
 reposicao de estoque: verificar SUM(disponivel) pre-reserva, nao SUM(saldo)

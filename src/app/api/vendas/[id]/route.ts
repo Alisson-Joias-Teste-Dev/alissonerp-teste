@@ -162,11 +162,30 @@ export async function GET(
   // anel 2 = ficha_tecnica_2_id. NAO altera preço/quantidade/comissão (só display).
   // IMPACTO SE REMOVIDO: a aliança volta a aparecer "tudo junto" numa linha só.
   const orcsAlianca = await sql`
-    SELECT id, quantidade, ficha_tecnica_id, ficha_tecnica_2_id
+    SELECT id, quantidade, ficha_tecnica_id, ficha_tecnica_2_id, tipo,
+           ordem_gerada_id, aro_confirmado_em
     FROM alissonerp.orcamentos
     WHERE venda_gerada_id = ${vendaId}
     ORDER BY id
   `;
+
+  /**
+   * REGRA DE NEGÓCIO (27/07/2026): venda de aliança aprovada e SEM ordem aberta.
+   *
+   * O QUE: sinaliza que falta confirmar o aro e abrir a ordem (a ordem de
+   * aliança não nasce mais junto com a aprovação da venda — ver migration 362 e
+   * criarOrdemDoOrcamento).
+   *
+   * POR QUE: tirar a criação automática resolveu a numeração errada na fábrica,
+   * mas cria um risco novo — venda fechada que ninguém manda produzir. A tela da
+   * venda precisa cobrar isso de quem abrir.
+   *
+   * IMPACTO SE REMOVIDO: a venda pode ficar esquecida sem chegar na fábrica, e
+   * ninguém percebe até o cliente cobrar a peça.
+   */
+  const aliancaSemOrdem = orcsAlianca.some(
+    (o) => o.tipo === "alianca" && o.ordem_gerada_id == null
+  ) && ["aprovado", "confirmado", "concluido", "em_rota", "entregue"].includes(String(venda.situacao));
   const fichaIds = orcsAlianca
     .flatMap((o) => [o.ficha_tecnica_id, o.ficha_tecnica_2_id])
     .filter((x): x is number => x != null);
@@ -328,6 +347,7 @@ export async function GET(
     })),
     ordens,
     aliancaRings,
+    alianca_sem_ordem: aliancaSemOrdem,
   });
 }
 

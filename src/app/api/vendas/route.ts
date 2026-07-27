@@ -134,6 +134,29 @@ export async function GET(req: NextRequest) {
   const situacao   = searchParams.get("situacao");   // rascunho|aprovado|enviado|cancelado|concluido
   const vendedorId = searchParams.get("vendedor_id");
   const q          = searchParams.get("q")?.trim();
+  /**
+   * REGRA DE NEGÓCIO (27/07/2026): filtro "aliança sem ordem aberta".
+   *
+   * O QUE: `?alianca_sem_ordem=1` devolve só vendas já fechadas cujo orçamento é
+   * de aliança e que ainda não têm ordem na fábrica.
+   *
+   * POR QUE: a ordem de aliança deixou de nascer na aprovação da venda (a
+   * consultora chutava o aro para fechar a venda e a fábrica produzia no tamanho
+   * errado). O efeito colateral é venda fechada que ninguém mandou produzir —
+   * este filtro é como a gestão enxerga essa fila.
+   *
+   * IMPACTO SE REMOVIDO: a pendência só aparece abrindo venda por venda.
+   */
+  const aliancaSemOrdem = searchParams.get("alianca_sem_ordem") === "1";
+  const filtroAliancaSemOrdem = aliancaSemOrdem
+    ? sql`AND v.situacao IN ('aprovado','confirmado','concluido','em_rota','entregue')
+          AND EXISTS (
+            SELECT 1 FROM alissonerp.orcamentos o
+             WHERE o.venda_gerada_id = v.id
+               AND o.tipo = 'alianca'
+               AND o.ordem_gerada_id IS NULL
+          )`
+    : sql``;
   const pageRaw = Number(searchParams.get("page") ?? "1");
   const pageSizeRaw = Number(searchParams.get("page_size") ?? "15");
 
@@ -172,6 +195,7 @@ export async function GET(req: NextRequest) {
       ${isFullAccess ? sql`` : sql`AND v.vendedor_id = ${meuVendedorId!}`}
       ${situacao   ? sql`AND v.situacao    = ${situacao}`              : sql``}
       ${vendedorId ? sql`AND v.vendedor_id = ${Number(vendedorId)}`    : sql``}
+      ${filtroAliancaSemOrdem}
       ${isDocSearch
           ? sql`AND regexp_replace(COALESCE(v.cliente_cpf_cnpj, ''), '\D', '', 'g') ILIKE ${'%' + qDigits + '%'}`
           : q
@@ -232,6 +256,7 @@ export async function GET(req: NextRequest) {
       ${isFullAccess ? sql`` : sql`AND v.vendedor_id = ${meuVendedorId!}`}
       ${situacao   ? sql`AND v.situacao    = ${situacao}`              : sql``}
       ${vendedorId ? sql`AND v.vendedor_id = ${Number(vendedorId)}`    : sql``}
+      ${filtroAliancaSemOrdem}
       ${isDocSearch
           ? sql`AND regexp_replace(COALESCE(v.cliente_cpf_cnpj, ''), '\D', '', 'g') ILIKE ${'%' + qDigits + '%'}`
           : q
