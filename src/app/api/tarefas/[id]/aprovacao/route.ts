@@ -208,6 +208,19 @@ async function processarAprovacaoCompraComercial(
             ${compra.created_by ?? aprovadorId}::uuid
           )
       `;
+
+      // REGRA DE NEGOCIO:
+      // - O que faz: garante a linha ativa em estoque_comercial_config para o produto comprado.
+      // - Por que: a view vw_saldo_estoque_comercial_v2 (tela de estoque) só mostra produto com
+      //   config ativa (JOIN estoque_comercial_config cfg ... AND cfg.ativo = true). Produto novo
+      //   comprado via compra comercial ganhava a entrada mas ficava INVISÍVEL no estoque até
+      //   alguém criar a config na mão (16 produtos corrigidos em prod, log 290, 27/07/2026).
+      // - Impacto se alterado/removido: todo produto novo comprado nasce com estoque escondido.
+      await tx`
+        INSERT INTO alissonerp.estoque_comercial_config (produto_id, created_by)
+        VALUES (${item.produto_id}, ${compra.created_by ?? aprovadorId}::uuid)
+        ON CONFLICT (produto_id) DO NOTHING
+      `;
     }
 
     const parcelas = Math.max(Number(compra.qtd_parcelas ?? 1), 1);

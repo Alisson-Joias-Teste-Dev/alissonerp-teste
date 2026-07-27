@@ -2,6 +2,20 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(compras): compra comercial aprovada cria a config de estoque do produto (vX.Y.Z (a definir no merge))
+
+**O quê:** produto novo comprado via compra comercial entrava no estoque (movimentação efetivada)
+mas ficava **invisível** na tela de estoque — a `vw_saldo_estoque_comercial_v2` só mostra produto
+com linha ativa em `estoque_comercial_config`, e a aprovação da compra não criava essa linha.
+
+**O que mudou:** na aprovação da compra comercial (`/api/tarefas/[id]/aprovacao`), cada item agora
+ganha também a config (`INSERT ... ON CONFLICT (produto_id) DO NOTHING`) na mesma transação da
+entrada de estoque.
+
+**Retroativo:** 16 produtos com saldo escondido em prod (SKUs 1846, 1852-16, 1856-15, 1859-11,
+1860-13, 1861-18, 1862-15, 1863-13, AJ5286, AJ5288–AJ5294) receberam a config via SQL assinado
+(log 290, 27/07/2026).
+
 ## feat(ordens): aprovação da consultora conclui a ordem — fim do passo "preparação de entrega" (vX.Y.Z (a definir no merge))
 
 **O quê:** quando a consultora aprova a peça, a ordem **já sai concluída**. Antes a aprovação
