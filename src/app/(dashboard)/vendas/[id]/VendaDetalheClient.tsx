@@ -7,7 +7,7 @@ import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle, XCircle, AlertCircle,
   Truck, Video, RefreshCw, Share2, Download,
   Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
-  RotateCcw, ArrowRight, PackageCheck, ScanLine, Bike,
+  RotateCcw, ArrowRight, PackageCheck, ScanLine, Bike, AlertTriangle, Factory,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { maskCpfCnpj, maskCelular, onlyDigits } from "@/lib/formatters";
@@ -26,6 +26,7 @@ import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 // REGRA DE NEGÓCIO: modal de entrega (parcial/total) da venda
 import MarcarEntregaModal from "@/components/entregas/MarcarEntregaModal";
+import AbrirOrdemAliancaModal from "@/components/vendas/AbrirOrdemAliancaModal";
 // REGRA DE NEGÓCIO (V3): modal de solicitação de frete avulso, aberto de
 // dentro da venda com modoSolicitacao (vendaId fixado, ver props abaixo)
 import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
@@ -163,6 +164,9 @@ interface Venda {
     id: number; numero_ordem: string; tipo_ordem: string;
     situacao: string; status: string; created_at: string;
   }>;
+  /** Venda de aliança já fechada e ainda SEM ordem na fábrica — falta confirmar
+   *  o aro e abrir (a ordem de aliança não nasce mais na aprovação da venda). */
+  alianca_sem_ordem?: boolean;
   /** Alianças: ficha de cada anel (só exibição — preenchido por /api/vendas/[id]). */
   aliancaRings?: Array<{
     anel: number; modelo: string | null; perfil: string | null;
@@ -697,6 +701,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [solicitarEnviando, setSolicitarEnviando] = useState(false);
   const [solicitarErro, setSolicitarErro] = useState("");
   const [solicitarSucesso, setSolicitarSucesso] = useState(false);
+  // Confirmação do aro + abertura da ordem de aliança (ver banner e modal).
+  const [abrirOrdemAberto, setAbrirOrdemAberto] = useState(false);
+  const [ordemAbertaMsg, setOrdemAbertaMsg] = useState("");
 
   // ── Load venda ──────────────────────────────────────────────────────────────
   // silent=true: recarrega os dados da venda SEM trocar a tela pelo spinner de
@@ -2498,6 +2505,39 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               e aprove a venda.
             </p>
           </div>
+        </div>
+      )}
+
+      {ordemAbertaMsg && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center gap-2"
+          style={{ backgroundColor: "#D1FAE5", borderColor: "#A7F3D0", color: "#065F46" }}>
+          <CheckCircle size={16} className="shrink-0" />
+          <p className="text-sm font-medium">{ordemAbertaMsg}</p>
+        </div>
+      )}
+
+      {/* ── Banner: aliança vendida SEM ordem na fábrica ──
+          REGRA DE NEGÓCIO (27/07/2026, Jonathan): a ordem de aliança não nasce
+          mais junto com a aprovação da venda, porque o cliente muitas vezes
+          ainda não sabe o tamanho do dedo e a consultora chutava um aro só pra
+          fechar a venda — a fábrica recebia a numeração errada. Agora alguém
+          confirma o aro e abre a ordem aqui.
+          IMPACTO SE REMOVIDO: a venda pode ficar esquecida sem nunca chegar na
+          fábrica — este banner é o que cobra a abertura. */}
+      {venda.alianca_sem_ordem && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-3 flex-wrap"
+          style={{ backgroundColor: "#FEF3C7", borderColor: "#FDE68A", color: "#92400E" }}>
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertTriangle size={16} className="shrink-0" />
+            <p className="text-sm font-medium break-words">
+              Aliança sem ordem na fábrica — confirme o aro com o cliente para abrir a ordem.
+            </p>
+          </div>
+          <button onClick={() => setAbrirOrdemAberto(true)}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg shrink-0"
+            style={{ backgroundColor: C.esmeralda, color: "#fff" }}>
+            Confirmar aro e abrir ordem →
+          </button>
         </div>
       )}
 
@@ -4483,11 +4523,29 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         </Secao>
 
         {/* ── 7. Ordens vinculadas ── */}
-        {venda.ordens && venda.ordens.length > 0 && (
+        {((venda.ordens && venda.ordens.length > 0) || venda.alianca_sem_ordem) && (
           <Secao>
             <STitle>Ordens Vinculadas</STitle>
+            {/* Aliança sem ordem: a pendência aparece AQUI também, no lugar onde
+                quem procura a ordem vai olhar primeiro. */}
+            {venda.alianca_sem_ordem && (
+              <div className="mb-2 p-3 rounded-lg border flex items-center justify-between gap-3 flex-wrap"
+                style={{ backgroundColor: "#FFFBEB", borderColor: "#FDE68A" }}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Factory size={16} style={{ color: "#92400E" }} className="shrink-0" />
+                  <p className="text-sm break-words" style={{ color: "#92400E" }}>
+                    Nenhuma ordem aberta. A aliança só vai para a fábrica depois que o aro for confirmado.
+                  </p>
+                </div>
+                <button onClick={() => setAbrirOrdemAberto(true)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg shrink-0"
+                  style={{ backgroundColor: C.esmeralda, color: "#fff" }}>
+                  Confirmar aro e abrir ordem →
+                </button>
+              </div>
+            )}
             <div className="space-y-2">
-              {venda.ordens.map(ord => {
+              {(venda.ordens ?? []).map(ord => {
                 const statusColor: Record<string, { bg: string; text: string }> = {
                   aguardando: { bg: "#FEF3C7", text: "#92400E" },
                   em_andamento: { bg: "#DBEAFE", text: "#1E40AF" },
@@ -4737,6 +4795,18 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         modoSolicitacao
         vendaId={venda.id}
         enderecoInicial={enderecoInicialFreteAvulso}
+      />
+    )}
+    {/* Confirmação do aro antes de a ordem de aliança ir para a fábrica. */}
+    {abrirOrdemAberto && venda && (
+      <AbrirOrdemAliancaModal
+        vendaId={venda.id}
+        onClose={() => setAbrirOrdemAberto(false)}
+        onSucesso={(numeroOrdem) => {
+          setAbrirOrdemAberto(false);
+          setOrdemAbertaMsg(`Ordem ${numeroOrdem} aberta para a fábrica.`);
+          load();
+        }}
       />
     )}
     </>

@@ -2,6 +2,32 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(vendas): ordem de aliança só nasce com o aro confirmado (vX.Y.Z (a definir no merge))
+
+**O quê:** a ordem de fabricação de **orçamento de aliança** deixou de ser criada automaticamente
+na aprovação da venda. Agora a venda aprova sem ordem e alguém abre a ordem à mão, confirmando o
+**aro de cada aliança** — botão "Confirmar aro e abrir ordem" no detalhe da venda.
+
+**Por quê:** o aro é obrigatório no orçamento, mas o cliente muitas vezes ainda não sabe o tamanho
+do dedo quando a venda é fechada. A consultora digitava qualquer número para conseguir passar a
+venda e, como a ordem nascia dentro da aprovação, **a fábrica recebia a numeração chutada** e
+produzia no tamanho errado.
+
+**O que mudou:**
+- `criarOrdemDoOrcamento` (`src/lib/vendas-aprovar.ts`) só cria ordem de aliança com
+  `opts.aroConfirmado` — flag passada **exclusivamente** por `POST /api/vendas/[id]/abrir-ordem`.
+  Peça personalizada continua automática.
+- Nova tela de confirmação (`AbrirOrdemAliancaModal`): um cartão por aliança, com a **gravação em
+  destaque** para não confundir qual é qual, e escolha explícita de aro (manter ou trocar). Aro é
+  lista fechada 1–36.
+- Trocar o aro **recalcula o peso** (`src/lib/orcamento-aro-peso.ts`, por delta) e a ordem sai com a
+  soma das fichas em `peso_metal_negociado`. **O valor negociado com o cliente não muda.**
+- Visibilidade da fila: faixa "Aliança sem ordem na fábrica" no detalhe da venda + filtro
+  **"Aliança sem ordem"** na lista `/vendas` (`?alianca_sem_ordem=1`).
+- Migration **362**: `orcamentos.aro_confirmado_por` / `aro_confirmado_em` + índice parcial da fila.
+
+**Regra completa:** `docs/regras-negocio/comercial.md` §12.
+
 ## fix(compras): compra comercial aprovada cria a config de estoque do produto (vX.Y.Z (a definir no merge))
 
 **O quê:** produto novo comprado via compra comercial entrava no estoque (movimentação efetivada)
