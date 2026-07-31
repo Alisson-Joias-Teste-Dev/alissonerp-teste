@@ -1881,7 +1881,8 @@ export async function confirmarEntrega(
  * Entregas já confirmadas ou já canceladas não podem ser alteradas.
  * O cancelamento libera o saldo pendente dos itens para novas entregas.
  *
- * O QUE: atualiza situacao para 'cancelada', registra auditoria.
+ * O QUE: atualiza situacao para 'cancelada', ESTORNA o lançamento de frete
+ * grátis da gerente (ver comentário dentro da transação) e registra auditoria.
  *
  * POR QUE: permite corrigir erros operacionais (ex: entrega criada com
  * itens errados) sem perder rastreabilidade — o registro permanece
@@ -1918,6 +1919,60 @@ export async function cancelarEntrega(
       SET situacao = 'cancelada', updated_at = now()
       WHERE id = ${entregaId}
     `;
+
+    /**
+     * REGRA DE NEGÓCIO: cancelar a entrega DESFAZ o lançamento de frete grátis
+     * que a criação gerou na conta da gerente.
+     *
+     * O QUE: soma o líquido (créditos − débitos) dos lançamentos desta entrega
+     * em `saldo_frete_gratis` e grava um CONTRA-LANÇAMENTO de sinal oposto.
+     *
+     * POR QUE: `criarEntrega` lança crédito/débito na hora em que a entrega
+     * NASCE, em cima da PREVISÃO de frete (cobrado × motoboy) — antes de se
+     * saber se a entrega vai acontecer. Sem estorno, toda entrega cancelada
+     * deixa dinheiro fantasma no saldo da gerente. Em 31/07/2026 havia 14
+     * lançamentos órfãos de entregas canceladas (R$ 82,00 líquidos a mais na
+     * conta dela) — que iriam direto para o fechamento mensal e para a conta a
+     * pagar dela.
+     *
+     * COMO: contra-lançamento, NUNCA apagar/editar o lançamento original — o
+     * extrato é histórico e auditável (mesmo padrão do fechamento mensal em
+     * `src/lib/frete-fechamento.ts`). Como o estorno zera o líquido DA ENTREGA,
+     * rodar de novo não tem efeito (líquido 0 = nada a estornar).
+     *
+     * IMPACTO SE REMOVIDO: volta o bug — o saldo da gerente infla/desinfla com
+     * entregas que nunca saíram, e o fechamento do mês cobra (ou perdoa) valor
+     * errado.
+     */
+    const [saldoEntrega] = await tx`
+      SELECT gerente_id,
+             MAX(venda_id) AS venda_id,
+             COALESCE(SUM(CASE WHEN tipo = 'credito' THEN valor ELSE 0 END), 0)
+           - COALESCE(SUM(CASE WHEN tipo = 'debito'  THEN valor ELSE 0 END), 0) AS liquido
+      FROM alissonerp.saldo_frete_gratis
+      WHERE entrega_id = ${entregaId}
+      GROUP BY gerente_id
+    `;
+
+    const liquido = money(saldoEntrega?.liquido);
+    if (saldoEntrega && liquido !== 0) {
+      const gerenteId = saldoEntrega.gerente_id;
+      const saldoAntes = await obterSaldoFreteGerenteNoTx(tx, gerenteId);
+      await tx`
+        INSERT INTO alissonerp.saldo_frete_gratis
+          (gerente_id, tipo, valor, saldo_antes, saldo_depois, entrega_id, venda_id, descricao, created_by)
+        VALUES
+          (${gerenteId}::uuid,
+           ${liquido > 0 ? "debito" : "credito"},
+           ${Math.abs(liquido)},
+           ${saldoAntes},
+           ${money(saldoAntes - liquido)},
+           ${entregaId},
+           ${saldoEntrega.venda_id ?? null},
+           ${`Estorno — entrega ${entrega.codigo_entrega} cancelada`},
+           ${usuarioId}::uuid)
+      `;
+    }
 
     await logAudit(tx, {
       tabela: "entregas_venda",
