@@ -63,6 +63,7 @@ const CriarEntregaSchema = z.object({
     .optional(),
   motoboyId: z.string().optional(),
   freteCobrado: z.number().nonnegative("freteCobrado não pode ser negativo").optional(),
+  freteMotoboy: z.number().nonnegative("freteMotoboy não pode ser negativo").optional(),
   observacoes: z.string().max(2000, "observacoes muito longa").optional(),
 });
 
@@ -334,6 +335,7 @@ export async function POST(req: NextRequest) {
         regiao: body.regiao,
         motoboyId: body.motoboyId,
         freteCobrado: body.freteCobrado,
+        freteMotoboy: body.freteMotoboy,
         observacoes: body.observacoes,
       },
       user.id,
