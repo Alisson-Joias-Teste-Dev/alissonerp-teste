@@ -62,13 +62,16 @@ function setPool(uuids: string[]) {
 
 const mockPodeDecidir = vi.fn(async (
   user: { id: string },
-  _evento: string,
+  evento: string,
   ctx?: { solicitanteId?: string },
 ) => {
   let pool = [...poolFreteAvulso];
-  if (ctx?.solicitanteId) pool = pool.filter((id) => id !== ctx.solicitanteId);
+  // Espelha solicitantePodeAprovar do catálogo (31/07): 'frete_avulso_loja'
+  // NÃO exclui o solicitante do pool — só o irmão 'frete_avulso' (cliente).
+  const excluiSolicitante = evento !== "frete_avulso_loja";
+  if (ctx?.solicitanteId && excluiSolicitante) pool = pool.filter((id) => id !== ctx.solicitanteId);
   if (pool.length === 0) {
-    return { pode: false, motivo: ctx?.solicitanteId ? "aprovador_e_o_proprio_solicitante" : "aprovador_nao_configurado" };
+    return { pode: false, motivo: ctx?.solicitanteId && excluiSolicitante ? "aprovador_e_o_proprio_solicitante" : "aprovador_nao_configurado" };
   }
   return pool.includes(user.id) ? { pode: true } : { pode: false, motivo: "nao_e_aprovador_configurado" };
 });
@@ -245,5 +248,37 @@ describe("P2 — pool decidido pelo DADO (entregas_venda.pagante), não pela tag
       "frete_avulso_loja",
       expect.anything(),
     );
+  });
+});
+
+describe("P3 — auto-aprovação PERMITIDA no frete pago pela LOJA (31/07, decisão do Jonathan)", () => {
+  it("pagante='loja': quem solicitou (e está no pool aprovadores_frete_avulso_loja) aprova o PRÓPRIO frete → 200, ação de domínio roda", async () => {
+    setPool([SOLICITANTE_E_APROVADOR_GRAVADO]);
+    mockGetUser.mockResolvedValue({ data: { user: { id: SOLICITANTE_E_APROVADOR_GRAVADO } } });
+    setupAntesDaTx({ fretePagante: "loja" });
+    sqlMock
+      .mockResolvedValueOnce(comContagem([], 1)) // UPDATE aprovacoes_tarefa (guard OK)
+      .mockResolvedValueOnce([])                 // fragmento tx`, concluida_em = now()`
+      .mockResolvedValueOnce([])                 // UPDATE tarefas
+      .mockResolvedValueOnce([])                 // INSERT tarefas_historico
+      .mockResolvedValueOnce([{ id: ENTREGA_ID }]); // SELECT entregas_venda pela tarefa
+
+    const res = await PATCH(makeRequest({ aprovacao_id: APROVACAO_ID, decisao: "aprovado" }), makeParams());
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(mockLiberarFreteAvulsoNoTx).toHaveBeenCalledWith(sqlMock, ENTREGA_ID, SOLICITANTE_E_APROVADOR_GRAVADO);
+  });
+
+  it("ANTI-VOLTA: pagante='cliente' com o MESMO cenário (solicitante = aprovador gravado) segue 403 — a liberação é só da loja", async () => {
+    setPool([SOLICITANTE_E_APROVADOR_GRAVADO]);
+    mockGetUser.mockResolvedValue({ data: { user: { id: SOLICITANTE_E_APROVADOR_GRAVADO } } });
+    setupAntesDaTx({ fretePagante: "cliente" });
+
+    const res = await PATCH(makeRequest({ aprovacao_id: APROVACAO_ID, decisao: "aprovado" }), makeParams());
+
+    expect(res.status).toBe(403);
+    expect(mockLiberarFreteAvulsoNoTx).not.toHaveBeenCalled();
   });
 });

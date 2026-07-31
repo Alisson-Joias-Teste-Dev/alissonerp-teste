@@ -268,6 +268,7 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
     rotulo: "Frete avulso solicitado (custo da loja)",
     configKeys: ["aprovadores_frete_avulso_loja"],
     configMulti: true,
+    solicitantePodeAprovar: true,
     camposLock: [
       "entregas_venda.tarefa_aprovacao_id",
       "entregas_venda.liberada_por",
@@ -284,7 +285,13 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
       "recusar (liberarFreteAvulso/recusarFreteAvulso em entrega-venda.ts); eventoDaTarefa escolhe " +
       "entre os dois por `tarefaInfo.frete_pagante` (entregas_venda.pagante) — NÃO mais pela tag " +
       "`frete_pagante:loja` gravada na criação (BLOCO 2, jul/2026: tag editável pelo solicitante " +
-      "via PATCH /api/tarefas/[id], deixou de ser fonte de verdade).",
+      "via PATCH /api/tarefas/[id], deixou de ser fonte de verdade). " +
+      "AUTO-APROVAÇÃO PERMITIDA (31/07, decisão do Jonathan): quem está na lista " +
+      "'aprovadores_frete_avulso_loja' é o responsável pelos fretes da loja — se essa pessoa " +
+      "SOLICITAR um frete pago pela loja, ela mesma pode aprovar (solicitantePodeAprovar:true faz " +
+      "resolverAprovadores NÃO excluir o solicitante do pool; o carve-out de ehAprovadorGravado no " +
+      "PATCH .../aprovacao também deixa de valer para este evento). A segregação de função " +
+      "continua valendo no evento irmão 'frete_avulso' (pagante='cliente').",
   },
   fechamento_frete_negativo: {
     evento: "fechamento_frete_negativo",
