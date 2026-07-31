@@ -515,3 +515,35 @@ A trava age **ANTES** da criação da entrega (geração de código, INSERT). Ne
 - Lib: `src/lib/entrega-venda.ts` — `buscarItemJaEmEntregaAberta` (novo, privado) e as duas chamadas dentro de `criarEntrega`.
 - Testes: `src/__tests__/criar-entrega-duplicada.test.ts` — guard fora da tx barra (P1), granularidade por item preserva a parcial legítima (P2), trava atômica dentro da tx com `FOR UPDATE` barra mesmo quando o guard de fora não viu nada a tempo (P3, simula a corrida do duplo-clique).
 - **Débito conhecido, fora do escopo combinado**: o front (`MarcarEntregaModal.tsx`) não tem visibilidade de quais itens já estão numa entrega aberta — continua calculando o saldo só via `GET /api/entregas-venda/saldo-pendente` (`vw_entregas_pendentes`). O operador só descobre a duplicata pela mensagem de erro ao tentar salvar, não antes (o item não some da lista de seleção). Melhorar isso é mudança de UI, não fechada nesta sessão.
+
+---
+
+## 14. Cancelar entrega ESTORNA o frete grátis da gerente (fix 31/07/2026)
+
+### 14.1. O bug
+
+`criarEntrega` lança crédito/débito na conta de frete grátis da gerente **no momento em que a entrega nasce**, em cima da PREVISÃO (`frete_cobrado` × `frete_motoboy`) — antes de se saber se a entrega vai acontecer. `cancelarEntrega` só trocava `situacao` para `'cancelada'` e gravava auditoria: **não desfazia o lançamento**. Toda entrega cancelada deixava dinheiro fantasma no saldo.
+
+Evidência real (produção, 31/07/2026): entrega 551 (`ENT-20260731-00013`, venda 15879) nasceu às 13:02:20 creditando R$ 40,00 (frete cobrado R$ 60,00 > motoboy R$ 20,00) e foi cancelada às 13:02:45 — o crédito ficou. No total: **14 lançamentos órfãos** de entregas canceladas (5 créditos = R$ 127,00; 9 débitos = R$ 45,00), líquido **+R$ 82,00 a favor da gerente**. Sem a limpeza, esse valor iria para o fechamento mensal (§10) e para a conta a pagar dela.
+
+### 14.2. O fix — contra-lançamento, nunca DELETE
+
+Dentro da mesma transação do cancelamento: soma o **líquido** (créditos − débitos) dos lançamentos daquela entrega e grava **um contra-lançamento de sinal oposto**, amarrado à mesma `entrega_id`.
+
+- **Nunca apaga nem edita o lançamento original** — o extrato é histórico e auditável, mesmo padrão do fechamento mensal (`src/lib/frete-fechamento.ts`).
+- **Idempotente por construção**: o estorno zera o líquido DA ENTREGA, então rodar de novo não acha nada a estornar (líquido 0 → nenhum INSERT). Não existe "estorno do estorno".
+- Entrega sem lançamento de frete (ex.: retirada) não gera nada.
+
+### 14.3. Por que só em `cancelarEntrega`
+
+É o **único** caminho que grava `situacao='cancelada'` em `entregas_venda` (conferido em 31/07/2026: `grep` no `src/` + `pg_trigger` na tabela — nenhum trigger, nenhuma cascata do cancelamento da venda). Se algum dia surgir um segundo caminho, ele precisa do mesmo estorno.
+
+### 14.4. Limpeza do passivo em produção
+
+Os 14 lançamentos órfãos que já existiam foram corrigidos **pelo mesmo mecanismo** (contra-lançamento, não DELETE), em SQL assinado no `log_mudancas_banco`. Saldo da gerente foi de −R$ 185,64 para −R$ 267,64.
+
+### 14.5. Referência (§14)
+
+- Lib: `src/lib/entrega-venda.ts` — bloco de estorno dentro de `cancelarEntrega`.
+- Testes: `src/__tests__/cancelar-entrega-estorna-frete.test.ts` — crédito vira débito (P1), débito vira crédito (P2), idempotência com líquido zero (P3), entrega sem lançamento (P4), original nunca apagado/editado (P5). P1/P2 falham contra o código antigo.
+- **Ponto em aberto**: o lançamento continua nascendo na CRIAÇÃO da entrega, não na confirmação. O estorno resolve o sintoma (entrega cancelada), mas o desenho segue provisionando frete de entrega que ainda não aconteceu. Mudar isso é redesenho do módulo, não fechado nesta sessão.
