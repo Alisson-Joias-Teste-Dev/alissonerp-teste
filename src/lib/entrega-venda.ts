@@ -59,6 +59,14 @@ export interface CriarEntregaParams {
   regiao?: "fortaleza" | "fora_fortaleza" | "longe" | "correios";
   motoboyId?: string; // UUID
   freteCobrado?: number;
+  /**
+   * Valor pago ao motoboy informado pelo usuário (31/07, pedido do Jonathan:
+   * campo editável no MarcarEntregaModal). Quando ausente, mantém o cálculo
+   * automático pela região (calcularValorMotoboy) — comportamento de sempre.
+   * Necessário para "longe"/"correios", cujo valor de tabela é 0 e só era
+   * ajustável DEPOIS, pela edição da entrega (atualizarEntrega).
+   */
+  freteMotoboy?: number;
   observacoes?: string;
 }
 
@@ -987,11 +995,16 @@ export async function criarEntrega(
     );
   }
 
-  // 7. Cálculo do frete
+  // 7. Cálculo do frete — o valor informado pelo usuário (freteMotoboy) tem
+  // precedência sobre a tabela por região; a regra de aprovação e o saldo de
+  // frete grátis abaixo usam o mesmo valor, seja ele qual for.
   const regiao = params.regiao ?? null;
-  const freteMotoboyCalculado = regiao
-    ? calcularValorMotoboy(regiao)
-    : 0;
+  const freteMotoboyCalculado =
+    params.freteMotoboy != null
+      ? money(params.freteMotoboy)
+      : regiao
+        ? calcularValorMotoboy(regiao)
+        : 0;
   const freteCobrado = money(params.freteCobrado ?? 0);
   const aprovacaoFreteNecessaria =
     params.formaEntrega === "motoboy" &&

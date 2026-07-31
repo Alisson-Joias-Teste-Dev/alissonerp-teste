@@ -702,6 +702,10 @@ export default function MarcarEntregaModal({
 
   // Frete
   const [freteCobradoStr, setFreteCobradoStr] = useState("");
+  // Valor do motoboy EDITÁVEL (31/07, pedido do Jonathan): escolher a região
+  // pré-preenche com a tabela (calcularFreteMotoboy), mas o usuário pode
+  // sobrescrever — essencial em "longe"/"correios", cuja tabela é R$ 0.
+  const [freteMotoboyStr, setFreteMotoboyStr] = useState("");
 
   // Observações
   const [observacoes, setObservacoes] = useState("");
@@ -732,10 +736,10 @@ export default function MarcarEntregaModal({
   // ── Cálculos derivados ───────────────────────────────────────────────────────
 
   const freteCobrado = parseFloat(freteCobradoStr.replace(",", ".")) || 0;
-  const freteMotoboyCalculado = regiao ? calcularFreteMotoboy(regiao) : 0;
+  const freteMotoboy = parseFloat(freteMotoboyStr.replace(",", ".")) || 0;
   const precisaAprovacaoFrete =
     formaEntrega === "motoboy" &&
-    (freteCobrado < freteMotoboyCalculado || freteCobrado === 0);
+    (freteCobrado < freteMotoboy || freteCobrado === 0);
 
   // ── Buscar entregas existentes e calcular saldo pendente ─────────────────────
   /**
@@ -859,6 +863,11 @@ export default function MarcarEntregaModal({
       setFreteCobradoStr(
         freteVenda ? freteVenda.toFixed(2).replace(".", ",") : "",
       );
+      // Região e valor do motoboy resetam JUNTOS — o valor é derivado da
+      // região (pré-preenchido no clique do chip); resetar só um dos dois
+      // deixaria chip marcado com campo vazio (ou vice-versa).
+      setRegiao("");
+      setFreteMotoboyStr("");
       setErro("");
       setCodigosGerados(null);
     }
@@ -948,6 +957,12 @@ export default function MarcarEntregaModal({
       if (formaEntrega === "motoboy" && motoboyId) body.motoboyId = motoboyId;
       if (freteCobrado > 0 || freteCobradoStr.trim() !== "") {
         body.freteCobrado = freteCobrado;
+      }
+      // Envia o valor do motoboy exatamente como está na tela — inclusive 0
+      // (campo limpo de propósito). O backend só recalcula pela região quando
+      // este campo NÃO vem no body (chamadas antigas/outros callers).
+      if (formaEntrega === "motoboy") {
+        body.freteMotoboy = freteMotoboy;
       }
       if (observacoes.trim()) body.observacoes = observacoes.trim();
 
@@ -1630,9 +1645,18 @@ export default function MarcarEntregaModal({
                   ).map((r) => (
                     <button
                       key={r}
-                      onClick={() =>
-                        setRegiao(regiao === r ? "" : r)
-                      }
+                      onClick={() => {
+                        const nova = regiao === r ? "" : r;
+                        setRegiao(nova);
+                        // Trocar a região re-preenche o valor do motoboy com a
+                        // tabela — qualquer edição manual anterior é descartada
+                        // de propósito (o valor manual era da região antiga).
+                        setFreteMotoboyStr(
+                          nova
+                            ? calcularFreteMotoboy(nova).toFixed(2).replace(".", ",")
+                            : "",
+                        );
+                      }}
                       style={{
                         padding: "8px 10px",
                         borderRadius: 6,
@@ -1719,23 +1743,26 @@ export default function MarcarEntregaModal({
                   >
                     <Truck size={11} /> Frete Motoboy
                   </div>
-                  <div
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={freteMotoboyStr}
+                    onChange={(e) => setFreteMotoboyStr(e.target.value)}
+                    placeholder="0,00"
                     style={{
+                      width: "100%",
                       fontSize: 14,
                       fontWeight: 600,
                       padding: "7px 10px",
-                      borderRadius: 6,
-                      background: "#fff",
                       border: `1px solid ${C.cremeBorder}`,
-                      color:
-                        freteMotoboyCalculado > 0
-                          ? C.esmeralda
-                          : C.cinza,
+                      borderRadius: 6,
+                      outline: "none",
+                      background: "#fff",
+                      color: freteMotoboy > 0 ? C.esmeralda : C.cinza,
+                      boxSizing: "border-box",
                       fontFamily: "monospace",
                     }}
-                  >
-                    {fmtBRL(freteMotoboyCalculado)}
-                  </div>
+                  />
                 </div>
               </div>
 
@@ -1764,7 +1791,7 @@ export default function MarcarEntregaModal({
                     <strong>⚠️ Precisa de aprovação da gerente.</strong>
                     <br />
                     Frete cobrado ({fmtBRL(freteCobrado)}) é menor que o frete
-                    do motoboy ({fmtBRL(freteMotoboyCalculado)}). A entrega será
+                    do motoboy ({fmtBRL(freteMotoboy)}). A entrega será
                     criada com pendência de aprovação.
                   </div>
                   </div>
