@@ -143,12 +143,17 @@ describe("CATALOGO — completude e consistência (política config-first estrit
     }
   });
 
-  it("conferencia_consultora é a ÚNICA exceção: configKeys vazio + solicitantePodeAprovar:true", () => {
+  it("solicitantePodeAprovar só em conferencia_consultora (configKeys vazio) e frete_avulso_loja (31/07)", () => {
     const regra = CATALOGO.conferencia_consultora;
     expect(regra.configKeys).toEqual([]);
     expect(regra.solicitantePodeAprovar).toBe(true);
+    // 31/07 (decisão do Jonathan): o responsável configurado em
+    // aprovadores_frete_avulso_loja pode aprovar o próprio frete pago pela
+    // loja; frete_avulso (cliente) mantém a segregação.
+    expect(CATALOGO.frete_avulso_loja.solicitantePodeAprovar).toBe(true);
+    const excecoes = new Set(["conferencia_consultora", "frete_avulso_loja"]);
     for (const evento of TODOS_EVENTOS) {
-      if (evento === "conferencia_consultora") continue;
+      if (excecoes.has(evento)) continue;
       expect(CATALOGO[evento].solicitantePodeAprovar).toBeFalsy();
     }
   });
