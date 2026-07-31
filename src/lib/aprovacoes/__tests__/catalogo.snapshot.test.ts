@@ -49,7 +49,9 @@ const SNAPSHOT_ESPERADO: Record<
   frete_avulso: { configKeys: ["aprovadores_frete_avulso"], configMulti: true },
   // Migration 359 (21/07): irmão de frete_avulso pra pagante='loja' — chave
   // própria (aprovadores_frete_avulso_loja), autoriza o CUSTO da loja.
-  frete_avulso_loja: { configKeys: ["aprovadores_frete_avulso_loja"], configMulti: true },
+  // 31/07 (decisão do Jonathan): quem está nessa lista é o responsável pelos
+  // fretes da loja e PODE aprovar a própria solicitação (solicitantePodeAprovar).
+  frete_avulso_loja: { configKeys: ["aprovadores_frete_avulso_loja"], configMulti: true, solicitantePodeAprovar: true },
   // BLOCO 4 (21/07): rotina automática do dia 01 — fechamento mensal do saldo
   // de frete grátis. Saldo negativo cria esta tarefa (src/lib/frete-fechamento.ts).
   fechamento_frete_negativo: { configKeys: ["aprovadores_fechamento_frete"], configMulti: true },
@@ -83,11 +85,18 @@ describe("snapshot do CATALOGO — trava a política; qualquer mudança quebra e
     }
   });
 
-  it("conferencia_consultora: configKeys:[] + solicitantePodeAprovar:true — única exceção do catálogo", () => {
+  it("solicitantePodeAprovar: só conferencia_consultora e frete_avulso_loja (31/07) — nenhum outro evento", () => {
+    // conferencia_consultora: sem aprovador a configurar — a consultora aprova a própria conferência.
     expect(CATALOGO.conferencia_consultora.configKeys).toEqual([]);
     expect(CATALOGO.conferencia_consultora.solicitantePodeAprovar).toBe(true);
+    // frete_avulso_loja (31/07, decisão do Jonathan): o responsável configurado
+    // no pool pode aprovar o próprio frete pago pela loja. O irmão frete_avulso
+    // (pagante='cliente') mantém a segregação de função.
+    expect(CATALOGO.frete_avulso_loja.solicitantePodeAprovar).toBe(true);
+    expect(CATALOGO.frete_avulso.solicitantePodeAprovar).toBeFalsy();
+    const excecoes = new Set(["conferencia_consultora", "frete_avulso_loja"]);
     for (const [evento, regra] of Object.entries(CATALOGO)) {
-      if (evento === "conferencia_consultora") continue;
+      if (excecoes.has(evento)) continue;
       expect(regra.solicitantePodeAprovar, `${evento} não deveria ter solicitantePodeAprovar`).toBeFalsy();
     }
   });

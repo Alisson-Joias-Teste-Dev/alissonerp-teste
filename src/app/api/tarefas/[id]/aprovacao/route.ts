@@ -522,6 +522,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // IMPACTO SE REMOVIDO: quem está no pool solicita e aprova o PRÓPRIO pedido
   // de frete avulso sozinho, sem segregação de função nenhuma.
   const ehFreteAvulsoTipo = tarefaInfo?.tipo === "frete_avulso";
+  // REGRA DE NEGÓCIO (31/07, decisão do Jonathan — auto-aprovação PERMITIDA no
+  // frete pago pela LOJA): quem está na lista 'aprovadores_frete_avulso_loja' é
+  // o responsável pelos fretes da loja e PODE aprovar a própria solicitação —
+  // a exclusão do solicitante (carve-out abaixo) passa a valer só pro evento
+  // 'frete_avulso' (pagante='cliente'). Espelha solicitantePodeAprovar:true em
+  // catalogo.ts (que faz resolverAprovadores não filtrar o solicitante).
+  // `evento !== 'frete_avulso_loja'` (e não `evento === 'frete_avulso'`) de
+  // propósito: se eventoDaTarefa devolver null num caso imprevisto, a exclusão
+  // continua valendo (fail-secure).
+  const ehFreteAvulsoSemAutoAprovacao = ehFreteAvulsoTipo && evento !== "frete_avulso_loja";
   // REGRA DE NEGÓCIO (BLOCO 4, jul/2026 — segregação do fechamento de frete):
   // exclui a GERENTE do saldo (fechamento_gerente_id, não o solicitante
   // gravado — a tarefa é criada pelo cron/admin do sistema) do bypass do
@@ -529,7 +539,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const ehFechamentoFreteTipo = tarefaInfo?.tipo === "fechamento_frete_negativo";
   const ehAprovadorGravado =
     String(aprovacao.aprovador_id) === user.id &&
-    !(ehFreteAvulsoTipo && String(aprovacao.solicitante_id) === user.id) &&
+    !(ehFreteAvulsoSemAutoAprovacao && String(aprovacao.solicitante_id) === user.id) &&
     !(ehFechamentoFreteTipo && String(tarefaInfo?.fechamento_gerente_id ?? "") === user.id);
   let autorizado = ehAprovadorGravado;
   let motivoNegado: string | undefined;

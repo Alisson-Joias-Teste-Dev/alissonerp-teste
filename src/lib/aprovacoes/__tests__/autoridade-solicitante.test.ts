@@ -27,9 +27,13 @@ const usuariosAtivos = new Set<string>();
 const sqlMock = vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
   const query = strings.join("?");
   if (query.includes("FROM alissonerp.configuracoes_sistema")) {
-    // values[0] é o array de chaves (ANY(${chaves})) — só existe UMA chave
-    // relevante nestes testes (aprovadores_frete_avulso).
+    // values[0] é o array de chaves (ANY(${chaves})) — duas chaves relevantes
+    // nestes testes: aprovadores_frete_avulso (cliente) e
+    // aprovadores_frete_avulso_loja (loja, auto-aprovação permitida desde 31/07).
     const chaves = values[0] as string[];
+    if (chaves.includes("aprovadores_frete_avulso_loja")) {
+      return [{ chave: "aprovadores_frete_avulso_loja", valor: (globalThis as { __configFreteAvulsoLoja?: string }).__configFreteAvulsoLoja ?? "" }];
+    }
     if (chaves.includes("aprovadores_frete_avulso")) {
       return [{ chave: "aprovadores_frete_avulso", valor: (globalThis as { __configFreteAvulso?: string }).__configFreteAvulso ?? "" }];
     }
@@ -53,12 +57,17 @@ function setConfig(uuidsCsv: string) {
   (globalThis as { __configFreteAvulso?: string }).__configFreteAvulso = uuidsCsv;
 }
 
+function setConfigLoja(uuidsCsv: string) {
+  (globalThis as { __configFreteAvulsoLoja?: string }).__configFreteAvulsoLoja = uuidsCsv;
+}
+
 beforeEach(() => {
   sqlMock.mockClear();
   usuariosAtivos.clear();
   usuariosAtivos.add(SOLICITANTE);
   usuariosAtivos.add(OUTRO_APROVADOR);
   setConfig("");
+  setConfigLoja("");
 });
 
 describe("podeDecidir('frete_avulso', ctx.solicitanteId) — sem auto-aprovação", () => {
@@ -121,5 +130,51 @@ describe("podeDecidir('frete_avulso', ctx.solicitanteId) — sem auto-aprovaçã
     setConfig(SOLICITANTE);
     const resultado = await podeDecidir({ id: SOLICITANTE, role: "gerente_loja" }, "frete_avulso");
     expect(resultado.pode).toBe(true);
+  });
+});
+
+describe("podeDecidir('frete_avulso_loja') — auto-aprovação PERMITIDA (31/07, decisão do Jonathan)", () => {
+  it("pool = [solicitante]: quem está em aprovadores_frete_avulso_loja aprova o PRÓPRIO frete pago pela loja, mesmo com ctx.solicitanteId", async () => {
+    setConfigLoja(SOLICITANTE);
+    const resultado = await podeDecidir(
+      { id: SOLICITANTE, role: "gerente_loja" },
+      "frete_avulso_loja",
+      { solicitanteId: SOLICITANTE },
+    );
+    expect(resultado.pode).toBe(true);
+  });
+
+  it("quem NÃO está no pool da loja continua barrado (a flag não abre pra qualquer um)", async () => {
+    setConfigLoja(OUTRO_APROVADOR);
+    const resultado = await podeDecidir(
+      { id: SOLICITANTE, role: "gerente_loja" },
+      "frete_avulso_loja",
+      { solicitanteId: SOLICITANTE },
+    );
+    expect(resultado.pode).toBe(false);
+    expect(resultado.motivo).toBe("nao_e_aprovador_configurado");
+  });
+
+  it("config da loja vazia → 'aprovador_nao_configurado' (a flag não inventa aprovador)", async () => {
+    setConfigLoja("");
+    const resultado = await podeDecidir(
+      { id: SOLICITANTE, role: "gerente_loja" },
+      "frete_avulso_loja",
+      { solicitanteId: SOLICITANTE },
+    );
+    expect(resultado.pode).toBe(false);
+    expect(resultado.motivo).toBe("aprovador_nao_configurado");
+  });
+
+  it("ANTI-VOLTA: o irmão 'frete_avulso' (cliente) SEGUE excluindo o solicitante — a flag é só da loja", async () => {
+    setConfig(SOLICITANTE);
+    setConfigLoja(SOLICITANTE);
+    const resultado = await podeDecidir(
+      { id: SOLICITANTE, role: "gerente_loja" },
+      "frete_avulso",
+      { solicitanteId: SOLICITANTE },
+    );
+    expect(resultado.pode).toBe(false);
+    expect(resultado.motivo).toBe("aprovador_e_o_proprio_solicitante");
   });
 });
