@@ -23,8 +23,14 @@ import { confirmarFreteAvulso, MAX_FOTOS_ENTREGA } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
 import { LIMITS, checkArrayLength, checkBase64Length, payloadTooLargeResponse } from "@/lib/payload-limits";
 
+// REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026): latitude/longitude
+// OPCIONAIS no schema (admin/gerente confirmando pelo escritório nunca
+// manda) — a obrigatoriedade real (só para o motoboy, role 'entregador') é
+// decidida dentro de confirmarFreteAvulso(), não aqui.
 const ConfirmarAvulsoSchema = z.object({
   fotos_base64: z.array(z.string().max(LIMITS.IMAGE_BASE64_MAX)).max(MAX_FOTOS_ENTREGA).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
 });
 
 // REGRA: motoboy só confirma a própria corrida; admin/gerente confirma qualquer uma
@@ -88,7 +94,7 @@ export async function POST(
   const raw = await req.json().catch(() => ({}));
   const parsed = ConfirmarAvulsoSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
-  const { fotos_base64 } = parsed.data;
+  const { fotos_base64, latitude, longitude } = parsed.data;
 
   if (fotos_base64) {
     try {
@@ -102,7 +108,11 @@ export async function POST(
   }
 
   try {
-    await confirmarFreteAvulso(entregaId, user.id, fotos_base64);
+    await confirmarFreteAvulso(entregaId, user.id, fotos_base64, {
+      usuarioRole: usuario.role as string,
+      latitude,
+      longitude,
+    });
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erro ao confirmar";

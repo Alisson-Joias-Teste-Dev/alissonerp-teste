@@ -19,12 +19,22 @@
  * IMPACTO SE ALTERADO: a confirmação de entrega dispara a baixa de estoque
  * (baixa_estoque_realizada = true). Alterar este fluxo pode causar estoque
  * inconsistente ou dupla baixa.
+ *
+ * REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — reverte a opcionalidade
+ * das fotos SÓ para o motoboy confirmando a entrega ao cliente): quando
+ * `exigirLocalizacaoEFoto` vem true (EntregaDetalheDrawer só manda isso para
+ * `userRole==='entregador'` E o botão específico "Confirmar Entrega ao
+ * Cliente", nunca para "Confirmar Retirada" nem para o código B), localização
+ * + pelo menos 1 foto passam a ser obrigatórias para habilitar "Confirmar".
+ * Fora disso (admin/gerente confirmando pelo escritório, ou código B/retirada
+ * na loja), continua tudo opcional como sempre foi.
  */
 
 import { useState, useRef, useEffect } from "react";
-import { X, Loader2, CheckCircle, Shield, AlertTriangle, Camera } from "lucide-react";
+import { X, Loader2, CheckCircle, Shield, AlertTriangle, Camera, MapPin } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import { lerArquivosComoBase64 } from "@/lib/fotos-base64";
+import { useLocalizacaoMotoboy } from "@/hooks/useLocalizacaoMotoboy";
 
 // REGRA DE NEGÓCIO (migration 357): limite de fotos por confirmação — mesmo
 // valor usado no backend (MAX_FOTOS_ENTREGA, src/lib/entrega-venda.ts) e no
@@ -58,6 +68,9 @@ interface ConfirmarEntregaModalProps {
   onClose: () => void;
   /** Callback chamado após confirmação bem-sucedida */
   onSuccess: () => void;
+  /** Ver REGRA DE NEGÓCIO no topo do arquivo — true só quando o motoboy
+   *  confirma a entrega ao cliente no próprio app. */
+  exigirLocalizacaoEFoto?: boolean;
 }
 
 // ── Resposta da API ─────────────────────────────────────────────────────────────
@@ -76,6 +89,7 @@ export default function ConfirmarEntregaModal({
   isOpen,
   onClose,
   onSuccess,
+  exigirLocalizacaoEFoto = false,
 }: ConfirmarEntregaModalProps) {
   const [codigo, setCodigo] = useState("");
   const [submetendo, setSubmetendo] = useState(false);
@@ -86,6 +100,8 @@ export default function ConfirmarEntregaModal({
   const [fotoErro, setFotoErro] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const fotoInputRef = useRef<HTMLInputElement>(null);
+  const { coords, buscando: buscandoLocalizacao, erro: erroLocalizacao, tentarNovamente: tentarLocalizacaoNovamente } =
+    useLocalizacaoMotoboy(isOpen && exigirLocalizacaoEFoto);
 
   // Foco automático no input ao abrir
   useEffect(() => {
@@ -139,6 +155,7 @@ export default function ConfirmarEntregaModal({
       // opcional). Este front só empacota o que foi digitado/anexado.
       const body: Record<string, unknown> = { codigo: code };
       if (fotosBase64.length > 0) body.fotos_base64 = fotosBase64;
+      if (coords) { body.latitude = coords.latitude; body.longitude = coords.longitude; }
 
       const result = await apiFetch<ConfirmacaoResponse>(
         `/api/entregas-venda/${entregaId}/confirmar`,
@@ -379,10 +396,44 @@ export default function ConfirmarEntregaModal({
                 </div>
               )}
 
-              {/* ── Fotos de comprovação (opcional, migration 357) ──── */}
-              {/* REGRA DE NEGÓCIO: até MAX_FOTOS fotos, OPCIONAIS, como
-                  comprovante visual da retirada/entrega. Nunca bloqueia a
-                  confirmação — só o código (acima) é obrigatório. */}
+              {/* ── Localização (obrigatória só quando exigirLocalizacaoEFoto) ── */}
+              {exigirLocalizacaoEFoto && (
+                <div style={{
+                  marginBottom: 16, padding: "10px 14px", borderRadius: 8,
+                  background: coords ? C.verdeLt : erroLocalizacao ? C.vermelhoLt : C.cremeBorder + "40",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  fontSize: 12, fontWeight: 600,
+                  color: coords ? C.verde : erroLocalizacao ? C.vermelho : C.cinza,
+                }}>
+                  {buscandoLocalizacao ? (
+                    <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Obtendo localização...</>
+                  ) : coords ? (
+                    <><MapPin size={14} /> Localização confirmada</>
+                  ) : (
+                    <><AlertTriangle size={14} /> {erroLocalizacao || "Localização não obtida"}</>
+                  )}
+                  {!buscandoLocalizacao && !coords && (
+                    <button
+                      type="button"
+                      onClick={tentarLocalizacaoNovamente}
+                      style={{
+                        marginLeft: 4, padding: "3px 8px", borderRadius: 6,
+                        border: `1px solid ${C.vermelho}`, background: "#fff",
+                        color: C.vermelho, fontSize: 11, fontWeight: 700, cursor: "pointer",
+                      }}
+                    >
+                      Tentar de novo
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* ── Fotos de comprovação (opcional, migration 357 — exceto
+                  quando exigirLocalizacaoEFoto, ver REGRA DE NEGÓCIO no topo
+                  do arquivo) ──── */}
+              {/* REGRA DE NEGÓCIO: até MAX_FOTOS fotos. Nunca antecipa/substitui
+                  a validação do código (acima) — só se soma a ela quando o
+                  código já é válido. */}
               <div style={{ marginBottom: 16, textAlign: "center" }}>
                 <input
                   ref={fotoInputRef}
@@ -408,8 +459,8 @@ export default function ConfirmarEntregaModal({
                 >
                   <Camera size={14} />
                   {fotosBase64.length > 0
-                    ? `${fotosBase64.length} foto(s) anexada(s) (opcional)`
-                    : "Anexar fotos da entrega (opcional)"}
+                    ? `${fotosBase64.length} foto(s) anexada(s)${exigirLocalizacaoEFoto ? "" : " (opcional)"}`
+                    : exigirLocalizacaoEFoto ? "Anexar foto da entrega (obrigatório)" : "Anexar fotos da entrega (opcional)"}
                 </button>
                 {fotoErro && (
                   <div style={{ marginTop: 6, fontSize: 11, color: C.ambar }}>{fotoErro}</div>
@@ -448,26 +499,27 @@ export default function ConfirmarEntregaModal({
                 )}
               </div>
 
-              {/* Botão Confirmar */}
+              {/* Botão Confirmar — com exigirLocalizacaoEFoto, também trava até
+                  foto + localização baterem (código continua sendo a ÚNICA
+                  coisa validada no servidor antes de qualquer outra coisa —
+                  isto aqui é só o gate de UX do botão). */}
+              {(() => {
+                const faltaExigencia = exigirLocalizacaoEFoto && (fotosBase64.length === 0 || !coords);
+                const desabilitado = submetendo || codigo.trim().length < 6 || faltaExigencia;
+                return (
               <button
                 onClick={handleConfirmar}
-                disabled={submetendo || codigo.trim().length < 6}
+                disabled={desabilitado}
                 style={{
                   width: "100%",
                   padding: "12px",
-                  background:
-                    submetendo || codigo.trim().length < 6
-                      ? "#9CA3AF"
-                      : corTema,
+                  background: desabilitado ? "#9CA3AF" : corTema,
                   color: "#fff",
                   border: "none",
                   borderRadius: 8,
                   fontSize: 14,
                   fontWeight: 700,
-                  cursor:
-                    submetendo || codigo.trim().length < 6
-                      ? "not-allowed"
-                      : "pointer",
+                  cursor: desabilitado ? "not-allowed" : "pointer",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -489,6 +541,8 @@ export default function ConfirmarEntregaModal({
                   </>
                 )}
               </button>
+                );
+              })()}
             </>
           )}
         </div>

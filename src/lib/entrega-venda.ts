@@ -1579,6 +1579,13 @@ export async function confirmarEntrega(
   codigo: string,
   usuarioId: string,
   fotosBase64?: string[],
+  // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — localização/foto
+  // obrigatórias no app do motoboy): opcional em TODOS os campos para não
+  // quebrar chamador nenhum (inclusive os testes existentes, que nunca
+  // passam este parâmetro). `usuarioRole` só é usado para decidir SE a
+  // exigência abaixo se aplica — quem confirma pelo escritório (admin/
+  // gerente) continua exatamente como antes, foto/localização opcionais.
+  opts?: { usuarioRole?: string; latitude?: number; longitude?: number },
 ): Promise<ConfirmacaoResult> {
   // Carregar entrega
   const [entrega] = await sql`
@@ -1658,6 +1665,28 @@ export async function confirmarEntrega(
     }
     const restantes = MAX_TENTATIVAS_CODIGO - Number(tent?.tentativas_codigo ?? 0);
     throw new Error(`Código inválido. ${restantes} tentativa(s) restante(s) antes do bloqueio.`);
+  }
+
+  // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — localização/foto
+  // obrigatórias no app do motoboy): roda DEPOIS do código já validado acima
+  // (ORDEM INVIOLÁVEL — não muda: foto/localização nunca antecipam nem
+  // substituem a checagem do código, só se somam a ela quando o código já é
+  // válido). Vale SÓ para o motoboy (role 'entregador') confirmando ENTREGA
+  // AO CLIENTE (código A, forma_entrega='motoboy') — não vale pra retirada
+  // na loja pelo motoboy (código B) nem pra cliente retirando na loja
+  // (forma_entrega='retirada'), e não vale quando quem confirma é
+  // admin/gerente pelo escritório (ex.: motoboy sem celular, cliente ligou
+  // passando o código) — aí continua tudo opcional, como sempre foi.
+  // IMPACTO SE REMOVIDO: motoboy volta a poder finalizar a entrega ao
+  // cliente sem provar hora/local/foto — motivo original deste bloco.
+  const ehEntregaAoClientePeloMotoboy = !matchMotoboy && String(entrega.forma_entrega) !== "retirada";
+  if (opts?.usuarioRole === "entregador" && ehEntregaAoClientePeloMotoboy) {
+    if (!fotosBase64 || fotosBase64.length === 0) {
+      throw new Error("Anexe ao menos 1 foto para confirmar a entrega ao cliente.");
+    }
+    if (opts.latitude == null || opts.longitude == null) {
+      throw new Error("Não foi possível obter sua localização. Ative o GPS e tente novamente.");
+    }
   }
 
   // ── Pré-validação: reposição POR ITEM ─────────────────────────────────────
@@ -1776,6 +1805,8 @@ export async function confirmarEntrega(
             data_entrega_realizada = now(),
             situacao = 'confirmada',
             confirmado_por_motoboy_entrega = ${usuarioId}::uuid,
+            latitude_entrega = ${opts?.latitude ?? null},
+            longitude_entrega = ${opts?.longitude ?? null},
             updated_at = now()
           WHERE id = ${entregaId}
         `;
@@ -2823,6 +2854,19 @@ export async function criarFreteAvulso(
     ) {
       throw new Error("Informe ao menos logradouro, número e cidade do endereço de entrega.");
     }
+
+    // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — "obrigatório o nome
+    // do cliente" na tela de Solicitar Frete Avulso): validado no SERVIDOR
+    // (defesa em profundidade, mesmo padrão do campo `pagante`/endereço
+    // acima) além do front (FreteAvulsoModal + ClienteSelector). Vale nos
+    // dois casos de `usaFormularioCompleto` — a migration 365 já documentou o
+    // problema de fundo ("frete avulso não tem cliente"): sem contatoId,
+    // nenhuma corrida avulsa tem como saber de quem ela é.
+    // IMPACTO SE REMOVIDO: reabre a lacuna que forçou a gambiarra da
+    // migration 365 (lista manual de exceção pra sumir do relatório).
+    if (!params.contatoId) {
+      throw new Error("Selecione o cliente da corrida.");
+    }
   }
 
   // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — migration 359
@@ -3404,6 +3448,11 @@ export async function confirmarFreteAvulso(
   entregaId: number,
   usuarioId: string,
   fotosBase64?: string[],
+  // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — localização/foto
+  // obrigatórias no app do motoboy): opcional para não quebrar chamador
+  // nenhum (inclusive os testes existentes). `usuarioRole` só decide SE a
+  // exigência abaixo se aplica.
+  opts?: { usuarioRole?: string; latitude?: number; longitude?: number },
 ): Promise<void> {
   const [entrega] = await sql`
     SELECT id, situacao, codigo_entrega, is_avulso, motoboy_id, created_by
@@ -3437,6 +3486,23 @@ export async function confirmarFreteAvulso(
     );
   }
 
+  // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — localização/foto
+  // obrigatórias no app do motoboy): roda DEPOIS dos guards de estado acima
+  // (existe / é avulso / não confirmada / não cancelada / pode confirmar) —
+  // mesmo padrão de confirmarEntrega. Vale só para role 'entregador' (o
+  // motoboy usando o próprio app); admin/gerente confirmando pelo escritório
+  // continua opcional, como sempre foi.
+  // IMPACTO SE REMOVIDO: motoboy volta a poder finalizar corrida avulsa sem
+  // provar hora/local/foto — motivo original deste bloco.
+  if (opts?.usuarioRole === "entregador") {
+    if (!fotosBase64 || fotosBase64.length === 0) {
+      throw new Error("Anexe ao menos 1 foto para finalizar a corrida.");
+    }
+    if (opts.latitude == null || opts.longitude == null) {
+      throw new Error("Não foi possível obter sua localização. Ative o GPS e tente novamente.");
+    }
+  }
+
   // Upload best-effort ANTES de abrir a transação: como é best-effort (nunca
   // lança — ver uploadFotosEntrega), não há risco de deixar a corrida
   // travada por causa do Storage; e ao rodar aqui (fora do tx), os guards de
@@ -3453,6 +3519,8 @@ export async function confirmarFreteAvulso(
         situacao = 'confirmada',
         data_entrega_realizada = now(),
         confirmado_por_motoboy_entrega = ${usuarioId}::uuid,
+        latitude_entrega = ${opts?.latitude ?? null},
+        longitude_entrega = ${opts?.longitude ?? null},
         updated_at = now()
       WHERE id = ${entregaId}
     `;

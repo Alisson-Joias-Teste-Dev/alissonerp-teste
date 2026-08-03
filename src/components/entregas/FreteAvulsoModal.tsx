@@ -106,6 +106,19 @@
  * IMPACTO SE REINTRODUZIDO: qualquer novo caller que abrir este modal sem
  * `modoSolicitacao`/`formularioCompleto` agora cai no formulário COMPLETO
  * (não existe mais fallback enxuto) — é a única forma suportada.
+ *
+ * REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — "obrigatório o nome do
+ * cliente"): reusa o `ClienteSelector` do módulo Metal (mesmo componente,
+ * mesma busca em public.contatos — nada duplicado). Quando `vendaFixada`
+ * (aberto de dentro da venda — VendaDetalheClient), o cliente já é
+ * inequívoco (o da própria venda) — o caller manda `contatoIdInicial` e o
+ * seletor nem aparece. Fora disso (Tarefas e Entregas-direto, os 2 casos SEM
+ * venda pré-vinculada), o seletor aparece e é OBRIGATÓRIO; se uma venda for
+ * buscada/selecionada dentro do modal, auto-preenche a partir do que
+ * GET /api/vendas/[id] já retorna (cliente_id/nome/cpf/telefone — mesma
+ * chamada que já preenche o endereço), continuando editável/trocável.
+ * IMPACTO SE REMOVIDO: reabre a lacuna documentada na migration 365 ("frete
+ * avulso não tem cliente") que virou gambiarra de config manual.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -113,6 +126,7 @@ import { X, Loader2, CheckCircle, Bike, MapPin, AlignLeft, Search, DollarSign, S
 import { apiFetch } from "@/lib/apiFetch";
 import { useErrorStore } from "@/stores/errorStore";
 import EnderecoForm, { type EnderecoValue, ENDERECO_VAZIO, enderecoDaVenda, type EnderecoVendaFields } from "@/components/endereco/EnderecoForm";
+import ClienteSelector, { type ClienteOption } from "@/components/metal/ClienteSelector";
 import { precisaValorCobradoDoCliente } from "@/lib/frete-avulso-valor-cobrado";
 
 const C = {
@@ -139,7 +153,16 @@ interface VendaBusca {
 
 /** Campos de endereço de entrega retornados por GET /api/vendas/[id] —
  *  mesmo formato aceito por enderecoDaVenda() (EnderecoForm.tsx). */
-type VendaEnderecoResp = EnderecoVendaFields;
+type VendaEnderecoResp = EnderecoVendaFields & {
+  /** REGRA DE NEGÓCIO (03/08/2026): a mesma resposta de GET /api/vendas/[id]
+   *  já traz o cliente da venda (ver route.ts, `v.cliente_id, v.cliente_nome,
+   *  v.cliente_cpf_cnpj, v.cliente_telefone`) — reusado aqui pra auto-
+   *  preencher o ClienteSelector sem uma 2ª chamada. */
+  cliente_id: number | null;
+  cliente_nome: string | null;
+  cliente_cpf_cnpj: string | null;
+  cliente_telefone: string | null;
+};
 
 interface Props {
   isOpen: boolean;
@@ -178,6 +201,13 @@ interface Props {
    * (sem endereço/pagante/comprovante).
    */
   formularioCompleto?: boolean;
+  /**
+   * REGRA DE NEGÓCIO (03/08/2026 — "obrigatório o nome do cliente"): id do
+   * contato da venda (public.contatos.id_contato), só quando `vendaId`
+   * também é informado (vendaFixada) — o cliente da corrida já é o mesmo da
+   * venda, sem precisar buscar de novo. Ignorado sem vendaId.
+   */
+  contatoIdInicial?: number;
 }
 
 const REGIOES = [
@@ -189,7 +219,7 @@ const REGIOES = [
 
 type Regiao = "fortaleza" | "fora_fortaleza" | "longe" | "correios";
 
-export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolicitacao = false, vendaId, enderecoInicial, formularioCompleto = false }: Props) {
+export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolicitacao = false, vendaId, enderecoInicial, formularioCompleto = false, contatoIdInicial }: Props) {
   // REGRA DE NEGÓCIO (intenção explícita — ponto de entrada decide, não o
   // cargo): no modo solicitação, quem abriu o modal só SOLICITA — não cria o
   // avulso já liberado e não escolhe motoboy/responsável. Vem da prop, não
@@ -221,6 +251,19 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   const [enderecoEntrega, setEnderecoEntrega] = useState<EnderecoValue>(ENDERECO_VAZIO);
   const [carregandoEndereco, setCarregandoEndereco] = useState(false);
   const [freteCobradoConsultora, setFreteCobradoConsultora] = useState("");
+
+  // REGRA DE NEGÓCIO (03/08/2026 — "obrigatório o nome do cliente"): só
+  // usado quando !vendaFixada (Tarefas e Entregas-direto) — com vendaFixada,
+  // o cliente vem direto de `contatoIdInicial` (prop), sem seletor visível.
+  const [clienteSelecionado, setClienteSelecionado] = useState<ClienteOption | null>(null);
+  // Id efetivo enviado ao backend nos dois casos — unifica a checagem de
+  // obrigatoriedade abaixo (disabledFormularioCompleto) e o submit.
+  // REGRA DE NEGÓCIO (03/08/2026): prioriza contatoIdInicial (vendaFixada
+  // normal); cai para o ClienteSelector quando ele não vier — cobre o caso
+  // raro de venda fixada SEM cliente cadastrado (cliente_id nulo), onde
+  // esconder o seletor deixaria o formulário travado sem saída.
+  const contatoIdEfetivo = contatoIdInicial ?? clienteSelecionado?.id_contato;
+  const mostrarSeletorCliente = !contatoIdInicial;
 
   // REGRA DE NEGÓCIO (migration 359 — "quem paga"): só existe no modo
   // solicitação. `comprovanteBase64` só é exigido quando pagante='cliente'.
@@ -292,6 +335,17 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     try {
       const detalhe = await apiFetch<VendaEnderecoResp>(`/api/vendas/${v.id}`);
       setEnderecoEntrega(enderecoDaVenda(detalhe));
+      // REGRA DE NEGÓCIO (03/08/2026): auto-preenche o cliente a partir da
+      // venda selecionada — mesma chamada que já traz o endereço, sem 2ª
+      // requisição. Continua editável/trocável pelo ClienteSelector.
+      if (detalhe.cliente_id) {
+        setClienteSelecionado({
+          id_contato: detalhe.cliente_id,
+          nome: detalhe.cliente_nome ?? "",
+          cpf_cnpj: detalhe.cliente_cpf_cnpj ?? "",
+          telefone: detalhe.cliente_telefone ?? "",
+        });
+      }
     } catch {
       useErrorStore.getState().push("Erro ao carregar endereço da venda", { level: "warning" });
     } finally {
@@ -317,6 +371,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     setVendasResultado([]);
     setVendaSelecionada(null);
     setEnderecoEntrega(ENDERECO_VAZIO);
+    setClienteSelecionado(null);
     setFreteCobradoConsultora("");
     setPagante("");
     setComprovanteBase64("");
@@ -383,9 +438,20 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
         if (pagante === "cliente" && !comprovanteBase64) {
           throw new Error("Anexe o comprovante de pagamento do cliente.");
         }
+        // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — "obrigatório o
+        // nome do cliente"): validado aqui (front) E no backend
+        // (criarFreteAvulso — defesa em profundidade). Com vendaFixada vem
+        // de contatoIdInicial; sem ela, do ClienteSelector.
+        if (!contatoIdEfetivo) {
+          throw new Error("Selecione o cliente da corrida.");
+        }
         await apiFetch("/api/entregas-venda/frete-avulso", {
           method: "POST",
           body: JSON.stringify({
+            // REGRA DE NEGÓCIO (03/08/2026): Number() por segurança — id_contato
+            // é bigint no Postgres e pode chegar como string (ver ClienteSelector);
+            // o backend também coage (z.coerce), defesa em profundidade.
+            contatoId: Number(contatoIdEfetivo),
             // REGRA DE NEGÓCIO (intenção explícita; reforma da tela Entregas):
             // `solicitar: true` só é enviado quando `ehSolicitacao` (=
             // modoSolicitacao) — é o que faz o backend tratar a chamada como
@@ -446,7 +512,8 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     enviando ||
     !enderecoEntrega.logradouro.trim() || !enderecoEntrega.numero.trim() || !enderecoEntrega.cidade.trim() ||
     (precisaValorCobradoDoCliente(pagante) && freteCobradoConsultora === "") || !descricao.trim() ||
-    !pagante || (pagante === "cliente" && !comprovanteBase64);
+    !pagante || (pagante === "cliente" && !comprovanteBase64) ||
+    !contatoIdEfetivo;
   // LIMPEZA (código morto, 21/07): existia um `disabledPadrao` (formulário
   // ENXUTO, exigia motoboyId) e um ternário `mostrarFormularioCompleto ?
   // disabledFormularioCompleto : disabledPadrao`. Removido junto com o
@@ -765,6 +832,23 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                           )}
                         </div>
                       )}
+                    </div>
+                    )}
+
+                    {/* Cliente da corrida — REGRA DE NEGÓCIO (03/08/2026):
+                        obrigatório, exceto quando a venda já vem fixada
+                        (vendaFixada = cliente inequívoco, vem da prop
+                        contatoIdInicial, sem seletor visível). Buscar/
+                        selecionar uma venda acima auto-preenche este campo
+                        (ainda editável/trocável). */}
+                    {mostrarSeletorCliente && (
+                    <div style={{ marginBottom: 14 }}>
+                      <ClienteSelector
+                        value={clienteSelecionado}
+                        onChange={setClienteSelecionado}
+                        label="Cliente da corrida *"
+                        placeholder="Buscar por nome ou CPF..."
+                      />
                     </div>
                     )}
 

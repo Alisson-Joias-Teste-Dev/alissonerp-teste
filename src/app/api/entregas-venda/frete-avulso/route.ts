@@ -46,7 +46,12 @@ const FreteAvulsoSchema = z.object({
   freteCobrado: z.number().nonnegative("freteCobrado não pode ser negativo"),
   freteMotoboyOverride: z.number().positive().optional(),
   descricaoAvulso: z.string().min(1, "Descrição da corrida é obrigatória").max(500),
-  contatoId: z.number().int().positive().optional(),
+  // REGRA DE NEGÓCIO (03/08/2026 — bug achado em teste): public.contatos.id_contato
+  // é bigint — a API retorna como string (evita perda de precisão em JS). z.coerce
+  // aceita string OU number, blindando contra esse formato. IMPACTO SE VOLTAR A
+  // z.number() PURO: 400 "expected number, received string" sempre que o
+  // ClienteSelector mandar o id como veio do backend (caso real, não hipotético).
+  contatoId: z.coerce.number().int().positive().optional(),
   observacoes: z.string().max(2000).optional(),
   // REGRA DE NEGÓCIO (intenção explícita — ponto de entrada decide, não o
   // cargo): quem chama declara SE quer solicitar (`solicitar: true`) ou criar
@@ -248,6 +253,21 @@ export async function POST(req: NextRequest) {
     if (parsed.data.pagante !== "loja" && parsed.data.pagante !== "cliente") {
       return NextResponse.json(
         { error: "Informe quem paga o frete avulso: loja ou cliente" },
+        { status: 400 },
+      );
+    }
+    // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — "obrigatório o nome
+    // do cliente" na tela de Solicitar Frete Avulso): validado no SERVIDOR,
+    // não só no front (FreteAvulsoModal + ClienteSelector) — mesmo padrão de
+    // defesa em profundidade de pagante/endereço acima. Vale nos dois casos
+    // de `usaFormularioCompleto` (solicitação E direto-completo) — o motivo
+    // de "frete avulso não tem cliente" (ver migration 365) era exatamente
+    // não dar pra saber de quem era a corrida; contatoId fecha essa lacuna.
+    // IMPACTO SE REMOVIDO: reabre a lacuna que forçou a gambiarra da
+    // migration 365 (lista manual de exceção pra sumir do relatório).
+    if (!parsed.data.contatoId) {
+      return NextResponse.json(
+        { error: "Selecione o cliente da corrida" },
         { status: 400 },
       );
     }

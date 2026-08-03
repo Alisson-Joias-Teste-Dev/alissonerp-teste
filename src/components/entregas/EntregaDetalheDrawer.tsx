@@ -101,6 +101,11 @@ interface EntregaDetalhe {
   foto_entrega_path: string | null;
   /** MULTIFOTO (migration 357): lista já unificada — ver buscarFotosEntrega. */
   fotos_entrega: string[];
+  /** REGRA DE NEGÓCIO (03/08/2026): posição GPS bruta do motoboy na
+   *  confirmação — vira link do Google Maps na exibição, sem geocodificação
+   *  reversa (ver migration 366). */
+  latitude_entrega: number | null;
+  longitude_entrega: number | null;
   numero_venda: string | null;
   total_venda: number | null;
   venda_situacao: string | null;
@@ -243,7 +248,14 @@ export default function EntregaDetalheDrawer({
     entregaId: number;
     tipo: "codigo_motoboy" | "codigo_cliente";
     aberto: boolean;
-  }>({ entregaId: 0, tipo: "codigo_cliente", aberto: false });
+    /** REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026): distingue os 2
+     *  botões que chamam `abrirConfirmar("codigo_cliente")` — "Confirmar
+     *  Retirada" (cliente busca na loja, forma_entrega='retirada') e
+     *  "Confirmar Entrega ao Cliente" (motoboy entrega, forma_entrega=
+     *  'motoboy') têm o MESMO tipo de código, mas só o 2º é o momento de
+     *  "finalizar a corrida" pro motoboy — só ele exige localização/foto. */
+    entregaAoClientePeloMotoboy: boolean;
+  }>({ entregaId: 0, tipo: "codigo_cliente", aberto: false, entregaAoClientePeloMotoboy: false });
 
   const [modalCorreios, setModalCorreios] = useState(false);
 
@@ -304,9 +316,9 @@ export default function EntregaDetalheDrawer({
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   /** Confirmar retirada (código A) ou registrar saída (código B) */
-  function abrirConfirmar(tipo: "codigo_motoboy" | "codigo_cliente") {
+  function abrirConfirmar(tipo: "codigo_motoboy" | "codigo_cliente", entregaAoClientePeloMotoboy = false) {
     if (!entregaId) return;
-    setModalConfirmar({ entregaId, tipo, aberto: true });
+    setModalConfirmar({ entregaId, tipo, aberto: true, entregaAoClientePeloMotoboy });
   }
 
   /** Cancelar entrega */
@@ -1249,6 +1261,26 @@ export default function EntregaDetalheDrawer({
               </div>
             )}
 
+            {/* ── Localização do motoboy na confirmação (03/08/2026) ────────── */}
+            {/* REGRA DE NEGÓCIO: só existe quando a confirmação passou pela
+                exigência de localização (motoboy no app) — corridas antigas
+                ou confirmadas pelo escritório não têm essas colunas. */}
+            {detalhe.latitude_entrega != null && detalhe.longitude_entrega != null && (
+              <div style={{ marginBottom: 20 }}>
+                <a
+                  href={`https://www.google.com/maps?q=${detalhe.latitude_entrega},${detalhe.longitude_entrega}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                    fontSize: 12, fontWeight: 600, color: C.esmeralda, textDecoration: "none",
+                  }}
+                >
+                  <MapPin size={13} /> Ver localização da confirmação no mapa
+                </a>
+              </div>
+            )}
+
             {/* ── Observações ──────────────────────────────────────────────── */}
             {detalhe.observacoes && (
               <div style={{ marginBottom: 20 }}>
@@ -1461,7 +1493,7 @@ export default function EntregaDetalheDrawer({
               {/* Confirmar Entrega ao Cliente (via motoboy, após saída) */}
               {podeConfirmarEntregaCliente && (
                 <button
-                  onClick={() => abrirConfirmar("codigo_cliente")}
+                  onClick={() => abrirConfirmar("codigo_cliente", true)}
                   style={{
                     padding: "10px 12px",
                     background: C.verde,
@@ -1590,6 +1622,7 @@ export default function EntregaDetalheDrawer({
             setModalConfirmar((prev) => ({ ...prev, aberto: false }))
           }
           onSuccess={handleRefresh}
+          exigirLocalizacaoEFoto={userRole === "entregador" && modalConfirmar.entregaAoClientePeloMotoboy}
         />
       )}
 
@@ -1599,6 +1632,7 @@ export default function EntregaDetalheDrawer({
           isOpen={modalFinalizarAvulso}
           onClose={() => setModalFinalizarAvulso(false)}
           onSuccess={() => { setModalFinalizarAvulso(false); handleRefresh(); }}
+          exigirLocalizacaoEFoto={userRole === "entregador"}
         />
       )}
 

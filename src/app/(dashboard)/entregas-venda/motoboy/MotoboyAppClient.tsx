@@ -548,6 +548,7 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
           isOpen={finalizandoAvulsoId !== null}
           onClose={() => setFinalizandoAvulsoId(null)}
           onSuccess={() => { setFinalizandoAvulsoId(null); carregar(); }}
+          exigirLocalizacaoEFoto
         />
       )}
 
