@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from "react";
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -189,6 +189,11 @@ const fmtDate = (d: string | null) => {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("pt-BR", { timeZone: "UTC" });
 };
+
+/** Percentual com 2 casas no formato BR. "—" quando é zero e zero não informa
+ *  nada (desconto). Na comissão o zero é informação e passa. */
+const fmtPct = (n: number, zeroComoTraco = false) =>
+  zeroComoTraco && n === 0 ? "—" : `${n.toFixed(2).replace(".", ",")}%`;
 
 const isVencido = (d: string | null, situacao: string) => {
   if (situacao !== "pendente" || !d) return false;
@@ -3330,6 +3335,9 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
   // sem lista de colegas e sem botão de voltar. Quem decide o que ela pode ver
   // é o servidor (comissao-permissao.ts); isto aqui é só a navegação.
   const [abertaId, setAbertaId] = useState<number | null>(soConsultoraId ?? null);
+  // Uma linha aberta por vez: o detalhe dos itens é para conferir um pedido, não
+  // para virar uma segunda tabela empilhada. Chave = "balde-índice".
+  const [linhaAberta, setLinhaAberta] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [soComMovimento, setSoComMovimento] = useState(true);
@@ -3400,6 +3408,9 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
   useEffect(() => {
     if (!abertaId) { setDetalhe(null); return; }
     let cancelado = false;
+    // Trocar de mês/consultora recarrega a lista: a linha aberta apontava pro
+    // índice antigo e abriria o pedido errado.
+    setLinhaAberta(null);
     setLoading(true); setErro(null);
     fetch(`/api/financeiro/comissoes/extrato/${abertaId}?competencia=${competencia}`)
       .then(async r => {
@@ -3651,27 +3662,76 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
                           </tr>
                         </thead>
                         <tbody>
-                          {linhas.map((l: any, i: number) => (
-                            <tr key={i} className="border-t" style={{ borderColor: C.cremeBorder }}>
-                              <td className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: C.cinza }}>{fmtDate(l.data)}</td>
-                              <td className="px-3 py-2 text-xs" style={{ color: "#1A1A1A" }}>
-                                {l.venda_id ? (
-                                  <a href={`/vendas/${l.venda_id}`} target="_blank" rel="noopener noreferrer"
-                                    className="hover:underline" style={{ color: C.esmeralda }}>{l.descricao}</a>
-                                ) : l.descricao}
-                                {l.previsto && (
-                                  <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium"
-                                    style={{ backgroundColor: C.ambarLt, color: C.ambar }}>a lançar</span>
+                          {linhas.map((l: any, i: number) => {
+                            const chave = `${sec.chave}-${i}`;
+                            const itens: any[] = Array.isArray(l.itens) ? l.itens : [];
+                            const abre = itens.length > 0;
+                            const aberta = linhaAberta === chave;
+                            const nCols = sec.colunas ? 5 : 3;
+                            return (
+                              <Fragment key={chave}>
+                                <tr className="border-t" style={{ borderColor: C.cremeBorder, cursor: abre ? "pointer" : undefined }}
+                                  onClick={abre ? () => setLinhaAberta(aberta ? null : chave) : undefined}>
+                                  <td className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: C.cinza }}>{fmtDate(l.data)}</td>
+                                  <td className="px-3 py-2 text-xs" style={{ color: "#1A1A1A" }}>
+                                    <span className="inline-block w-3 mr-1" style={{ color: C.cinza }}>
+                                      {abre ? (aberta ? "▾" : "▸") : ""}
+                                    </span>
+                                    {l.venda_id ? (
+                                      // O link vive SÓ no texto do pedido; o resto da linha abre o detalhe.
+                                      // Sem o stopPropagation, um clique no pedido faria as duas coisas.
+                                      <a href={`/vendas/${l.venda_id}`} target="_blank" rel="noopener noreferrer"
+                                        onClick={e => e.stopPropagation()}
+                                        className="hover:underline" style={{ color: C.esmeralda }}>{l.descricao}</a>
+                                    ) : l.descricao}
+                                    {l.previsto && (
+                                      <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium"
+                                        style={{ backgroundColor: C.ambarLt, color: C.ambar }}>a lançar</span>
+                                    )}
+                                  </td>
+                                  {sec.colunas && <td className="px-3 py-2 text-xs text-right tabular-nums" style={{ color: C.cinza }}>{l.valor_pago != null ? fmt(l.valor_pago) : "—"}</td>}
+                                  {sec.colunas && <td className="px-3 py-2 text-xs text-right tabular-nums" style={{ color: C.cinza }}>{l.base_comissao != null ? fmt(l.base_comissao) : "—"}</td>}
+                                  <td className="px-3 py-2 text-xs text-right tabular-nums font-medium"
+                                    style={{ color: Number(l.valor) < 0 ? C.vermelho : Number(l.valor) === 0 ? C.cinza : "#1A1A1A" }}>
+                                    {fmt(Math.abs(Number(l.valor)))}
+                                  </td>
+                                </tr>
+                                {aberta && (
+                                  <tr>
+                                    <td colSpan={nCols} className="px-3 pb-3 pt-1" style={{ backgroundColor: C.cremeBg }}>
+                                      <table className="w-full text-[11px]">
+                                        <thead>
+                                          <tr>
+                                            <th className="px-2 py-1 text-left font-semibold" style={{ color: C.cinza }}>Item</th>
+                                            <th className="px-2 py-1 text-right font-semibold" style={{ color: C.cinza }}>Desconto</th>
+                                            <th className="px-2 py-1 text-right font-semibold whitespace-nowrap" style={{ color: C.cinza }}>% comissão</th>
+                                            <th className="px-2 py-1 text-right font-semibold whitespace-nowrap" style={{ color: C.cinza }}>Comissão do item</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {itens.map((it: any, j: number) => (
+                                            <tr key={j}>
+                                              <td className="px-2 py-1" style={{ color: "#1A1A1A" }}>
+                                                {it.sku && <span style={{ color: C.cinza }}>{it.sku} · </span>}
+                                                {it.nome_produto}
+                                                {it.quantidade > 1 && <span style={{ color: C.cinza }}> ×{it.quantidade}</span>}
+                                              </td>
+                                              <td className="px-2 py-1 text-right tabular-nums" style={{ color: C.cinza }}>{fmtPct(Number(it.desconto), true)}</td>
+                                              <td className="px-2 py-1 text-right tabular-nums font-medium" style={{ color: "#1A1A1A" }}>{fmtPct(Number(it.pct_comissao))}</td>
+                                              <td className="px-2 py-1 text-right tabular-nums" style={{ color: C.cinza }}>{fmt(Number(it.valor_comissao))}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                      <p className="px-2 pt-2 text-[10px]" style={{ color: C.cinza }}>
+                                        A comissão do item é da venda inteira. Esta linha pagou a parte proporcional ao que o cliente já quitou.
+                                      </p>
+                                    </td>
+                                  </tr>
                                 )}
-                              </td>
-                              {sec.colunas && <td className="px-3 py-2 text-xs text-right tabular-nums" style={{ color: C.cinza }}>{l.valor_pago != null ? fmt(l.valor_pago) : "—"}</td>}
-                              {sec.colunas && <td className="px-3 py-2 text-xs text-right tabular-nums" style={{ color: C.cinza }}>{l.base_comissao != null ? fmt(l.base_comissao) : "—"}</td>}
-                              <td className="px-3 py-2 text-xs text-right tabular-nums font-medium"
-                                style={{ color: Number(l.valor) < 0 ? C.vermelho : Number(l.valor) === 0 ? C.cinza : "#1A1A1A" }}>
-                                {fmt(Math.abs(Number(l.valor)))}
-                              </td>
-                            </tr>
-                          ))}
+                              </Fragment>
+                            );
+                          })}
                           <tr className="border-t" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
                             <td colSpan={sec.colunas ? 4 : 2} className="px-3 py-2 text-xs font-semibold" style={{ color: C.cinza }}>
                               Total de {sec.titulo.replace(/^\([+−]\)\s*/, "").toLowerCase()} ({linhas.length})
