@@ -374,6 +374,28 @@ Depois de ver o primeiro fechamento real na tela, o Jonathan corrigiu **duas pre
 - Lib: `src/lib/frete-verba.ts` (`calcularFaturamentoLiquidoMes` nova; `calcularFaturamentoMes` (bruto) mantida como contraprova dos dois números; `calcularVerbaFreteGratis` agora recebe a COMPETÊNCIA e usa o próprio mês), `src/lib/frete-fechamento.ts` (`mes_referencia` = mês anterior ao de execução).
 - Testes ANTI-VOLTA: `frete-fechamento-mensal.test.ts` (bloco "competência" — 3 testes: fecha julho rodando em agosto, a verba recebe julho, e a virada de ano jan/2027 → dez/2026) e `frete-verba-equivalente-dashboard.test.ts` (bloco "líquido" — 3 testes: a subtração de `valor_vale_troca` existe, casa com a da dashboard, e a verba chama a função líquida). **Verificados por mutação**: revertendo as duas regras de propósito, 4 desses testes quebram.
 
+### 10.9. Contatos de TESTE somem do relatório (migration 364, 03/08)
+
+O relatório do fechamento mostrava 9 corridas de 08/06 no nome do próprio Jonathan — contato **224**, "Jonathan Araujo Chagas ( Programador )". São vendas de **teste** (7 vendas, todas canceladas, R$ 31–32) feitas em produção no dia em que o módulo de entregas entrou no ar. Pedido: *"cancela esses fretes no meu nome que eles são de teste, todos que estiverem no nome devem sair desse relatório"*.
+
+- **Config, não lista no código**: chave `contatos_teste` (`configuracoes_sistema`, migration 364) com os `id_contato` separados por vírgula — semeada com `224, 394408` (alias mesclado do mesmo contato) e `4549, 4550, 4552` ("jonathan teste"). A regra é *"todos que estiverem no meu nome"*, então um teste novo some sozinho, sem deploy. Pedaço não numérico na config é descartado (a chave é editada à mão).
+- **A flag é resolvida no BANCO** (`COALESCE(v.cliente_id, e.contato_id) = ANY (...)`), junto do resto da consulta — não puxa contatos pro JS só pra comparar id. Config ausente → array vazio → ninguém marcado.
+
+> 🔴 **EXIBIÇÃO APENAS — não estorna, não mexe em saldo.** O efeito de +R$ 60,00 desses testes **já foi neutralizado pela zeragem do fechamento #1**: o saldo do mês foi zerado antes de a verba nova entrar, então ele NÃO se propagou para agosto. Estorná-los agora tiraria R$ 60,00 da verba de agosto por um erro de junho que já se resolveu sozinho — seria criar um erro novo para "consertar" um que não existe mais.
+>
+> Consequência: os valores de teste **continuam dentro** de `total_creditos`/`total_debitos` do cabeçalho, que foram GRAVADOS no dia da apuração. Por isso a tela **declara quanto ocultou** em vez de simplesmente sumir: sem isso a soma da lista não explicaria mais os cards, e quem conferisse concluiria que a tela está errada. Conferido em prod (dry-run com ROLLBACK): 12 de teste (+R$ 60,00) + 47 exibidos (−R$ 50,64) + 10 de efeito zero = 69 lançamentos, e 60,00 − 50,64 = **R$ 9,36**, o saldo apurado do cabeçalho.
+>
+> Efeito nos totais de "quem pagou o frete" do fechamento #1: de 30 corridas / R$ 835,00 motoboy / R$ 860,00 cliente para **24 corridas / R$ 685,00 / R$ 650,00** (loja bancou R$ 35,00).
+
+- **Causa raiz, fora do alcance desta mudança**: testar entrega em PRODUÇÃO. O ledger do frete não distingue teste de venda real, e a rotina agora roda todo dia — teste novo entra no mês corrente. O `contatos_teste` limpa o relatório, não o razão.
+
+#### 10.9.1. Referência (§10.9)
+
+- Migration: `supabase/migrations/364_contatos_teste_frete.sql` (só INSERT de config, `ON CONFLICT DO NOTHING`).
+- Lib: `listarContatosTeste` + flag `isTeste` em `LancamentoFechamentoFrete` (`src/lib/frete-fechamento.ts`).
+- Front: `FechamentoFreteDetalhePainel.tsx` — filtra e declara o que ocultou.
+- Testes: `frete-fechamento-detalhe.test.ts` (config vira filtro no SQL, ids inválidos descartados, config ausente não quebra).
+
 ---
 
 ## 11. MULTIFOTO na confirmação de entrega (migration 357, 21/07)

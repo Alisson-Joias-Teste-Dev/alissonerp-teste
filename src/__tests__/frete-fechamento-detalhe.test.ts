@@ -80,6 +80,7 @@ function lancamentoRow(overrides: Record<string, unknown> = {}): Record<string, 
     cliente_nome: "Márcia Nogueira",
     is_avulso: false,
     descricao_avulso: null,
+    is_teste: false,
     ...overrides,
   };
 }
@@ -104,11 +105,16 @@ function criarDbMock(opts: {
   cabecalho?: Record<string, unknown> | null;
   lancamentos?: Record<string, unknown>[];
   aprovacao?: Record<string, unknown> | null;
+  /** Valor cru da config `contatos_teste` (CSV). undefined = chave não existe. */
+  contatosTeste?: string;
 }) {
   const calls: unknown[][] = [];
   const fn = vi.fn((...args: unknown[]) => {
     calls.push(args);
     const texto = textoDaChamada(args);
+    if (texto.includes("FROM alissonerp.configuracoes_sistema")) {
+      return Promise.resolve(opts.contatosTeste === undefined ? [] : [{ valor: opts.contatosTeste }]);
+    }
     if (texto.includes("FROM alissonerp.saldo_frete_gratis")) {
       return Promise.resolve(opts.lancamentos ?? []);
     }
@@ -117,6 +123,9 @@ function criarDbMock(opts: {
     }
     return Promise.resolve(opts.cabecalho === null ? [] : [opts.cabecalho ?? cabecalhoRow()]);
   });
+  // `db.array(...)` do postgres.js — usado para passar a lista de contatos de
+  // teste como bigint[]. No mock, devolve o próprio array.
+  (fn as unknown as { array: (a: unknown[]) => unknown[] }).array = (a: unknown[]) => a;
   return { fn, calls };
 }
 
@@ -235,6 +244,43 @@ describe("obterFechamentoFreteDetalhe", () => {
       id: 74, valor: 42, entregaId: null, codigoEntrega: null,
       freteCobrado: null, vendaId: null, clienteNome: null, doFechamento: false,
     });
+  });
+
+  it("contatos de teste: a config vira filtro no SQL e a flag chega no lançamento", async () => {
+    // Pedido do Jonathan (03/08): "todos que estiverem no meu nome devem sair
+    // desse relatório". A lista é CONFIG (migration 364), não código — se
+    // alguém trocar por uma lista fixa, um contato de teste novo volta a
+    // aparecer e só se descobre olhando a tela.
+    const { fn, calls } = criarDbMock({
+      contatosTeste: "224,394408, 4549 ,lixo,",
+      lancamentos: [
+        lancamentoRow({ id: 40, is_teste: true, cliente_nome: "Jonathan Araujo Chagas ( Programador )" }),
+        lancamentoRow({ id: 41, is_teste: false }),
+      ],
+    });
+
+    const detalhe = await obterFechamentoFreteDetalhe(fn, 1);
+
+    expect(detalhe!.lancamentos.find((l) => l.id === 40)!.isTeste).toBe(true);
+    expect(detalhe!.lancamentos.find((l) => l.id === 41)!.isTeste).toBe(false);
+
+    // A flag é resolvida no BANCO (não no JS), e os ids inválidos da config
+    // ("lixo", vazio) são descartados antes de virar parâmetro.
+    const queryLancamentos = calls.find((c) =>
+      textoDaChamada(c).includes("FROM alissonerp.saldo_frete_gratis"))!;
+    expect(textoDaChamada(queryLancamentos)).toContain("= ANY (");
+    expect(queryLancamentos.slice(1)).toContainEqual([224, 394408, 4549]);
+  });
+
+  it("config `contatos_teste` ausente: ninguém é marcado como teste (array vazio, sem quebrar)", async () => {
+    const { fn, calls } = criarDbMock({ lancamentos: [lancamentoRow()] }); // sem contatosTeste
+
+    const detalhe = await obterFechamentoFreteDetalhe(fn, 1);
+
+    expect(detalhe!.lancamentos[0].isTeste).toBe(false);
+    const queryLancamentos = calls.find((c) =>
+      textoDaChamada(c).includes("FROM alissonerp.saldo_frete_gratis"))!;
+    expect(queryLancamentos.slice(1)).toContainEqual([]);
   });
 
   it("frete avulso: sem cliente por natureza, mas com a descrição da corrida", async () => {
