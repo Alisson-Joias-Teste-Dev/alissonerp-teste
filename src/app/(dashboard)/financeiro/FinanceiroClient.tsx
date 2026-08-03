@@ -3303,6 +3303,221 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOur
   );
 }
 
+// ─── ExtratoComissao ──────────────────────────────────────────────────────────
+
+/**
+ * Extrato de comissão da consultora (migration 363)
+ *
+ * REGRA DE NEGÓCIO: a comissão é um extrato bancário. Cada fato vira uma linha
+ * datada — venda paga (crédito), peça devolvida (débito), vale usado (crédito),
+ * pagamento à consultora (baixa) — e o saldo ROLA de um mês pro outro, podendo
+ * ficar negativo.
+ * POR QUE: mês fechado nunca é reaberto. Acerto entra como linha nova no mês do
+ * fato, o que deixa a conta auditável linha a linha e faz o total bater por
+ * construção (saldo = soma dos lançamentos).
+ * IMPACTO SE ALTERADO: "A receber" NÃO pode entrar no saldo — é crediário que o
+ * cliente ainda não pagou, e o que firma a comissão é o pagamento. Somar ali faz
+ * a empresa pagar comissão sobre dinheiro que não entrou.
+ */
+function ExtratoComissao({ vendedores }: { vendedores?: any[] }) {
+  const hoje = new Date();
+  const mesAtualIni = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}-01`;
+  const hojeStr = hoje.toISOString().slice(0, 10);
+
+  const [consultoraId, setConsultoraId] = useState("");
+  const [de, setDe] = useState(mesAtualIni);
+  const [ate, setAte] = useState(hojeStr);
+  const [periodo, setPeriodo] = useState<"mes" | "3meses" | "ano" | "custom">("mes");
+  const [dados, setDados] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  function aplicarPeriodo(p: "mes" | "3meses" | "ano" | "custom") {
+    setPeriodo(p);
+    if (p === "mes") { setDe(mesAtualIni); setAte(hojeStr); }
+    else if (p === "3meses") {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() - 2, 1);
+      setDe(d.toISOString().slice(0, 10)); setAte(hojeStr);
+    } else if (p === "ano") {
+      setDe(`${hoje.getFullYear()}-01-01`); setAte(hojeStr);
+    }
+  }
+
+  useEffect(() => {
+    if (!consultoraId) { setDados(null); return; }
+    setLoading(true); setErro(null);
+    fetch(`/api/financeiro/comissoes/extrato?consultora_id=${consultoraId}&de=${de}&ate=${ate}`)
+      .then(async r => {
+        if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error ?? "Erro ao carregar extrato"); }
+        return r.json();
+      })
+      .then(setDados)
+      .catch(e => { setErro(e.message); setDados(null); })
+      .finally(() => setLoading(false));
+  }, [consultoraId, de, ate]);
+
+  const corLinha = (tipo: string, valor: number) =>
+    tipo === "sem_comissao" ? C.cinza : valor < 0 ? C.vermelho : C.verde;
+
+  const rotuloMes = (comp: string) => {
+    const [ano, mes] = comp.split("-");
+    return new Date(Number(ano), Number(mes) - 1)
+      .toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  };
+
+  const aVencer = (dados?.a_receber ?? []).filter((r: any) => !r.atrasado);
+  const atrasado = (dados?.a_receber ?? []).filter((r: any) => r.atrasado);
+  const somaPrev = (arr: any[]) => arr.reduce((s, r) => s + Number(r.comissao_prevista ?? 0), 0);
+
+  return (
+    <div className="space-y-5">
+      {/* Filtros */}
+      <div className="rounded-xl bg-white p-4 border space-y-3" style={{ borderColor: C.cremeBorder }}>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[200px]">
+            <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Consultora</label>
+            <select value={consultoraId} onChange={e => setConsultoraId(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }}>
+              <option value="">Selecione…</option>
+              {(vendedores ?? []).map((v: any) => (
+                <option key={v.id_vendedor} value={v.id_vendedor}>{v.nome}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-1">
+            {([["mes", "Este mês"], ["3meses", "3 meses"], ["ano", "Este ano"], ["custom", "Personalizado"]] as const).map(([k, label]) => (
+              <button key={k} onClick={() => aplicarPeriodo(k)}
+                className="px-3 py-2 rounded-lg text-xs font-medium border"
+                style={periodo === k
+                  ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
+                  : { borderColor: C.cremeBorder, color: C.cinza }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {periodo === "custom" && (
+            <div className="flex gap-2">
+              <input type="date" value={de} onChange={e => setDe(e.target.value)}
+                className="px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+              <input type="date" value={ate} onChange={e => setAte(e.target.value)}
+                className="px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {loading && <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin" style={{ color: C.esmeralda }} /></div>}
+      {erro && <div className="rounded-xl p-4 text-sm" style={{ backgroundColor: C.vermelhoLt, color: C.vermelho }}>{erro}</div>}
+
+      {!loading && !consultoraId && (
+        <div className="rounded-xl bg-white p-8 border text-center text-sm" style={{ borderColor: C.cremeBorder, color: C.cinza }}>
+          Escolha uma consultora para ver o extrato.
+        </div>
+      )}
+
+      {!loading && dados && (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="rounded-xl p-4" style={{ backgroundColor: C.cremeBg }}>
+              <p className="text-[11px]" style={{ color: C.cinza }}>Saldo anterior</p>
+              <p className="text-xl font-bold tabular-nums" style={{ color: "#1A1A1A" }}>{fmt(dados.saldo_inicial)}</p>
+            </div>
+            <div className="rounded-xl p-4" style={{ backgroundColor: C.cremeBg }}>
+              <p className="text-[11px]" style={{ color: C.cinza }}>Saldo atual</p>
+              <p className="text-xl font-bold tabular-nums"
+                style={{ color: dados.saldo_atual < 0 ? C.vermelho : C.esmeralda }}>{fmt(dados.saldo_atual)}</p>
+            </div>
+            <div className="rounded-xl p-4" style={{ backgroundColor: C.cremeBg }}>
+              <p className="text-[11px]" style={{ color: C.cinza }}>A receber (fora do saldo)</p>
+              <p className="text-xl font-bold tabular-nums" style={{ color: C.cinza }}>
+                {fmt(somaPrev(dados.a_receber ?? []))}
+              </p>
+            </div>
+          </div>
+
+          {(dados.meses ?? []).length === 0 && (
+            <div className="rounded-xl bg-white p-8 border text-center text-sm" style={{ borderColor: C.cremeBorder, color: C.cinza }}>
+              Nenhum lançamento no período.
+            </div>
+          )}
+
+          {(dados.meses ?? []).map((m: any) => (
+            <div key={m.competencia} className="rounded-xl bg-white border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+              <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
+                <h4 className="text-sm font-bold capitalize" style={{ color: "#1A1A1A" }}>{rotuloMes(m.competencia)}</h4>
+                <span className="text-[11px]" style={{ color: C.cinza }}>saldo anterior {fmt(m.saldo_anterior)}</span>
+              </div>
+              <table className="w-full text-sm">
+                <tbody>
+                  {m.lancamentos.map((l: any, i: number) => (
+                    <tr key={i} className="border-b last:border-0" style={{ borderColor: C.cremeBorder }}>
+                      <td className="px-4 py-2 text-xs tabular-nums whitespace-nowrap" style={{ color: C.cinza }}>{fmtDate(l.data)}</td>
+                      <td className="px-2 py-2">
+                        <span style={{ color: "#1A1A1A" }}>{l.descricao}</span>
+                        {l.previsto && (
+                          <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium"
+                            style={{ backgroundColor: C.ambarLt, color: C.ambar }}>a lançar</span>
+                        )}
+                        {l.tipo === "sem_comissao" && (
+                          <span className="ml-2 text-[10px]" style={{ color: C.cinza }}>não comissiona</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap font-medium"
+                        style={{ color: corLinha(l.tipo, Number(l.valor)) }}>
+                        {Number(l.valor) < 0 ? "− " : "+ "}{fmt(Math.abs(Number(l.valor)))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="px-4 py-3 border-t flex items-center justify-between"
+                style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+                <span className="text-sm font-bold" style={{ color: "#1A1A1A" }}>Saldo de {rotuloMes(m.competencia).split(" de ")[0]}</span>
+                <span className="text-base font-bold tabular-nums"
+                  style={{ color: m.saldo < 0 ? C.vermelho : C.esmeralda }}>{fmt(m.saldo)}</span>
+              </div>
+            </div>
+          ))}
+
+          {/* A receber — FORA do saldo. Só vira crédito quando o cliente pagar. */}
+          {(dados.a_receber ?? []).length > 0 && (
+            <div className="rounded-xl p-4 border" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Clock size={14} style={{ color: C.cinza }} />
+                <span className="text-sm font-bold" style={{ color: "#1A1A1A" }}>Comissões a receber</span>
+                <span className="text-[11px]" style={{ color: C.cinza }}>não entra no saldo</span>
+              </div>
+              <table className="w-full text-sm">
+                <tbody>
+                  {atrasado.map((r: any, i: number) => (
+                    <tr key={`a${i}`}>
+                      <td className="py-1.5" style={{ color: C.ambar }}>
+                        Atrasado · {r.parcelas} parcela{r.parcelas > 1 ? "s" : ""} de {r.mes ?? "sem data"}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums" style={{ color: C.ambar }}>{fmt(r.comissao_prevista)}</td>
+                    </tr>
+                  ))}
+                  {aVencer.map((r: any, i: number) => (
+                    <tr key={`v${i}`}>
+                      <td className="py-1.5" style={{ color: C.cinza }}>
+                        Vence em {r.mes ?? "data não informada"} · {r.parcelas} parcela{r.parcelas > 1 ? "s" : ""}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums" style={{ color: "#1A1A1A" }}>{fmt(r.comissao_prevista)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-2 text-[11px]" style={{ color: C.cinza }}>
+                Só vira crédito no mês em que o cliente pagar.
+              </p>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── TabComissoes ─────────────────────────────────────────────────────────────
 
 /**
@@ -3327,6 +3542,7 @@ function TabComissoes({ fechamentos, vendedores }: { fechamentos: any[]; vendedo
   const [cancelMotivo, setCancelMotivo] = useState("");
   const [consultoraFiltro, setConsultoraFiltro] = useState("");
   const [sortAsc, setSortAsc] = useState(false);
+  const [subTab, setSubTab] = useState<"fechamentos" | "extrato">("fechamentos");
 
   // Form criar
   const [form, setForm] = useState({ consultora_id: "", periodo_inicio: "", periodo_fim: "", competencia: "" });
@@ -3608,8 +3824,33 @@ function TabComissoes({ fechamentos, vendedores }: { fechamentos: any[]; vendedo
     );
   }
 
+  // Sub-abas: "Fechamentos" é a tela de sempre (criar/aprovar/pagar);
+  // "Extrato" é a visão contínua por consultora, com saldo rolando (migration 363).
+  if (subTab === "extrato") {
+    return (
+      <div className="space-y-5">
+        <div className="flex gap-1">
+          <button onClick={() => setSubTab("fechamentos")}
+            className="px-4 py-2 rounded-lg text-sm font-medium border"
+            style={{ borderColor: C.cremeBorder, color: C.cinza }}>Fechamentos</button>
+          <button className="px-4 py-2 rounded-lg text-sm font-medium border"
+            style={{ backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }}>Extrato</button>
+        </div>
+        <ExtratoComissao vendedores={vendedores} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
+      <div className="flex gap-1">
+        <button className="px-4 py-2 rounded-lg text-sm font-medium border"
+          style={{ backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }}>Fechamentos</button>
+        <button onClick={() => setSubTab("extrato")}
+          className="px-4 py-2 rounded-lg text-sm font-medium border"
+          style={{ borderColor: C.cremeBorder, color: C.cinza }}>Extrato</button>
+      </div>
+
       {/* Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Disponível" value={fmt(resumo?.disponivel ?? 0)} valueColor={C.esmeralda} icon={CheckCircle} accent={C.esmeralda} sub="pagamentos não fechados" />

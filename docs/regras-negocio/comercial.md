@@ -46,7 +46,43 @@ Arquivos: `src/lib/vale-troca.ts`, `src/app/api/vale-troca/`, migration `142_dev
   3. **Grave:** `pv.data_confirmacao <= periodoFim::date` compara um `timestamptz` contra a meia-noite do último dia — qualquer pagamento confirmado durante o PRÓPRIO último dia do período (não só à noite) ficava de fora. Achou 7 pagamentos de 30/06/2026 (R$194,34 de comissão) que nunca entraram no fechamento de jun/2026. Corrigido: `< periodoFim::date + interval '1 day'` em `elegiveis`/`fechamentos`/`gerar-maio` (2x).
 - **Itens de PROMOÇÃO não seguem a tabela de desconto normal.** Ex.: campanha 7 ("Storys aprovado pelo Alisson", 29/05–24/06/2026) — AJ5237 (desconto real 26,97%) comissiona 0,85% fixo, AJ1364 (53,05%) comissiona 0,50% fixo, **enquanto a venda não tiver desconto adicional além do preço promocional**. Se tiver desconto extra em cima da promoção, cai pro piso de 0,50% (regra confirmada pelo Jonathan, 06/07/2026). 3 itens achados fora dessa regra (comissão contaminada em 1,20%, sem explicação aparente) corrigidos em prod.
 
-Arquivos: `src/app/api/financeiro/comissoes/*`, `src/lib/types/financeiro-comissoes.ts`.
+### 2.1 A comissão é um EXTRATO (livro-razão) — migration 363, 03/08/2026
+
+**A regra-mãe:** **cada real recebido gera comissão exatamente UMA vez.** Tudo abaixo deriva disso.
+
+A comissão deixou de ser só um retrato por fechamento e passou a funcionar como **extrato bancário**: cada fato vira uma **linha datada** no mês em que aconteceu, e o **saldo rola** para o mês seguinte (podendo ficar **negativo**). Mês fechado **nunca** é reaberto — o acerto entra como lançamento novo.
+
+| Fato | Entra no extrato | Sinal |
+|---|---|---|
+| Cliente pagou (à vista, cartão, pix, parcela de crediário) | mês do **pagamento** | **+** |
+| Peça devolvida volta ao estoque | mês da **volta** | **−** |
+| Cliente usa o vale numa compra nova | mês do **uso** | **+** (para quem fez a venda nova) |
+| Empresa paga a consultora | mês do **pagamento** | **−** (baixa) |
+
+**Débito da devolução** (`src/lib/comissao-lancamentos.ts`, chamado por `concluirDevolucao`):
+- **Gatilho:** confirmação FÍSICA da peça no estoque (`condicao='aprovado_retorno'`). `reprovado_descarte` e `garantia` **não mexem em comissão** — por construção, nem passam pelo `if`.
+- **Valor:** `valor_comissao do item × (recebido comissionável ÷ total da venda)`. Debita só o que de fato virou comissão — venda meio paga debita metade.
+- **Uma linha por devolução** (soma dos itens), com `fechamento_id` NULO. O índice único `uq_fech_com_itens_devolucao` impede debitar duas vezes.
+- Vale para **os dois tipos** de devolução: vale-troca e estorno (reembolso MP ou manual). O que muda é o lado da cliente; o lado da consultora é idêntico.
+
+**Crédito do vale** (`vale_troca.comissiona_no_uso`): o `comissionavel=false` cravado no pagamento de Vale-Troca virou espelho dessa coluna.
+- Vale nascido de **devolução** → `true` (acabou de levar o débito; se o débito deu R$0 é porque aquele dinheiro nunca comissionou).
+- Vale de **troco** herda do vale pai (é o mesmo dinheiro).
+- Vale `VC-` de **venda não paga** → `false`. `virou_credito` está em `SITUACOES_VENDA_ATIVAS`, ou seja, a consultora original **mantém** a comissão sobre o que foi pago — comissionar o vale de novo pagaria duas vezes.
+- **Vales anteriores a 07/2026 ficam `false`**: nunca tiveram débito.
+- O crédito é **da cliente**, não da consultora: quem leva a comissão da venda nova é quem vendeu, mesmo sendo outra pessoa.
+
+**Crediário no extrato:** parcela não paga aparece em "Comissões a receber", com data prevista e separando **a vencer** de **atrasado** — mas **FORA do saldo**. O que firma a comissão é o pagamento: antecipou, entra antes; atrasou, entra depois.
+
+**Fechamento vira o PAGAMENTO, não o cálculo.** Ao gerar o fechamento do mês, ele **adota** os lançamentos soltos do período (`adotarLancamentosSoltos`) e soma ao total. Um mês só de devolução pode fechar com saldo negativo.
+
+⚠️ **Armadilha do PostgreSQL: `LEAST` IGNORA NULL** — `LEAST(NULL, 1)` devolve **1**, não NULL. Um `COALESCE(LEAST(recebido/total, 1), 0)` lê venda **sem pagamento nenhum** como "100% recebida" e debita a comissão cheia de quem nunca recebeu nada. Usar `CASE WHEN total > 0 THEN LEAST(...) ELSE 0 END`. Achado no ensaio do acerto de julho (inflava o débito de R$640,60 para R$666,96).
+
+**Acerto de julho/2026 aplicado em prod** (log 331, 03/08/2026): 15 débitos de devolução (**−R$640,60** — Debora 423,58 / Loja Alisson 127,20 / Germana 85,82 / Cristiane 4,00), 14 vales marcados, 11 pagamentos de vale liberados (R$22.755,50) e o fechamento parcial da Germana (01–15/07, R$125,20) substituído por lançamento solto para julho fechar num extrato só.
+
+**Não é tocado:** a **dashboard comercial e a meta**. Ela usa `forma` e `valor_vale_troca`, nunca `comissionavel`. ⚠️ Já a tela `dashboard-comercial/analise-comissoes` tem regra própria ("Vale-Troca não gera nova comissão") e passa a **divergir** do fechamento — alinhar é tarefa separada.
+
+Arquivos: `src/app/api/financeiro/comissoes/*` (inclusive `extrato/route.ts`), `src/lib/comissao-lancamentos.ts`, `src/lib/vale-troca.ts`, `src/lib/devolucoes.ts`, `src/lib/types/financeiro-comissoes.ts`.
 
 ---
 

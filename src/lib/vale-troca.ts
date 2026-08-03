@@ -45,6 +45,10 @@ export interface AplicacaoValeTroca {
   valor_aplicado: number;
   precisa_complemento?: number;
   novo_vale?: { id: number; numero: string; valor_original: number };
+  // migration 363: o pagamento gerado por este vale comissiona? Espelha
+  // vale_troca.comissiona_no_uso. Quem grava o pagamento usa isto em
+  // pagamentos_venda.comissionavel.
+  comissiona_no_uso: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -57,6 +61,13 @@ export async function gerarValeTroca(
   userId: string,
   valeOrigemId?: number | null,
   txClient?: any,
+  // comissionaNoUso (migration 363): true = gastar este vale numa venda PAGA
+  // comissão a quem vendeu. Só é true quando o dinheiro por trás dele já teve a
+  // comissão debitada (vale de devolução, ver devolucoes.ts) ou quando o vale é
+  // o TROCO de um vale que já era comissionável (herda do pai, em aplicarValeTroca).
+  // Default false: vale cuja origem ninguém debitou não pode comissionar, senão
+  // a empresa paga a mesma comissão duas vezes.
+  comissionaNoUso: boolean = false,
 ): Promise<ValeTroca> {
   const runner = txClient ?? sql;
 
@@ -67,7 +78,7 @@ export async function gerarValeTroca(
   const [row] = await runner`
     INSERT INTO alissonerp.vale_troca (
       numero, devolucao_id, cliente_id, valor_original, valor_disponivel,
-      status, vale_origem_id, created_by
+      status, vale_origem_id, created_by, comissiona_no_uso
     ) VALUES (
       'VT-' || LPAD(nextval('alissonerp.vale_troca_seq')::text, 5, '0'),
       ${devolucaoId},
@@ -76,7 +87,8 @@ export async function gerarValeTroca(
       ${valor},
       'ativo',
       ${valeOrigemId ?? null},
-      ${userId}::uuid
+      ${userId}::uuid,
+      ${comissionaNoUso}
     )
     RETURNING id, numero, devolucao_id, cliente_id, valor_original, valor_disponivel,
               status, venda_utilizado_id, utilizado_em, vale_origem_id, created_at, created_by
@@ -121,14 +133,23 @@ export async function gerarValeCredito(
   const runner = txClient ?? sql;
   if (valor <= 0) throw new Error("Valor do vale crédito deve ser maior que zero");
 
+  // comissiona_no_uso = FALSE, sempre (migration 363).
+  // O PORQUÊ: a venda que virou crédito fica com situacao 'virou_credito', que
+  // ESTÁ em SITUACOES_VENDA_ATIVAS — ou seja, a consultora original MANTÉM a
+  // comissão sobre o que o cliente pagou (ver src/lib/vendas-situacoes.ts).
+  // Aquele dinheiro já comissionou uma vez. Se o vale comissionasse de novo ao
+  // ser gasto, a empresa pagaria duas vezes pelo mesmo real.
+  // O IMPACTO: mudar para true quebra a invariante "cada real recebido gera
+  // comissão uma vez só" — só faria sentido se 'virou_credito' saísse da lista
+  // de situações que comissionam.
   const [row] = await runner`
     INSERT INTO alissonerp.vale_troca (
       numero, devolucao_id, cliente_id, valor_original, valor_disponivel,
-      status, origem, origem_venda_id, created_by
+      status, origem, origem_venda_id, created_by, comissiona_no_uso
     ) VALUES (
       'VC-' || LPAD(nextval('alissonerp.vale_troca_seq')::text, 5, '0'),
       NULL, ${clienteId}, ${valor}, ${valor}, 'ativo',
-      'venda_nao_paga', ${origemVendaId}, ${userId}::uuid
+      'venda_nao_paga', ${origemVendaId}, ${userId}::uuid, false
     )
     RETURNING id, numero, devolucao_id, cliente_id, valor_original, valor_disponivel,
               status, venda_utilizado_id, utilizado_em, vale_origem_id, created_at, created_by
@@ -207,7 +228,8 @@ export async function aplicarValeTroca(
   const exec = async (tx: any): Promise<AplicacaoValeTroca> => {
     // Lock pessimista no vale
     const [vale] = await tx`
-      SELECT id, numero, cliente_id, valor_original, valor_disponivel, status
+      SELECT id, numero, cliente_id, valor_original, valor_disponivel, status,
+             comissiona_no_uso
       FROM alissonerp.vale_troca
       WHERE numero = ${numero}
       FOR UPDATE
@@ -234,6 +256,9 @@ export async function aplicarValeTroca(
       valorAplicado = valorUsar;
       const troco = Math.round((disponivel - valorUsar) * 100) / 100;
       if (troco > 0) {
+        // O troco HERDA o comissiona_no_uso do vale pai: é o mesmo dinheiro,
+        // que já teve (ou não teve) o débito lá atrás. Sem herdar, o troco de um
+        // vale comissionável perderia o direito à comissão no caminho.
         const novo = await gerarValeTroca(
           null,
           vale.cliente_id,
@@ -241,6 +266,7 @@ export async function aplicarValeTroca(
           userId,
           vale.id,
           tx,
+          vale.comissiona_no_uso === true,
         );
         novoVale = {
           id: novo.id,
@@ -280,6 +306,7 @@ export async function aplicarValeTroca(
       valor_aplicado: valorAplicado,
       precisa_complemento: precisaComplemento,
       novo_vale: novoVale,
+      comissiona_no_uso: vale.comissiona_no_uso === true,
     };
   };
 
