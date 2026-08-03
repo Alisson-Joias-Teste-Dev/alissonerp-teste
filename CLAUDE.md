@@ -205,6 +205,7 @@ Ouro Total: SO deposito geral ID=1 (outros sao operadores)
 Gemini: gemini-2.5-flash (2.0-flash descontinuado)
 IA virgula: normalizar "2,02" -> 2.02 antes de comparar
 IA float: Math.abs(a-b) < 0.005 em vez de ===
+postgres.js: BIGINT volta como STRING, INTEGER como number — `vendas_erp.vendedor_id` e `public.vendedores.id_vendedor` sao BIGINT, `fechamento_comissao_itens.consultora_id` e INTEGER. Cruzar as duas fontes numa chave de Map/Set SEM `::int` no SELECT duplica a linha (cada vendedora apareceu 2x no extrato de comissao, 03/08/2026). tsc NAO pega — so o driver rodando pega. Sempre `::int` (ou `Number()`) antes de virar chave.
 contatos.id_contato (NAO contatos.id) — PK real
 public.produtos.id_produto (NAO id) — PK real, BIGINT
 directus.ordens.peso_metal_negocido (TYPO sem A)

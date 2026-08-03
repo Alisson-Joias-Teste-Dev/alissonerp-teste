@@ -98,7 +98,11 @@ export async function linhasExtrato(
     valor_pagamento: string; total_venda: string; valor: string; comissionavel: boolean;
     vale_numero: string | null; vale_pedido_origem: string | null;
   }>>`
-    SELECT v.vendedor_id AS consultora_id, ven.nome AS consultora_nome,
+    -- ::int obrigatorio: vendas_erp.vendedor_id e BIGINT e o postgres.js devolve
+    -- bigint como STRING, enquanto fechamento_comissao_itens.consultora_id e
+    -- integer e vem como number. Sem o cast as duas fontes viram chaves
+    -- diferentes no agrupamento e cada vendedora aparece DUAS vezes na tela.
+    SELECT v.vendedor_id::int AS consultora_id, ven.nome AS consultora_nome,
            pv.data_confirmacao::date::text AS data,
            v.id AS venda_id, v.numero_venda AS pedido, c.nome AS cliente,
            pv.forma, pv.valor::text AS valor_pagamento, v.total_venda::text,
@@ -148,7 +152,9 @@ export async function linhasExtrato(
     const valor = Number(g.valor);
     const balde = baldeDoItem(g.tipo_item, g.devolucao_id, g.forma, valor);
     linhas.push({
-      consultora_id: g.consultora_id,
+      // Number() em TODAS as fontes: a chave do agrupamento tem que ser do mesmo
+      // tipo, senao a mesma vendedora vira duas linhas. Ver o cast ::int acima.
+      consultora_id: Number(g.consultora_id),
       consultora_nome: g.consultora_nome,
       data: g.data,
       balde,
@@ -167,7 +173,7 @@ export async function linhasExtrato(
   for (const p of previstos) {
     const ehVale = p.forma === "Vale-Troca";
     linhas.push({
-      consultora_id: p.consultora_id,
+      consultora_id: Number(p.consultora_id),
       consultora_nome: p.consultora_nome,
       data: p.data,
       balde: ehVale ? "outro_credito" : "comissao",
@@ -185,7 +191,7 @@ export async function linhasExtrato(
 
   for (const b of baixas) {
     linhas.push({
-      consultora_id: b.consultora_id,
+      consultora_id: Number(b.consultora_id),
       consultora_nome: b.consultora_nome,
       data: b.data,
       balde: "pagamento",
@@ -226,7 +232,9 @@ export async function saldoAnterior(
       GROUP BY 1
     ),
     naolancado AS (
-      SELECT v.vendedor_id AS consultora_id,
+      -- ::int: vendedor_id e bigint; sem o cast o UNION com consultora_id (int)
+      -- vira bigint e volta como string, quebrando a chave do Map.
+      SELECT v.vendedor_id::int AS consultora_id,
              COALESCE(SUM(ROUND(v.total_comissao * LEAST(pv.valor / NULLIF(v.total_venda, 0), 1), 2)), 0) AS v
       FROM alissonerp.pagamentos_venda pv
       JOIN alissonerp.vendas_erp v ON v.id = pv.venda_id
@@ -276,7 +284,7 @@ export async function comissoesPendentes(
   const rows = await sql<Array<{
     consultora_id: number; parcelas: string; total: string; atrasado: string;
   }>>`
-    SELECT v.vendedor_id AS consultora_id,
+    SELECT v.vendedor_id::int AS consultora_id,
            COUNT(*)::text AS parcelas,
            ROUND(SUM(v.total_comissao * LEAST(cr.valor / NULLIF(v.total_venda, 0), 1)), 2)::text AS total,
            ROUND(SUM(CASE WHEN cr.data_vencimento < CURRENT_DATE
