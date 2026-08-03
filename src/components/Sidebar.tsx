@@ -527,9 +527,14 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* Footer — configurações + usuário + logout */}
+      {/* Footer — configurações + usuário + logout
+          A condição está no PRÓPRIO div: antes ele existia sempre e só o
+          conteúdo era condicional, então quem não tem Configurações (consultora,
+          gerente_loja) via um bloco VAZIO com `border-t` — um risco solto colado
+          na borda do rodapé do usuário. */}
+      {configEntry && (
       <div className="border-t" style={{ borderColor: "#0F2922" }}>
-        {configEntry && (() => {
+        {(() => {
           const Icon = ICON_MAP[configEntry.icon];
           const active = pathname === "/configuracoes" || pathname.startsWith("/configuracoes/");
           return (
@@ -550,6 +555,7 @@ export default function Sidebar() {
           );
         })()}
       </div>
+      )}
       <div className="px-4 py-4 border-t" style={{ borderColor: "#0F2922" }}>
         <button
           onClick={() => setPerfilAberto(true)}
