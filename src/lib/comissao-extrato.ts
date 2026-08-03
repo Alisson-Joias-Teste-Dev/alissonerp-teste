@@ -305,6 +305,59 @@ export async function comissoesPendentes(
   ]));
 }
 
+export interface ParcelaPendente {
+  conta_id: number;
+  venda_id: number | null;
+  pedido: string | null;
+  cliente: string | null;
+  descricao: string | null;
+  vencimento: string | null;
+  valor_parcela: number;
+  comissao_prevista: number;
+  atrasado: boolean;
+}
+
+/**
+ * As parcelas por trás do total de "comissões pendentes" — para a consultora
+ * poder clicar e ver DE QUAIS vendas vem a previsão.
+ *
+ * REGRA: mesma fonte e mesma conta do total (comissoesPendentes). Se as duas
+ * divergirem, a tela mente — por isso o filtro é idêntico.
+ */
+export async function pendentesDetalhe(consultoraId: number): Promise<ParcelaPendente[]> {
+  const rows = await sql<Array<{
+    conta_id: number; venda_id: number | null; pedido: string | null;
+    cliente: string | null; descricao: string | null; vencimento: string | null;
+    valor_parcela: string; comissao_prevista: string; atrasado: boolean;
+  }>>`
+    SELECT cr.id AS conta_id, v.id AS venda_id, v.numero_venda AS pedido,
+           COALESCE(c.nome, cr.cliente_nome) AS cliente, cr.descricao,
+           cr.data_vencimento::text AS vencimento,
+           cr.valor::text AS valor_parcela,
+           ROUND(v.total_comissao * LEAST(cr.valor / NULLIF(v.total_venda, 0), 1), 2)::text AS comissao_prevista,
+           (cr.data_vencimento < CURRENT_DATE) AS atrasado
+    FROM alissonerp.contas_receber cr
+    JOIN alissonerp.vendas_erp v ON v.id = cr.venda_erp_id
+      AND v.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
+    LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
+    WHERE cr.data_recebimento IS NULL AND cr.situacao = 'pendente'
+      AND v.vendedor_id = ${consultoraId}
+    ORDER BY cr.data_vencimento NULLS LAST, cr.id
+  `;
+
+  return rows.map((r) => ({
+    conta_id: Number(r.conta_id),
+    venda_id: r.venda_id ? Number(r.venda_id) : null,
+    pedido: r.pedido,
+    cliente: r.cliente,
+    descricao: r.descricao,
+    vencimento: r.vencimento,
+    valor_parcela: Number(r.valor_parcela),
+    comissao_prevista: Number(r.comissao_prevista ?? 0),
+    atrasado: r.atrasado === true,
+  }));
+}
+
 /** Soma as linhas de um balde. */
 export function somaBalde(linhas: LinhaExtrato[], balde: BaldeExtrato): number {
   return Math.round(

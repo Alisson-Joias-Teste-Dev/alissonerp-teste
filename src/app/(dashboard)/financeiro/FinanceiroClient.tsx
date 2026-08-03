@@ -3330,6 +3330,7 @@ function ExtratoComissao() {
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [soComMovimento, setSoComMovimento] = useState(true);
+  const [verPendentes, setVerPendentes] = useState(false);
 
   const rotuloMes = (comp: string) => {
     const [a, m] = comp.split("-");
@@ -3507,10 +3508,21 @@ function ExtratoComissao() {
                 <span className="text-xl font-bold tabular-nums"
                   style={{ color: detalhe.resumo.saldo < 0 ? C.vermelho : C.esmeralda }}>{fmt(detalhe.resumo.saldo)}</span>
               </div>
-              <div className="flex items-center justify-between pt-3 mt-3 border-t text-sm" style={{ borderColor: C.cremeBorder }}>
+              {/* Clicável: abre as parcelas por trás da previsão. Sem isso a
+                  consultora vê um total e não tem como conferir de onde vem. */}
+              <button onClick={() => setVerPendentes(v => !v)}
+                className="w-full flex items-center justify-between pt-3 mt-3 border-t text-sm text-left hover:opacity-80"
+                style={{ borderColor: C.cremeBorder }}>
                 <span style={{ color: C.cinza }}>
-                  Comissões ainda pendentes
-                  <span className="ml-2 text-[11px]" style={{ color: C.cinza }}>não entra no saldo</span>
+                  <span style={{ color: C.esmeralda, fontWeight: 500 }}>
+                    {verPendentes ? "▾" : "▸"} Comissões ainda pendentes
+                  </span>
+                  <span className="ml-2 text-[11px]">não entra no saldo</span>
+                  {(detalhe.pendentes.parcelas ?? 0) > 0 && (
+                    <span className="ml-2 text-[11px]">
+                      · {detalhe.pendentes.parcelas} parcela{detalhe.pendentes.parcelas > 1 ? "s" : ""}
+                    </span>
+                  )}
                 </span>
                 <span className="tabular-nums" style={{ color: "#1A1A1A" }}>
                   {fmt(detalhe.pendentes.total)}
@@ -3518,7 +3530,47 @@ function ExtratoComissao() {
                     <span className="ml-2 text-[11px]" style={{ color: C.ambar }}>({fmt(detalhe.pendentes.atrasado)} atrasado)</span>
                   )}
                 </span>
-              </div>
+              </button>
+
+              {verPendentes && (
+                (detalhe.pendentes.itens ?? []).length === 0 ? (
+                  <p className="mt-3 text-xs" style={{ color: C.cinza }}>Nenhuma parcela em aberto.</p>
+                ) : (
+                  <div className="mt-3 overflow-x-auto rounded-lg border" style={{ borderColor: C.cremeBorder }}>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ backgroundColor: C.cremeBg }}>
+                          <th className="px-3 py-2 text-left text-[11px] font-semibold" style={{ color: C.cinza }}>Vencimento</th>
+                          <th className="px-3 py-2 text-left text-[11px] font-semibold" style={{ color: C.cinza }}>Pedido</th>
+                          <th className="px-3 py-2 text-left text-[11px] font-semibold" style={{ color: C.cinza }}>Cliente</th>
+                          <th className="px-3 py-2 text-right text-[11px] font-semibold" style={{ color: C.cinza }}>Parcela</th>
+                          <th className="px-3 py-2 text-right text-[11px] font-semibold" style={{ color: C.cinza }}>Comissão prevista</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(detalhe.pendentes.itens ?? []).map((p: any) => (
+                          <tr key={p.conta_id} className="border-t" style={{ borderColor: C.cremeBorder }}>
+                            <td className="px-3 py-2 text-xs whitespace-nowrap"
+                              style={{ color: p.atrasado ? C.ambar : C.cinza }}>
+                              {p.vencimento ? fmtDate(p.vencimento) : "sem data"}
+                              {p.atrasado && <span className="ml-1 text-[10px]">atrasado</span>}
+                            </td>
+                            <td className="px-3 py-2 text-xs">
+                              {p.venda_id ? (
+                                <a href={`/vendas/${p.venda_id}`} target="_blank" rel="noopener noreferrer"
+                                  className="hover:underline" style={{ color: C.esmeralda, fontWeight: 500 }}>#{p.pedido ?? p.venda_id}</a>
+                              ) : <span style={{ color: "#1A1A1A" }}>—</span>}
+                            </td>
+                            <td className="px-3 py-2 text-xs" style={{ color: "#1A1A1A" }}>{p.cliente ?? "—"}</td>
+                            <td className="px-3 py-2 text-xs text-right tabular-nums" style={{ color: C.cinza }}>{fmt(p.valor_parcela)}</td>
+                            <td className="px-3 py-2 text-xs text-right tabular-nums font-medium" style={{ color: "#1A1A1A" }}>{fmt(p.comissao_prevista)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
             </div>
           </>
         )}

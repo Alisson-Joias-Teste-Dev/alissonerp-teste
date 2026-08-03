@@ -4,7 +4,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
 import {
-  linhasExtrato, saldoAnterior, comissoesPendentes, somaBalde,
+  linhasExtrato, saldoAnterior, comissoesPendentes, pendentesDetalhe, somaBalde,
 } from "@/lib/comissao-extrato";
 
 /**
@@ -48,10 +48,11 @@ export async function GET(
   const ate = new Date(Date.UTC(ano, mes, 0)).toISOString().slice(0, 10);
 
   try {
-    const [linhas, saldos, pendentes, cons] = await Promise.all([
+    const [linhas, saldos, pendentes, parcelas, cons] = await Promise.all([
       linhasExtrato(id, de, ate),
       saldoAnterior(id, de),
       comissoesPendentes(id),
+      pendentesDetalhe(id),
       sql<Array<{ nome: string }>>`SELECT nome FROM public.vendedores WHERE id_vendedor = ${id}`,
     ]);
 
@@ -89,6 +90,8 @@ export async function GET(
         total: pend?.total ?? 0,
         atrasado: pend?.atrasado ?? 0,
         parcelas: pend?.parcelas ?? 0,
+        // itens: as parcelas por trás do total, para a tela abrir ao clicar.
+        itens: parcelas,
       },
     });
   } catch (err) {
