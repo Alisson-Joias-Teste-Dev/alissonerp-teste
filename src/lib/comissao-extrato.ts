@@ -132,17 +132,32 @@ export async function linhasExtrato(
     ORDER BY 3
   `;
 
+  // A baixa entra no mês da COMPETÊNCIA, não no mês em que o Pix saiu.
+  //
+  // O PORQUÊ (decisão do Jonathan, 03/08/2026): a comissão de um mês sempre é
+  // paga no mês seguinte. Jogando a baixa na data do Pix, todo mês fechava com
+  // "ganhei junho, recebi maio" — a consultora não conseguia ler o próprio
+  // extrato. Pela competência, cada mês fecha sozinho: o que ela ganhou naquele
+  // mês e o que ela recebeu por aquele mês, lado a lado.
+  //
+  // A data real do pagamento não se perde — vai na descrição da linha.
+  //
+  // O IMPACTO: `saldoAnterior` tem que usar o MESMO critério (competência), senão
+  // o saldo anterior conta um pagamento que o mês ainda não descontou, e a conta
+  // não fecha.
   const baixas = await sql<Array<{
     consultora_id: number; consultora_nome: string | null;
-    data: string; competencia: string; valor: string;
+    data: string; competencia: string; valor: string; pago_em: string | null;
   }>>`
     SELECT f.consultora_id, ve.nome AS consultora_nome,
-           f.paid_at::date::text AS data, f.competencia, f.valor_total::text AS valor
+           f.periodo_fim::text AS data, f.competencia, f.valor_total::text AS valor,
+           f.paid_at::date::text AS pago_em
     FROM alissonerp.fechamentos_comissao f
     LEFT JOIN public.vendedores ve ON ve.id_vendedor = f.consultora_id
-    WHERE f.status = 'pago' AND f.paid_at IS NOT NULL
+    WHERE f.status = 'pago'
       AND (${cid}::int IS NULL OR f.consultora_id = ${cid}::int)
-      AND f.paid_at::date >= ${de}::date AND f.paid_at::date <= ${ate}::date
+      AND f.competencia >= to_char(${de}::date, 'YYYY-MM')
+      AND f.competencia <= to_char(${ate}::date, 'YYYY-MM')
     ORDER BY 3
   `;
 
@@ -190,12 +205,18 @@ export async function linhasExtrato(
   }
 
   for (const b of baixas) {
+    const [ano, mes] = b.competencia.split("-");
+    const rotulo = new Date(Number(ano), Number(mes) - 1)
+      .toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
     linhas.push({
       consultora_id: Number(b.consultora_id),
       consultora_nome: b.consultora_nome,
       data: b.data,
       balde: "pagamento",
-      descricao: `Pagamento da comissão de ${b.competencia}`,
+      // A data real do Pix não se perde: a linha mora na competência, mas
+      // quando o dinheiro saiu fica escrito na descrição.
+      descricao: `Pagamento da comissão de ${rotulo}`
+        + (b.pago_em ? ` · pago em ${b.pago_em.split("-").reverse().join("/")}` : ""),
       pedido: null,
       venda_id: null,
       valor_pago: null,
@@ -250,11 +271,14 @@ export async function saldoAnterior(
       GROUP BY 1
     ),
     pago AS (
+      -- Por COMPETÊNCIA, igual à baixa em linhasExtrato(). Se aqui olhasse
+      -- paid_at e lá competência, o pagamento do mês anterior seria contado
+      -- duas vezes (ou nenhuma) e o saldo anterior mentiria.
       SELECT f.consultora_id, COALESCE(SUM(f.valor_total), 0) AS v
       FROM alissonerp.fechamentos_comissao f
-      WHERE f.status = 'pago' AND f.paid_at IS NOT NULL
+      WHERE f.status = 'pago'
         AND (${cid}::int IS NULL OR f.consultora_id = ${cid}::int)
-        AND f.paid_at::date < ${de}::date
+        AND f.competencia < to_char(${de}::date, 'YYYY-MM')
       GROUP BY 1
     )
     SELECT c AS consultora_id,
