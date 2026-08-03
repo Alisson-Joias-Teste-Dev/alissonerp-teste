@@ -136,4 +136,30 @@ describe("a verba usa o faturamento LÍQUIDO, com a mesma subtração da dashboa
     const corpo = fonte.slice(fonte.indexOf("export async function calcularVerbaFreteGratis"));
     expect(corpo).toContain("calcularFaturamentoLiquidoMes(inicio, fim)");
   });
+
+  /**
+   * 🔴 A BASE É O MÊS ANTERIOR À COMPETÊNCIA — *"a verba do mês de julho é o
+   * faturamento do mês de junho"* (Jonathan, 03/08).
+   *
+   * POR QUE ESTE TESTE EXISTE: em 03/08 eu quebrei exatamente isto. Ao mudar o
+   * RÓTULO do fechamento para a competência, troquei a BASE junto, e a verba
+   * passou a sair do próprio mês fechado. Passou em tudo — nenhum teste
+   * olhava a base — e só apareceu porque o Jonathan reconheceu o número errado
+   * na tela. Este teste é a rede que faltava.
+   *
+   * Prova independente: no relatório consolidado de julho que ele fechou à mão
+   * em 31/07, a verba era R$ 777,86 = 0,1% do líquido de JUNHO (R$ 777.860,82).
+   * O líquido de julho daria R$ 731,70.
+   */
+  it("a base é o mês ANTERIOR ao de competência (competência julho ⇒ soma junho)", () => {
+    const fonte = readFileSync(CAMINHO_FRETE_VERBA, "utf-8");
+    const corpo = fonte.slice(fonte.indexOf("export async function calcularVerbaFreteGratis"));
+
+    // Início = dia 1 do mês anterior; fim = dia 0 do mês de competência
+    // (= último dia do mês anterior).
+    expect(corpo).toMatch(/getMonth\(\)\s*-\s*1,\s*1\s*\)/);
+    expect(corpo).toMatch(/new Date\(\s*mesCompetencia\.getFullYear\(\),\s*mesCompetencia\.getMonth\(\),\s*0\s*\)/);
+    // Não pode voltar a somar o próprio mês de competência.
+    expect(corpo).not.toMatch(/new Date\(\s*mesCompetencia\.getFullYear\(\),\s*mesCompetencia\.getMonth\(\),\s*1\s*\)/);
+  });
 });
