@@ -2,6 +2,26 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(comissao): aprovação de crédito não zera mais a comissão da consultora (vX.Y.Z a definir no merge)
+
+**O quê:** a aprovação de crédito (gerente ou diretor) deixou de mexer na comissão da
+consultora. Antes, quando o **diretor** aprovava um crediário acima do saldo, a comissão da
+venda inteira era **zerada** na aprovação — inclusive a parte já paga em dinheiro/cartão/Pix.
+
+**Por quê:** era injusto (a consultora perdia comissão sobre dinheiro real que já entrou) e
+obrigava a restaurar as vendas 1 a 1 na mão todo mês (22 vendas de julho/2026 restauradas antes
+desta correção). A comissão deve **seguir o dinheiro recebido**.
+
+**O que mudou:**
+- Removido o bloco de zeramento em `src/lib/vendas-credito-aprovar.ts` (era o único ponto —
+  código e banco — que zerava comissão por crédito).
+- A comissão passa a ser apurada só no **fechamento**, que já paga proporcional ao pagamento
+  confirmado (à vista comissiona já; crediário só quando a parcela é paga). Sem mudança no banco.
+- Textos da tarefa/notificação que diziam "zera a comissão" ajustados; regra atualizada em
+  `docs/regras-negocio/comercial.md` §2.
+- A aprovação do diretor continua servindo pra **liberar** a venda acima do limite — só não
+  penaliza mais a comissão.
+
 ## feat(vendas): ordem de aliança só nasce com o aro confirmado (vX.Y.Z (a definir no merge))
 
 **O quê:** a ordem de fabricação de **orçamento de aliança** deixou de ser criada automaticamente
