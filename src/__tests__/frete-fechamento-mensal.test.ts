@@ -277,3 +277,67 @@ describe("BLOCO 4 — item 5: decisão da tarefa (aprovar/recusar)", () => {
     await expect(recusarFechamentoFreteNoTx(sqlMock, 999, "motivo")).rejects.toThrow(/não encontrado/i);
   });
 });
+
+/**
+ * 🔴 COMPETÊNCIA (03/08/2026) — a regra que NENHUM teste travava até aqui.
+ *
+ * `mes_referencia` é o mês FECHADO (o anterior ao de `hoje`), não o mês em que
+ * a rotina rodou. Antes de 03/08 era o contrário, e a linha #1 de produção
+ * nasceu com `2026-08-01`.
+ *
+ * POR QUE ISTO PRECISA DE TESTE: se alguém "consertar" o `- 1` de volta, a
+ * rotina do dia seguinte grava um `mes_referencia` que ainda não existe na
+ * tabela, o `ON CONFLICT (gerente_id, mes_referencia)` NÃO dispara, e a verba
+ * do mês é CREDITADA DE NOVO — dinheiro a mais no saldo da gerente, em
+ * silêncio. É a única proteção contra esse estrago.
+ */
+describe("competência: mes_referencia é o mês FECHADO, não o mês em que a rotina rodou", () => {
+  /** Extrai o valor `YYYY-MM-DD` interpolado no INSERT do fechamento. */
+  function mesReferenciaGravado(): string | undefined {
+    const call = acharChamada(/INSERT INTO alissonerp\.fechamentos_frete/)!;
+    return call.slice(1).find((v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) as string | undefined;
+  }
+
+  it("rodando em 03/08/2026 → fecha JULHO (2026-07-01), não agosto", async () => {
+    mockObterSaldo.mockResolvedValue(9.36);
+    configurarRespostas([
+      { match: /SUM\(valor\) FILTER/, value: [{ creditos: 706.36, debitos: 697 }] },
+      { match: /INSERT INTO alissonerp\.fechamentos_frete/, value: [{ id: 601 }] },
+    ]);
+
+    const resultado = await fecharMesFreteGratisAutomatico(new Date(2026, 7, 3), USER_ID);
+
+    expect(resultado.mesReferencia).toBe("2026-07-01");
+    expect(mesReferenciaGravado()).toBe("2026-07-01");
+    // O rótulo dos lançamentos acompanha a competência — se ficar "agosto", o
+    // extrato da gerente contradiz o cabeçalho do fechamento.
+    expect(textoDaChamada(acharChamada(/zeragem do saldo positivo/)!)).toContain("julho");
+  });
+
+  it("a verba é calculada sobre a COMPETÊNCIA (recebe julho, não agosto)", async () => {
+    mockObterSaldo.mockResolvedValue(0);
+    configurarRespostas([
+      { match: /SUM\(valor\) FILTER/, value: [{ creditos: 0, debitos: 0 }] },
+      { match: /INSERT INTO alissonerp\.fechamentos_frete/, value: [{ id: 602 }] },
+    ]);
+
+    await fecharMesFreteGratisAutomatico(new Date(2026, 7, 3), USER_ID);
+
+    const [dataPassada] = mockCalcularVerba.mock.calls.at(-1) as [Date];
+    expect(dataPassada.getFullYear()).toBe(2026);
+    expect(dataPassada.getMonth()).toBe(6); // 6 = julho (0-indexado)
+    expect(dataPassada.getDate()).toBe(1);
+  });
+
+  it("vira o ANO: rodando em janeiro/2027 → fecha dezembro/2026", async () => {
+    mockObterSaldo.mockResolvedValue(0);
+    configurarRespostas([
+      { match: /SUM\(valor\) FILTER/, value: [{ creditos: 0, debitos: 0 }] },
+      { match: /INSERT INTO alissonerp\.fechamentos_frete/, value: [{ id: 603 }] },
+    ]);
+
+    const resultado = await fecharMesFreteGratisAutomatico(new Date(2027, 0, 1), USER_ID);
+
+    expect(resultado.mesReferencia).toBe("2026-12-01");
+  });
+});

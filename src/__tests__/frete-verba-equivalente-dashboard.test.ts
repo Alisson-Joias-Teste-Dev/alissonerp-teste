@@ -96,3 +96,44 @@ describe("calcularFaturamentoMes usa o MESMO filtro da dashboard comercial", () 
     expect(filtroFreteVerba).toBe(filtroDashboard);
   });
 });
+
+/**
+ * 🔴 LÍQUIDO (03/08/2026) — decisão do Jonathan: *"o saldo que é gerado ele é
+ * do faturamento líquido e não do bruto"*.
+ *
+ * "Líquido" tem UMA definição neste projeto: a da dashboard comercial
+ * (`totalLiquido = totalBruto - valorVale`). Este bloco garante que a verba
+ * usa a MESMA subtração — se alguém remover o desconto de vale-troca aqui, ou
+ * inventar um "líquido" diferente (descontando devolução, desconto, frete...),
+ * a verba para de bater com o número que ele olha na tela.
+ *
+ * NÚMEROS REAIS (prod, julho/2026): bruto R$ 751.010,92 − vale-troca
+ * R$ 19.306,00 = líquido R$ 731.704,92 → verba R$ 731,70 (era R$ 751,01).
+ */
+describe("a verba usa o faturamento LÍQUIDO, com a mesma subtração da dashboard", () => {
+  it("frete-verba desconta valor_vale_troca da soma de total_venda", () => {
+    const fonte = readFileSync(CAMINHO_FRETE_VERBA, "utf-8");
+    const somaLiquida = fonte.match(
+      /SUM\(total_venda\)\s*-\s*SUM\(COALESCE\(valor_vale_troca,\s*0\)\)/i,
+    );
+    expect(
+      somaLiquida,
+      "calcularFaturamentoLiquidoMes deve somar total_venda e SUBTRAIR valor_vale_troca — " +
+        "é a mesma conta do alcancado_periodo da dashboard.",
+    ).not.toBeNull();
+  });
+
+  it("a dashboard usa a MESMA coluna de vale-troca (valor_vale_troca) para o líquido", () => {
+    const dashboard = readFileSync(CAMINHO_DASHBOARD, "utf-8");
+    expect(dashboard).toContain("valor_vale_troca");
+    // A conta de lá é em JS, não em SQL — o que precisa casar é a COLUNA e o
+    // sentido da operação (subtrair do bruto).
+    expect(dashboard).toMatch(/totalLiquido\s*=\s*totalBruto\s*-\s*valorVale/);
+  });
+
+  it("a função da verba chama a versão LÍQUIDA, não a bruta", () => {
+    const fonte = readFileSync(CAMINHO_FRETE_VERBA, "utf-8");
+    const corpo = fonte.slice(fonte.indexOf("export async function calcularVerbaFreteGratis"));
+    expect(corpo).toContain("calcularFaturamentoLiquidoMes(inicio, fim)");
+  });
+});

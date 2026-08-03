@@ -1,19 +1,28 @@
 /**
  * frete-verba.ts — cálculo da VERBA MENSAL de frete grátis (BLOCO 3, 21/07).
  *
- * REGRA DE NEGÓCIO (definida pelo Jonathan, não reabrir — ver migration 356 e
+ * REGRA DE NEGÓCIO (definida pelo Jonathan — ver migration 356 e
  * docs/regras-negocio/entregas.md): a loja recebe todo mês uma verba para
  * dar frete grátis de cortesia (o normal é o cliente pagar). Verba = 0,1%
- * (config `percentual_verba_frete`, default 0.1) do FATURAMENTO DO MÊS
- * ANTERIOR ao mês de referência do fechamento.
+ * (config `percentual_verba_frete`, default 0.1) do FATURAMENTO LÍQUIDO DA
+ * COMPETÊNCIA — o mês que o fechamento está fechando.
  *
- * O QUE: `calcularFaturamentoMes(inicio, fim)` é a FONTE ÚNICA do cálculo de
- * faturamento usado pela verba — reaproveita, campo a campo e filtro a
- * filtro, a MESMA consulta já usada pela dashboard comercial (GET
- * /api/dashboard-comercial/vendas-dashboard/route.ts, campo
- * `visaoGeral.alcancado_bruto` = soma de `total_venda` sem descontar
- * vale-troca): `FROM alissonerp.vw_dash_vendas_todas WHERE data_venda
- * BETWEEN ... AND status IS NOT NULL AND status != 4`.
+ * ⚠️ REVISADA EM 03/08/2026 (§10.8): eram "bruto" e "mês anterior ao de
+ * referência"; viraram "líquido" (bruto − vale-troca) e "o próprio mês de
+ * competência". A rotina roda no dia 01 e fecha o mês que acabou, então o
+ * período consultado continua sendo o mesmo — o que mudou foi o VALOR (líquido)
+ * e o RÓTULO (o fechamento passa a se chamar pela competência, não pelo mês em
+ * que a rotina rodou).
+ *
+ * O QUE: `calcularFaturamentoLiquidoMes(inicio, fim)` é a FONTE ÚNICA do
+ * cálculo de faturamento usado pela verba — reaproveita, campo a campo e
+ * filtro a filtro, a MESMA consulta já usada pela dashboard comercial (GET
+ * /api/dashboard-comercial/vendas-dashboard/route.ts): `FROM
+ * alissonerp.vw_dash_vendas_todas WHERE data_venda BETWEEN ... AND status IS
+ * NOT NULL AND status != 4`, somando `total_venda` e subtraindo
+ * `valor_vale_troca` — a MESMA conta do `alcancado_periodo` (líquido) de lá.
+ * `calcularFaturamentoMes` (bruto, = `alcancado_bruto`) continua existindo
+ * como contraprova dos dois números.
  *
  * POR QUE: o Jonathan conferiu manualmente (homolog, jul/26: 17 vendas,
  * R$ 217.867,00) que esse é o número que bate com a tela que ele já usa e
@@ -72,6 +81,42 @@ export async function calcularFaturamentoMes(inicio: string, fim: string): Promi
 }
 
 /**
+ * Faturamento LÍQUIDO do período — bruto MENOS vale-troca. É esta a base da
+ * verba desde 03/08/2026 (decisão do Jonathan: *"o saldo que é gerado ele é do
+ * faturamento líquido e não do bruto"*).
+ *
+ * O QUE MUDA: `SUM(total_venda) - SUM(valor_vale_troca)`. MESMO filtro
+ * (view/data/status) de `calcularFaturamentoMes` acima — o teste ANTI-VOLTA
+ * `frete-verba-equivalente-dashboard.test.ts` compara o filtro dos dois
+ * arquivos e quebra se divergirem.
+ *
+ * POR QUE ESTA subtração e não outra: é EXATAMENTE a conta que a dashboard
+ * comercial já faz para o `alcancado_periodo` (o número "líquido" que o
+ * Jonathan olha na tela) — `vendas-dashboard/route.ts` ~L118-122:
+ * `totalLiquido = totalBruto - valorVale`. Inventar uma segunda definição de
+ * "líquido" aqui (descontando devolução, desconto, o que for) faria a verba
+ * parar de bater com a tela que ele confia — o mesmo risco que motivou a
+ * `calcularFaturamentoMes` a copiar o filtro da dashboard.
+ *
+ * NÚMEROS REAIS de julho/2026 (conferidos em prod, 03/08): bruto
+ * R$ 751.010,92 − vale-troca R$ 19.306,00 = líquido R$ 731.704,92 → verba
+ * R$ 731,70 (era R$ 751,01 no bruto).
+ *
+ * `calcularFaturamentoMes` (bruto) fica EXPORTADA de propósito: é ela que
+ * espelha o `alcancado_bruto` da dashboard e serve de contraprova quando
+ * alguém questionar a diferença entre os dois números.
+ */
+export async function calcularFaturamentoLiquidoMes(inicio: string, fim: string): Promise<number> {
+  const [row] = await sql<{ total: string | null }[]>`
+    SELECT COALESCE(SUM(total_venda) - SUM(COALESCE(valor_vale_troca, 0)), 0)::text AS total
+    FROM alissonerp.vw_dash_vendas_todas
+    WHERE data_venda BETWEEN ${inicio}::date AND ${fim}::date
+      AND status IS NOT NULL AND status != 4
+  `;
+  return Number(row?.total ?? 0);
+}
+
+/**
  * Lê o percentual da verba de frete grátis — config `percentual_verba_frete`
  * em alissonerp.configuracoes_sistema (valor "0.1" = 0,1%). Default
  * PERCENTUAL_VERBA_FRETE_DEFAULT se a chave ainda não existir — mesmo
@@ -92,42 +137,55 @@ export async function obterPercentualVerbaFrete(): Promise<number> {
 export interface VerbaFreteGratisCalculada {
   /** Valor da verba a creditar no fechamento (percentual% do faturamento base). */
   verba: number;
-  /** Faturamento do mês anterior usado como base — auditoria (fechamentos_frete.faturamento_base). */
+  /** Faturamento LÍQUIDO da competência — auditoria (fechamentos_frete.faturamento_base). */
   faturamentoBase: number;
   /** Percentual aplicado (%) — auditoria (fechamentos_frete.percentual_verba). */
   percentual: number;
-  /** Início/fim (YYYY-MM-DD) do mês anterior usado como base do cálculo. */
-  inicioMesAnterior: string;
-  fimMesAnterior: string;
+  /** Início/fim (YYYY-MM-DD) do mês de COMPETÊNCIA usado como base do cálculo. */
+  inicioCompetencia: string;
+  fimCompetencia: string;
 }
 
 /**
- * Calcula a verba de frete grátis para o fechamento de `mesReferencia` —
- * 0,1% (ou o percentual configurado) do faturamento do MÊS ANTERIOR a
- * `mesReferencia`. Fundação para o fechamento automático do dia 01 (cron
- * fora do escopo desta sessão — Blocos 1-3 são só a base: gerente
- * configurável, migration e este cálculo).
+ * Calcula a verba de frete grátis da COMPETÊNCIA `mesCompetencia` — 0,1% (ou o
+ * percentual configurado) do faturamento LÍQUIDO **do próprio mês de
+ * competência**.
+ *
+ * ⚠️ MUDANÇA DE 03/08/2026 (decisão do Jonathan, ver docs/regras-negocio/
+ * entregas.md §10.8) — DUAS coisas mudaram juntas nesta função:
+ *   1. A base virou o faturamento LÍQUIDO (bruto − vale-troca), não mais o
+ *      bruto: *"o saldo que é gerado ele é do faturamento líquido e não do
+ *      bruto"*. Ver `calcularFaturamentoLiquidoMes`.
+ *   2. O parâmetro virou o mês de COMPETÊNCIA, e a base é ELE MESMO — antes
+ *      recebia o mês de execução (agosto) e ia buscar o mês anterior (julho).
+ *      Agora recebe julho e usa julho: *"o cálculo precisa ser do mês da
+ *      competência e não do próximo"*. O NÚMERO não muda por causa disso (o
+ *      período consultado é o mesmo julho) — o que muda é o rótulo do
+ *      fechamento, que passa a ser a competência.
+ *
+ * 🔴 IMPACTO SE ALGUÉM "CONSERTAR" ISTO VOLTANDO O `- 1` NO MÊS: o fechamento
+ * rodando em agosto passaria a somar JUNHO, creditando a verba errada e ainda
+ * gravando `mes_referencia` de um mês que já tem fechamento — colidindo com o
+ * `UNIQUE (gerente_id, mes_referencia)`.
  *
  * IMPACTO SE ALTERADO: fechamentos_frete.verba_creditada/faturamento_base/
  * percentual_verba (migration 356) dependem deste retorno para gravar a
  * auditoria de cada fechamento mensal.
  */
-export async function calcularVerbaFreteGratis(mesReferencia: Date): Promise<VerbaFreteGratisCalculada> {
-  // Mês anterior ao mês de referência — ex.: fechamento de agosto usa o
-  // faturamento de julho (regra: "verba do mês novo = 0,1% do faturamento
-  // do MÊS ANTERIOR").
-  const inicioMesAnterior = new Date(mesReferencia.getFullYear(), mesReferencia.getMonth() - 1, 1);
-  const fimMesAnterior = new Date(mesReferencia.getFullYear(), mesReferencia.getMonth(), 0);
+export async function calcularVerbaFreteGratis(mesCompetencia: Date): Promise<VerbaFreteGratisCalculada> {
+  // O período é o PRÓPRIO mês de competência (dia 1 até o último dia).
+  const inicioMes = new Date(mesCompetencia.getFullYear(), mesCompetencia.getMonth(), 1);
+  const fimMes = new Date(mesCompetencia.getFullYear(), mesCompetencia.getMonth() + 1, 0);
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  const inicio = fmt(inicioMesAnterior);
-  const fim = fmt(fimMesAnterior);
+  const inicio = fmt(inicioMes);
+  const fim = fmt(fimMes);
 
   const [faturamentoBase, percentual] = await Promise.all([
-    calcularFaturamentoMes(inicio, fim),
+    calcularFaturamentoLiquidoMes(inicio, fim),
     obterPercentualVerbaFrete(),
   ]);
 
   const verba = arredondarMoeda(faturamentoBase * (percentual / 100));
 
-  return { verba, faturamentoBase, percentual, inicioMesAnterior: inicio, fimMesAnterior: fim };
+  return { verba, faturamentoBase, percentual, inicioCompetencia: inicio, fimCompetencia: fim };
 }

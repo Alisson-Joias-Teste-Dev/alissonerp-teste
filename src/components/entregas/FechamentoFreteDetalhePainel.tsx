@@ -50,7 +50,15 @@ function badgeStatusFechamento(status: FechamentoFreteDetalhe["cabecalho"]["stat
   }
 }
 
-/** "agosto de 2026" a partir de "YYYY-MM-DD" — mesma função de FechamentosFretePainel. */
+/**
+ * "julho de 2026" a partir de "YYYY-MM-DD" — mesma função de
+ * FechamentosFretePainel.
+ *
+ * ⚠️ NÃO usar `textTransform: "capitalize"` no CSS pra dar maiúscula: ele
+ * capitaliza CADA palavra e o resultado vira "Julho De 2026" (bug reportado
+ * pelo Jonathan em 03/08, print da tela). Quem precisa de inicial maiúscula
+ * usa `capitalizar()` abaixo, que mexe só na primeira letra.
+ */
 function fmtMesReferencia(mesReferencia: string): string {
   const [y, m] = mesReferencia.slice(0, 10).split("-");
   if (!y || !m) return mesReferencia || "—";
@@ -58,12 +66,9 @@ function fmtMesReferencia(mesReferencia: string): string {
     .toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 }
 
-/** Mês ANTERIOR ao de referência — é dele que sai o faturamento base da verba. */
-function fmtMesBase(mesReferencia: string): string {
-  const [y, m] = mesReferencia.slice(0, 10).split("-");
-  if (!y || !m) return "—";
-  return new Date(Number(y), Number(m) - 2, 1)
-    .toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+/** "julho de 2026" -> "Julho de 2026" (só a 1ª letra — ver fmtMesReferencia). */
+function capitalizar(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 /** dd/mm — a lista é sempre do mesmo período, o ano só polui. */
@@ -97,8 +102,54 @@ export default function FechamentoFreteDetalhePainel({ detalhe }: Props) {
   const { cabecalho: f, lancamentos, aprovacao } = detalhe;
   const [filtro, setFiltro] = useState<FiltroLancamento>("todos");
 
-  const doMes = lancamentos.filter((l) => !l.doFechamento);
+  // REGRA DE NEGÓCIO (03/08, pedido do Jonathan: "preciso que tenha apenas as
+  // corridas que geraram valor"): lançamento de efeito R$ 0,00 sai da lista —
+  // é a corrida em que o cliente pagou exatamente o custo do motoboy, ou a
+  // cancelada sem valor. Não mexeu no saldo, não explica nada do fechamento.
+  // Os totais abaixo (frete pago/cliente/loja) também ignoram essas linhas,
+  // senão o "quanto a loja bancou" contaria corrida que ninguém bancou.
+  const doMes = lancamentos.filter((l) => !l.doFechamento && l.valor !== 0);
+  const ocultadosSemEfeito = lancamentos.filter((l) => !l.doFechamento && l.valor === 0).length;
   const doFechamento = lancamentos.filter((l) => l.doFechamento);
+
+  // ── Quem pagou o frete do mês ────────────────────────────────────────────
+  // REGRA DE NEGÓCIO: cada corrida tem `frete_cobrado` (o que o CLIENTE pagou)
+  // e `frete_motoboy` (o que a corrida CUSTOU). A diferença é o que a LOJA
+  // bancou (positiva) ou lucrou (negativa) — e é exatamente o que vira débito
+  // ou crédito no saldo da verba.
+  //
+  // ⚠️ Só entram lançamentos COM entrega: ajuste manual de saldo não tem
+  // corrida por trás, então somá-lo aqui inventaria frete que ninguém pagou.
+  // ⚠️ Só a PRIMEIRA ocorrência de cada entrega conta: uma mesma corrida pode
+  // ter lançamento + estorno (vários casos no fechamento #1), e contar as duas
+  // dobraria o frete pago ao motoboy.
+  // ⚠️ Só corrida CONFIRMADA conta como "pago": no fechamento #1 real, das 47
+  // corridas com lançamento, 30 eram confirmadas, 9 pendentes (R$ 210,00 de
+  // frete que ainda não rodou) e 8 canceladas (R$ 140,00). Somar as 47 daria
+  // R$ 1.185,00 de "frete pago" — dinheiro que o motoboy não recebeu. As
+  // pendentes/canceladas aparecem numa nota, não escondidas.
+  const entregasVistas = new Set<number>();
+  const totais = doMes.reduce(
+    (acc, l) => {
+      if (l.entregaId == null || entregasVistas.has(l.entregaId)) return acc;
+      entregasVistas.add(l.entregaId);
+      const motoboy = l.freteMotoboy ?? 0;
+      if (l.situacaoEntrega === "confirmada") {
+        acc.pagoMotoboy += motoboy;
+        acc.pagoCliente += l.freteCobrado ?? 0;
+        acc.corridas += 1;
+      } else {
+        acc.naoRodouValor += motoboy;
+        acc.naoRodou += 1;
+      }
+      return acc;
+    },
+    { pagoMotoboy: 0, pagoCliente: 0, corridas: 0, naoRodou: 0, naoRodouValor: 0 },
+  );
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const pagoMotoboy = r2(totais.pagoMotoboy);
+  const pagoCliente = r2(totais.pagoCliente);
+  const bancadoLoja = r2(pagoMotoboy - pagoCliente);
 
   // "Ajuste" = lançamento sem entrega vinculada (ajuste manual/correção feita
   // direto no saldo). Não é um tipo no banco — é a leitura de "não veio de uma
@@ -145,14 +196,11 @@ export default function FechamentoFreteDetalhePainel({ detalhe }: Props) {
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div>
-            <h1 style={{
-              fontSize: 18, fontWeight: 700, color: C.esmeralda, margin: 0,
-              textTransform: "capitalize",
-            }}>
-              Fechamento de {fmtMesReferencia(f.mesReferencia)}
+            <h1 style={{ fontSize: 18, fontWeight: 700, color: C.esmeralda, margin: 0 }}>
+              Fechamento — competência {fmtMesReferencia(f.mesReferencia)}
             </h1>
             <p style={{ fontSize: 12, color: C.cinza, margin: "4px 0 0" }}>
-              {f.gerenteNome} · executado em {fmtDtHr(f.createdAt)} · fechamento #{f.id}
+              {f.gerenteNome} · apurado em {fmtDtHr(f.createdAt)} · fechamento #{f.id}
             </p>
           </div>
           <span style={{
@@ -172,23 +220,68 @@ export default function FechamentoFreteDetalhePainel({ detalhe }: Props) {
             { label: "Créditos do mês", valor: fmtBRL(f.totalCreditos), hint: `${qtdCreditos} lançamentos`, cor: undefined },
             { label: "Débitos do mês", valor: fmtBRL(f.totalDebitos), hint: `${qtdDebitos} lançamentos`, cor: undefined },
             { label: "Saldo apurado", valor: fmtBRL(f.saldoFinal), hint: "zerado no fechamento", cor: f.saldoFinal >= 0 ? C.verde : C.vermelho },
-            { label: "Verba creditada", valor: fmtBRL(f.verbaCreditada), hint: fmtMesReferencia(f.mesReferencia), cor: C.esmeralda },
+            { label: "Verba creditada", valor: fmtBRL(f.verbaCreditada), hint: capitalizar(fmtMesReferencia(f.mesReferencia)), cor: C.esmeralda },
           ].map((c) => (
             <div key={c.label} style={{ background: C.cremeBg, borderRadius: 8, padding: "10px 12px" }}>
               <div style={{ fontSize: 11, color: C.cinza }}>{c.label}</div>
               <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2, color: c.cor }}>{c.valor}</div>
-              <div style={{ fontSize: 11, color: C.cinza, textTransform: "capitalize" }}>{c.hint}</div>
+              <div style={{ fontSize: 11, color: C.cinza }}>{c.hint}</div>
             </div>
           ))}
         </div>
+
+        {/* ── Quem pagou o frete do mês (03/08 — pedido do Jonathan) ───────── */}
+        <div style={{
+          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+          gap: 10, marginTop: 10,
+        }}>
+          <div style={{ background: C.cremeBg, borderRadius: 8, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, color: C.cinza }}>Frete pago ao motoboy</div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{fmtBRL(pagoMotoboy)}</div>
+            <div style={{ fontSize: 11, color: C.cinza }}>{totais.corridas} corridas confirmadas</div>
+          </div>
+          <div style={{ background: C.cremeBg, borderRadius: 8, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, color: C.cinza }}>Pago pelo cliente</div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2, color: C.verde }}>{fmtBRL(pagoCliente)}</div>
+            <div style={{ fontSize: 11, color: C.cinza }}>
+              {pagoMotoboy > 0 ? `${Math.round((pagoCliente / pagoMotoboy) * 100)}% do custo` : "—"}
+            </div>
+          </div>
+          <div style={{ background: C.cremeBg, borderRadius: 8, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, color: C.cinza }}>
+              {bancadoLoja >= 0 ? "Bancado pela loja" : "Sobra da loja"}
+            </div>
+            <div style={{
+              fontSize: 18, fontWeight: 700, marginTop: 2,
+              color: bancadoLoja > 0 ? C.vermelho : C.verde,
+            }}>
+              {fmtBRL(Math.abs(bancadoLoja))}
+            </div>
+            <div style={{ fontSize: 11, color: C.cinza }}>
+              {bancadoLoja >= 0 ? "saiu da verba" : "o cliente pagou a mais"}
+            </div>
+          </div>
+        </div>
+
+        {/* Transparência: o que ficou FORA do "pago" acima — corrida que ainda
+            não rodou ou foi cancelada mexeu no saldo, mas não virou dinheiro
+            para o motoboy. Esconder isso faria o total parecer menor sem
+            explicação. */}
+        {totais.naoRodou > 0 && (
+          <p style={{ fontSize: 11, color: C.cinza, margin: "8px 0 0" }}>
+            Não inclui {totais.naoRodou} corrida{totais.naoRodou > 1 ? "s" : ""} pendente ou cancelada
+            ({fmtBRL(r2(totais.naoRodouValor))} de frete que não foi pago ao motoboy) — os lançamentos
+            delas continuam na lista abaixo, porque mexeram no saldo.
+          </p>
+        )}
 
         {/* ── Memória de cálculo da verba ──────────────────────────────────── */}
         <div style={{ background: C.esmeraldaLt, borderRadius: 8, padding: "12px 14px", marginTop: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: C.esmeralda, marginBottom: 6 }}>
             Memória de cálculo da verba
           </div>
-          <div style={{ fontSize: 12, color: C.esmeralda, lineHeight: 1.7, textTransform: "capitalize" }}>
-            Faturamento de {fmtMesBase(f.mesReferencia)} — <strong>{fmtBRL(f.faturamentoBase)}</strong>
+          <div style={{ fontSize: 12, color: C.esmeralda, lineHeight: 1.7 }}>
+            Faturamento líquido de {fmtMesReferencia(f.mesReferencia)} — <strong>{fmtBRL(f.faturamentoBase)}</strong>
           </div>
           <div style={{ fontSize: 12, color: C.esmeralda, lineHeight: 1.7 }}>
             × {f.percentualVerba}% (config <code>percentual_verba_frete</code>) = <strong>{fmtBRL(f.verbaCreditada)}</strong>
@@ -284,8 +377,11 @@ export default function FechamentoFreteDetalhePainel({ detalhe }: Props) {
           gap: 10, flexWrap: "wrap", marginBottom: 10,
         }}>
           <h2 style={{ fontSize: 14, fontWeight: 700, color: C.esmeralda, margin: 0 }}>
-            Movimento do mês{" "}
-            <span style={{ color: C.cinza, fontWeight: 400 }}>· {doMes.length} lançamentos</span>
+            Corridas que geraram valor{" "}
+            <span style={{ color: C.cinza, fontWeight: 400 }}>
+              · {doMes.length} lançamentos
+              {ocultadosSemEfeito > 0 && ` (${ocultadosSemEfeito} de efeito R$ 0,00 ocultos)`}
+            </span>
           </h2>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {chip("todos", "Todos", doMes.length)}
