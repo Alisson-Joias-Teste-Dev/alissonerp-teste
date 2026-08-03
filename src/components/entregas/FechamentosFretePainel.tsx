@@ -89,6 +89,7 @@ export default function FechamentosFretePainel({
         </h3>
         <p style={{ fontSize: 11, color: C.cinza, margin: "4px 0 0" }}>
           Relatório — o fechamento é feito pela rotina automática do dia 01, não por esta tela.
+          Clique no mês para ver os lançamentos que compõem cada fechamento.
         </p>
       </div>
 
@@ -118,7 +119,12 @@ export default function FechamentosFretePainel({
                 return (
                   <tr key={f.id} style={{ borderTop: `1px solid ${C.cremeBorder}` }}>
                     <td style={{ padding: "8px 10px", fontWeight: 600, textTransform: "capitalize" }}>
-                      {fmtMesReferencia(f.mesReferencia)}
+                      {/* Abre o detalhe (03/08/2026): página própria, não drawer
+                          — decisão do Jonathan, pra o link poder ser mandado
+                          pra gerente/chefe. Ver .../fechamentos/[id]/page.tsx. */}
+                      <Link href={`/entregas-venda/fechamentos/${f.id}`} style={{ color: C.esmeralda }}>
+                        {fmtMesReferencia(f.mesReferencia)}
+                      </Link>
                     </td>
                     <td style={{ padding: "8px 10px" }}>{f.gerenteNome}</td>
                     <td style={{ padding: "8px 10px", textAlign: "right" }}>{fmtBRL(f.verbaCreditada)}</td>

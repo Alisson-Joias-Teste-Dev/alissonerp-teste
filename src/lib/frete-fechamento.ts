@@ -450,7 +450,20 @@ export async function listarFechamentosFrete(
     db`SELECT COUNT(*)::integer AS total FROM alissonerp.fechamentos_frete`,
   ]);
 
-  const items: FechamentoFreteListItem[] = rows.map((r) => ({
+  const items: FechamentoFreteListItem[] = rows.map(mapFechamentoRow);
+
+  return { items, total: Number(countRows[0]?.total ?? 0) };
+}
+
+/**
+ * Converte uma linha crua de `fechamentos_frete` (+ `u.nome AS gerente_nome`)
+ * no item serializável do front. EXTRAÍDO de `listarFechamentosFrete` para ser
+ * reusado por `obterFechamentoFreteDetalhe` (03/08/2026) — a lista e o detalhe
+ * mostram o MESMO cabeçalho, então mapear em dois lugares abriria espaço pra
+ * divergirem (ex.: um formata `mes_referencia` e o outro não).
+ */
+function mapFechamentoRow(r: Record<string, unknown>): FechamentoFreteListItem {
+  return {
     id: Number(r.id),
     gerenteId: String(r.gerente_id),
     gerenteNome: (r.gerente_nome as string | null) ?? "—",
@@ -466,7 +479,190 @@ export async function listarFechamentosFrete(
     tarefaAprovacaoId: r.tarefa_aprovacao_id != null ? Number(r.tarefa_aprovacao_id) : null,
     contaPagarId: r.conta_pagar_id != null ? Number(r.conta_pagar_id) : null,
     createdAt: r.created_at ? new Date(String(r.created_at)).toISOString() : "",
+  };
+}
+
+// ─── Detalhe de UM fechamento (03/08/2026) ────────────────────────────────────
+
+/**
+ * Um lançamento de `saldo_frete_gratis` carimbado com o `fechamento_id`, já
+ * com o contexto da entrega/venda que o originou (quando existe).
+ */
+export interface LancamentoFechamentoFrete {
+  id: number;
+  tipo: "credito" | "debito";
+  valor: number;
+  descricao: string;
+  /** ISO 8601 — `now()` da transação que gravou o lançamento. */
+  createdAt: string;
+  /**
+   * true = lançamento gerado pela PRÓPRIA rotina de fechamento (contra-lançamento
+   * de zeragem e crédito da verba). Ver `doFechamento` em
+   * `obterFechamentoFreteDetalhe` para o critério — e por que ele NÃO pode
+   * entrar nos totais do mês.
+   */
+  doFechamento: boolean;
+  entregaId: number | null;
+  codigoEntrega: string | null;
+  situacaoEntrega: string | null;
+  freteCobrado: number | null;
+  freteMotoboy: number | null;
+  vendaId: number | null;
+  numeroVenda: string | null;
+  clienteNome: string | null;
+  /**
+   * Frete AVULSO (corrida sem venda). CONFERIDO em prod: 6 dos 68 lançamentos
+   * do fechamento #1 são assim — não têm venda nem contato, então `clienteNome`
+   * é null POR NATUREZA, não por dado faltando. A tela mostra
+   * `descricaoAvulso` ("ir buscar peça que deu problema") no lugar do cliente.
+   */
+  isAvulso: boolean;
+  descricaoAvulso: string | null;
+}
+
+/** Rastro da decisão do saldo negativo — só existe quando `tarefa_aprovacao_id` está preenchido. */
+export interface AprovacaoFechamentoFrete {
+  tarefaId: number;
+  tituloTarefa: string;
+  /** Status da TAREFA (`aguardando_aprovacao`, `concluida`, ...). */
+  statusTarefa: string;
+  /** Status da linha de `aprovacoes_tarefa` (`pendente` | `aprovado` | `recusado`). */
+  statusAprovacao: string | null;
+  solicitanteNome: string | null;
+  aprovadorNome: string | null;
+  /** Motivo obrigatório da recusa (null quando aprovado ou ainda pendente). */
+  motivo: string | null;
+  /** ISO 8601 — quando o aprovador decidiu; null enquanto pendente. */
+  respondidoEm: string | null;
+  criadoEm: string;
+}
+
+export interface FechamentoFreteDetalhe {
+  cabecalho: FechamentoFreteListItem;
+  /** TODOS os lançamentos carimbados, mês + fechamento, do mais recente pro mais antigo. */
+  lancamentos: LancamentoFechamentoFrete[];
+  aprovacao: AprovacaoFechamentoFrete | null;
+}
+
+/**
+ * Detalhe completo de UM fechamento: cabeçalho + os lançamentos que ele
+ * carimbou + o rastro da aprovação do saldo negativo. Alimenta a página
+ * `/entregas-venda/fechamentos/[id]` (03/08/2026 — decisão do Jonathan:
+ * página própria, não drawer, pra o link poder ser compartilhado).
+ *
+ * ⚠️ REGRA DE NEGÓCIO — `doFechamento` (o detalhe que faz as contas fecharem):
+ * a rotina do dia 01 carimba `fechamento_id` nos lançamentos do mês E DEPOIS
+ * grava os seus DOIS lançamentos próprios (zeragem do saldo + verba nova) já
+ * com o mesmo `fechamento_id`. Logo, somar tudo que tem `fechamento_id = N`
+ * NÃO reproduz `total_creditos`/`total_debitos` do cabeçalho — no fechamento
+ * #1 daria R$ 1.457,37 / R$ 706,36 em vez de R$ 706,36 / R$ 697,00.
+ *
+ * O critério de separação é `s.created_at >= f.created_at`, e ele é EXATO (não
+ * é heurística de tolerância): `created_at` das duas tabelas tem default
+ * `now()`, que no PostgreSQL é o horário de INÍCIO DA TRANSAÇÃO — como o
+ * fechamento e os seus dois lançamentos nascem na MESMA transação
+ * (`sql.begin` em `fecharMesFreteGratisAutomatico`), os três carimbam o
+ * timestamp idêntico, enquanto todo lançamento do mês veio de transação
+ * anterior e é estritamente menor. CONFERIDO em prod no fechamento #1
+ * (2026-08-03 17:13:10.878269+00 nos três).
+ *
+ * IMPACTO SE ALTERADO PARA `clock_timestamp()`: os dois lançamentos passariam
+ * a ter timestamp alguns microssegundos MAIOR que o do fechamento — o `>=`
+ * continua funcionando. O que quebraria seria mover a gravação deles para
+ * FORA da transação do fechamento.
+ *
+ * Retorna null se o id não existir (a página responde 404).
+ */
+export async function obterFechamentoFreteDetalhe(
+  db: DbSql,
+  id: number,
+): Promise<FechamentoFreteDetalhe | null> {
+  const [cabecalhoRow] = await db`
+    SELECT
+      f.id, f.gerente_id, f.mes_referencia, f.saldo_anterior, f.total_creditos,
+      f.total_debitos, f.saldo_final, f.verba_creditada, f.faturamento_base,
+      f.percentual_verba, f.status, f.tarefa_aprovacao_id, f.conta_pagar_id,
+      f.created_at,
+      u.nome AS gerente_nome
+    FROM alissonerp.fechamentos_frete f
+    LEFT JOIN alissonerp.usuarios u ON u.id = f.gerente_id
+    WHERE f.id = ${id}
+  `;
+  if (!cabecalhoRow) return null;
+  const cabecalho = mapFechamentoRow(cabecalhoRow);
+
+  // SEM N+1: entrega, venda e cliente vêm por LEFT JOIN na mesma consulta —
+  // MESMOS joins da listagem de entregas (`page.tsx`: `public.contatos` por
+  // `id_contato`, com fallback no contato da entrega avulsa, que não tem venda).
+  const lancamentoRows: Record<string, unknown>[] = await db`
+    SELECT
+      s.id, s.tipo::text AS tipo, s.valor, s.descricao, s.created_at,
+      (s.created_at >= f.created_at) AS do_fechamento,
+      s.entrega_id, e.codigo_entrega, e.situacao::text AS situacao_entrega,
+      e.frete_cobrado, e.frete_motoboy, e.is_avulso, e.descricao_avulso,
+      s.venda_id, v.numero_venda,
+      COALESCE(c.nome, ca.nome) AS cliente_nome
+    FROM alissonerp.saldo_frete_gratis s
+    JOIN alissonerp.fechamentos_frete f ON f.id = s.fechamento_id
+    LEFT JOIN alissonerp.entregas_venda e ON e.id = s.entrega_id
+    LEFT JOIN alissonerp.vendas_erp v ON v.id = s.venda_id
+    LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
+    LEFT JOIN public.contatos ca ON ca.id_contato = e.contato_id
+    WHERE s.fechamento_id = ${id}
+    ORDER BY s.created_at DESC, s.id DESC
+  `;
+
+  const lancamentos: LancamentoFechamentoFrete[] = lancamentoRows.map((r) => ({
+    id: Number(r.id),
+    tipo: r.tipo as "credito" | "debito",
+    valor: Number(r.valor ?? 0),
+    descricao: String(r.descricao ?? ""),
+    createdAt: r.created_at ? new Date(String(r.created_at)).toISOString() : "",
+    doFechamento: Boolean(r.do_fechamento),
+    entregaId: r.entrega_id != null ? Number(r.entrega_id) : null,
+    codigoEntrega: r.codigo_entrega ? String(r.codigo_entrega) : null,
+    situacaoEntrega: r.situacao_entrega ? String(r.situacao_entrega) : null,
+    freteCobrado: r.frete_cobrado != null ? Number(r.frete_cobrado) : null,
+    freteMotoboy: r.frete_motoboy != null ? Number(r.frete_motoboy) : null,
+    vendaId: r.venda_id != null ? Number(r.venda_id) : null,
+    numeroVenda: r.numero_venda ? String(r.numero_venda) : null,
+    clienteNome: r.cliente_nome ? String(r.cliente_nome) : null,
+    isAvulso: Boolean(r.is_avulso),
+    descricaoAvulso: r.descricao_avulso ? String(r.descricao_avulso) : null,
   }));
 
-  return { items, total: Number(countRows[0]?.total ?? 0) };
+  // Rastro da decisão — só quando o mês fechou negativo e abriu tarefa.
+  // `aprovacoes_tarefa` pode ter mais de uma linha para a mesma tarefa (o
+  // dispatcher de aprovações reusa a tabela em outros fluxos); pega a última.
+  let aprovacao: AprovacaoFechamentoFrete | null = null;
+  if (cabecalho.tarefaAprovacaoId != null) {
+    const [ap] = await db`
+      SELECT
+        t.id AS tarefa_id, t.titulo, t.status AS status_tarefa, t.created_at AS criado_em,
+        a.status AS status_aprovacao, a.motivo, a.respondido_em,
+        us.nome AS solicitante_nome, ua.nome AS aprovador_nome
+      FROM alissonerp.tarefas t
+      LEFT JOIN alissonerp.aprovacoes_tarefa a ON a.tarefa_id = t.id
+      LEFT JOIN alissonerp.usuarios us ON us.id = a.solicitante_id
+      LEFT JOIN alissonerp.usuarios ua ON ua.id = a.aprovador_id
+      WHERE t.id = ${cabecalho.tarefaAprovacaoId}
+      ORDER BY a.id DESC NULLS LAST
+      LIMIT 1
+    `;
+    if (ap) {
+      aprovacao = {
+        tarefaId: Number(ap.tarefa_id),
+        tituloTarefa: String(ap.titulo ?? ""),
+        statusTarefa: String(ap.status_tarefa ?? ""),
+        statusAprovacao: ap.status_aprovacao ? String(ap.status_aprovacao) : null,
+        solicitanteNome: ap.solicitante_nome ? String(ap.solicitante_nome) : null,
+        aprovadorNome: ap.aprovador_nome ? String(ap.aprovador_nome) : null,
+        motivo: ap.motivo ? String(ap.motivo) : null,
+        respondidoEm: ap.respondido_em ? new Date(String(ap.respondido_em)).toISOString() : null,
+        criadoEm: ap.criado_em ? new Date(String(ap.criado_em)).toISOString() : "",
+      };
+    }
+  }
+
+  return { cabecalho, lancamentos, aprovacao };
 }
