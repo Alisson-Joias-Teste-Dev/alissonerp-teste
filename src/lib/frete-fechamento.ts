@@ -81,6 +81,36 @@ function fmtDate(d: Date): string {
  * listarAprovadoresFreteAvulso/listarAprovadoresFreteAvulsoLoja
  * (src/lib/entrega-venda.ts).
  */
+/**
+ * IDs de `public.contatos` marcados como TESTE (config `contatos_teste`,
+ * migration 364) — lançamentos de frete vinculados a eles somem do relatório
+ * de fechamento.
+ *
+ * REGRA DE NEGÓCIO (03/08/2026, pedido do Jonathan): *"cancela esses fretes no
+ * meu nome que eles são de teste, todos que estiverem no nome devem sair desse
+ * relatório"*. É config, não lista no código, porque a regra é "todos no meu
+ * nome" — um teste novo some sozinho, sem deploy.
+ *
+ * ⚠️ EXIBIÇÃO APENAS: não estorna, não mexe em saldo. Os valores continuam
+ * dentro dos totais GRAVADOS no cabeçalho do fechamento (a tela mostra quanto
+ * foi ocultado, justamente para o cabeçalho continuar explicável).
+ *
+ * Mesmo padrão de leitura de `listarAprovadoresFechamentoFrete` (CSV na
+ * `configuracoes_sistema`, sem cache). Ignora pedaços não numéricos — a chave é
+ * editada à mão pelo Jonathan e um espaço/vírgula sobrando não pode virar erro
+ * de SQL.
+ */
+export async function listarContatosTeste(db: DbSql): Promise<number[]> {
+  const [cfg] = await db`
+    SELECT valor FROM alissonerp.configuracoes_sistema
+    WHERE chave = 'contatos_teste'
+  `;
+  return String(cfg?.valor ?? "")
+    .split(",")
+    .map((s: string) => Number(s.trim()))
+    .filter((n: number) => Number.isInteger(n) && n > 0);
+}
+
 export async function listarAprovadoresFechamentoFrete(): Promise<string[]> {
   const [cfg] = await sql`
     SELECT valor FROM alissonerp.configuracoes_sistema
@@ -533,6 +563,11 @@ export interface LancamentoFechamentoFrete {
    */
   isAvulso: boolean;
   descricaoAvulso: string | null;
+  /**
+   * Lançamento de TESTE — o cliente (ou o contato da corrida avulsa) está na
+   * config `contatos_teste`. Some do relatório; ver `listarContatosTeste`.
+   */
+  isTeste: boolean;
 }
 
 /** Rastro da decisão do saldo negativo — só existe quando `tarefa_aprovacao_id` está preenchido. */
@@ -609,6 +644,12 @@ export async function obterFechamentoFreteDetalhe(
   // SEM N+1: entrega, venda e cliente vêm por LEFT JOIN na mesma consulta —
   // MESMOS joins da listagem de entregas (`page.tsx`: `public.contatos` por
   // `id_contato`, com fallback no contato da entrega avulsa, que não tem venda).
+  // Contatos de teste (config) — a flag é resolvida no BANCO, junto do resto,
+  // para não puxar a lista de contatos pro JS só para comparar id.
+  // `= ANY(...)` com array vazio devolve false para todos (nenhum lançamento
+  // marcado), que é o comportamento correto quando a config não existe.
+  const contatosTeste = await listarContatosTeste(db);
+
   const lancamentoRows: Record<string, unknown>[] = await db`
     SELECT
       s.id, s.tipo::text AS tipo, s.valor, s.descricao, s.created_at,
@@ -616,7 +657,8 @@ export async function obterFechamentoFreteDetalhe(
       s.entrega_id, e.codigo_entrega, e.situacao::text AS situacao_entrega,
       e.frete_cobrado, e.frete_motoboy, e.is_avulso, e.descricao_avulso,
       s.venda_id, v.numero_venda,
-      COALESCE(c.nome, ca.nome) AS cliente_nome
+      COALESCE(c.nome, ca.nome) AS cliente_nome,
+      (COALESCE(v.cliente_id, e.contato_id) = ANY (${db.array(contatosTeste)}::bigint[])) AS is_teste
     FROM alissonerp.saldo_frete_gratis s
     JOIN alissonerp.fechamentos_frete f ON f.id = s.fechamento_id
     LEFT JOIN alissonerp.entregas_venda e ON e.id = s.entrega_id
@@ -644,6 +686,7 @@ export async function obterFechamentoFreteDetalhe(
     clienteNome: r.cliente_nome ? String(r.cliente_nome) : null,
     isAvulso: Boolean(r.is_avulso),
     descricaoAvulso: r.descricao_avulso ? String(r.descricao_avulso) : null,
+    isTeste: Boolean(r.is_teste),
   }));
 
   // Rastro da decisão — só quando o mês fechou negativo e abriu tarefa.

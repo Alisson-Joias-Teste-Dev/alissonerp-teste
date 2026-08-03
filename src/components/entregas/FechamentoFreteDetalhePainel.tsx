@@ -108,8 +108,21 @@ export default function FechamentoFreteDetalhePainel({ detalhe }: Props) {
   // cancelada sem valor. Não mexeu no saldo, não explica nada do fechamento.
   // Os totais abaixo (frete pago/cliente/loja) também ignoram essas linhas,
   // senão o "quanto a loja bancou" contaria corrida que ninguém bancou.
-  const doMes = lancamentos.filter((l) => !l.doFechamento && l.valor !== 0);
-  const ocultadosSemEfeito = lancamentos.filter((l) => !l.doFechamento && l.valor === 0).length;
+  // REGRA DE NEGÓCIO (03/08, pedido do Jonathan): lançamento de contato de
+  // TESTE (config `contatos_teste`, migration 364) sai do relatório — *"todos
+  // que estiverem no [meu] nome devem sair desse relatório"*.
+  //
+  // ⚠️ Some da TELA, não do razão: os valores continuam dentro de
+  // `totalCreditos`/`totalDebitos` do cabeçalho, que já foram GRAVADOS no dia
+  // do fechamento. Por isso o quanto foi ocultado aparece logo abaixo — sem
+  // isso, a soma da lista não explicaria mais o cabeçalho e a tela pareceria
+  // errada para quem conferisse.
+  const doMes = lancamentos.filter((l) => !l.doFechamento && l.valor !== 0 && !l.isTeste);
+  const ocultadosSemEfeito = lancamentos.filter((l) => !l.doFechamento && l.valor === 0 && !l.isTeste).length;
+  const teste = lancamentos.filter((l) => !l.doFechamento && l.isTeste);
+  const testeEfeito = Math.round(
+    teste.reduce((acc, l) => acc + (l.tipo === "credito" ? l.valor : -l.valor), 0) * 100,
+  ) / 100;
   const doFechamento = lancamentos.filter((l) => l.doFechamento);
 
   // ── Quem pagou o frete do mês ────────────────────────────────────────────
@@ -272,6 +285,18 @@ export default function FechamentoFreteDetalhePainel({ detalhe }: Props) {
             Não inclui {totais.naoRodou} corrida{totais.naoRodou > 1 ? "s" : ""} pendente ou cancelada
             ({fmtBRL(r2(totais.naoRodouValor))} de frete que não foi pago ao motoboy) — os lançamentos
             delas continuam na lista abaixo, porque mexeram no saldo.
+          </p>
+        )}
+
+        {/* Teste: o cabeçalho acima foi gravado COM esses valores, então
+            esconder sem dizer quanto faria a soma da lista não fechar com os
+            cards. Fica declarado, não apagado. */}
+        {teste.length > 0 && (
+          <p style={{ fontSize: 11, color: C.ambar, margin: "6px 0 0" }}>
+            {teste.length} lançamento{teste.length > 1 ? "s" : ""} de contato de teste
+            ocultado{teste.length > 1 ? "s" : ""} deste relatório
+            (efeito {testeEfeito >= 0 ? "+" : "−"}{fmtBRL(Math.abs(testeEfeito))}).
+            Continuam somados nos totais do fechamento, que foram gravados no dia da apuração.
           </p>
         )}
 
