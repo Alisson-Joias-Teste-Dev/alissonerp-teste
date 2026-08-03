@@ -20,6 +20,7 @@ import { estornarMP, criarContaPagarReembolso } from "@/lib/reembolso";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { avaliarPrazoDevolucao } from "@/lib/prazo-devolucao";
 import { resolverAprovadores } from "@/lib/aprovacoes";
+import { debitarComissaoDevolucao } from "@/lib/comissao-lancamentos";
 
 /**
  * Sinaliza um status HTTP específico a partir desta lib (que retorna objeto, não
@@ -678,10 +679,33 @@ export async function concluirDevolucao(
     }
   }
 
+  // 1b. DEBITAR A COMISSÃO da consultora que vendeu (migration 363)
+  //
+  // O QUÊ: uma linha negativa no extrato de comissão dela, no valor da comissão
+  // dos itens que acabaram de voltar ao estoque, proporcional ao que o cliente
+  // já pagou da venda.
+  //
+  // O PORQUÊ: a peça saiu do "vendido", então a comissão dela sai junto. Roda
+  // AQUI, logo depois da entrada no estoque, porque o gatilho definido pelo
+  // Jonathan (22/07/2026) é a confirmação física da peça — descarte e garantia
+  // não passam por este ponto e, por construção, não mexem em comissão.
+  //
+  // O IMPACTO: sem este débito, o crédito do vale (vale-troca.ts) paga comissão
+  // pela segunda vez sobre o mesmo dinheiro. Os dois são uma coisa só.
+  const debitoComissao = await debitarComissaoDevolucao(id, userId);
+  if (debitoComissao && debitoComissao.valor_debito > 0) {
+    acoes.push(
+      `comissao debitada R$ ${debitoComissao.valor_debito.toFixed(2)} da consultora ${debitoComissao.consultora_id}`,
+    );
+  }
+
   // 2. Gerar compensacao
   if (valorCompensacao > 0) {
     if (dev.tipo_compensacao === "vale_troca") {
-      const vale = await gerarValeTroca(id, dev.cliente_id, valorCompensacao, userId);
+      // comissionaNoUso=true: o vale nasce de uma devolução que ACABOU de ser
+      // debitada acima. Se o débito deu R$0, é porque aquele dinheiro nunca
+      // comissionou. Nos dois casos usar o vale pode pagar comissão sem dobrar.
+      const vale = await gerarValeTroca(id, dev.cliente_id, valorCompensacao, userId, null, undefined, true);
       result.vale_troca_id = vale.id;
       result.vale_troca_numero = vale.numero;
       acoes.push(`vale-troca ${vale.numero} gerado (R$ ${valorCompensacao.toFixed(2)})`);

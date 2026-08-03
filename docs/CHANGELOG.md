@@ -2,6 +2,42 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## feat(comissao): comissão vira EXTRATO — débito de devolução + crédito de vale (migration 363)
+
+**O quê:** a comissão passou a funcionar como extrato bancário. Cada fato vira uma linha datada
+no mês em que aconteceu e o saldo rola pro mês seguinte, podendo ficar negativo. Três coisas que
+não existiam passaram a existir:
+
+1. **Devolução debita a comissão.** Quando a peça é confirmada de volta no estoque, sai da
+   consultora a comissão daquele item, proporcional ao que o cliente já tinha pagado da venda.
+   Descarte e garantia não mexem em nada.
+2. **Vale-troca usado paga comissão.** O `comissionavel=false` cravado no pagamento de Vale-Troca
+   virou espelho de `vale_troca.comissiona_no_uso`. Quem recebe é quem fez a venda nova — o
+   crédito é da cliente, não da consultora.
+3. **Tela de extrato** (aba Comissões → Extrato): lançamentos por mês, saldo rolando e bloco
+   "comissões a receber" (crediário não pago) FORA do saldo, separando a vencer de atrasado.
+
+**Por quê:** a comissão ficava presa na venda desfeita e a venda que de fato ficou de pé não
+pagava ninguém. Regra-mãe: **cada real recebido gera comissão exatamente uma vez**.
+
+**Banco (migration 363):** `vale_troca.comissiona_no_uso`; `fechamento_comissao_itens.fechamento_id`
+passa a aceitar nulo (o lançamento nasce no dia do fato e o fechamento adota depois);
+`fechamento_comissao_itens.devolucao_id` + índice único anti-duplicidade; índices do extrato.
+
+**Acerto de julho/2026 em prod** (log 331): −R$640,60 de débito em 15 devoluções
+(Debora 423,58 / Loja Alisson 127,20 / Germana 85,82 / Cristiane 4,00), 14 vales marcados,
+11 pagamentos de vale liberados (R$22.755,50), fechamento parcial da Germana substituído.
+
+**⚠️ Armadilha achada:** no PostgreSQL `LEAST` **ignora NULL** — `LEAST(NULL,1)` = 1. Um
+`COALESCE(LEAST(recebido/total,1),0)` lê venda sem pagamento como 100% recebida. Inflava o
+débito de R$640,60 para R$666,96. Usar `CASE WHEN total > 0 THEN ... ELSE 0 END`.
+
+**Não toca** a dashboard comercial nem a meta (usam `forma` e `valor_vale_troca`).
+A tela `dashboard-comercial/analise-comissoes` passa a divergir do fechamento — alinhar é
+tarefa separada. Regras completas em `docs/regras-negocio/comercial.md §2.1`.
+
+---
+
 ## fix(comissao): aprovação de crédito não zera mais a comissão da consultora (vX.Y.Z a definir no merge)
 
 **O quê:** a aprovação de crédito (gerente ou diretor) deixou de mexer na comissão da

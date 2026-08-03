@@ -5,6 +5,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
 import { logAudit } from "@/lib/audit";
+import { adotarLancamentosSoltos } from "@/lib/comissao-lancamentos";
 
 // GET /api/financeiro/comissoes/fechamentos
 // POST /api/financeiro/comissoes/fechamentos
@@ -131,7 +132,21 @@ export async function POST(req: NextRequest) {
         )
     `;
 
-    if (elegiveis.length === 0) {
+    // Lançamentos SOLTOS do extrato (migration 363): débitos de devolução que
+    // nasceram no dia do fato, sem fechamento. Contam para o mês mesmo quando não
+    // houve nenhum pagamento novo — um mês só de devolução tem que poder fechar
+    // (com saldo negativo, que rola). Por isso o guard olha os dois.
+    const [{ qtd: qtdSoltos }] = await sql<Array<{ qtd: string }>>`
+      SELECT COUNT(*)::text AS qtd
+      FROM alissonerp.fechamento_comissao_itens
+      WHERE fechamento_id IS NULL
+        AND consultora_id = ${consultoraId}
+        AND status NOT IN ('estornado', 'cancelado')
+        AND data_recebimento >= ${periodoInicio}::date
+        AND data_recebimento <= ${periodoFim}::date
+    `;
+
+    if (elegiveis.length === 0 && Number(qtdSoltos) === 0) {
       return NextResponse.json({ error: "Nenhum pagamento elegível no período para esta consultora" }, { status: 400 });
     }
 
@@ -166,15 +181,42 @@ export async function POST(req: NextRequest) {
       `;
     }
 
+    // O fechamento ADOTA os lançamentos soltos do período (migration 363) e soma
+    // ao total. É o que traz o débito da devolução para dentro do pagamento do
+    // mês. Sem isso o desconto ficaria eternamente solto e a empresa pagaria a mais.
+    const adotados = await adotarLancamentosSoltos(
+      fechamento.id, consultoraId, periodoInicio, periodoFim,
+    );
+    const valorFinal = Math.round((valorTotal + adotados.valor) * 100) / 100;
+
+    if (adotados.qtd > 0) {
+      await sql`
+        UPDATE alissonerp.fechamentos_comissao
+        SET valor_total = ${valorFinal}, updated_at = now()
+        WHERE id = ${fechamento.id}
+      `;
+    }
+
     await logAudit(sql, {
       tabela: "fechamentos_comissao",
       operacao: "INSERT",
       registro_id: fechamento.id,
       usuario_id: user.id,
-      dados_depois: { consultora_id: consultoraId, valor_total: valorTotal, qtd_itens: elegiveis.length },
+      dados_depois: {
+        consultora_id: consultoraId,
+        valor_total: valorFinal,
+        qtd_itens: elegiveis.length + adotados.qtd,
+        lancamentos_adotados: adotados.qtd,
+        valor_adotado: adotados.valor,
+      },
     });
 
-    return NextResponse.json({ id: fechamento.id, valor_total: valorTotal, qtd_itens: elegiveis.length }, { status: 201 });
+    return NextResponse.json({
+      id: fechamento.id,
+      valor_total: valorFinal,
+      qtd_itens: elegiveis.length + adotados.qtd,
+      lancamentos_adotados: adotados.qtd,
+    }, { status: 201 });
   } catch (err) {
     return internalError("[POST /api/financeiro/comissoes/fechamentos]", err);
   }

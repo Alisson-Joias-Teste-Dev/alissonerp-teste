@@ -272,12 +272,25 @@ export async function POST(
         if (restante <= 0.01) throw new Error("VALE_VENDA_PAGA");
         const valorUsarVale = Math.min(body.valor, Math.round(restante * 100) / 100);
         const aplic = await aplicarValeTroca(valeNum, vendaId, valorUsarVale, user.id, tx);
+        // comissionavel: ANTES era `false` cravado — vale-troca NUNCA comissionava.
+        //
+        // O PORQUÊ da mudança (migration 363, regra do Jonathan em 03/08/2026):
+        // o `false` fixo existia porque a devolução não debitava a comissão da
+        // venda desfeita; comissionar o vale pagaria em dobro. Agora a devolução
+        // debita (ver src/lib/comissao-lancamentos.ts), então o vale nascido dela
+        // PODE comissionar — e quem recebe é quem fez a venda nova, porque o
+        // crédito é da cliente, não da consultora.
+        //
+        // O IMPACTO: voltar para `false` fixo faz a venda paga com vale não pagar
+        // ninguém, mesmo com o débito já lançado — a consultora perde. Trocar por
+        // `true` fixo paga em dobro nos vales antigos, que nunca foram debitados.
+        // A verdade é o `comissiona_no_uso` do vale, e só ele.
         const [novoPg] = await tx`
           INSERT INTO alissonerp.pagamentos_venda (
             venda_id, forma, gateway, valor, parcelas, status, vale_troca_id, data_confirmacao, comissionavel
           ) VALUES (
             ${vendaId}, 'Vale-Troca', NULL, ${aplic.valor_aplicado}, 1,
-            'confirmado', ${aplic.vale_aplicado_id}, now(), false
+            'confirmado', ${aplic.vale_aplicado_id}, now(), ${aplic.comissiona_no_uso}
           )
           RETURNING id
         `;
