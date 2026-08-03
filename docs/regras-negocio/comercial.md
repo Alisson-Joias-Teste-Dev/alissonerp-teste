@@ -74,6 +74,17 @@ A comissão deixou de ser só um retrato por fechamento e passou a funcionar com
 
 **Crediário no extrato:** parcela não paga aparece em "Comissões a receber", com data prevista e separando **a vencer** de **atrasado** — mas **FORA do saldo**. O que firma a comissão é o pagamento: antecipou, entra antes; atrasou, entra depois.
 
+**As DUAS telas** (`src/lib/comissao-extrato.ts` + `api/financeiro/comissoes/extrato[/[consultoraId]]`), no formato do extrato do Tiny/Olist:
+
+- **Tela 1 — lista:** uma linha por vendedora no mês. Colunas: `Saldo ant.` · `(+) Comis. mês` · `(−) Déb. devoluções` · `(+) Out. créditos` · `(−) Out. débitos` · `(−) Pgtos` · `Comis. pend.` · `(=) Saldo`.
+- **Tela 2 — detalhe:** as linhas de cada balde (comissões do mês com valor pago/base/comissão, débitos de devolução, outros créditos, outros débitos, pagamentos) + o Resumo que fecha o saldo. Clicar na vendedora abre.
+
+**Os baldes:** vale-troca usado e ajuste positivo caem em **outros créditos** (mesmo lugar do Tiny); ajuste negativo em outros débitos; item `nao_comissionavel` fica visível em comissões do mês com R$ 0.
+
+⚠️ **O saldo anterior só baixa quando o fechamento é marcado `pago`.** Em 03/08/2026 **nenhum** fechamento tinha status `pago` (6 em rascunho de mai/jun, R$23.980,57) — e ainda havia pagamentos anteriores a julho que nunca entraram em fechamento nenhum (Germana 1.881,78 · Cristiane 1.279,21 · Debora 892,15). Resultado: o saldo anterior de julho abre em Germana 12.232,22 · Debora 8.987,59 · Cristiane 6.614,73 · Loja 0,04. Até alguém marcar os fechamentos pagos, a coluna Saldo mostra como devido o que já foi pago por fora.
+
+⚠️ **O extrato agrupa por DATA, não pela competência do fechamento.** Um `ajuste_positivo` de R$199,17 (venda 15323) está dentro do fechamento de **junho** mas tem `data_recebimento` 08/07 — logo aparece em **julho** na tela. É o comportamento certo para um livro-razão, mas explica divergência contra o fechamento.
+
 **Fechamento vira o PAGAMENTO, não o cálculo.** Ao gerar o fechamento do mês, ele **adota** os lançamentos soltos do período (`adotarLancamentosSoltos`) e soma ao total. Um mês só de devolução pode fechar com saldo negativo.
 
 ⚠️ **Armadilha do PostgreSQL: `LEAST` IGNORA NULL** — `LEAST(NULL, 1)` devolve **1**, não NULL. Um `COALESCE(LEAST(recebido/total, 1), 0)` lê venda **sem pagamento nenhum** como "100% recebida" e debita a comissão cheia de quem nunca recebeu nada. Usar `CASE WHEN total > 0 THEN LEAST(...) ELSE 0 END`. Achado no ensaio do acerto de julho (inflava o débito de R$640,60 para R$666,96).
