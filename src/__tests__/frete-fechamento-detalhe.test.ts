@@ -107,13 +107,19 @@ function criarDbMock(opts: {
   aprovacao?: Record<string, unknown> | null;
   /** Valor cru da config `contatos_teste` (CSV). undefined = chave não existe. */
   contatosTeste?: string;
+  /** Valor cru da config `entregas_teste` (CSV). undefined = chave não existe. */
+  entregasTeste?: string;
 }) {
   const calls: unknown[][] = [];
   const fn = vi.fn((...args: unknown[]) => {
     calls.push(args);
     const texto = textoDaChamada(args);
     if (texto.includes("FROM alissonerp.configuracoes_sistema")) {
-      return Promise.resolve(opts.contatosTeste === undefined ? [] : [{ valor: opts.contatosTeste }]);
+      // As duas chaves saem da MESMA query (lerConfigListaDeIds) — o que muda é
+      // o parâmetro interpolado, então o mock responde por ele.
+      const chave = texto.includes("entregas_teste") ? "entregas_teste" : "contatos_teste";
+      const valor = chave === "entregas_teste" ? opts.entregasTeste : opts.contatosTeste;
+      return Promise.resolve(valor === undefined ? [] : [{ valor }]);
     }
     if (texto.includes("FROM alissonerp.saldo_frete_gratis")) {
       return Promise.resolve(opts.lancamentos ?? []);
@@ -270,6 +276,33 @@ describe("obterFechamentoFreteDetalhe", () => {
       textoDaChamada(c).includes("FROM alissonerp.saldo_frete_gratis"))!;
     expect(textoDaChamada(queryLancamentos)).toContain("= ANY (");
     expect(queryLancamentos.slice(1)).toContainEqual([224, 394408, 4549]);
+  });
+
+  it("entrega de teste SEM cliente (frete avulso) também é marcada — via `entregas_teste`", async () => {
+    // POR QUE ESTE TESTE: frete avulso não tem venda nem contato, então
+    // `contatos_teste` NUNCA alcança ele (caso real: entrega 47,
+    // ENT-20260610-00009, "teste de frete avulso"). Se alguém remover o OR por
+    // entrega achando que é redundante, essa corrida volta pro relatório.
+    const { fn, calls } = criarDbMock({
+      contatosTeste: "224",
+      entregasTeste: "47",
+      lancamentos: [lancamentoRow({
+        id: 16, entrega_id: 47, codigo_entrega: "ENT-20260610-00009",
+        venda_id: null, numero_venda: null, cliente_nome: null,
+        is_avulso: true, descricao_avulso: "teste de frete avulso",
+        is_teste: true,
+      })],
+    });
+
+    const detalhe = await obterFechamentoFreteDetalhe(fn, 1);
+    expect(detalhe!.lancamentos[0].isTeste).toBe(true);
+
+    // As duas listas chegam na query, cada uma no seu parâmetro.
+    const queryLancamentos = calls.find((c) =>
+      textoDaChamada(c).includes("FROM alissonerp.saldo_frete_gratis"))!;
+    expect(textoDaChamada(queryLancamentos)).toContain("s.entrega_id = ANY (");
+    expect(queryLancamentos.slice(1)).toContainEqual([224]);
+    expect(queryLancamentos.slice(1)).toContainEqual([47]);
   });
 
   it("config `contatos_teste` ausente: ninguém é marcado como teste (array vazio, sem quebrar)", async () => {
