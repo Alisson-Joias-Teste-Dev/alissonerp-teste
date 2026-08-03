@@ -54,12 +54,21 @@ function badgeStatusFechamento(status: FechamentoFreteListItem["status"]) {
   }
 }
 
-/** "julho de 2026" a partir de "YYYY-MM-DD" (mes_referencia é sempre dia 1). */
+/**
+ * "Julho de 2026" a partir de "YYYY-MM-DD" (mes_referencia é sempre dia 1 e,
+ * desde 03/08, é a COMPETÊNCIA — o mês fechado, não o mês em que a rotina
+ * rodou; ver docs/regras-negocio/entregas.md §10.8).
+ *
+ * ⚠️ Capitaliza aqui, na mão, só a 1ª letra: o CSS `textTransform:
+ * "capitalize"` que estava nesta coluna capitalizava CADA palavra e exibia
+ * "Agosto De 2026" (bug reportado pelo Jonathan em 03/08, print da tela).
+ */
 function fmtMesReferencia(mesReferencia: string): string {
   const [y, m] = mesReferencia.slice(0, 10).split("-");
   if (!y || !m) return mesReferencia || "—";
   const d = new Date(Number(y), Number(m) - 1, 1);
-  return d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  const label = d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 interface FechamentosFretePainelProps {
@@ -102,7 +111,7 @@ export default function FechamentosFretePainel({
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: C.cremeBg, textAlign: "left" }}>
-                <th style={{ padding: "8px 10px" }}>Mês</th>
+                <th style={{ padding: "8px 10px" }}>Competência</th>
                 <th style={{ padding: "8px 10px" }}>Gerente</th>
                 <th style={{ padding: "8px 10px", textAlign: "right" }}>Verba creditada</th>
                 <th style={{ padding: "8px 10px", textAlign: "right" }}>Créditos</th>
@@ -118,7 +127,7 @@ export default function FechamentosFretePainel({
                 const saldoCor = f.saldoFinal >= 0 ? C.verde : C.vermelho;
                 return (
                   <tr key={f.id} style={{ borderTop: `1px solid ${C.cremeBorder}` }}>
-                    <td style={{ padding: "8px 10px", fontWeight: 600, textTransform: "capitalize" }}>
+                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>
                       {/* Abre o detalhe (03/08/2026): página própria, não drawer
                           — decisão do Jonathan, pra o link poder ser mandado
                           pra gerente/chefe. Ver .../fechamentos/[id]/page.tsx. */}

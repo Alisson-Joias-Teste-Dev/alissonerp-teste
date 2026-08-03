@@ -348,6 +348,32 @@ Pedido do Jonathan em 03/08, logo depois do PRIMEIRO fechamento real ter rodado:
 - Testes: `src/__tests__/frete-fechamento-detalhe.test.ts` — o teste que importa é o da separação `doFechamento` (garante que os totais continuam vindo do cabeçalho e que a soma ingênua NÃO bate com eles).
 - **Sem rota de API**: a página é SSR pura, não tem ação nem refresh client-side — não precisa de `GET` irmão (diferente do §10.6, que criou um por simetria).
 
+### 10.8. Revisão da regra da verba (03/08) — competência + faturamento LÍQUIDO
+
+Depois de ver o primeiro fechamento real na tela, o Jonathan corrigiu **duas premissas** da regra original (§10.4). Elas mudam VALOR e RÓTULO, então valem para todos os fechamentos daqui pra frente e o fechamento #1 foi corrigido em produção.
+
+**1. A base é o faturamento LÍQUIDO, não o bruto** — *"o saldo que é gerado ele é do faturamento líquido e não do bruto"*. Líquido = bruto − vale-troca, EXATAMENTE a conta que a dashboard comercial já faz para o `alcancado_periodo` (`vendas-dashboard/route.ts`: `totalLiquido = totalBruto - valorVale`). Não se inventa uma segunda definição de "líquido" aqui — se a verba parar de bater com a tela que ele confia, o número perde a autoridade. Julho/2026: bruto R$ 751.010,92 − vale-troca R$ 19.306,00 = **R$ 731.704,92** → verba **R$ 731,70** (era R$ 751,01).
+
+**2. `mes_referencia` é a COMPETÊNCIA, não o mês de execução** — *"eu preciso que seja o mês da competência"* e *"o cálculo precisa ser do mês da competência e não do próximo"*. A rotina roda no dia 01 e fecha o mês que acabou: rodando em agosto, o fechamento é de **julho** (`2026-07-01`), calculado sobre o faturamento de **julho**. Antes, o mesmo fechamento se chamava "agosto" e usava julho — o rótulo brigava com o cálculo. O período consultado não mudou; o nome sim.
+
+> 🔴 **A armadilha da virada (vale para qualquer mudança futura em `mes_referencia`)**: o fechamento #1 já estava gravado como `2026-08-01`. Mudar só o código faria a rotina do dia seguinte gravar `2026-07-01`, **não encontrar conflito** no `UNIQUE (gerente_id, mes_referencia)` e **creditar a verba de novo**. Por isso a correção da linha em produção e o deploy do código são **uma coisa só** — e, no intervalo entre os dois, o job 23 do pg_cron ficou **desligado** (`cron.alter_job(23, active := false)`, log 346). **Religar depois do deploy**: `SELECT cron.alter_job(23, active := true);`
+>
+> Correção aplicada em prod (log 345): `fechamentos_frete` #1 → `mes_referencia` 2026-07-01, `faturamento_base` 731.704,92, `verba_creditada` 731,70; lançamento de débito de R$ 19,31 (a diferença bruto→líquido, `fechamento_id = 1`); descrições dos lançamentos 81/82 realinhadas à competência. Saldo da Germana: R$ 751,01 → **R$ 731,70**.
+
+**3. Relatório: quem pagou o frete** (§10.7, mesma tela). Três totais no topo — frete pago ao motoboy, quanto o cliente pagou, quanto a loja bancou (a diferença, que é o que sai da verba).
+
+- **Só corrida CONFIRMADA conta como "pago"**. No fechamento #1, das 47 corridas com lançamento: 30 confirmadas (R$ 835,00 motoboy / R$ 860,00 cliente), 9 **pendentes** (R$ 210,00) e 8 **canceladas** (R$ 140,00). Somar as 47 daria R$ 1.185,00 de "frete pago" — dinheiro que o motoboy não recebeu. As 17 que não rodaram aparecem numa **nota** abaixo dos cards (não são escondidas) e seus lançamentos continuam na lista, porque mexeram no saldo.
+- **Dedup por entrega**: uma mesma corrida pode ter lançamento + estorno; contar as duas dobraria o frete. Conta só a ocorrência mais recente de cada `entrega_id`.
+- **Ajuste manual não entra** nesses totais: não tem corrida por trás, somá-lo inventaria frete que ninguém pagou.
+- **Lançamento de efeito R$ 0,00 sai da lista** — *"preciso que tenha apenas as corridas que geraram valor"*. São 10 no fechamento #1 (cliente pagou exatamente o custo, ou cancelada sem valor). O contador de ocultos fica visível no título.
+
+**4. Bug de exibição corrigido**: `textTransform: "capitalize"` no CSS capitaliza CADA palavra e exibia **"Agosto De 2026"**. A capitalização virou função (`capitalizar()`, só a 1ª letra). Não voltar a usar `capitalize` em texto de mês.
+
+#### 10.8.1. Referência (§10.8)
+
+- Lib: `src/lib/frete-verba.ts` (`calcularFaturamentoLiquidoMes` nova; `calcularFaturamentoMes` (bruto) mantida como contraprova dos dois números; `calcularVerbaFreteGratis` agora recebe a COMPETÊNCIA e usa o próprio mês), `src/lib/frete-fechamento.ts` (`mes_referencia` = mês anterior ao de execução).
+- Testes ANTI-VOLTA: `frete-fechamento-mensal.test.ts` (bloco "competência" — 3 testes: fecha julho rodando em agosto, a verba recebe julho, e a virada de ano jan/2027 → dez/2026) e `frete-verba-equivalente-dashboard.test.ts` (bloco "líquido" — 3 testes: a subtração de `valor_vale_troca` existe, casa com a da dashboard, e a verba chama a função líquida). **Verificados por mutação**: revertendo as duas regras de propósito, 4 desses testes quebram.
+
 ---
 
 ## 11. MULTIFOTO na confirmação de entrega (migration 357, 21/07)

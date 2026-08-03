@@ -13,9 +13,11 @@
  *   3. ZERA o saldo com um CONTRA-LANÇAMENTO (técnica contábil — a soma é a de
  *      SEMPRE, não filtrada por mês): positivo → débito de mesmo valor;
  *      negativo → crédito de mesmo valor.
- *   4. Credita a VERBA NOVA (0,1% do faturamento do mês anterior,
- *      calcularVerbaFreteGratis) — entra SEMPRE, independente do resultado
- *      do fechamento.
+ *   4. Credita a VERBA NOVA (0,1% do faturamento LÍQUIDO da COMPETÊNCIA — o
+ *      mês que está sendo fechado; calcularVerbaFreteGratis) — entra SEMPRE,
+ *      independente do resultado do fechamento. ⚠️ Base revisada em
+ *      03/08/2026: era o BRUTO, e o fechamento se chamava pelo mês em que a
+ *      rotina rodava; virou LÍQUIDO e COMPETÊNCIA (§10.8).
  *   5. Se o saldo fechou NEGATIVO: cria tarefa de aprovação (evento
  *      'fechamento_frete_negativo', src/lib/aprovacoes/catalogo.ts) — a
  *      tarefa NÃO trava o ciclo, os passos 1-4 já aconteceram.
@@ -126,7 +128,20 @@ export async function fecharMesFreteGratisAutomatico(
   hoje: Date,
   userId: string,
 ): Promise<ResultadoFechamentoFrete> {
-  const mesReferenciaDate = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  // 🔴 COMPETÊNCIA (mudança de 03/08/2026, decisão do Jonathan: *"eu preciso
+  // que seja o mês da competência"*): `mes_referencia` é o mês que está sendo
+  // FECHADO — o ANTERIOR ao de `hoje` —, não o mês em que a rotina rodou.
+  // Rodando em 03/08, o fechamento é de JULHO (`2026-07-01`), e a verba sai do
+  // faturamento líquido de julho (calcularVerbaFreteGratis recebe a própria
+  // competência, ver src/lib/frete-verba.ts).
+  //
+  // IMPACTO DA VIRADA (só valeu uma vez, no deploy): o fechamento #1 já estava
+  // gravado com `2026-08-01` pela regra antiga. Trocar isto no código SEM
+  // corrigir aquela linha faria a rotina do dia seguinte não achar conflito no
+  // `UNIQUE (gerente_id, mes_referencia)`, inserir uma linha nova de julho e
+  // CREDITAR A VERBA DE NOVO. Por isso a correção da linha #1 (2026-08-01 →
+  // 2026-07-01) subiu junto com este código, não depois.
+  const mesReferenciaDate = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
   const mesReferenciaStr = fmtDate(mesReferenciaDate);
   const mesLabel = formatarMesReferencia(mesReferenciaDate);
 
@@ -223,7 +238,7 @@ export async function fecharMesFreteGratisAutomatico(
           (gerente_id, tipo, valor, saldo_antes, saldo_depois, descricao, fechamento_id, created_by)
         VALUES (
           ${gerenteId}::uuid, 'credito', ${verbaArredondada}, 0, ${verbaArredondada},
-          ${`Verba de frete grátis — ${mesLabel} (${percentual}% do faturamento do mês anterior)`},
+          ${`Verba de frete grátis — competência ${mesLabel} (${percentual}% do faturamento líquido)`},
           ${fechamentoId}, ${userId}::uuid
         )
       `;
