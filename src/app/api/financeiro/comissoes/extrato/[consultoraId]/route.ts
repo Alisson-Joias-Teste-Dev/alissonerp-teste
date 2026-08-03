@@ -46,7 +46,7 @@ export async function GET(
 
   try {
     const [linhas, saldos, pendentes, parcelas, cons, pagoRows] = await Promise.all([
-      linhasExtrato(id, de, ate),
+      linhasExtrato(id, de, ate, true),
       saldoAnterior(id, de),
       comissoesPendentes(id),
       pendentesDetalhe(id),

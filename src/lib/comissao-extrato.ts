@@ -48,8 +48,87 @@ export interface LinhaExtrato {
   venda_id: number | null;
   valor_pago: number | null;
   base_comissao: number | null;
+  /** Itens da venda — o detalhe que abre ao clicar na linha. `null` quando a
+   *  linha não tem venda (pagamento) ou quando o chamador pediu sem itens. */
+  itens: ItemDaVenda[] | null;
   valor: number;
   previsto: boolean;
+}
+
+export interface ItemDaVenda {
+  sku: string | null;
+  nome_produto: string;
+  quantidade: number;
+  /** Desconto REAL do item, em %: (preço cheio − preço unitário) ÷ preço cheio,
+   *  usando o `promocao_itens.preco_original` da campanha vigente na data da venda
+   *  quando o item está em promoção. NÃO é o `itens_venda_erp.pct_desconto`
+   *  gravado — é ele que mente no item promocional: mede contra o preço já
+   *  promocional, dá 0% e o sistema paga a faixa cheia. Negativo (vendido acima
+   *  da lista) vira 0. */
+  desconto: number;
+  pct_comissao: number;
+  valor_comissao: number;
+}
+
+/**
+ * Itens de cada venda, com o desconto real calculado.
+ *
+ * O PORQUÊ (Jonathan, 03/08/2026): desconto e comissão vivem no ITEM, não na
+ * venda. Em julho/2026, 66% das vendas com mais de um item tinham percentuais
+ * DIFERENTES entre os itens (pedido 15803 = um item a 4,00% e outro a 0,50%).
+ * Qualquer número por venda — média, faixa — ou mente ou esconde. O extrato fica
+ * limpo com um valor por coluna e a verdade item a item abre no clique.
+ *
+ * ⚠️ O join com a promoção é `LEFT JOIN LATERAL ... MAX(preco_original)`, NÃO um
+ * join direto em `promocao_itens`: um produto pode estar em DUAS campanhas
+ * sobrepostas na mesma data (aconteceu com o AJ4895 em 31/07/2026) e o join
+ * direto DUPLICA o item — o detalhe mostraria a mesma peça duas vezes.
+ */
+async function itensPorVenda(vendaIds: number[]): Promise<Map<number, ItemDaVenda[]>> {
+  const mapa = new Map<number, ItemDaVenda[]>();
+  if (vendaIds.length === 0) return mapa;
+
+  const rows = await sql<Array<{
+    venda_id: number; sku: string | null; nome_produto: string;
+    quantidade: string; desconto: string; pct_comissao: string; valor_comissao: string;
+  }>>`
+    SELECT iv.venda_id, iv.sku, iv.nome_produto,
+           iv.quantidade::text, d.desconto::text,
+           iv.pct_comissao::text, iv.valor_comissao::text
+    FROM alissonerp.itens_venda_erp iv
+    JOIN alissonerp.vendas_erp v ON v.id = iv.venda_id
+    LEFT JOIN LATERAL (
+      SELECT MAX(pi.preco_original) AS preco_original
+      FROM alissonerp.promocao_itens pi
+      JOIN alissonerp.promocoes_produtos pp ON pp.id = pi.promocao_id
+      WHERE pi.produto_id = iv.produto_id
+        AND v.data_venda BETWEEN pp.data_inicio AND pp.data_fim
+    ) pr ON true
+    CROSS JOIN LATERAL (
+      SELECT CASE WHEN GREATEST(COALESCE(pr.preco_original, iv.preco_lista), iv.preco_lista) > 0
+                  THEN GREATEST(ROUND((
+                         (GREATEST(COALESCE(pr.preco_original, iv.preco_lista), iv.preco_lista) - iv.preco_unitario)
+                         / GREATEST(COALESCE(pr.preco_original, iv.preco_lista), iv.preco_lista)
+                       ) * 100, 2), 0)
+                  ELSE 0 END AS desconto
+    ) d
+    WHERE iv.venda_id = ANY(${vendaIds})
+    ORDER BY iv.venda_id, iv.id
+  `;
+
+  for (const r of rows) {
+    const vid = Number(r.venda_id);
+    if (!mapa.has(vid)) mapa.set(vid, []);
+    mapa.get(vid)!.push({
+      sku: r.sku,
+      nome_produto: r.nome_produto,
+      quantidade: Number(r.quantidade),
+      desconto: Number(r.desconto),
+      pct_comissao: Number(r.pct_comissao),
+      valor_comissao: Number(r.valor_comissao),
+    });
+  }
+  return mapa;
 }
 
 /** Classifica um item gravado no balde certo do extrato. */
@@ -68,6 +147,10 @@ export async function linhasExtrato(
   consultoraId: number | null,
   de: string,
   ate: string,
+  /** Traz os itens de cada venda (o detalhe que abre na tela 2). A tela 1 só
+   *  soma os baldes e joga as linhas fora — carregar item lá é consulta perdida
+   *  sobre o mês INTEIRO de todas as consultoras. Por isso o padrão é false. */
+  comItens = false,
 ): Promise<LinhaExtrato[]> {
   const cid = consultoraId ?? null;
 
@@ -180,6 +263,7 @@ export async function linhasExtrato(
       venda_id: g.venda_id,
       valor_pago: g.valor_pagamento ? Number(g.valor_pagamento) : null,
       base_comissao: g.valor_venda ? Number(g.valor_venda) : null,
+      itens: null,
       valor,
       previsto: false,
     });
@@ -199,6 +283,7 @@ export async function linhasExtrato(
       venda_id: p.venda_id,
       valor_pago: Number(p.valor_pagamento),
       base_comissao: Number(p.total_venda),
+      itens: null,
       valor: Number(p.valor),
       previsto: true,
     });
@@ -221,9 +306,22 @@ export async function linhasExtrato(
       venda_id: null,
       valor_pago: null,
       base_comissao: null,
+      itens: null,
       valor: -Number(b.valor),
       previsto: false,
     });
+  }
+
+  // Itens: UMA consulta pro conjunto todo de vendas do mês, não uma por linha —
+  // o mesmo pedido costuma aparecer em vários pagamentos e todos apontam pro
+  // mesmo array (mesma referência, sem cópia).
+  if (comItens) {
+    const itens = await itensPorVenda([...new Set(
+      linhas.map(l => l.venda_id).filter((id): id is number => id != null),
+    )]);
+    for (const l of linhas) {
+      if (l.venda_id != null) l.itens = itens.get(l.venda_id) ?? null;
+    }
   }
 
   return linhas.sort((a, b) => a.data.localeCompare(b.data));
