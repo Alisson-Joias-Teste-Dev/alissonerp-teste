@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
+import { resolverEscopoComissao, resolverConsultoraAlvo } from "@/lib/comissao-permissao";
 import {
   linhasExtrato, saldoAnterior, comissoesPendentes, pendentesDetalhe, somaBalde,
 } from "@/lib/comissao-extrato";
@@ -18,8 +18,6 @@ import {
  * que permite conferir pedido a pedido. Ver comercial.md §2.1.
  */
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
-
 export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ consultoraId: string }> },
@@ -28,16 +26,15 @@ export async function GET(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const [perfil] = await sql<Array<{ role: string }>>`
-    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid
-  `;
-  if (!perfil || (!isFullAccess(perfil.role) && !ROLES_FINANCEIRO.includes(perfil.role))) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
-  }
+  const escopo = await resolverEscopoComissao(user.id);
+  if (!escopo) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
   const { consultoraId } = await ctx.params;
-  const id = Number(consultoraId);
   const competencia = req.nextUrl.searchParams.get("competencia");
+
+  // O id da URL é um PEDIDO, não uma ordem: quem não vê todas recebe sempre o
+  // próprio id. Trocar o número na barra não abre a comissão da colega.
+  const id = resolverConsultoraAlvo(escopo, Number(consultoraId) || null);
 
   if (!id || !competencia || !/^\d{4}-\d{2}$/.test(competencia)) {
     return NextResponse.json({ error: "consultoraId e competencia (AAAA-MM) obrigatórios" }, { status: 400 });
@@ -48,12 +45,19 @@ export async function GET(
   const ate = new Date(Date.UTC(ano, mes, 0)).toISOString().slice(0, 10);
 
   try {
-    const [linhas, saldos, pendentes, parcelas, cons] = await Promise.all([
+    const [linhas, saldos, pendentes, parcelas, cons, pagoRows] = await Promise.all([
       linhasExtrato(id, de, ate),
       saldoAnterior(id, de),
       comissoesPendentes(id),
       pendentesDetalhe(id),
       sql<Array<{ nome: string }>>`SELECT nome FROM public.vendedores WHERE id_vendedor = ${id}`,
+      // A competência já foi paga? É o que decide se o menu oferece "realizar
+      // pagamento" ou "estornar" — e o que impede pagar duas vezes o mesmo mês.
+      sql<Array<{ paid_at: string | null; valor_total: string }>>`
+        SELECT paid_at::date::text, valor_total::text FROM alissonerp.fechamentos_comissao
+        WHERE consultora_id = ${id} AND competencia = ${competencia} AND status = 'pago'
+        LIMIT 1
+      `,
     ]);
 
     const ant = saldos.get(id) ?? 0;
@@ -69,6 +73,14 @@ export async function GET(
     return NextResponse.json({
       consultora: { id, nome: cons[0]?.nome ?? `#${id}` },
       competencia, de, ate,
+      // A tela usa isto para mostrar ou não o menu "mais ações". É espelho do
+      // que o servidor já decidiu — as rotas de ação checam de novo por conta
+      // própria, esconder botão não é permissão.
+      permissoes: { podePagar: escopo.podePagar, podeVerTodas: escopo.podeVerTodas },
+      pago: pagoRows.length > 0,
+      pagamento: pagoRows[0]
+        ? { data: pagoRows[0].paid_at, valor: Number(pagoRows[0].valor_total) }
+        : null,
       saldo_anterior: ant,
       baldes: {
         comissao: balde("comissao"),

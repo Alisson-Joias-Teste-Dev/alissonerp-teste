@@ -3319,18 +3319,54 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOur
  * O que firma a comissão é o pagamento — somar ali paga sobre dinheiro que não
  * entrou. Ver docs/regras-negocio/comercial.md §2.1.
  */
-function ExtratoComissao() {
+export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } = {}) {
   const hoje = new Date();
   const [competencia, setCompetencia] = useState(
     `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`,
   );
   const [lista, setLista] = useState<any[] | null>(null);
   const [detalhe, setDetalhe] = useState<any | null>(null);
-  const [abertaId, setAbertaId] = useState<number | null>(null);
+  // soConsultoraId: modo "minha comissão" — abre direto no extrato da pessoa,
+  // sem lista de colegas e sem botão de voltar. Quem decide o que ela pode ver
+  // é o servidor (comissao-permissao.ts); isto aqui é só a navegação.
+  const [abertaId, setAbertaId] = useState<number | null>(soConsultoraId ?? null);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [soComMovimento, setSoComMovimento] = useState(true);
   const [verPendentes, setVerPendentes] = useState(false);
+  const [menuAberto, setMenuAberto] = useState(false);
+  const [modal, setModal] = useState<null | "pagar" | "lancar" | "estornar">(null);
+  const [salvando, setSalvando] = useState(false);
+  const [formPagar, setFormPagar] = useState({ data: "", valor: "", descricao: "" });
+  const [formLanc, setFormLanc] = useState({ tipo: "ajuste_positivo", valor: "", pedido: "", motivo: "" });
+  const [motivoEstorno, setMotivoEstorno] = useState("");
+
+  const podePagar = detalhe?.permissoes?.podePagar === true;
+
+  function recarregar() {
+    setModal(null); setMenuAberto(false); setSalvando(false);
+    setDetalhe(null);
+    setAbertaId(a => a); // dispara o efeito de detalhe
+    setCompetencia(c => c);
+    fetch(`/api/financeiro/comissoes/extrato/${abertaId}?competencia=${competencia}`)
+      .then(r => r.ok ? r.json() : null).then(d => d && setDetalhe(d)).catch(() => {});
+  }
+
+  async function acao(url: string, init: RequestInit, erroPadrao: string) {
+    setSalvando(true);
+    try {
+      const res = await fetch(url, init);
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        alert(e.error ?? erroPadrao);
+        return false;
+      }
+      recarregar();
+      return true;
+    } finally {
+      setSalvando(false);
+    }
+  }
 
   const rotuloMes = (comp: string) => {
     const [a, m] = comp.split("-");
@@ -3406,12 +3442,176 @@ function ExtratoComissao() {
     return (
       <div className="space-y-5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <button onClick={() => { setAbertaId(null); setDetalhe(null); }}
-            className="flex items-center gap-1 text-sm font-medium" style={{ color: C.esmeralda }}>
-            ← Voltar para a lista
-          </button>
-          {filtroMes}
+          {soConsultoraId ? <span /> : (
+            <button onClick={() => { setAbertaId(null); setDetalhe(null); }}
+              className="flex items-center gap-1 text-sm font-medium" style={{ color: C.esmeralda }}>
+              ← Voltar para a lista
+            </button>
+          )}
+          <div className="flex items-center gap-2">
+            {filtroMes}
+            {podePagar && (
+              <div className="relative">
+                <button onClick={() => setMenuAberto(v => !v)}
+                  className="px-3 py-1.5 rounded-lg border text-sm font-medium"
+                  style={{ borderColor: C.esmeralda, color: C.esmeralda }}>
+                  mais ações ⋯
+                </button>
+                {menuAberto && (
+                  <div className="absolute right-0 mt-1 z-20 rounded-lg border bg-white shadow-lg py-1 min-w-[210px]"
+                    style={{ borderColor: C.cremeBorder }}>
+                    {detalhe?.pago ? (
+                      <button onClick={() => { setMotivoEstorno(""); setModal("estornar"); setMenuAberto(false); }}
+                        className="w-full text-left px-4 py-2 text-sm hover:opacity-70" style={{ color: C.vermelho }}>
+                        ↺ Estornar pagamento
+                      </button>
+                    ) : (
+                      <button onClick={() => {
+                        setFormPagar({
+                          data: new Date().toISOString().slice(0, 10),
+                          valor: String(detalhe?.resumo?.saldo ?? ""),
+                          descricao: "",
+                        });
+                        setModal("pagar"); setMenuAberto(false);
+                      }} className="w-full text-left px-4 py-2 text-sm hover:opacity-70" style={{ color: "#1A1A1A" }}>
+                        ✓ Realizar pagamento
+                      </button>
+                    )}
+                    <button onClick={() => { setFormLanc({ tipo: "ajuste_positivo", valor: "", pedido: "", motivo: "" }); setModal("lancar"); setMenuAberto(false); }}
+                      className="w-full text-left px-4 py-2 text-sm hover:opacity-70" style={{ color: "#1A1A1A" }}>
+                      ＋ Incluir lançamento
+                    </button>
+                    <button onClick={() => { setMenuAberto(false); window.print(); }}
+                      className="w-full text-left px-4 py-2 text-sm hover:opacity-70" style={{ color: C.cinza }}>
+                      ⎙ Imprimir extrato
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* ── Modais ─────────────────────────────────────────────────────── */}
+        {modal && (
+          <div className="fixed inset-0 z-40 flex items-start justify-center pt-16 px-4"
+            style={{ backgroundColor: "rgba(0,0,0,.35)" }} onClick={() => setModal(null)}>
+            <div className="w-full max-w-md rounded-xl bg-white p-5 border" style={{ borderColor: C.cremeBorder }}
+              onClick={e => e.stopPropagation()}>
+
+              {modal === "pagar" && (
+                <>
+                  <h4 className="text-base font-bold mb-1" style={{ color: "#1A1A1A" }}>Pagamento de comissão</h4>
+                  <p className="text-xs mb-4" style={{ color: C.cinza }}>
+                    {detalhe?.consultora?.nome} · referente a <span className="capitalize">{rotuloMes(competencia)}</span>
+                  </p>
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Data do pagamento</label>
+                  <input type="date" value={formPagar.data} onChange={e => setFormPagar(f => ({ ...f, data: e.target.value }))}
+                    className="w-full mb-3 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Valor</label>
+                  <input type="number" step="0.01" value={formPagar.valor}
+                    onChange={e => setFormPagar(f => ({ ...f, valor: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <p className="text-[11px] mt-1 mb-3" style={{ color: C.cinza }}>
+                    Vem do saldo do mês. Edite se o Pix saiu diferente — o extrato grava o que saiu.
+                  </p>
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Descrição <span style={{ opacity: .7 }}>(opcional)</span></label>
+                  <input value={formPagar.descricao} onChange={e => setFormPagar(f => ({ ...f, descricao: e.target.value }))}
+                    className="w-full mb-4 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <div className="flex items-center gap-3">
+                    <button disabled={salvando || !formPagar.data}
+                      onClick={() => acao(`/api/financeiro/comissoes/extrato/${abertaId}/pagar`, {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          competencia, data_pagamento: formPagar.data,
+                          valor: formPagar.valor ? Number(formPagar.valor) : null,
+                          descricao: formPagar.descricao || null,
+                        }),
+                      }, "Erro ao registrar o pagamento")}
+                      className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                      style={{ backgroundColor: C.esmeralda }}>
+                      {salvando ? "Salvando…" : "Salvar"}
+                    </button>
+                    <button onClick={() => setModal(null)} className="text-sm" style={{ color: C.cinza }}>cancelar</button>
+                  </div>
+                </>
+              )}
+
+              {modal === "lancar" && (
+                <>
+                  <h4 className="text-base font-bold mb-1" style={{ color: "#1A1A1A" }}>Lançamento manual</h4>
+                  <p className="text-xs mb-4" style={{ color: C.cinza }}>
+                    {detalhe?.consultora?.nome} · entra em <span className="capitalize">{rotuloMes(competencia)}</span>
+                  </p>
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Tipo</label>
+                  <div className="flex gap-2 mb-3">
+                    {([["ajuste_positivo", "(+) crédito"], ["ajuste_negativo", "(−) débito"]] as const).map(([v, r]) => (
+                      <button key={v} onClick={() => setFormLanc(f => ({ ...f, tipo: v }))}
+                        className="px-3 py-1.5 rounded-lg border text-xs font-medium"
+                        style={formLanc.tipo === v
+                          ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
+                          : { borderColor: C.cremeBorder, color: C.cinza }}>{r}</button>
+                    ))}
+                  </div>
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Valor</label>
+                  <input type="number" step="0.01" value={formLanc.valor}
+                    onChange={e => setFormLanc(f => ({ ...f, valor: e.target.value }))}
+                    className="w-full mb-3 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Venda <span style={{ opacity: .7 }}>(opcional — id da venda)</span></label>
+                  <input value={formLanc.pedido} onChange={e => setFormLanc(f => ({ ...f, pedido: e.target.value }))}
+                    className="w-full mb-3 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>
+                    Motivo <span style={{ color: C.vermelho }}>obrigatório</span>
+                  </label>
+                  <input value={formLanc.motivo} onChange={e => setFormLanc(f => ({ ...f, motivo: e.target.value }))}
+                    placeholder="por que esse acerto existe"
+                    className="w-full mb-4 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <div className="flex items-center gap-3">
+                    <button disabled={salvando || !formLanc.valor || !formLanc.motivo.trim()}
+                      onClick={() => acao("/api/financeiro/comissoes/ajustes", {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          consultora_id: abertaId, competencia, tipo_item: formLanc.tipo,
+                          valor: Number(formLanc.valor), justificativa: formLanc.motivo.trim(),
+                          venda_id: formLanc.pedido ? Number(formLanc.pedido) : null,
+                        }),
+                      }, "Erro ao lançar")}
+                      className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                      style={{ backgroundColor: C.esmeralda }}>
+                      {salvando ? "Salvando…" : "Salvar"}
+                    </button>
+                    <button onClick={() => setModal(null)} className="text-sm" style={{ color: C.cinza }}>cancelar</button>
+                  </div>
+                </>
+              )}
+
+              {modal === "estornar" && (
+                <>
+                  <h4 className="text-base font-bold mb-1" style={{ color: C.vermelho }}>Estornar pagamento</h4>
+                  <p className="text-xs mb-4" style={{ color: C.cinza }}>
+                    O pagamento de <span className="capitalize">{rotuloMes(competencia)}</span> volta a ficar em aberto e o saldo sobe de novo. Nenhum lançamento é apagado.
+                  </p>
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>
+                    Motivo <span style={{ color: C.vermelho }}>obrigatório</span>
+                  </label>
+                  <input value={motivoEstorno} onChange={e => setMotivoEstorno(e.target.value)}
+                    className="w-full mb-4 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <div className="flex items-center gap-3">
+                    <button disabled={salvando || motivoEstorno.trim().length < 5}
+                      onClick={() => acao(
+                        `/api/financeiro/comissoes/extrato/${abertaId}/pagar?competencia=${competencia}&motivo=${encodeURIComponent(motivoEstorno.trim())}`,
+                        { method: "DELETE" }, "Erro ao estornar")}
+                      className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                      style={{ backgroundColor: C.vermelho }}>
+                      {salvando ? "Estornando…" : "Estornar"}
+                    </button>
+                    <button onClick={() => setModal(null)} className="text-sm" style={{ color: C.cinza }}>cancelar</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
         {loading && <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin" style={{ color: C.esmeralda }} /></div>}
         {erro && <div className="rounded-xl p-4 text-sm" style={{ backgroundColor: C.vermelhoLt, color: C.vermelho }}>{erro}</div>}
@@ -3653,548 +3853,6 @@ function ExtratoComissao() {
   );
 }
 
-// ─── TabComissoes ─────────────────────────────────────────────────────────────
-
-/**
- * Aba de Pagamento de Comissões
- * REGRA DE NEGÓCIO: fechamento mensal de comissão por consultora.
- * O que: lista fechamentos, permite criar, aprovar e gerar conta a pagar.
- * Por que: módulo completo de pagamento de comissão com rastreio.
- * Impacto se alterado: risco de pagar comissão sem controle ou duplicar.
- */
-function TabComissoes({ fechamentos, vendedores }: { fechamentos: any[]; vendedores?: any[] }) {
-  const [lista, setLista] = useState(fechamentos);
-  const [resumo, setResumo] = useState<{ disponivel: number; em_rascunho: number; gerado: number; pago: number } | null>(null);
-  const [loadingResumo, setLoadingResumo] = useState(true);
-  const [criando, setCriando] = useState(false);
-  const [showCriar, setShowCriar] = useState(false);
-  const [filtro, setFiltro] = useState("todos");
-  const [detailId, setDetailId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<any | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [actionId, setActionId] = useState<string | null>(null);
-  const [showCancelForm, setShowCancelForm] = useState<string | null>(null);
-  const [cancelMotivo, setCancelMotivo] = useState("");
-  const [consultoraFiltro, setConsultoraFiltro] = useState("");
-  const [sortAsc, setSortAsc] = useState(false);
-  const [subTab, setSubTab] = useState<"fechamentos" | "extrato">("fechamentos");
-
-  // Form criar
-  const [form, setForm] = useState({ consultora_id: "", periodo_inicio: "", periodo_fim: "", competencia: "" });
-  const hoje = new Date();
-  const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`;
-
-  useEffect(() => {
-    if (showCriar) {
-      // Preenche defaults
-      const inicio = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}-01`;
-      const fim = hoje.toISOString().slice(0, 10);
-      setForm(f => ({ ...f, periodo_inicio: f.periodo_inicio || inicio, periodo_fim: f.periodo_fim || fim, competencia: f.competencia || mesAtual }));
-    }
-  }, [showCriar, mesAtual]);
-
-  // Carrega resumo
-  useEffect(() => {
-    fetch("/api/financeiro/comissoes/resumo")
-      .then(r => r.ok ? r.json() : null)
-      .then(d => setResumo(d))
-      .catch(() => {})
-      .finally(() => setLoadingResumo(false));
-  }, []);
-
-  // Abre detail
-  function abrirDetail(id: string) {
-    setDetailId(id);
-    setDetailLoading(true);
-    fetch(`/api/financeiro/comissoes/fechamentos/${id}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => setDetail(d))
-      .catch(() => setDetail(null))
-      .finally(() => setDetailLoading(false));
-  }
-
-  async function handleCriar() {
-    if (!form.consultora_id || !form.periodo_inicio || !form.periodo_fim || !form.competencia) return;
-    setCriando(true);
-    try {
-      const res = await fetch("/api/financeiro/comissoes/fechamentos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      if (res.ok) {
-        const nova = await res.json();
-        setLista(prev => [{ id: nova.id, consultora_nome_snapshot: form.consultora_id, valor_total: nova.valor_total, qtd_itens: nova.qtd_itens, status: "rascunho", created_at: new Date().toISOString() }, ...prev] as any[]);
-        setShowCriar(false);
-        setForm({ consultora_id: "", periodo_inicio: "", periodo_fim: "", competencia: "" });
-      } else {
-        const err = await res.json().catch(() => ({ error: "Erro ao criar" }));
-        alert(err.error);
-      }
-    } finally {
-      setCriando(false);
-    }
-  }
-
-  async function handleFechar(id: string) {
-    setActionId(id);
-    try {
-      const res = await fetch(`/api/financeiro/comissoes/fechamentos/${id}/fechar`, { method: "POST" });
-      if (res.ok) {
-        setLista(prev => prev.map(f => f.id === id ? { ...f, status: "fechado" } : f));
-      } else {
-        const err = await res.json().catch(() => ({ error: "Erro" }));
-        alert(err.error);
-      }
-    } finally {
-      setActionId(null);
-    }
-  }
-
-  async function handleGerarConta(id: string) {
-    setActionId(id);
-    try {
-      const res = await fetch(`/api/financeiro/comissoes/fechamentos/${id}/gerar-conta-pagar`, { method: "POST" });
-      if (res.ok) {
-        const data = await res.json();
-        setLista(prev => prev.map(f => f.id === id ? { ...f, status: "enviado_financeiro", conta_pagar_id: data.conta_pagar_id } : f));
-      } else {
-        const err = await res.json().catch(() => ({ error: "Erro" }));
-        alert(err.error);
-      }
-    } finally {
-      setActionId(null);
-    }
-  }
-
-  async function handleCancelar(id: string) {
-    if (!cancelMotivo.trim()) return;
-    setActionId(id);
-    try {
-      const res = await fetch(`/api/financeiro/comissoes/fechamentos/${id}/cancelar`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ motivo: cancelMotivo.trim() }),
-      });
-      if (res.ok) {
-        setLista(prev => prev.map(f => f.id === id ? { ...f, status: "cancelado" } : f));
-        setShowCancelForm(null);
-        setCancelMotivo("");
-      } else {
-        const err = await res.json().catch(() => ({ error: "Erro" }));
-        alert(err.error);
-      }
-    } finally {
-      setActionId(null);
-    }
-  }
-
-  const consultorasUnicas = useMemo(() => {
-    const map = new Map<string, string>();
-    lista.forEach(f => {
-      const id = f.consultora_id;
-      const nome = f.consultora_nome_snapshot;
-      if (id && nome) map.set(String(id), nome);
-    });
-    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [lista]);
-
-  const filtradas = useMemo(() => {
-    let r = lista;
-    if (filtro !== "todos") r = r.filter(f => f.status === filtro);
-    if (consultoraFiltro) r = r.filter(f => String(f.consultora_id) === consultoraFiltro);
-    return r;
-  }, [lista, filtro, consultoraFiltro]);
-
-  const statusBadge = (s: string) => {
-    const map: Record<string, { label: string; color: string; bg: string }> = {
-      rascunho:           { label: "Rascunho",  color: "#D4833C", bg: "#FFF3E0" },
-      fechado:            { label: "Fechado",   color: "#4A7C5E", bg: "#E8F5E9" },
-      enviado_financeiro: { label: "Enviado",   color: "#184036", bg: "#E0F2F1" },
-      pago:               { label: "Pago",      color: "#2E7D32", bg: "#E8F5E9" },
-      cancelado:          { label: "Cancelado", color: "#B54747", bg: "#FFEBEE" },
-    };
-    return map[s] ?? { label: s, color: "#666", bg: "#F5F5F5" };
-  };
-
-  if (detailId) {
-    return (
-      <div className="space-y-5">
-        <button onClick={() => { setDetailId(null); setDetail(null); }}
-          className="flex items-center gap-1 text-sm font-medium" style={{ color: C.esmeralda }}>
-          ← Voltar para lista
-        </button>
-        {detailLoading ? (
-          <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin" style={{ color: C.esmeralda }} /></div>
-        ) : detail ? (
-          <div className="space-y-5">
-            <div className="rounded-xl bg-white p-5 border" style={{ borderColor: C.cremeBorder }}>
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-bold" style={{ color: "#1A1A1A" }}>{detail.consultora_nome_snapshot}</h3>
-                  <p className="text-xs" style={{ color: C.cinza }}>
-                    {(() => {
-                      const [ano, mes] = (detail.competencia ?? "").split("-");
-                      const data = new Date(Number(ano), Number(mes) - 1);
-                      return data.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-                    })()} · {fmtDate(detail.periodo_inicio)} a {fmtDate(detail.periodo_fim)}
-                  </p>
-                </div>
-                <span className="px-3 py-1 rounded-full text-xs font-semibold"
-                  style={{ color: statusBadge(detail.status).color, backgroundColor: statusBadge(detail.status).bg }}>
-                  {statusBadge(detail.status).label}
-                </span>
-              </div>
-              <div className="text-3xl font-bold tabular-nums mb-4" style={{ color: C.esmeralda }}>
-                {fmt(Number(detail.valor_total))}
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-4">
-                <div><span style={{ color: C.cinza }}>Aprovado por: </span><span style={{ color: "#1A1A1A" }}>{detail.approved_by ?? "—"}</span></div>
-                <div><span style={{ color: C.cinza }}>Aprovado em: </span><span style={{ color: "#1A1A1A" }}>{detail.approved_at ? fmtDate(detail.approved_at) : "—"}</span></div>
-                <div><span style={{ color: C.cinza }}>Conta Pagar: </span><span style={{ color: "#1A1A1A" }}>{detail.conta_pagar_id ? `#${detail.conta_pagar_id}` : "—"}</span></div>
-                <div><span style={{ color: C.cinza }}>Itens: </span><span style={{ color: "#1A1A1A" }}>{(detail.itens ?? []).filter((i: any) => i.status !== "cancelado").length}</span></div>
-              </div>
-            </div>
-
-            {/* Itens do fechamento */}
-            <div className="rounded-xl bg-white overflow-hidden border" style={{ borderColor: C.cremeBorder }}>
-              <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
-                <h4 className="text-sm font-bold" style={{ color: "#1A1A1A" }}>Detalhamento dos Itens</h4>
-                <button onClick={() => setSortAsc(!sortAsc)}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border"
-                  style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
-                  {sortAsc ? "↑ Data ↑" : "↓ Data ↓"}
-                </button>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr style={{ backgroundColor: C.cremeBg }}>
-                      {["Pedido", "Data Venda", "Cliente", "Pagamento", "Forma", "Recebido em", "Valor Comissionável", "% Rateio", "% Com.", "Comissão", "Tipo"].map(h => (
-                        <th key={h} className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-semibold" style={{ color: C.cinza }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(detail.itens ?? []).slice().sort((a: any, b: any) => {
-                      const da = a.data_recebimento ?? "";
-                      const db = b.data_recebimento ?? "";
-                      return sortAsc ? da.localeCompare(db) : db.localeCompare(da);
-                    }).map((item: any) => {
-                      const cancelado = item.status === "cancelado";
-                      const strike = cancelado ? "line-through" : undefined;
-                      return (
-                      <tr key={item.id} className="border-t" style={{ borderColor: C.cremeBorder, opacity: cancelado ? 0.45 : 1 }}>
-                        <td className="px-3 py-2 text-xs" style={{ textDecoration: strike }}>
-                          {item.venda_id ? (
-                            <a href={`/vendas/${item.venda_id}`} target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: C.esmeralda, fontWeight: 500 }}>#{item.numero_venda_snapshot ?? item.venda_id}</a>
-                          ) : (
-                            <span style={{ color: "#1A1A1A" }}>#{item.numero_venda_snapshot ?? "—"}</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-xs" style={{ color: C.cinza, textDecoration: strike }}>{item.data_venda ? fmtDate(item.data_venda) : "—"}</td>
-                        <td className="px-3 py-2 text-xs" style={{ color: C.cinza, textDecoration: strike }}>{item.cliente_nome_snapshot ?? "—"}</td>
-                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: "#1A1A1A", textDecoration: strike }}>{fmt(item.valor_pagamento)}</td>
-                        <td className="px-3 py-2 text-xs" style={{ color: "#1A1A1A", textDecoration: strike }}>{item.forma_recebimento}</td>
-                        <td className="px-3 py-2 text-xs" style={{ color: C.cinza, textDecoration: strike }}>{item.data_recebimento ? fmtDate(item.data_recebimento) : "—"}</td>
-                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: "#1A1A1A", textDecoration: strike }}>{fmt(item.valor_comissionavel)}</td>
-                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: C.cinza, textDecoration: strike }}>{(Number(item.percentual_rateio) * 100).toFixed(2)}%</td>
-                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: C.ambar, textDecoration: strike }}>
-                          {Number(item.valor_comissionavel) > 0
-                            ? `${(Number(item.comissao_calculada) / Number(item.valor_comissionavel) * 100).toFixed(2)}%`
-                            : "—"}
-                        </td>
-                        <td className="px-3 py-2 text-xs tabular-nums font-semibold" style={{ color: cancelado || item.tipo_item === "nao_comissionavel" ? C.cinza : C.esmeralda, textDecoration: strike }}>{fmt(item.comissao_calculada)}</td>
-                        <td className="px-3 py-2 text-xs">
-                          {cancelado ? (
-                            <span className="px-2 py-0.5 rounded-full font-semibold" style={{ color: C.vermelho, backgroundColor: "#FFEBEE" }}>cancelado — não conta no total</span>
-                          ) : item.tipo_item === "nao_comissionavel" ? (
-                            <span className="px-2 py-0.5 rounded-full font-semibold" style={{ color: "#92400E", backgroundColor: "#FFF3E0" }} title="Vale-Troca, Permuta ou Ajuste Consultora não é dinheiro novo — não comissiona.">não comissionável ({item.forma_recebimento})</span>
-                          ) : (
-                            <span style={{ color: item.tipo_item === "estorno" || item.tipo_item === "ajuste_negativo" ? C.vermelho : item.tipo_item === "ajuste_positivo" ? C.esmeralda : C.cinza, fontWeight: item.tipo_item !== "normal" ? 600 : 400 }}>{item.tipo_item}</span>
-                          )}
-                        </td>
-                      </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot>
-                    {(() => {
-                      // Itens cancelados não contam em NENHUM total do rodapé — eles ficam
-                      // na tabela só pra auditoria (ver comercial.md §2). Somar sem filtrar
-                      // aqui foi o bug que fez o rodapé mostrar R$3.156,29 quando o total
-                      // real (o mesmo do card do topo) já era R$2.994,25 (08/07/2026).
-                      const itensAtivos = (detail.itens ?? []).filter((i: any) => i.status !== "cancelado");
-                      return (
-                    <tr style={{ borderTop: `2px solid ${C.esmeralda}`, backgroundColor: C.cremeBg }}>
-                      <td className="px-3 py-2 text-xs font-bold" style={{ color: C.esmeralda }} colSpan={3}>
-                        Total ({itensAtivos.length} itens)
-                      </td>
-                      <td className="px-3 py-2 text-xs tabular-nums font-bold" style={{ color: C.esmeralda }}>
-                        {fmt(itensAtivos.reduce((s: number, i: any) => s + Number(i.valor_pagamento), 0))}
-                      </td>
-                      <td className="px-3 py-2 text-xs" />
-                      <td className="px-3 py-2 text-xs" />
-                      <td className="px-3 py-2 text-xs tabular-nums font-bold" style={{ color: C.esmeralda }}>
-                        {fmt(itensAtivos.reduce((s: number, i: any) => s + Number(i.valor_comissionavel), 0))}
-                      </td>
-                      <td className="px-3 py-2 text-xs" />
-                      <td className="px-3 py-2 text-xs" />
-                      <td className="px-3 py-2 text-xs tabular-nums font-bold" style={{ color: C.esmeralda }}>
-                        {fmt(itensAtivos.reduce((s: number, i: any) => s + Number(i.comissao_calculada), 0))}
-                      </td>
-                      <td className="px-3 py-2 text-xs" />
-                    </tr>
-                      );
-                    })()}
-                  </tfoot>
-                </table>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p className="text-center text-sm py-8" style={{ color: C.cinza }}>Erro ao carregar detalhe</p>
-        )}
-      </div>
-    );
-  }
-
-  // Sub-abas: "Fechamentos" é a tela de sempre (criar/aprovar/pagar);
-  // "Extrato" é a visão contínua por consultora, com saldo rolando (migration 363).
-  if (subTab === "extrato") {
-    return (
-      <div className="space-y-5">
-        <div className="flex gap-1">
-          <button onClick={() => setSubTab("fechamentos")}
-            className="px-4 py-2 rounded-lg text-sm font-medium border"
-            style={{ borderColor: C.cremeBorder, color: C.cinza }}>Fechamentos</button>
-          <button className="px-4 py-2 rounded-lg text-sm font-medium border"
-            style={{ backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }}>Extrato</button>
-        </div>
-        <ExtratoComissao />
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-5">
-      <div className="flex gap-1">
-        <button className="px-4 py-2 rounded-lg text-sm font-medium border"
-          style={{ backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }}>Fechamentos</button>
-        <button onClick={() => setSubTab("extrato")}
-          className="px-4 py-2 rounded-lg text-sm font-medium border"
-          style={{ borderColor: C.cremeBorder, color: C.cinza }}>Extrato</button>
-      </div>
-
-      {/* Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard label="Disponível" value={fmt(resumo?.disponivel ?? 0)} valueColor={C.esmeralda} icon={CheckCircle} accent={C.esmeralda} sub="pagamentos não fechados" />
-        <KpiCard label="Em Rascunho" value={fmt(resumo?.em_rascunho ?? 0)} valueColor={C.ambar} icon={Clock} accent={C.ambar} sub="aguardando aprovação" />
-        <KpiCard label="Enviado Financeiro" value={fmt(resumo?.gerado ?? 0)} valueColor={C.esmeralda} icon={ArrowUpCircle} accent={C.esmeralda} sub="conta a pagar gerada" />
-        <KpiCard label="Pago" value={fmt(resumo?.pago ?? 0)} valueColor={C.verde} icon={CheckCircle} accent={C.verde} sub="já liquidado" />
-      </div>
-
-      {/* Ações */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <button onClick={() => setShowCriar(!showCriar)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-90"
-            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-            {showCriar ? <X size={14} /> : <Plus size={14} />}
-            {showCriar ? "Cancelar" : "Novo Fechamento"}
-          </button>
-          <button onClick={async () => {
-            if (!confirm("Gerar fechamentos de maio/2026 para todas as consultoras com pagamentos no período?")) return;
-            setCriando(true);
-            try {
-              const res = await fetch("/api/financeiro/comissoes/gerar-maio", { method: "POST" });
-              const data = await res.json();
-              if (res.ok) {
-                // Recarrega lista
-                const listaRes = await fetch("/api/financeiro/comissoes/fechamentos");
-                if (listaRes.ok) setLista(await listaRes.json());
-                // Recarrega resumo
-                fetch("/api/financeiro/comissoes/resumo").then(r => r.ok ? r.json() : null).then(d => setResumo(d));
-                const msg = data.gerados?.length
-                  ? `✅ Gerados: ${data.gerados.map((g: any) => `${g.consultora} (R$ ${g.valor_total.toFixed(2)})`).join(", ")}`
-                  : "Nenhum fechamento gerado";
-                const errMsg = data.erros?.length ? `\n⚠️ ${data.erros.join("\n")}` : "";
-                alert(msg + errMsg);
-              } else {
-                alert(data.error || "Erro ao gerar fechamentos");
-              }
-            } catch {
-              alert("Erro de conexão");
-            } finally {
-              setCriando(false);
-            }
-          }} disabled={criando}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-90"
-            style={{ backgroundColor: C.ambar, color: "white" }}>
-            {criando ? <Loader2 size={14} className="animate-spin" /> : <Calendar size={14} />}
-            Gerar Fechamentos de Maio
-          </button>
-        </div>
-
-        <div className="flex gap-1.5 flex-wrap">
-          {[
-            { key: "todos", label: "Todos" },
-            { key: "rascunho", label: "Rascunho", color: C.ambar },
-            { key: "fechado", label: "Fechado", color: C.esmeralda },
-            { key: "enviado_financeiro", label: "Enviado", color: C.esmeralda },
-            { key: "pago", label: "Pago", color: C.verde },
-            { key: "cancelado", label: "Cancelado", color: C.vermelho },
-          ].map(({ key, label, color }) => (
-            <button key={key} onClick={() => setFiltro(key)}
-              className="text-xs px-3 py-1.5 rounded-full transition-colors border"
-              style={{
-                backgroundColor: filtro === key ? (color ?? C.esmeralda) : "white",
-                borderColor: filtro === key ? (color ?? C.esmeralda) : (color ? `${color}44` : C.cremeBorder),
-                color: filtro === key ? "white" : (color ?? C.cinza),
-                fontWeight: filtro === key ? 600 : 400,
-              }}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Form criar */}
-      {showCriar && (
-        <div className="rounded-xl bg-white p-5 border space-y-3" style={{ borderColor: C.cremeBorder }}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Consultora *">
-              <select value={form.consultora_id} onChange={e => setForm(f => ({ ...f, consultora_id: e.target.value }))}
-                className="border rounded-lg px-2 py-1.5 text-xs outline-none w-full"
-                style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}>
-                <option value="">Selecione...</option>
-                {(vendedores ?? []).map((v: any) => (
-                  <option key={v.id_vendedor} value={v.id_vendedor}>{v.nome}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Competência *">
-              <Input type="month" value={form.competencia} onChange={e => setForm(f => ({ ...f, competencia: e.target.value }))} />
-            </Field>
-            <Field label="Período Início *">
-              <Input type="date" value={form.periodo_inicio} onChange={e => setForm(f => ({ ...f, periodo_inicio: e.target.value }))} />
-            </Field>
-            <Field label="Período Fim *">
-              <Input type="date" value={form.periodo_fim} onChange={e => setForm(f => ({ ...f, periodo_fim: e.target.value }))} />
-            </Field>
-          </div>
-          <button onClick={handleCriar} disabled={criando || !form.consultora_id || !form.competencia}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
-            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-            {criando ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            Gerar Fechamento
-          </button>
-        </div>
-      )}
-
-      {/* Filtro consultora */}
-      {consultorasUnicas.length > 0 && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium" style={{ color: C.cinza }}>Consultora:</span>
-          <select value={consultoraFiltro} onChange={e => setConsultoraFiltro(e.target.value)}
-            className="border rounded-lg px-2 py-1.5 text-xs outline-none" style={{ borderColor: C.cremeBorder }}>
-            <option value="">Todas</option>
-            {consultorasUnicas.map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
-          </select>
-        </div>
-      )}
-
-      {/* Tabela */}
-      <div className="rounded-xl bg-white overflow-hidden border" style={{ borderColor: C.cremeBorder }}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
-                {["Período", "Consultora", "Valor", "Itens", "Status", "Conta Pagar", "Ações"].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-[11px] uppercase tracking-wider font-semibold" style={{ color: C.cinza }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtradas.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm" style={{ color: C.cinza }}>Nenhum fechamento encontrado</td></tr>
-              ) : (
-                filtradas.map((f: any) => {
-                  const sb = statusBadge(f.status ?? "rascunho");
-                  return (
-                    <tr key={f.id} className="border-t" style={{ borderColor: C.cremeBorder }}>
-                      <td className="px-4 py-3 text-xs" style={{ color: "#1A1A1A" }}>{f.competencia ?? "—"}</td>
-                      <td className="px-4 py-3">
-                        <span className="text-sm font-medium" style={{ color: "#1A1A1A" }}>{f.consultora_nome_snapshot ?? "—"}</span>
-                      </td>
-                      <td className="px-4 py-3 text-xs tabular-nums font-medium" style={{ color: C.esmeralda }}>{fmt(Number(f.valor_total ?? 0))}</td>
-                      <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{f.qtd_itens ?? 0}</td>
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                          style={{ color: sb.color, backgroundColor: sb.bg }}>
-                          {sb.label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{f.conta_pagar_id ? `#${f.conta_pagar_id}` : "—"}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <button onClick={() => abrirDetail(f.id)}
-                            className="px-2 py-1 rounded text-[10px] font-medium border"
-                            style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
-                            Detalhe
-                          </button>
-                          {f.status === "rascunho" && (
-                            <>
-                              <button onClick={() => handleFechar(f.id)} disabled={actionId === f.id}
-                                className="px-2 py-1 rounded text-[10px] font-medium border"
-                                style={{ borderColor: C.esmeralda, color: C.esmeralda }}>
-                                {actionId === f.id ? <Loader2 size={10} className="animate-spin" /> : "Fechar"}
-                              </button>
-                              <button onClick={() => setShowCancelForm(f.id)}
-                                className="px-2 py-1 rounded text-[10px] font-medium border"
-                                style={{ borderColor: C.vermelho, color: C.vermelho }}>
-                                Cancelar
-                              </button>
-                            </>
-                          )}
-                          {f.status === "fechado" && (
-                            <button onClick={() => handleGerarConta(f.id)} disabled={actionId === f.id}
-                              className="px-2 py-1 rounded text-[10px] font-medium border"
-                              style={{ borderColor: C.esmeralda, color: C.esmeralda }}>
-                              {actionId === f.id ? <Loader2 size={10} className="animate-spin" /> : "Gerar Conta"}
-                            </button>
-                          )}
-                        </div>
-                        {/* Form cancelar inline */}
-                        {showCancelForm === f.id && (
-                          <div className="mt-2 flex items-center gap-2">
-                            <input type="text" value={cancelMotivo} onChange={e => setCancelMotivo(e.target.value)}
-                              placeholder="Motivo do cancelamento *"
-                              className="border rounded px-2 py-1 text-[10px] outline-none w-40"
-                              style={{ borderColor: C.cremeBorder }} />
-                            <button onClick={() => handleCancelar(f.id)} disabled={actionId === f.id || !cancelMotivo.trim()}
-                              className="px-2 py-1 rounded text-[10px] font-medium"
-                              style={{ backgroundColor: C.vermelho, color: "white" }}>
-                              {actionId === f.id ? <Loader2 size={10} className="animate-spin" /> : "Confirmar"}
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
-          <p className="text-xs" style={{ color: C.cinza }}>{filtradas.length} fechamento(s)</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 type Tab = "pagar" | "receber" | "caixa" | "conciliacao_pendente" | "bancario" | "comissoes";
 
 export default function FinanceiroClient({ pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas, userRole, defaultTab, comissoes, vendedores }: Props) {
@@ -4295,7 +3953,7 @@ export default function FinanceiroClient({ pagar, receber, extratos, lancamentos
       {tab === "caixa"                && <TabCaixa caixa={caixaPagamentos} baixas={caixaBaixas} podeBaixar={["admin","desenvolvedor","gerente_loja","gerente_fabrica"].includes(userRole ?? "")} podeReversa={["admin","desenvolvedor","gerente_loja","estoquista_loja"].includes(userRole ?? "")} caixaOuroTrigger={caixaOuroTrigger} />}
       {tab === "bancario"             && <TabConciliacao extratos={extratos} lancamentos={lancamentos} />}
       {tab === "conciliacao_pendente" && <TabConciliacaoPendente />}
-      {tab === "comissoes"            && <TabComissoes fechamentos={comissoes ?? []} vendedores={vendedores} />}
+      {tab === "comissoes"            && <ExtratoComissao />}
     </div>
   );
 }
