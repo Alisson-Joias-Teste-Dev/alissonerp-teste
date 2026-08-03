@@ -126,7 +126,7 @@ function isActiveInGroup(group: MenuGroup, pathname: string) {
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { role, nome, fotoUrl, loading, user, modulos_leitura, isOperadorService } = useAuth();
+  const { role, nome, fotoUrl, loading, user, modulos_leitura, isOperadorService, isVendedora } = useAuth();
   const { aberta, setAberta } = useSidebar();
 
   // Injetar módulos que a role permite mas ainda não estão no banco (role_permissoes)
@@ -203,6 +203,23 @@ export default function Sidebar() {
     type: "group", label: "Ajuda", icon: "HelpCircle",
     items: [{ label: "Treinamentos", href: "/treinamentos", icon: "GraduationCap" }],
   };
+  /**
+   * "Minha comissão" — item solto, para QUALQUER usuário ligado a uma vendedora
+   * ativa (03/08/2026).
+   *
+   * O QUÊ: atalho para /minha-comissao, o extrato que a própria vendedora
+   * acompanha.
+   * POR QUE fora do módulo Financeiro: a consultora não tem (nem deve ter)
+   * acesso a ele — lá estão contas a pagar, caixa e a comissão das colegas.
+   * POR QUE por `isVendedora` e não por papel: a Germana é `gerente_loja` e É
+   * vendedora; a Geovana é `gerente_loja` e NÃO é. Filtrar por papel colocaria
+   * no menu da Geovana um atalho que só a devolveria pra home.
+   * IMPACTO SE REMOVIDO: a vendedora fica sem porta de entrada — a página
+   * existe, mas ninguém acha (foi o que aconteceu ao subir a tela sem o menu).
+   */
+  const comissaoExtras: MenuItem[] = isVendedora
+    ? [{ label: "Minha comissão", href: "/minha-comissao", icon: "Banknote" }]
+    : [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const entries     = [...allEntries.filter(e => isGroup(e) || (e as any).href !== "/configuracoes"), AJUDA_GROUP];
 
@@ -377,8 +394,8 @@ export default function Sidebar() {
           </div>
         ) : (
           <div className="space-y-0.5">
-            {/* Itens Service (flag isOperadorService) e Painel Service (role) */}
-            {serviceExtras.map((item) => {
+            {/* Itens soltos: Service (flag) e Minha comissão (vendedora vinculada) */}
+            {[...serviceExtras, ...comissaoExtras].map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
               const Icon = ICON_MAP[item.icon];
               return (
