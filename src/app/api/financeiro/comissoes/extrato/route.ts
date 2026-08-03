@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
+import { resolverEscopoComissao } from "@/lib/comissao-permissao";
 import {
   linhasExtrato, saldoAnterior, comissoesPendentes, somaBalde,
 } from "@/lib/comissao-extrato";
@@ -22,17 +22,16 @@ import {
  * dinheiro que ainda não entrou.
  */
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
-
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  const [perfil] = await sql<Array<{ role: string }>>`
-    SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid
-  `;
-  if (!perfil || (!isFullAccess(perfil.role) && !ROLES_FINANCEIRO.includes(perfil.role))) {
+  // Esta é a tela que mostra TODAS as vendedoras — só para quem vê todas.
+  // A consultora não passa aqui: ela abre /minha-comissao, que bate na rota de
+  // detalhe e lá o escopo força o id dela.
+  const escopo = await resolverEscopoComissao(user.id);
+  if (!escopo || !escopo.podeVerTodas) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 

@@ -74,6 +74,26 @@ A comissão deixou de ser só um retrato por fechamento e passou a funcionar com
 
 **Crediário no extrato:** parcela não paga aparece em "Comissões a receber", com data prevista e separando **a vencer** de **atrasado** — mas **FORA do saldo**. O que firma a comissão é o pagamento: antecipou, entra antes; atrasou, entra depois.
 
+### 2.1.1 O extrato é a TELA ÚNICA (03/08/2026)
+
+A aba **Fechamentos** foi removida. Tudo — ver, pagar, estornar e lançar acerto — acontece dentro do extrato. O *registro* de fechamento continua existindo por baixo (é dele que sai a linha de baixa, na competência); o que sumiu foi a tela.
+
+**Quem vê o quê** (`src/lib/comissao-permissao.ts` — decidido no SERVIDOR):
+
+| Quem | Vê | Pode pagar |
+|---|---|---|
+| Papel com `role_permissoes.financeiro.pode_ler` (admin, administrativo, desenvolvedor, diretor, financeiro, gerente_loja) | todas as consultoras | sim, se `pode_escrever` |
+| Vendedora com `public.vendedores.user_id` ligado | **só o próprio extrato**, via `/minha-comissao` | não |
+
+⚠️ **A permissão saiu da lista cravada e passou a vir de `role_permissoes`.** As rotas repetiam `["desenvolvedor","admin","gerente_fabrica","gerente_loja"]`, que DIVERGIA do cadastro: `gerente_fabrica` via comissão sem autorização e `administrativo`/`diretor` estavam autorizados e não entravam. O papel `financeiro` não tinha linha nenhuma — foi criada (log 347).
+
+⚠️ **O `consultoraId` da URL é um PEDIDO, não uma ordem.** Quem não vê todas recebe sempre o próprio id (`resolverConsultoraAlvo`), em vez de 403 — assim trocar o número na barra não vaza nem revela quais ids existem. Esconder botão no front nunca foi a permissão.
+
+**As ações** (menu "mais ações", só para quem pode pagar):
+- **Realizar pagamento** (`POST .../extrato/[id]/pagar`): num clique cria o fechamento da competência, gera os itens dos pagamentos do período, adota os lançamentos soltos e marca **pago** na data informada. O valor vem do saldo mas é **editável** — grava o que o Pix pagou, não a teoria. **NÃO gera conta a pagar**: em produção nunca existiu uma (0 registros) e o registro é feito com o dinheiro já pago. Pagar duas vezes a mesma competência dá 409.
+- **Estornar pagamento** (`DELETE` na mesma rota, motivo obrigatório): volta para rascunho e limpa `paid_at`. Nenhum lançamento é apagado.
+- **Incluir lançamento** (`ajustes/route.ts`): agora exige **competência** — o lançamento é datado no último dia do mês a que se refere, e nasce SOLTO (o pagamento daquele mês adota). Antes carimbava `hoje` e criava fechamento por conta própria: foi assim que o acerto de R$199,17 da venda 15323 (de maio) foi parar dentro do fechamento de junho.
+
 **As DUAS telas** (`src/lib/comissao-extrato.ts` + `api/financeiro/comissoes/extrato[/[consultoraId]]`), no formato do extrato do Tiny/Olist:
 
 - **Tela 1 — lista:** uma linha por vendedora no mês. Colunas: `Saldo ant.` · `(+) Comis. mês` · `(−) Déb. devoluções` · `(+) Out. créditos` · `(−) Out. débitos` · `(−) Pgtos` · `Comis. pend.` · `(=) Saldo`.
