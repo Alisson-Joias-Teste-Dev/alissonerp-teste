@@ -14,6 +14,8 @@ interface AuthState {
   modulos_leitura: string[];
   modulos_escrita: string[];
   isOperadorService: boolean;
+  /** Existe vendedora ativa ligada a este usuário — mostra "Minha comissão" no menu. */
+  isVendedora: boolean;
 }
 
 // Cache module-global: deduplica fetch entre os 17+ componentes que usam useAuth()
@@ -29,7 +31,7 @@ async function fetchAuthData(): Promise<AuthState> {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return { user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [], isOperadorService: false };
+    return { user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [], isOperadorService: false, isVendedora: false };
   }
   const roleFromToken = user.user_metadata?.role as Role ?? null;
   const nome = user.user_metadata?.nome as string ?? null;
@@ -46,7 +48,7 @@ async function fetchAuthData(): Promise<AuthState> {
     if (typeof window !== "undefined") {
       window.location.href = "/login?reason=desativado";
     }
-    return { user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [], isOperadorService: false };
+    return { user: null, role: null, nome: null, fotoUrl: null, loading: false, modulos_leitura: [], modulos_escrita: [], isOperadorService: false, isVendedora: false };
   }
   const profile = profileRes?.ok ? await profileRes.json() : null;
   const perm    = permRes?.ok    ? await permRes.json()    : null;
@@ -59,6 +61,7 @@ async function fetchAuthData(): Promise<AuthState> {
     modulos_leitura:   perm?.modulos_leitura ?? [],
     modulos_escrita:   perm?.modulos_escrita ?? [],
     isOperadorService: perm?.is_operador_service ?? false,
+    isVendedora:       perm?.is_vendedora ?? false,
   };
 }
 
@@ -110,7 +113,7 @@ export function useAuth(): AuthState {
   const [state, setState] = useState<AuthState>(
     cachedState ?? {
       user: null, role: null, nome: null, fotoUrl: null,
-      loading: true, modulos_leitura: [], modulos_escrita: [], isOperadorService: false,
+      loading: true, modulos_leitura: [], modulos_escrita: [], isOperadorService: false, isVendedora: false,
     }
   );
 
