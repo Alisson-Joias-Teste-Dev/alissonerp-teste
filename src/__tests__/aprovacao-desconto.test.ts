@@ -327,9 +327,48 @@ describe("PATCH aprovacao — hook aprovacao_desconto", () => {
     expect(sqlParts).toMatch(/valor_comissao/);
     expect(sqlParts).toMatch(/faixas_comissao/);
     // fallback fixo só para item com desconto > 30% — não mais para toda a venda
-    expect(sqlParts).toMatch(/pct_desconto\s*>\s*30\s+THEN\s+0\.5/i);
+    expect(sqlParts).toMatch(/desconto\s*>\s*30\s+THEN\s+0\.5/i);
     // demais itens seguem a tabela de faixas (fc.comissao_pct), não um * 0.005 fixo
     expect(sqlParts).toMatch(/comissao_pct/);
+  });
+
+  /**
+   * O desconto da comissão sai dos PREÇOS, nunca de `pct_desconto`.
+   *
+   * O PORQUÊ (03/08/2026): `pct_desconto` mente no item promocional — ele mede
+   * contra o preço já promocional, dá ~0% e joga o item na faixa cheia de 4%
+   * onde a tabela mandava 0,50%. Custou R$ 575,61 em julho/2026. A base certa é
+   * `preco_lista_cheio` (migration 366), o preço original da campanha.
+   */
+  it("aprovação: o desconto da comissão vem de preco_lista_cheio, não de pct_desconto", async () => {
+    setupBase(["aprovacao_desconto"], 5);
+
+    await PATCH(makeRequest("10", { aprovacao_id: 1, decisao: "aprovado" }), makeParams("10"));
+
+    const sqlParts: string = (acharUpdateItensVendaErp()[0] as string[]).join(" ");
+    expect(sqlParts).toMatch(/preco_lista_cheio/);
+    // COALESCE com preco_lista cobre linha antiga com a coluna ainda nula
+    expect(sqlParts).toMatch(/COALESCE\(\s*i\.preco_lista_cheio,\s*i\.preco_lista\s*\)/i);
+    // pct_desconto NÃO pode ser a base da comissão neste UPDATE
+    expect(sqlParts).not.toMatch(/pct_desconto/);
+  });
+
+  /**
+   * Aliança e peça personalizada NÃO entram no recálculo.
+   *
+   * O PORQUÊ (decisão do Jonathan, 03/08/2026): a comissão delas vem do módulo
+   * de orçamento, que calcula pelo PESO — "não é bug, é do módulo de orçamento
+   * de alianças". Elas nunca têm `produto_id` (117 itens desde 01/05/2026, todos
+   * desses dois tipos). Sem este filtro, aprovar um desconto numa venda que
+   * tenha aliança substitui a comissão da aliança pela faixa.
+   */
+  it("aprovação: NÃO recalcula item sem produto_id (aliança e peça personalizada)", async () => {
+    setupBase(["aprovacao_desconto"], 5);
+
+    await PATCH(makeRequest("10", { aprovacao_id: 1, decisao: "aprovado" }), makeParams("10"));
+
+    const sqlParts: string = (acharUpdateItensVendaErp()[0] as string[]).join(" ");
+    expect(sqlParts).toMatch(/produto_id\s+IS\s+NOT\s+NULL/i);
   });
 
   it("rejeição: UPDATE vendas_erp NÃO inclui mudança de situacao nem comissão", async () => {

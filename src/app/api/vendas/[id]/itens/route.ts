@@ -21,6 +21,7 @@ import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 // REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
 // Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos endpoints.
 import { normalizarTextoBusca, isServicoRodio, round2, getPctRodio } from "@/lib/servico-rodio";
+import { resolverItemComissao } from "@/lib/comissao-item";
 
 const VendaItemPostSchema = z.object({
   produto_id: IdSchema.nullable().optional(),
@@ -422,10 +423,30 @@ export async function POST(
     }
   }
 
+  // ── Comissão: quem manda é o SERVIDOR, não o navegador ──────────────────────
+  // Antes daqui a rota gravava `${body.pct_comissao}` cru. Para item em promoção
+  // o navegador media o desconto contra o preço já promocional, enxergava 0% e
+  // mandava a faixa cheia de 4% onde a tabela mandava 0,50%. Ver comissao-item.ts.
+  // Item sem produto_id (aliança/personalizada) devolve comissao=null de
+  // propósito: a regra deles é do módulo de orçamento, que calcula pelo peso.
+  const resolvido = await resolverItemComissao({
+    produtoId: body.produto_id ?? null,
+    precoLista: precoListaFinal,
+    precoUnitario: precoUnitarioFinal,
+    totalItem: totalItemFinal,
+    situacaoVenda: venda.situacao,
+  });
+  if (resolvido.comissao) {
+    valorComissaoFinal = resolvido.comissao.valor_comissao;
+  }
+  const pctComissaoFinal = resolvido.comissao
+    ? resolvido.comissao.pct_comissao
+    : (body.pct_comissao ?? 0);
+
   const [novoItem] = await sql`
     INSERT INTO alissonerp.itens_venda_erp (
       venda_id, produto_id, nome_produto, sku,
-      quantidade, preco_lista,
+      quantidade, preco_lista, preco_lista_cheio,
       pct_desconto, preco_unitario, total_item,
       pct_comissao, valor_comissao,
       peso_estimado, observacao, personalizacao
@@ -436,10 +457,11 @@ export async function POST(
       ${body.sku ?? null},
       ${body.quantidade},
       ${precoListaFinal},
+      ${resolvido.preco_lista_cheio},
       ${body.pct_desconto ?? 0},
       ${precoUnitarioFinal},
       ${totalItemFinal},
-      ${body.pct_comissao ?? 0},
+      ${pctComissaoFinal},
       ${valorComissaoFinal},
       ${pesoEstimadoFinal},
       ${observacaoFinal},

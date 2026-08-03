@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { zodError } from "@/lib/schemas/common";
 import { podeDecidir } from "@/lib/aprovacoes";
+import { resolverPrecoCheio, buscarFaixasComissao, calcularComissaoItem } from "@/lib/comissao-item";
 
 const SolicitacaoDescontoPatchSchema = z.object({
   status: z.enum(["aprovado", "rejeitado"]),
@@ -89,7 +90,8 @@ export async function PATCH(
     const precoUnit  = precoLista * (1 - pct / 100);
 
     const [item] = await sql`
-      SELECT quantidade FROM alissonerp.itens_venda_erp WHERE id = ${solicitacao.item_id}
+      SELECT quantidade, produto_id FROM alissonerp.itens_venda_erp
+      WHERE id = ${solicitacao.item_id}
     `;
     if (item) {
       const totalItem = precoUnit * Number(item.quantidade);
@@ -98,20 +100,26 @@ export async function PATCH(
       // oficial (tarefas/[id]/aprovacao/route.ts, bloco "desconto_acima"): acima de 30% de
       // desconto, comissão fixa em 0,5%; senão, pela tabela de faixas (faixas_comissao) pelo
       // desconto real do item. Antes esta porta zerava a comissão sempre — divergia da oficial.
-      const [faixa] = pct > 30 ? [] : await sql`
-        SELECT comissao_pct FROM alissonerp.faixas_comissao
-        WHERE desconto_pct = ${Math.round(pct)} AND ativo = true
-      `;
-      const pctComissao = pct > 30 ? 0.5 : Number(faixa?.comissao_pct ?? 0);
-      const valorComissao = Math.round((totalItem * pctComissao / 100) * 100) / 100;
+      //
+      // ⚠️ CORREÇÃO 03/08/2026: o desconto da COMISSÃO sai do preço CHEIO, não do
+      // `pct` solicitado. `solicitacao.preco_lista` é o preço PROMOCIONAL num item
+      // em campanha — medir por ele dá um desconto menor e uma faixa maior do que
+      // a devida. O `pct` solicitado continua sendo o da ALÇADA (é sobre o preço
+      // promocional que a vendedora pede aprovação; promoção é pré-aprovada e não
+      // entra na conta da alçada). São dois descontos diferentes de propósito.
+      // Ver comissao-item.ts.
+      const precoCheio = await resolverPrecoCheio(item.produto_id ?? null, precoLista);
+      const faixas = await buscarFaixasComissao();
+      const calc = calcularComissaoItem(precoCheio, precoUnit, totalItem, faixas);
 
       await sql`
         UPDATE alissonerp.itens_venda_erp
         SET pct_desconto          = ${pct},
             preco_unitario        = ${precoUnit},
             total_item            = ${totalItem},
-            pct_comissao          = ${pctComissao},
-            valor_comissao        = ${valorComissao},
+            preco_lista_cheio     = ${calc.preco_lista_cheio},
+            pct_comissao          = ${calc.pct_comissao},
+            valor_comissao        = ${calc.valor_comissao},
             desconto_autorizado_por = ${user.id}::uuid
         WHERE id = ${solicitacao.item_id}
       `;

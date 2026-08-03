@@ -93,6 +93,7 @@ import {
 // REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
 // Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos endpoints.
 import { normalizarTextoBusca, isServicoRodio, round2, getPctRodio } from "@/lib/servico-rodio";
+import { resolverItemComissao, buscarFaixasComissao } from "@/lib/comissao-item";
 
 // ─── GET /api/vendas ───────────────────────────────────────────────────────────
 // Query params: inicio, fim, situacao, vendedor_id, q (busca)
@@ -553,6 +554,9 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(body.itens) || body.itens.length === 0) {
       throw new Error("Venda deve ter pelo menos um item");
     }
+    // As faixas são lidas UMA vez para a venda toda, não por item — a tabela é
+    // pequena e fixa, e uma venda pode ter 5 itens.
+    const faixasComissao = await buscarFaixasComissao(tx);
     for (const item of body.itens) {
         if (item.produto_id !== null && item.produto_id !== undefined && Number(item.produto_id) <= 0) {
           throw new Error("produto_id inválido em item");
@@ -851,10 +855,30 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // ── Comissão: quem manda é o SERVIDOR ────────────────────────────────
+        // Ver comissao-item.ts. Item sem produto_id (aliança/personalizada) sai
+        // com comissao=null e mantém o que o chamador mandou — a regra deles é
+        // do módulo de orçamento, que calcula pelo peso.
+        const resolvidoItem = await resolverItemComissao({
+          produtoId: item.produto_id ?? null,
+          precoLista: precoListaFinal,
+          precoUnitario: precoUnitarioFinal,
+          totalItem: totalItemFinal,
+          situacaoVenda: venda.situacao,
+          faixas: faixasComissao,
+          txClient: tx,
+        });
+        if (resolvidoItem.comissao) {
+          valorComissaoFinal = resolvidoItem.comissao.valor_comissao;
+        }
+        const pctComissaoItem = resolvidoItem.comissao
+          ? resolvidoItem.comissao.pct_comissao
+          : (item.pct_comissao ?? 0);
+
         const [itemRow] = await tx`
           INSERT INTO alissonerp.itens_venda_erp (
             venda_id, produto_id, nome_produto, sku,
-            quantidade, preco_lista,
+            quantidade, preco_lista, preco_lista_cheio,
             pct_desconto, preco_unitario, total_item,
             pct_comissao, valor_comissao,
             peso_estimado, observacao, personalizacao
@@ -865,10 +889,11 @@ export async function POST(req: NextRequest) {
             ${item.sku ?? null},
             ${item.quantidade},
             ${precoListaFinal},
+            ${resolvidoItem.preco_lista_cheio},
             ${item.pct_desconto ?? 0},
             ${precoUnitarioFinal},
             ${totalItemFinal},
-            ${item.pct_comissao ?? 0},
+            ${pctComissaoItem},
             ${valorComissaoFinal},
             ${pesoEstimadoFinal},
             ${observacaoItem},
