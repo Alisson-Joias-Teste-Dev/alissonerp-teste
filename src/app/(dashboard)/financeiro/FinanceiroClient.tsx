@@ -3356,16 +3356,29 @@ function ExtratoComissao() {
       .finally(() => setLoading(false));
   }, [competencia, abertaId]);
 
-  function abrir(id: number) {
-    setAbertaId(id); setDetalhe(null); setLoading(true); setErro(null);
-    fetch(`/api/financeiro/comissoes/extrato/${id}?competencia=${competencia}`)
+  // A busca do detalhe vive num efeito (e não dentro do abrir()) porque o mês
+  // também muda DENTRO da tela de detalhe. Se ficar só no clique, trocar o mês
+  // no detalhe muda o rótulo e não recarrega nada — foi o bug reportado em
+  // 03/08/2026. Depende de abertaId E de competencia.
+  useEffect(() => {
+    if (!abertaId) { setDetalhe(null); return; }
+    let cancelado = false;
+    setLoading(true); setErro(null);
+    fetch(`/api/financeiro/comissoes/extrato/${abertaId}?competencia=${competencia}`)
       .then(async r => {
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Erro ao carregar");
         return r.json();
       })
-      .then(setDetalhe)
-      .catch(e => { setErro(e.message); setDetalhe(null); })
-      .finally(() => setLoading(false));
+      .then(d => { if (!cancelado) setDetalhe(d); })
+      .catch(e => { if (!cancelado) { setErro(e.message); setDetalhe(null); } })
+      .finally(() => { if (!cancelado) setLoading(false); });
+    // cancelado: troca rápida de mês dispara duas buscas; sem isso a resposta
+    // mais lenta pode chegar depois e sobrescrever o mês certo com o antigo.
+    return () => { cancelado = true; };
+  }, [abertaId, competencia]);
+
+  function abrir(id: number) {
+    setAbertaId(id);
   }
 
   const filtroMes = (
