@@ -389,6 +389,8 @@ O relatório do fechamento mostrava 9 corridas de 08/06 no nome do próprio Jona
 
 - **Causa raiz, fora do alcance desta mudança**: testar entrega em PRODUÇÃO. O ledger do frete não distingue teste de venda real, e a rotina agora roda todo dia — teste novo entra no mês corrente. O `contatos_teste` limpa o relatório, não o razão.
 
+**Complemento (migration 365)** — `entregas_teste`: **frete avulso não tem cliente**, então `contatos_teste` nunca alcança uma corrida solta. A entrega **47** (`ENT-20260610-00009`, "teste de frete avulso", cobrado R$ 0,00 / motoboy R$ 20,00) nasceu sem venda e sem `contato_id`. A chave por ENTREGA é a única forma de marcá-la. Mesma natureza: exibição apenas. ⚠️ É lista MANUAL de exceções — cada id some do relatório sem sair do razão; marcar corrida real aqui esconde movimento verdadeiro. A entrega 47 também foi **cancelada de verdade** em produção (log 353), com crédito de estorno de R$ 20,00.
+
 #### 10.9.1. Referência (§10.9)
 
 - Migration: `supabase/migrations/364_contatos_teste_frete.sql` (só INSERT de config, `ON CONFLICT DO NOTHING`).

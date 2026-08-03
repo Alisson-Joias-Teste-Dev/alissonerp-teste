@@ -101,9 +101,39 @@ function fmtDate(d: Date): string {
  * de SQL.
  */
 export async function listarContatosTeste(db: DbSql): Promise<number[]> {
+  return lerConfigListaDeIds(db, "contatos_teste");
+}
+
+/**
+ * IDs de `entregas_venda` marcadas como TESTE (config `entregas_teste`,
+ * migration 365).
+ *
+ * POR QUE EXISTE, se já há `contatos_teste` (03/08/2026): **frete avulso não
+ * tem cliente**. A corrida "teste de frete avulso" (entrega 47,
+ * ENT-20260610-00009) nasceu sem venda e sem `contato_id`, então nenhuma lista
+ * de contatos jamais a alcançaria — e o Jonathan pediu que ela não aparecesse.
+ * A chave por entrega é a única forma de marcar uma corrida solta.
+ *
+ * ⚠️ EXIBIÇÃO APENAS, igual `contatos_teste`: não estorna, não mexe em saldo.
+ * Usar com parcimônia — é uma lista manual de exceções, e cada id aqui é uma
+ * linha que some do relatório sem sair do razão. Marcar corrida REAL aqui
+ * esconde movimento verdadeiro.
+ */
+export async function listarEntregasTeste(db: DbSql): Promise<number[]> {
+  return lerConfigListaDeIds(db, "entregas_teste");
+}
+
+/**
+ * Lê uma config que guarda lista de ids em CSV ("224,394408") e devolve os
+ * números válidos. Pedaço não numérico é descartado — estas chaves são
+ * editadas à mão pelo Jonathan e um espaço/vírgula sobrando não pode virar
+ * erro de SQL. Mesmo padrão de leitura de `listarAprovadoresFechamentoFrete`
+ * (sem cache).
+ */
+async function lerConfigListaDeIds(db: DbSql, chave: string): Promise<number[]> {
   const [cfg] = await db`
     SELECT valor FROM alissonerp.configuracoes_sistema
-    WHERE chave = 'contatos_teste'
+    WHERE chave = ${chave}
   `;
   return String(cfg?.valor ?? "")
     .split(",")
@@ -648,7 +678,10 @@ export async function obterFechamentoFreteDetalhe(
   // para não puxar a lista de contatos pro JS só para comparar id.
   // `= ANY(...)` com array vazio devolve false para todos (nenhum lançamento
   // marcado), que é o comportamento correto quando a config não existe.
-  const contatosTeste = await listarContatosTeste(db);
+  const [contatosTeste, entregasTeste] = await Promise.all([
+    listarContatosTeste(db),
+    listarEntregasTeste(db),
+  ]);
 
   const lancamentoRows: Record<string, unknown>[] = await db`
     SELECT
@@ -658,7 +691,8 @@ export async function obterFechamentoFreteDetalhe(
       e.frete_cobrado, e.frete_motoboy, e.is_avulso, e.descricao_avulso,
       s.venda_id, v.numero_venda,
       COALESCE(c.nome, ca.nome) AS cliente_nome,
-      (COALESCE(v.cliente_id, e.contato_id) = ANY (${db.array(contatosTeste)}::bigint[])) AS is_teste
+      (COALESCE(v.cliente_id, e.contato_id) = ANY (${db.array(contatosTeste)}::bigint[])
+       OR s.entrega_id = ANY (${db.array(entregasTeste)}::int[])) AS is_teste
     FROM alissonerp.saldo_frete_gratis s
     JOIN alissonerp.fechamentos_frete f ON f.id = s.fechamento_id
     LEFT JOIN alissonerp.entregas_venda e ON e.id = s.entrega_id
