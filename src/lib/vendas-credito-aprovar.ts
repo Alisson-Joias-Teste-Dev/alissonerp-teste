@@ -153,7 +153,7 @@ export async function submeterVendaParaAprovacaoCredito(
       `Solicitado por: ${solicitante?.nome ?? "desconhecido"}`;
 
     const descDiretor = descGerente +
-      `\n\n⚠️ ACIMA DO SALDO — aprovação pelo diretor zera a comissão da consultora (R$ ${Number(venda.total_comissao).toFixed(2)})`;
+      `\n\n⚠️ ACIMA DO SALDO — liberação de crédito acima do limite disponível. NÃO afeta a comissão da consultora (a comissão segue o valor recebido).`;
 
     const tituloTarefa = tipo === "gerente"
       ? `Aprovação crédito — ${venda.numero_venda} (R$ ${valorAReceber.toFixed(2)})`
@@ -337,29 +337,26 @@ export async function processarAprovacaoCredito(
   }
 
   // 3. Aprovado — processar conforme tipo.
-  // tipo 'gerente' → comissão da consultora MANTIDA, nada a fazer: o saldo de crédito
-  // é DERIVADO ao vivo (limite − A Receber pendente, v2.78.0), não há contador a
-  // debitar. tipo 'diretor' (crédito sem saldo) → zera a comissão de todos os itens.
   //
-  // REGRA DE NEGÓCIO (decisão Jonathan, 27/06/2026): o zeramento só vale a
-  // partir de julho/2026 — maio e junho foram restaurados manualmente após
-  // pente-fino (ver comercial.md §2). Antes desta correção (06/07/2026) essa
-  // condição de data não existia no código, então aprovações de diretor em
-  // junho continuavam zerando a comissão (ex.: vendas 15672/15678, corrigidas
-  // manualmente em prod).
-  const ZERAMENTO_CREDITO_DIRETOR_A_PARTIR_DE = "2026-07-01";
-  if (tipo === "diretor" && (tarefa.data_venda as string) >= ZERAMENTO_CREDITO_DIRETOR_A_PARTIR_DE) {
-    await sql`
-      UPDATE alissonerp.itens_venda_erp
-      SET pct_comissao = 0, valor_comissao = 0
-      WHERE venda_id = ${vendaId}
-    `;
-    await sql`
-      UPDATE alissonerp.vendas_erp
-      SET total_comissao = 0, updated_at = NOW()
-      WHERE id = ${vendaId}
-    `;
-  }
+  // REGRA DE NEGÓCIO (decisão Jonathan, 03/08/2026): a aprovação de crédito
+  // — gerente OU diretor — NÃO mexe mais na comissão da consultora. A comissão
+  // SEGUE O DINHEIRO RECEBIDO, e isso o fechamento já faz sozinho: paga
+  // `total_comissao × (pagamento confirmado ÷ total_venda)` por pagamento
+  // comissionável, e o A Receber (crediário) só entra quando a parcela é de fato
+  // paga (ver fechamentos/route.ts e comercial.md §2).
+  //
+  // POR QUÊ: o antigo zeramento do diretor (crédito acima do saldo) apagava a
+  // comissão INTEIRA na aprovação — inclusive a parte já paga em dinheiro real —,
+  // o que era injusto e obrigava a restaurar 1 a 1 na mão todo mês (22 vendas de
+  // julho/2026 restauradas antes desta correção; ver comercial.md §2). Sem zerar,
+  // o número teórico fica de pé e o fechamento distribui na medida certa.
+  //
+  // IMPACTO SE REVERTIDO: volta o zeramento e a esteira de correção manual. A
+  // aprovação do diretor continua servindo pra LIBERAR a venda acima do limite
+  // (quem pode aprovar), só não penaliza mais a comissão.
+  //
+  // tipo 'gerente' → nada a fazer (saldo é derivado ao vivo, sem contador a
+  // debitar). tipo 'diretor' → também nada a fazer na comissão.
 
   // 4. Criar conta a receber manual (só valor do A Receber, não total_venda)
   const [vendaInfo] = await sql`
@@ -423,7 +420,7 @@ export async function processarAprovacaoCredito(
     : vendaAprovada
       ? (tipo === "gerente"
           ? `Crédito aprovado pelo gerente — Venda ${vendaInfo.numero_venda} aprovada`
-          : `Crédito aprovado pelo diretor — Venda ${vendaInfo.numero_venda} aprovada (comissão zerada)`)
+          : `Crédito aprovado pelo diretor — Venda ${vendaInfo.numero_venda} aprovada`)
       : `Crédito aprovado, mas a aprovação da venda falhou: ${erroAprovacao}`;
 
   await criarNotificacao({
