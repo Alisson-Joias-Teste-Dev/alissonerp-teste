@@ -4,15 +4,14 @@
  * REGRA DE NEGÓCIO (definida pelo Jonathan — ver migration 356 e
  * docs/regras-negocio/entregas.md): a loja recebe todo mês uma verba para
  * dar frete grátis de cortesia (o normal é o cliente pagar). Verba = 0,1%
- * (config `percentual_verba_frete`, default 0.1) do FATURAMENTO LÍQUIDO DA
- * COMPETÊNCIA — o mês que o fechamento está fechando.
+ * (config `percentual_verba_frete`, default 0.1) do FATURAMENTO LÍQUIDO DO
+ * MÊS ANTERIOR ao de competência — *"a verba do mês de julho é o faturamento
+ * do mês de junho"*.
  *
- * ⚠️ REVISADA EM 03/08/2026 (§10.8): eram "bruto" e "mês anterior ao de
- * referência"; viraram "líquido" (bruto − vale-troca) e "o próprio mês de
- * competência". A rotina roda no dia 01 e fecha o mês que acabou, então o
- * período consultado continua sendo o mesmo — o que mudou foi o VALOR (líquido)
- * e o RÓTULO (o fechamento passa a se chamar pela competência, não pelo mês em
- * que a rotina rodou).
+ * ⚠️ REVISADO EM 03/08/2026 (§10.8): o que mudou foi (a) bruto → LÍQUIDO
+ * (bruto − vale-troca) e (b) o RÓTULO do fechamento, que passou a ser a
+ * COMPETÊNCIA (o mês fechado) em vez do mês em que a rotina rodou. A relação
+ * "base = mês anterior" NÃO mudou.
  *
  * O QUE: `calcularFaturamentoLiquidoMes(inicio, fim)` é a FONTE ÚNICA do
  * cálculo de faturamento usado pela verba — reaproveita, campo a campo e
@@ -151,31 +150,39 @@ export interface VerbaFreteGratisCalculada {
  * percentual configurado) do faturamento LÍQUIDO **do próprio mês de
  * competência**.
  *
- * ⚠️ MUDANÇA DE 03/08/2026 (decisão do Jonathan, ver docs/regras-negocio/
- * entregas.md §10.8) — DUAS coisas mudaram juntas nesta função:
+ * ⚠️ MUDANÇAS DE 03/08/2026 (decisões do Jonathan, ver docs/regras-negocio/
+ * entregas.md §10.8):
  *   1. A base virou o faturamento LÍQUIDO (bruto − vale-troca), não mais o
  *      bruto: *"o saldo que é gerado ele é do faturamento líquido e não do
  *      bruto"*. Ver `calcularFaturamentoLiquidoMes`.
- *   2. O parâmetro virou o mês de COMPETÊNCIA, e a base é ELE MESMO — antes
- *      recebia o mês de execução (agosto) e ia buscar o mês anterior (julho).
- *      Agora recebe julho e usa julho: *"o cálculo precisa ser do mês da
- *      competência e não do próximo"*. O NÚMERO não muda por causa disso (o
- *      período consultado é o mesmo julho) — o que muda é o rótulo do
- *      fechamento, que passa a ser a competência.
+ *   2. O parâmetro virou o mês de COMPETÊNCIA (o mês FECHADO), não mais o mês
+ *      de execução da rotina.
  *
- * 🔴 IMPACTO SE ALGUÉM "CONSERTAR" ISTO VOLTANDO O `- 1` NO MÊS: o fechamento
- * rodando em agosto passaria a somar JUNHO, creditando a verba errada e ainda
- * gravando `mes_referencia` de um mês que já tem fechamento — colidindo com o
- * `UNIQUE (gerente_id, mes_referencia)`.
+ * 🔴 ERRO COMETIDO E CORRIGIDO NO MESMO DIA — não repetir: ao aplicar a
+ * mudança (2), a base foi trocada junto, passando a somar o PRÓPRIO mês de
+ * competência. Está errado. O Jonathan corrigiu: *"verba do mês de julho é o
+ * faturamento do mês de junho"*. Só o RÓTULO mudou de agosto para julho; a
+ * base sempre foi, e continua sendo, o **mês anterior ao de competência**.
+ *
+ * PROVA INDEPENDENTE: no relatório consolidado de julho que ele fechou à mão
+ * em 31/07/2026, a verba usada foi **R$ 777,86** — exatamente 0,1% do
+ * faturamento líquido de JUNHO (R$ 777.860,82). O líquido de julho daria
+ * R$ 731,70, que não bate com nada que ele já tinha fechado.
+ *
+ * IMPACTO SE ALGUÉM TIRAR O `- 1`: a verba passa a ser calculada sobre o mês
+ * que acabou de fechar em vez do anterior — número diferente todo mês, sem
+ * erro visível na tela.
  *
  * IMPACTO SE ALTERADO: fechamentos_frete.verba_creditada/faturamento_base/
  * percentual_verba (migration 356) dependem deste retorno para gravar a
  * auditoria de cada fechamento mensal.
  */
 export async function calcularVerbaFreteGratis(mesCompetencia: Date): Promise<VerbaFreteGratisCalculada> {
-  // O período é o PRÓPRIO mês de competência (dia 1 até o último dia).
-  const inicioMes = new Date(mesCompetencia.getFullYear(), mesCompetencia.getMonth(), 1);
-  const fimMes = new Date(mesCompetencia.getFullYear(), mesCompetencia.getMonth() + 1, 0);
+  // 🔴 A base é o mês ANTERIOR ao de competência — "a verba do mês de julho é o
+  // faturamento do mês de junho" (Jonathan, 03/08). Competência julho ⇒ soma
+  // 01/06 a 30/06.
+  const inicioMes = new Date(mesCompetencia.getFullYear(), mesCompetencia.getMonth() - 1, 1);
+  const fimMes = new Date(mesCompetencia.getFullYear(), mesCompetencia.getMonth(), 0);
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
   const inicio = fmt(inicioMes);
   const fim = fmt(fimMes);
