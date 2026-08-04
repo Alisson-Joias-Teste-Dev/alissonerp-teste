@@ -78,6 +78,8 @@ export async function GET(
         ev.created_at,
         ev.updated_at,
         ev.foto_entrega_path,
+        ev.latitude_entrega,
+        ev.longitude_entrega,
         ev.is_avulso,
         ev.descricao_avulso,
         (ev.created_by = ev.motoboy_id) AS auto_criado,
@@ -262,6 +264,11 @@ export async function GET(
     created_at: e.created_at,
     updated_at: e.updated_at,
     foto_entrega_path: e.foto_entrega_path ?? null,
+    // REGRA DE NEGÓCIO (03/08/2026): posição GPS bruta capturada na
+    // confirmação pelo motoboy — o front monta o link do Google Maps
+    // (https://www.google.com/maps?q=lat,lng), sem geocodificação reversa.
+    latitude_entrega: e.latitude_entrega != null ? Number(e.latitude_entrega) : null,
+    longitude_entrega: e.longitude_entrega != null ? Number(e.longitude_entrega) : null,
     // MULTIFOTO (migration 357): lista já unificada (nova tabela + fallback
     // pra coluna antiga) — ver buscarFotosEntrega em src/lib/entrega-venda.ts.
     fotos_entrega: fotosEntrega,

@@ -4795,6 +4795,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         modoSolicitacao
         vendaId={venda.id}
         enderecoInicial={enderecoInicialFreteAvulso}
+        contatoIdInicial={venda.cliente_id ?? undefined}
       />
     )}
     {/* Confirmação do aro antes de a ordem de aliança ir para a fábrica. */}

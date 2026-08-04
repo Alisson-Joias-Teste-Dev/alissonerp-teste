@@ -133,6 +133,11 @@ export async function GET(req: NextRequest) {
   const fim        = searchParams.get("fim");
   const situacao   = searchParams.get("situacao");   // rascunho|aprovado|enviado|cancelado|concluido
   const vendedorId = searchParams.get("vendedor_id");
+  // REGRA DE NEGÓCIO (03/08/2026 — sugestão de venda por cliente no Frete
+  // Avulso): filtro adicional, mesmo padrão de vendedorId — usado por
+  // FreteAvulsoModal pra listar as vendas de um cliente já selecionado
+  // (contato_id), sem precisar de endpoint novo.
+  const clienteId  = searchParams.get("cliente_id");
   const q          = searchParams.get("q")?.trim();
   /**
    * REGRA DE NEGÓCIO (27/07/2026): filtro "aliança sem ordem aberta".
@@ -195,6 +200,7 @@ export async function GET(req: NextRequest) {
       ${isFullAccess ? sql`` : sql`AND v.vendedor_id = ${meuVendedorId!}`}
       ${situacao   ? sql`AND v.situacao    = ${situacao}`              : sql``}
       ${vendedorId ? sql`AND v.vendedor_id = ${Number(vendedorId)}`    : sql``}
+      ${clienteId  ? sql`AND v.cliente_id  = ${Number(clienteId)}`     : sql``}
       ${filtroAliancaSemOrdem}
       ${isDocSearch
           ? sql`AND regexp_replace(COALESCE(v.cliente_cpf_cnpj, ''), '\D', '', 'g') ILIKE ${'%' + qDigits + '%'}`
@@ -256,6 +262,7 @@ export async function GET(req: NextRequest) {
       ${isFullAccess ? sql`` : sql`AND v.vendedor_id = ${meuVendedorId!}`}
       ${situacao   ? sql`AND v.situacao    = ${situacao}`              : sql``}
       ${vendedorId ? sql`AND v.vendedor_id = ${Number(vendedorId)}`    : sql``}
+      ${clienteId  ? sql`AND v.cliente_id  = ${Number(clienteId)}`     : sql``}
       ${filtroAliancaSemOrdem}
       ${isDocSearch
           ? sql`AND regexp_replace(COALESCE(v.cliente_cpf_cnpj, ''), '\D', '', 'g') ILIKE ${'%' + qDigits + '%'}`

@@ -140,6 +140,12 @@ describe("P3/P4 — enforcement por MODO via fonte única (src/lib/permissoes/fr
       enderecoEntregaLogradouro: "Rua X",
       enderecoEntregaNumero: "10",
       enderecoEntregaCidade: "Fortaleza",
+      // REGRA DE NEGÓCIO (03/08/2026 — "obrigatório o nome do cliente"):
+      // usaFormularioCompleto (pagante presente) agora também exige contatoId
+      // — ver route.ts. Sem isto, a rota rejeita com 400 antes de chegar em
+      // criarFreteAvulso, quebrando este teste que verifica AUTORIZAÇÃO
+      // (não validação de campo).
+      contatoId: 685,
     })));
 
     expect(res.status).toBe(200);
