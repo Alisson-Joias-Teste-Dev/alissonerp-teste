@@ -44,8 +44,9 @@ interface Props {
   isOpen: boolean;
   /** Endereço sugerido (da venda ou do cadastro do cliente) — null/incompleto = abre direto no modo "digitar". */
   enderecoSugerido: EnderecoValue | null;
-  /** De onde veio a sugestão, só pra compor a mensagem. */
-  fonte: "venda" | "cadastro" | null;
+  /** De onde veio a sugestão, só pra compor a mensagem. "manual" = a pessoa
+   *  já editou no formulário principal (ver "Trocar" no FreteAvulsoModal). */
+  fonte: "venda" | "cadastro" | "manual" | null;
   /** Número da venda, quando fonte === "venda" (compõe a mensagem). */
   numeroVenda?: string | null;
   onConfirmar: (endereco: EnderecoValue) => void;
@@ -77,7 +78,9 @@ export default function ConfirmarEnderecoModal({
 
   const mensagemFonte = fonte === "venda"
     ? `A entrega vai pro endereço cadastrado na venda ${numeroVenda ?? ""}?`
-    : "A entrega vai pro endereço do cadastro do cliente?";
+    : fonte === "manual"
+      ? "Confirma esse endereço?"
+      : "A entrega vai pro endereço do cadastro do cliente?";
 
   return (
     <>

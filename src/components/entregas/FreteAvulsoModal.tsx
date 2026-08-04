@@ -148,7 +148,7 @@ import { useState, useEffect, useRef } from "react";
 import { X, Loader2, CheckCircle, Bike, MapPin, AlignLeft, DollarSign, Store, Camera } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import { useErrorStore } from "@/stores/errorStore";
-import { type EnderecoValue, ENDERECO_VAZIO, enderecoDaVenda, type EnderecoVendaFields } from "@/components/endereco/EnderecoForm";
+import EnderecoForm, { type EnderecoValue, ENDERECO_VAZIO, enderecoDaVenda, type EnderecoVendaFields } from "@/components/endereco/EnderecoForm";
 import ClienteSelector, { type ClienteOption } from "@/components/metal/ClienteSelector";
 import ConfirmarEnderecoModal, { enderecoCompleto } from "@/components/entregas/ConfirmarEnderecoModal";
 import { precisaValorCobradoDoCliente } from "@/lib/frete-avulso-valor-cobrado";
@@ -326,6 +326,16 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   // avulso", depois de validar os campos do formulário principal — ver
   // handleAbrirConfirmacaoEndereco.
   const [mostrarPopupEndereco, setMostrarPopupEndereco] = useState(false);
+  // REGRA DE NEGÓCIO (pedido do Jonathan, 04/08/2026 — "trocar o
+  // endereço"): o preview de endereço no formulário principal (venda
+  // selecionada ou cadastro do cliente) ganha um "Trocar" — edita ali
+  // mesmo, sem precisar chegar no popup de confirmação. Quando preenchido,
+  // tem PRIORIDADE sobre venda/cadastro no popup final (ver
+  // enderecoSugerido) — mas o popup AINDA pede confirmação (nunca pula,
+  // regra já estabelecida) usando esse valor como sugestão.
+  const [enderecoManual, setEnderecoManual] = useState<EnderecoValue | null>(null);
+  const [editandoEnderecoInline, setEditandoEnderecoInline] = useState(false);
+  const [enderecoTemp, setEnderecoTemp] = useState<EnderecoValue>(ENDERECO_VAZIO);
   const [freteCobradoConsultora, setFreteCobradoConsultora] = useState("");
 
   // REGRA DE NEGÓCIO (03/08/2026 — "obrigatório o nome do cliente"): só
@@ -365,6 +375,10 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     if (!mostrarSeletorCliente) return;
     setVendaSelecionada(null);
     setSugestaoDispensada(false);
+    // REGRA DE NEGÓCIO (04/08/2026): troca de cliente descarta um endereço
+    // manual anterior — era pra outra pessoa, não faz sentido continuar.
+    setEnderecoManual(null);
+    setEditandoEnderecoInline(false);
     if (!clienteSelecionado) { setVendasDoCliente([]); return; }
     let cancelado = false;
     setCarregandoVendasDoCliente(true);
@@ -440,6 +454,9 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     setSugestaoDispensada(false);
     setEnderecoEntrega(ENDERECO_VAZIO);
     setMostrarPopupEndereco(false);
+    setEnderecoManual(null);
+    setEditandoEnderecoInline(false);
+    setEnderecoTemp(ENDERECO_VAZIO);
     setClienteSelecionado(null);
     setFreteCobradoConsultora("");
     setPagante("");
@@ -508,17 +525,24 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     }
   }
 
-  /** Endereço sugerido pro popup — venda selecionada tem prioridade sobre o
-   *  cadastro do cliente (é mais específico pra esta corrida). null quando
-   *  nenhum dos dois tem endereço completo — popup abre pra digitar. */
-  const enderecoSugerido = vendaSelecionada && enderecoCompleto(enderecoEntrega)
+  /** Endereço automático — venda selecionada tem prioridade sobre o cadastro
+   *  do cliente (é mais específico pra esta corrida). null quando nenhum dos
+   *  dois tem endereço completo. */
+  const enderecoAutoSugerido = vendaSelecionada && enderecoCompleto(enderecoEntrega)
     ? enderecoEntrega
     : clienteSelecionado && enderecoCompleto(enderecoDoCadastro(clienteSelecionado))
       ? enderecoDoCadastro(clienteSelecionado)
       : null;
-  const fonteSugestao: "venda" | "cadastro" | null = vendaSelecionada && enderecoCompleto(enderecoEntrega)
+  const fonteAutoSugestao: "venda" | "cadastro" | null = vendaSelecionada && enderecoCompleto(enderecoEntrega)
     ? "venda"
-    : enderecoSugerido ? "cadastro" : null;
+    : enderecoAutoSugerido ? "cadastro" : null;
+  // REGRA DE NEGÓCIO (pedido do Jonathan, 04/08/2026 — "trocar o
+  // endereço"): quando a pessoa edita o endereço direto no formulário
+  // principal (ver campoEnderecoPreview), esse valor manda — tanto no
+  // preview quanto no popup final. O popup AINDA pede confirmação (regra
+  // já estabelecida: nunca pula), só que sugerindo o que foi digitado.
+  const enderecoSugerido = enderecoManual ?? enderecoAutoSugerido;
+  const fonteSugestao: "venda" | "cadastro" | "manual" | null = enderecoManual ? "manual" : fonteAutoSugestao;
 
   /** Envio de verdade — chamado direto (vendaFixada) ou pelo
    *  ConfirmarEnderecoModal depois que o endereço é confirmado/digitado. */
@@ -842,29 +866,86 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                     </div>
                     )}
 
-                    {/* Endereço do cliente — REGRA DE NEGÓCIO (04/08/2026,
-                        pedido do Jonathan): assim que o cliente é
-                        selecionado, mostra o endereço do CADASTRO dele
-                        (public.contatos) direto no formulário — só pra
-                        visualização rápida, não é a confirmação (que
-                        continua acontecendo no popup ao clicar "Solicitar",
-                        ver ConfirmarEnderecoModal — nunca pulada). Some
-                        quando o cliente não tem endereço no cadastro; some
-                        também se uma venda for selecionada (a sugestão real
-                        no popup passa a ser a da venda, que tem prioridade —
-                        mostrar os dois aqui confundiria qual vale). */}
-                    {mostrarSeletorCliente && clienteSelecionado && !vendaSelecionada && enderecoCompleto(enderecoDoCadastro(clienteSelecionado)) && (
-                      <div style={{
-                        marginBottom: 14, fontSize: 12, color: C.cinza,
-                        display: "flex", alignItems: "flex-start", gap: 6,
-                      }}>
-                        <MapPin size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-                        <span>
-                          Endereço do cliente: {enderecoDoCadastro(clienteSelecionado).logradouro}, nº {enderecoDoCadastro(clienteSelecionado).numero}
-                          {enderecoDoCadastro(clienteSelecionado).bairro ? ` — ${enderecoDoCadastro(clienteSelecionado).bairro}` : ""}
-                          {enderecoDoCadastro(clienteSelecionado).cidade ? `, ${enderecoDoCadastro(clienteSelecionado).cidade}` : ""}
-                          {enderecoDoCadastro(clienteSelecionado).uf ? `/${enderecoDoCadastro(clienteSelecionado).uf}` : ""}
-                        </span>
+                    {/* Endereço (preview + trocar) — REGRA DE NEGÓCIO
+                        (04/08/2026, pedido do Jonathan): assim que há um
+                        endereço sugerido (da venda selecionada, do cadastro
+                        do cliente, ou já editado manualmente), mostra ele
+                        direto no formulário com um "Trocar" — edita ali
+                        mesmo, sem precisar chegar no popup. Isso é só
+                        VISUALIZAÇÃO/EDIÇÃO rápida — a CONFIRMAÇÃO de verdade
+                        continua acontecendo no popup ao clicar "Solicitar"
+                        (ConfirmarEnderecoModal — nunca pulada), usando este
+                        valor (enderecoSugerido, que já prioriza manual >
+                        venda > cadastro) como sugestão. */}
+                    {mostrarSeletorCliente && clienteSelecionado && !editandoEnderecoInline && (
+                      <div style={{ marginBottom: 14, fontSize: 12, color: C.cinza }}>
+                        {enderecoSugerido ? (
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                            <MapPin size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                            <span>
+                              {fonteSugestao === "venda" ? `Endereço (venda ${vendaSelecionada?.numero_venda}): ` : fonteSugestao === "cadastro" ? "Endereço do cliente: " : "Endereço: "}
+                              {enderecoSugerido.logradouro}, nº {enderecoSugerido.numero}
+                              {enderecoSugerido.bairro ? ` — ${enderecoSugerido.bairro}` : ""}
+                              {enderecoSugerido.cidade ? `, ${enderecoSugerido.cidade}` : ""}
+                              {enderecoSugerido.uf ? `/${enderecoSugerido.uf}` : ""}
+                              {" "}
+                              <button
+                                type="button"
+                                onClick={() => { setEnderecoTemp(enderecoSugerido); setEditandoEnderecoInline(true); }}
+                                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 600, color: C.esmeralda, textDecoration: "underline" }}
+                              >
+                                Trocar
+                              </button>
+                              {fonteSugestao === "manual" && (
+                                <>
+                                  {" · "}
+                                  <button
+                                    type="button"
+                                    onClick={() => setEnderecoManual(null)}
+                                    style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 11, color: C.cinza, textDecoration: "underline" }}
+                                  >
+                                    usar o automático de novo
+                                  </button>
+                                </>
+                              )}
+                            </span>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => { setEnderecoTemp(ENDERECO_VAZIO); setEditandoEnderecoInline(true); }}
+                            style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 600, color: C.esmeralda, textDecoration: "underline", display: "flex", alignItems: "center", gap: 6 }}
+                          >
+                            <MapPin size={13} /> Informar endereço de entrega agora
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {mostrarSeletorCliente && clienteSelecionado && editandoEnderecoInline && (
+                      <div style={{ marginBottom: 14, padding: 12, borderRadius: 10, background: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}>
+                        <EnderecoForm value={enderecoTemp} onChange={setEnderecoTemp} />
+                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                          <button
+                            type="button"
+                            disabled={!enderecoCompleto(enderecoTemp)}
+                            onClick={() => { setEnderecoManual(enderecoTemp); setEditandoEnderecoInline(false); }}
+                            style={{
+                              flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: 700, border: "none",
+                              background: enderecoCompleto(enderecoTemp) ? C.esmeralda : "#9CA3AF",
+                              color: "#fff", cursor: enderecoCompleto(enderecoTemp) ? "pointer" : "not-allowed",
+                            }}
+                          >
+                            Usar este endereço
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditandoEnderecoInline(false)}
+                            style={{ padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: `1px solid ${C.cremeBorder}`, background: "#fff", color: C.cinza, cursor: "pointer" }}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
                       </div>
                     )}
 
