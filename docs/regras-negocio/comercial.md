@@ -115,6 +115,50 @@ A aba **Fechamentos** foi removida. Tudo — ver, pagar, estornar e lançar acer
 
 Arquivos: `src/app/api/financeiro/comissoes/*` (inclusive `extrato/route.ts`), `src/lib/comissao-lancamentos.ts`, `src/lib/vale-troca.ts`, `src/lib/devolucoes.ts`, `src/lib/types/financeiro-comissoes.ts`.
 
+### 2.1.2 A comissão sai do PREÇO CHEIO, e quem calcula é o SERVIDOR (migration 366, 03/08/2026)
+
+**A regra:** a faixa de comissão de um item vem do desconto medido contra o **preço cheio** — `itens_venda_erp.preco_lista_cheio`. Para item em promoção, é o `preco_original` que a campanha fixou; para os demais, o próprio `preco_lista`.
+
+🔴 **Este é o desconto da COMISSÃO. NÃO é o desconto de ALÇADA.** São dois números diferentes e misturá-los quebra a operação:
+
+| | Base | Promoção conta? | Serve para |
+|---|---|---|---|
+| Desconto de **alçada** | `preco_lista` (o promocional) | **não** — é pré-aprovada | decidir se precisa de aprovação |
+| Desconto de **comissão** | `preco_lista_cheio` | **sim** | achar a faixa |
+
+Um item com 32,89% de promoção **vende sem aprovação nenhuma** — só passa a pagar 0,50% em vez de 4,00%. Usar o preço cheio na alçada faria toda venda promocional pedir aprovação (decisão do Jonathan, 03/08/2026).
+
+**O que estava errado:** o preço cheio não existia no banco. Para item em promoção `preco_lista` guarda o preço **promocional**, e o preço da campanha vivia só como `preco_lista_original` no estado React de `NovaVendaClientV2` — sumia quando a venda era reaberta. `comissaoPct()` caía no fallback `getComissao(pctManual)`, media o desconto contra o preço já promocional, enxergava ~0% e pagava a **faixa cheia de 4%** onde a tabela mandava 0,50%. A tela de detalhe da venda era pior: não conhecia promoção nenhuma. **Qualquer edição depois da venda criada derrubava a comissão pra faixa cheia** — por isso o erro parecia intermitente (venda criada e paga sem reabrir saía certa).
+
+Somava a isso que as rotas gravavam `${body.pct_comissao}` **cru**: a comissão vinha pronta do navegador, sem recálculo nem conferência contra `faixas_comissao`.
+
+**Custo medido:** R$ 575,61 em 8 itens de julho/2026, corrigidos em produção no log 357 (fechamentos de julho ainda em rascunho na hora).
+
+**A fronteira — o que o servidor NÃO recalcula** (`src/lib/comissao-item.ts`):
+
+1. **Item sem `produto_id`.** Aliança e peça personalizada nunca têm — 117 itens desde 01/05/2026, só desses dois tipos. A comissão deles vem do **módulo de orçamento, que calcula pelo PESO**. Decisão do Jonathan (03/08/2026): *"não é bug, é do módulo de orçamento de alianças, ele vê o peso"*.
+2. **Venda fora do rascunho.** O que congela a comissão é a **venda aprovada** (Jonathan, 03/08/2026). Em rascunho tudo recalcula; aprovou, fica como está.
+
+⚠️ O `preco_lista_cheio` é gravado **sempre**, mesmo quando a comissão não se mexe — é um fato do item (qual era o preço cheio na hora), não um recálculo. Sem isso a auditoria não teria contra o que medir.
+
+⚠️ **Nunca fazer JOIN direto em `promocao_itens`.** Um produto pode estar em **duas campanhas sobrepostas** na mesma data (AJ4895 em 31/07/2026) e o join direto **duplica a linha do item**, inflando qualquer agregado. Usar subconsulta escalar / `LEFT JOIN LATERAL` com `LIMIT 1`, desempate `ORDER BY data_inicio DESC, id DESC` (o mesmo de `vw_produto_preco_vigente`).
+
+⚠️ **Gravação nova e backfill usam regras diferentes, de propósito.** A gravação lê `vw_produto_preco_vigente` (que exige `situacao_manual='agendada'`) para o preço cheio ser exatamente o que a vendedora viu na tela. O backfill olha **só a janela de datas**: campanha encerrada na mão vira `encerrada_manual` e some da view, mas a rota de encerrar já faz `data_fim = LEAST(data_fim, CURRENT_DATE)` — exigir `agendada` faria as vendas feitas enquanto a campanha estava no ar perderem o preço cheio (10 campanhas nessa situação).
+
+**Também corrigido:** o recálculo de `tarefas/[id]/aprovacao/route.ts` varria **todos** os itens da venda usando `pct_desconto`, sem filtrar aliança — aprovar um desconto numa venda com aliança substituía a comissão da aliança pela faixa. Agora respeita a mesma fronteira e mede pelos preços.
+
+**A tela precisa MOSTRAR a promoção, senão o número certo vira chamado.** Com a comissão corrigida e a tela intacta, a aba Produtos exibia `preço lista 599,00 · % Desc — · comissão 0,50%`: sem desconto nenhum à vista e comissão de piso. A consultora abre chamado — e tem razão, porque pela tela não existe desconto. Item em campanha passa a mostrar três apoios: o selo `promoção · <campanha>` no nome, `cheio R$ 890,00` riscado sob o preço lista, `promo 32,70%` sob o "—" da coluna % Desc e `faixa de 32,70%` sob a comissão. Item sem campanha fica idêntico ao de antes. Vale para a aba Produtos do detalhe da venda **e** para a tela de nova venda.
+
+⚠️ A coluna **% Desc continua "—"** de propósito: ali é o desconto de **alçada**, e ele é zero mesmo. A promoção aparece embaixo, separada, porque é outra conta.
+
+⚠️ A prévia de comissão do detalhe da venda usava `getComissao(pct_desconto)` ao editar — mostrava 4,00% e virava 0,50% depois de salvar. Agora a prévia usa a mesma base do servidor.
+
+🔴 **A migration 366 é PRÉ-REQUISITO DURO do deploy.** `GET /api/vendas/[id]` seleciona `ive.preco_lista_cheio` direto: subir o código sem a coluna derruba o detalhe da venda inteiro (500).
+
+**Fica de fora (vai para o ERP novo, decisão do Jonathan em 03/08/2026):** o `Math.min(maxDesconto, ...)` de `NovaVendaClientV2` não limita desconto nenhum — limita só **o número gravado**. Digitando o preço final em vez do percentual, a peça sai com 23,39% de desconto e o registro diz 20% (o teto da vendedora), sem aprovação de ninguém; o servidor não pega porque confere o número já maquiado. É contorno de **alçada**, não de comissão (casos 15275 e 15751). Não mexer neste sistema.
+
+Arquivos: `src/lib/comissao-item.ts`, `supabase/migrations/366_comissao_preco_lista_cheio.sql`, `src/app/api/vendas/route.ts`, `src/app/api/vendas/[id]/itens/{route,[itemId]/route}.ts`, `src/app/api/vendas/solicitacoes-desconto/[id]/route.ts`, `src/app/api/tarefas/[id]/aprovacao/route.ts`.
+
 ---
 
 ## 3. Estoque comercial, reserva e entrega

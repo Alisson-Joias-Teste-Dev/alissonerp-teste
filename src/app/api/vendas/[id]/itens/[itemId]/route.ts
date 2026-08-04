@@ -7,6 +7,7 @@ import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { zodError } from "@/lib/schemas/common";
 import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 import { logAudit } from "@/lib/audit";
+import { resolverItemComissao } from "@/lib/comissao-item";
 
 const ItemVendaPatchSchema = z.object({
   quantidade: z.coerce.number().optional(),
@@ -63,7 +64,7 @@ export async function PATCH(
   }
 
   const [item] = await sql`
-    SELECT id, quantidade, pct_desconto, preco_unitario, total_item
+    SELECT id, produto_id, quantidade, preco_lista, pct_desconto, preco_unitario, total_item
     FROM alissonerp.itens_venda_erp WHERE id = ${iId} AND venda_id = ${vendaId}
   `;
   if (!item) return NextResponse.json({ error: "Item não encontrado" }, { status: 404 });
@@ -83,16 +84,37 @@ export async function PATCH(
   // era persistido, então o botão de solicitar nunca aparecia.
   // Esta rota só edita venda em rascunho (guard de situacao acima).
 
+  // ── Comissão: recalculada AQUI, não aceita do navegador ─────────────────────
+  // Esta rota é o caminho da EDIÇÃO — exatamente onde o furo da promoção batia.
+  // O navegador perde o preço cheio da campanha quando a venda é reaberta
+  // (ele só existia no estado React), media o desconto contra o preço já
+  // promocional e mandava a faixa cheia de 4%. Ver comissao-item.ts.
+  //
+  // Os valores efetivos são montados aqui, ANTES do UPDATE, porque a comissão
+  // depende do preço final — não dá pra derivar de dentro do COALESCE.
+  const precoListaEfetivo    = Number(body.preco_lista    ?? item.preco_lista);
+  const precoUnitarioEfetivo = Number(body.preco_unitario ?? item.preco_unitario);
+  const totalItemEfetivo     = Number(body.total_item     ?? item.total_item);
+
+  const resolvido = await resolverItemComissao({
+    produtoId: item.produto_id ?? null,
+    precoLista: precoListaEfetivo,
+    precoUnitario: precoUnitarioEfetivo,
+    totalItem: totalItemEfetivo,
+    situacaoVenda: venda.situacao,
+  });
+
   await sql`
     UPDATE alissonerp.itens_venda_erp SET
-      quantidade     = COALESCE(${body.quantidade     ?? null}, quantidade),
-      preco_lista    = COALESCE(${body.preco_lista    ?? null}, preco_lista),
-      pct_desconto   = COALESCE(${body.pct_desconto   ?? null}, pct_desconto),
-      preco_unitario = COALESCE(${body.preco_unitario ?? null}, preco_unitario),
-      total_item     = COALESCE(${body.total_item     ?? null}, total_item),
-      pct_comissao   = COALESCE(${body.pct_comissao   ?? null}, pct_comissao),
-      valor_comissao = COALESCE(${body.valor_comissao ?? null}, valor_comissao),
-      observacao     = COALESCE(${body.observacao     ?? null}, observacao)
+      quantidade        = COALESCE(${body.quantidade     ?? null}, quantidade),
+      preco_lista       = COALESCE(${body.preco_lista    ?? null}, preco_lista),
+      preco_lista_cheio = ${resolvido.preco_lista_cheio},
+      pct_desconto      = COALESCE(${body.pct_desconto   ?? null}, pct_desconto),
+      preco_unitario    = COALESCE(${body.preco_unitario ?? null}, preco_unitario),
+      total_item        = COALESCE(${body.total_item     ?? null}, total_item),
+      pct_comissao      = COALESCE(${resolvido.comissao?.pct_comissao   ?? body.pct_comissao   ?? null}, pct_comissao),
+      valor_comissao    = COALESCE(${resolvido.comissao?.valor_comissao ?? body.valor_comissao ?? null}, valor_comissao),
+      observacao        = COALESCE(${body.observacao     ?? null}, observacao)
     WHERE id = ${iId}
   `;
 

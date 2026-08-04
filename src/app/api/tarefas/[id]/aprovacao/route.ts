@@ -923,6 +923,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         // era, por ex., 21% (que vale 1,55% na tabela). Equívoco identificado
         // pelo dono: a aprovação de um desconto de 20-30% não deveria ter o
         // mesmo efeito na comissão que um desconto acima de 30%.
+        // ⚠️ DUAS CORREÇÕES AQUI (03/08/2026):
+        //
+        // 1. `WHERE i.produto_id IS NOT NULL` — este UPDATE varria TODOS os
+        //    itens da venda, inclusive ALIANÇA e PEÇA PERSONALIZADA. A comissão
+        //    desses vem do módulo de orçamento, que calcula pelo PESO (decisão
+        //    do Jonathan: "não é bug, é do módulo de orçamento de alianças").
+        //    Aprovar um desconto numa venda com aliança substituía a comissão da
+        //    aliança pela faixa. Aliança e personalizada NUNCA têm produto_id —
+        //    117 itens desde 01/05/2026, todos desses dois tipos.
+        //
+        // 2. O desconto sai dos PREÇOS, não de `i.pct_desconto`. O pct gravado
+        //    mente no item promocional (mede contra o preço já promocional, dá
+        //    0% e joga na faixa cheia de 4%) e no item com preço digitado à mão.
+        //    `preco_lista_cheio` (migration 366) é o preço da campanha.
+        //    COALESCE com preco_lista cobre linha antiga com a coluna nula.
         await sql`
           UPDATE alissonerp.itens_venda_erp iv
           SET pct_comissao   = calc.pct_comissao,
@@ -930,13 +945,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           FROM (
             SELECT i.id,
                    CASE
-                     WHEN i.pct_desconto > 30 THEN 0.5
+                     WHEN d.desconto > 30 THEN 0.5
                      ELSE COALESCE(fc.comissao_pct, 0)
                    END AS pct_comissao
             FROM alissonerp.itens_venda_erp i
+            CROSS JOIN LATERAL (
+              SELECT CASE WHEN COALESCE(i.preco_lista_cheio, i.preco_lista) > 0
+                          THEN GREATEST(ROUND((
+                                 (COALESCE(i.preco_lista_cheio, i.preco_lista) - i.preco_unitario)
+                                 / COALESCE(i.preco_lista_cheio, i.preco_lista)
+                               ) * 100, 2), 0)
+                          ELSE 0 END AS desconto
+            ) d
             LEFT JOIN alissonerp.faixas_comissao fc
-              ON fc.desconto_pct = ROUND(i.pct_desconto) AND fc.ativo = true
+              ON fc.desconto_pct = ROUND(d.desconto) AND fc.ativo = true
             WHERE i.venda_id = ${tarefaInfo.venda_id}
+              AND i.produto_id IS NOT NULL
           ) calc
           WHERE iv.id = calc.id
         `;
