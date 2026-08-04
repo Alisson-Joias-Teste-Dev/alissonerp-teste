@@ -82,6 +82,7 @@ export async function GET(
         ev.longitude_entrega,
         ev.is_avulso,
         ev.descricao_avulso,
+        ev.liberada_em,
         (ev.created_by = ev.motoboy_id) AS auto_criado,
         -- Dados da venda vinculada
         ve.numero_venda,
@@ -128,7 +129,15 @@ export async function GET(
         uc.nome AS criado_por_nome,
         umr.nome AS confirmado_motoboy_retirada_nome,
         ur.nome AS confirmado_retirada_nome,
-        ume.nome AS confirmado_motoboy_entrega_nome
+        ume.nome AS confirmado_motoboy_entrega_nome,
+        -- REGRA DE NEGÓCIO (04/08/2026, pedido do Jonathan — timeline fiel):
+        -- quem aprovou a solicitação de frete avulso (liberada_por/liberada_em
+        -- já existiam na tabela desde a migration 353, mas nunca eram
+        -- buscados/exibidos). Só vem preenchido quando a corrida passou pelo
+        -- fluxo de solicitação (pool de aprovadores) — criação direta nunca
+        -- tem liberada_por. Conferido no banco: NUNCA é a mesma pessoa que
+        -- criou (10/10 amostras reais).
+        ul.nome AS liberada_por_nome
       FROM alissonerp.entregas_venda ev
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = ev.venda_id
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
@@ -137,6 +146,7 @@ export async function GET(
       LEFT JOIN alissonerp.usuarios umr ON umr.id = ev.confirmado_por_motoboy_retirada
       LEFT JOIN alissonerp.usuarios ur ON ur.id = ev.confirmado_por_retirada
       LEFT JOIN alissonerp.usuarios ume ON ume.id = ev.confirmado_por_motoboy_entrega
+      LEFT JOIN alissonerp.usuarios ul ON ul.id = ev.liberada_por
       WHERE ev.id = ${entregaId}
       LIMIT 1
     `,
@@ -275,6 +285,12 @@ export async function GET(
     is_avulso: Boolean(e.is_avulso),
     descricao_avulso: e.descricao_avulso ?? null,
     auto_criado: Boolean(e.auto_criado),
+    // REGRA DE NEGÓCIO (04/08/2026 — timeline fiel): quem aprovou a
+    // solicitação e quando. null quando a corrida nasceu direto (sem passar
+    // pelo pool de aprovadores) — o front usa isso pra decidir se mostra o
+    // passo "Aprovada" na timeline.
+    liberada_em: e.liberada_em ?? null,
+    liberada_por_nome: e.liberada_por_nome ?? null,
     // Dados da venda
     numero_venda: e.numero_venda,
     total_venda: e.total_venda ? Number(e.total_venda) : null,
