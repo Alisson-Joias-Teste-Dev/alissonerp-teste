@@ -2866,14 +2866,18 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                 comissão 0,50%" e não há como explicar o 0,50%. O que puxa
                                 a faixa é o desconto contra o preço CHEIO da campanha.
                                 Ver docs/regras-negocio/comercial.md §2.1.2. */}
+                            {/* div (e não span inline): sem ela o selo cola no de
+                                "Sob encomenda · estoque: 0" e sai "estoque: 0promoção". */}
                             {(item.preco_lista_original ?? 0) > item.preco_lista && (
-                              <span className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded mt-0.5"
-                                style={{ backgroundColor: "#E8F0EC", color: "#184036" }}>
-                                promoção{item.promocao_nome ? ` · ${item.promocao_nome}` : ""}
-                                {" · "}
-                                {((((item.preco_lista_original ?? 0) - item.preco_lista) / (item.preco_lista_original ?? 1)) * 100)
-                                  .toFixed(2).replace(".", ",")}%
-                              </span>
+                              <div className="mt-0.5">
+                                <span className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded"
+                                  style={{ backgroundColor: "#E8F0EC", color: "#184036" }}>
+                                  promoção{item.promocao_nome ? ` · ${item.promocao_nome}` : ""}
+                                  {" · "}
+                                  {((((item.preco_lista_original ?? 0) - item.preco_lista) / (item.preco_lista_original ?? 1)) * 100)
+                                    .toFixed(2).replace(".", ",")}%
+                                </span>
+                              </div>
                             )}
                           </td>
                           {(tipoVenda === "produto" || tipoVenda === "garantia") && (
