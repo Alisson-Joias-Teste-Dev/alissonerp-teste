@@ -823,6 +823,32 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                     </div>
                     )}
 
+                    {/* Endereço do cliente — REGRA DE NEGÓCIO (04/08/2026,
+                        pedido do Jonathan): assim que o cliente é
+                        selecionado, mostra o endereço do CADASTRO dele
+                        (public.contatos) direto no formulário — só pra
+                        visualização rápida, não é a confirmação (que
+                        continua acontecendo no popup ao clicar "Solicitar",
+                        ver ConfirmarEnderecoModal — nunca pulada). Some
+                        quando o cliente não tem endereço no cadastro; some
+                        também se uma venda for selecionada (a sugestão real
+                        no popup passa a ser a da venda, que tem prioridade —
+                        mostrar os dois aqui confundiria qual vale). */}
+                    {mostrarSeletorCliente && clienteSelecionado && !vendaSelecionada && enderecoCompleto(enderecoDoCadastro(clienteSelecionado)) && (
+                      <div style={{
+                        marginBottom: 14, fontSize: 12, color: C.cinza,
+                        display: "flex", alignItems: "flex-start", gap: 6,
+                      }}>
+                        <MapPin size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                        <span>
+                          Endereço do cliente: {enderecoDoCadastro(clienteSelecionado).logradouro}, nº {enderecoDoCadastro(clienteSelecionado).numero}
+                          {enderecoDoCadastro(clienteSelecionado).bairro ? ` — ${enderecoDoCadastro(clienteSelecionado).bairro}` : ""}
+                          {enderecoDoCadastro(clienteSelecionado).cidade ? `, ${enderecoDoCadastro(clienteSelecionado).cidade}` : ""}
+                          {enderecoDoCadastro(clienteSelecionado).uf ? `/${enderecoDoCadastro(clienteSelecionado).uf}` : ""}
+                        </span>
+                      </div>
+                    )}
+
                     {/* Sugestão de venda do cliente — REGRA DE NEGÓCIO
                         (04/08/2026): substitui o buscador por número. Ao
                         escolher o cliente acima, busca sozinho as vendas
