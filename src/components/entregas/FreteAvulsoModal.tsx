@@ -280,7 +280,7 @@ interface Props {
 const REGIOES = [
   { value: "fortaleza", label: "Fortaleza", frete: 20 },
   { value: "fora_fortaleza", label: "Fora de Fortaleza", frete: 50 },
-  { value: "longe", label: "Longe (negociar)", frete: 0 },
+  { value: "longe", label: "Valor negociado", frete: 0 },
   { value: "correios", label: "Correios", frete: 0 },
 ] as const;
 
