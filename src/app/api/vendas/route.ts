@@ -434,7 +434,12 @@ export async function POST(req: NextRequest) {
         'rascunho',
         ${user.id}::uuid
       )
-      RETURNING id
+      -- situacao no RETURNING: resolverItemComissao() so recalcula em venda
+      -- rascunho, e sem isto ela chegava undefined — o recalculo era pulado em
+      -- silencio e a comissao do navegador passava batido. Pego no teste do
+      -- banco local (04/08/2026): item promocional gravou 4,00% em vez de 0,50%.
+      -- (sem crase neste comentario: ele vive dentro de um template literal.)
+      RETURNING id, situacao
     `;
 
 
