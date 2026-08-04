@@ -463,6 +463,22 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
    * prop), pula direto pro envio — não há nada pra sugerir/confirmar aqui
    * dentro do modal.
    */
+  // REGRA DE NEGÓCIO (pedido do Jonathan, 04/08/2026 — decisão de venda
+  // obrigatória): quando o cliente tem vendas candidatas (vendasDoCliente),
+  // a pessoa É OBRIGADA a decidir — selecionar uma OU clicar "Nenhuma
+  // dessas" (sugestaoDispensada) — antes de conseguir enviar. Não dá mais
+  // pra simplesmente ignorar a caixa de sugestão e mandar sem decidir nada
+  // (antes o resultado prático era o mesmo — venda_id ficava undefined de
+  // qualquer jeito — mas o Jonathan quer a escolha CONSCIENTE, não o
+  // default silencioso). Enquanto a lista ainda está carregando, também
+  // trava — senão dava pra clicar rápido antes da lista aparecer e furar a
+  // regra. Usado tanto pra desabilitar o botão (disabledFormularioCompleto)
+  // quanto pra mensagem de erro específica logo abaixo.
+  // IMPACTO SE REMOVIDO: volta a dar pra solicitar frete avulso sem nunca
+  // ter visto/decidido sobre as vendas do cliente, mesmo quando existem.
+  const precisaDecidirVenda = mostrarSeletorCliente && !!clienteSelecionado &&
+    (carregandoVendasDoCliente || (vendasDoCliente.length > 0 && !vendaSelecionada && !sugestaoDispensada));
+
   function handleAbrirConfirmacaoEndereco(e: React.FormEvent) {
     e.preventDefault();
     setErro("");
@@ -478,6 +494,9 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
       }
       if (!contatoIdEfetivo) {
         throw new Error("Selecione o cliente da corrida.");
+      }
+      if (precisaDecidirVenda) {
+        throw new Error("Selecione uma venda ou clique em \"Nenhuma dessas\".");
       }
       if (vendaFixada) {
         void enviarSolicitacao(enderecoEntrega);
@@ -561,7 +580,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   // Endereço não trava mais este botão — trava o "Confirmar"/"Sim,
   // confirmar" do ConfirmarEnderecoModal (ver enderecoCompleto lá).
   const disabledFormularioCompleto =
-    enviando || carregandoEndereco ||
+    enviando || carregandoEndereco || precisaDecidirVenda ||
     (precisaValorCobradoDoCliente(pagante) && freteCobradoConsultora === "") || !descricao.trim() ||
     !pagante || (pagante === "cliente" && !comprovanteBase64) ||
     !contatoIdEfetivo;
