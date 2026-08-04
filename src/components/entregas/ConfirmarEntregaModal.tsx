@@ -202,9 +202,15 @@ export default function ConfirmarEntregaModal({
    * excedente é descartado com um aviso (não trava a tela, só informa).
    */
   async function handleFotoSelecionada(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
+    // REGRA DE NEGÓCIO (04/08/2026 — bug real achado em teste, mesmo de
+    // FinalizarAvulsoModal): `e.target.files` é uma REFERÊNCIA ao FileList —
+    // `e.target.value = ""` logo abaixo (necessário pra permitir escolher o
+    // mesmo arquivo de novo) esvazia essa MESMA referência em alguns
+    // navegadores, fazendo o array virar vazio antes de processar.
+    // `Array.from(...)` copia os File objects, imune a isso.
+    const files = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = ""; // permite re-selecionar o mesmo arquivo depois
-    if (!files || files.length === 0) return;
+    if (files.length === 0) return;
 
     const vagas = MAX_FOTOS - fotosBase64.length;
     if (vagas <= 0) {
@@ -212,9 +218,17 @@ export default function ConfirmarEntregaModal({
       return;
     }
     const excedente = files.length > vagas;
-    const novas = await lerArquivosComoBase64(files, vagas);
-    setFotosBase64((prev) => [...prev, ...novas]);
-    setFotoErro(excedente ? `Só cabiam mais ${vagas} foto(s) — o restante foi ignorado.` : "");
+    // REGRA DE NEGÓCIO (04/08/2026 — mesmo bug de FinalizarAvulsoModal):
+    // sem try/catch, falha no FileReader (ex.: arquivo de pasta sincronizada
+    // na nuvem ainda não baixado) rejeitava a Promise em silêncio — nenhum
+    // aviso na tela. Agora mostra o erro.
+    try {
+      const novas = await lerArquivosComoBase64(files, vagas);
+      setFotosBase64((prev) => [...prev, ...novas]);
+      setFotoErro(excedente ? `Só cabiam mais ${vagas} foto(s) — o restante foi ignorado.` : "");
+    } catch (err) {
+      setFotoErro(err instanceof Error ? `Não consegui ler o arquivo: ${err.message}` : "Não consegui ler o arquivo selecionado. Tente outra foto.");
+    }
   }
 
   function removerFoto(idx: number) {
@@ -439,7 +453,12 @@ export default function ConfirmarEntregaModal({
                   ref={fotoInputRef}
                   type="file"
                   accept="image/*"
-                  capture="environment"
+                  // REGRA DE NEGÓCIO (04/08/2026 — mesmo bug de FinalizarAvulsoModal):
+                  // `capture="environment"` + `multiple` juntos têm
+                  // comportamento inconsistente em várias versões do Chrome —
+                  // a lista de arquivos chega vazia, sem erro. Removido; o
+                  // seletor nativo do celular ainda oferece "Câmera" como
+                  // opção, só não força mais direto pra ela.
                   multiple
                   onChange={handleFotoSelecionada}
                   style={{ display: "none" }}

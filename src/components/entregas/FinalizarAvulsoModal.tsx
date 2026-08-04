@@ -94,9 +94,19 @@ export default function FinalizarAvulsoModal({
   }, [isOpen]);
 
   async function handleFotoSelecionada(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
+    // REGRA DE NEGÓCIO (04/08/2026 — bug real achado em teste: "seleciono a
+    // foto e não vai", sem erro nenhum): `const files = e.target.files;`
+    // guardava uma REFERÊNCIA ao FileList, não uma cópia — em alguns
+    // navegadores/versões, `e.target.value = ""` logo abaixo (necessário pra
+    // permitir escolher o mesmo arquivo de novo depois) esvazia essa MESMA
+    // referência retroativamente, fazendo `files.length` virar 0 antes do
+    // código conseguir processar. `Array.from(...)` copia os File objects
+    // pra um array independente, imune a esse efeito colateral.
+    // IMPACTO SE VOLTAR À REFERÊNCIA DIRETA: reabre o bug — seleção real de
+    // foto (não via injeção sintética de teste) não anexa nada, em silêncio.
+    const files = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = "";
-    if (!files || files.length === 0) return;
+    if (files.length === 0) return;
 
     const vagas = MAX_FOTOS - fotosBase64.length;
     if (vagas <= 0) {
@@ -104,9 +114,18 @@ export default function FinalizarAvulsoModal({
       return;
     }
     const excedente = files.length > vagas;
-    const novas = await lerArquivosComoBase64(files, vagas);
-    setFotosBase64((prev) => [...prev, ...novas]);
-    setFotoErro(excedente ? `Só cabiam mais ${vagas} foto(s) — o restante foi ignorado.` : "");
+    // REGRA DE NEGÓCIO (04/08/2026 — bug achado em teste real: "seleciono a
+    // foto e não vai"): antes, se o FileReader falhasse (ex.: arquivo de
+    // pasta sincronizada na nuvem — OneDrive/iCloud — ainda não baixado de
+    // verdade no disco), a Promise rejeitava SEM try/catch aqui — o botão
+    // ficava do jeito que estava, sem nenhum aviso. Agora mostra o erro.
+    try {
+      const novas = await lerArquivosComoBase64(files, vagas);
+      setFotosBase64((prev) => [...prev, ...novas]);
+      setFotoErro(excedente ? `Só cabiam mais ${vagas} foto(s) — o restante foi ignorado.` : "");
+    } catch (err) {
+      setFotoErro(err instanceof Error ? `Não consegui ler o arquivo: ${err.message}` : "Não consegui ler o arquivo selecionado. Tente outra foto.");
+    }
   }
 
   function removerFoto(idx: number) {
@@ -225,7 +244,17 @@ export default function FinalizarAvulsoModal({
               ref={fotoInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
+              // REGRA DE NEGÓCIO (04/08/2026 — bug achado em teste real: "seleciono
+              // a foto e não vai", sem erro nenhum): `capture="environment"`
+              // junto com `multiple` tem comportamento inconsistente em várias
+              // versões do Chrome — a lista de arquivos chega vazia, sem
+              // disparar erro. Sem `capture`, o seletor nativo do celular ainda
+              // oferece "Câmera" como opção (junto de galeria/múltiplas fotos)
+              // — só deixa de FORÇAR direto pra câmera. Como a foto agora é
+              // OBRIGATÓRIA (não dá mais pra simplesmente tentar de novo sem
+              // notar), esse bug virou bloqueio real pro motoboy.
+              // IMPACTO SE READICIONADO: reabre o bug — seleção de foto
+              // silenciosamente não anexa nada, sem nenhum aviso na tela.
               multiple
               onChange={handleFotoSelecionada}
               style={{ display: "none" }}
