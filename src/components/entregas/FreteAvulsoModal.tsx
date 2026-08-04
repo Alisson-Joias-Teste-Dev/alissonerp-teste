@@ -715,7 +715,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
               opcional — por isso o indicador segue mostrarFormularioCompleto,
               não ehSolicitacao (que só decide o texto/modo de envio). */}
           <label style={{ fontSize: 11, fontWeight: 600, color: C.cinza, display: "block", marginBottom: 4 }}>
-            Valor negociado com o motoboy (R$) {mostrarFormularioCompleto ? "" : "*"}
+            Valor negociado (R$) {mostrarFormularioCompleto ? "" : "*"}
           </label>
           <input
             type="number"
