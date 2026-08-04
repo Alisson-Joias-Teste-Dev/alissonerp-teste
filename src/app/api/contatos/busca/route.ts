@@ -8,6 +8,12 @@
 //
 // IMPACTO SE REMOVIDO: ClienteSelector do módulo Metal não consegue
 // buscar contatos, bloqueando cadastro de compras e recebimentos.
+//
+// REGRA DE NEGÓCIO (03/08/2026 — confirmação de endereço no Frete Avulso):
+// resposta também traz o endereço de cadastro (endereco/numero/complemento/
+// bairro/municipio/uf/cep) — usado por FreteAvulsoModal como sugestão de
+// endereço quando o cliente não tem venda vinculada. Consumidores existentes
+// (ClienteSelector do módulo Metal) ignoram os campos extras sem quebrar.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from "next/server";
@@ -28,7 +34,8 @@ export async function GET(req: NextRequest) {
   const digitos = q.replace(/\D/g, "");
   if (digitos.length >= 3) {
     const rows = await sql`
-      SELECT id_contato, nome, cpf_cnpj, telefone
+      SELECT id_contato, nome, cpf_cnpj, telefone,
+           endereco, numero, complemento, bairro, municipio, uf, cep
       FROM public.contatos
       WHERE REPLACE(REPLACE(REPLACE(cpf_cnpj, '.', ''), '-', ''), '/', '') ILIKE ${"%" + digitos + "%"}
          OR nome ILIKE ${"%" + q + "%"}
@@ -42,7 +49,8 @@ export async function GET(req: NextRequest) {
 
   // Busca textual por nome
   const rows = await sql`
-    SELECT id_contato, nome, cpf_cnpj, telefone
+    SELECT id_contato, nome, cpf_cnpj, telefone,
+           endereco, numero, complemento, bairro, municipio, uf, cep
     FROM public.contatos
     WHERE nome ILIKE ${"%" + q + "%"}
     ORDER BY nome ASC

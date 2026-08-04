@@ -119,14 +119,38 @@
  * chamada que já preenche o endereço), continuando editável/trocável.
  * IMPACTO SE REMOVIDO: reabre a lacuna documentada na migration 365 ("frete
  * avulso não tem cliente") que virou gambiarra de config manual.
+ *
+ * REGRA DE NEGÓCIO (pedido do Jonathan, 04/08/2026 — endereço sai do
+ * formulário principal, vira popup de confirmação): antes o endereço era um
+ * EnderecoForm sempre visível no corpo do modal. Ficou "com cara de muito
+ * trabalho" — trocado por um passo separado (ConfirmarEnderecoModal) que só
+ * aparece ao clicar "Solicitar frete avulso":
+ *   1. Venda selecionada na sugestão abaixo → sugere o endereço DELA.
+ *   2. Sem venda, cliente com endereço no cadastro (public.contatos) →
+ *      sugere o endereço DO CADASTRO (GET /api/contatos/busca agora traz
+ *      esses campos).
+ *   3. Nenhum dos dois → abre direto pra digitar (nada a confirmar).
+ * A confirmação NUNCA é pulada quando existe sugestão — sempre mostra o
+ * endereço por extenso e exige clique explícito antes de gravar (ver
+ * ConfirmarEnderecoModal). O buscador de venda por NÚMERO (texto livre) saiu
+ * — no lugar, ao selecionar o cliente o modal busca sozinho as vendas DELE
+ * (GET /api/vendas?cliente_id=) e pergunta "essa corrida é de alguma
+ * dessas?" — vendas fora da janela de entrega (aprovado/em_rota/entregue)
+ * aparecem desabilitadas com o motivo (mesma janela que já existe em
+ * criarFreteAvulso, JANELA_FRETE_AVULSO_COM_VENDA — não duplicada, só
+ * refletida na UI).
+ * IMPACTO SE REMOVIDO: motivo original documentado acima — sem confirmação,
+ * corridas iam pro endereço errado ou o formulário ficava pesado demais pra
+ * consultora preencher rápido.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Loader2, CheckCircle, Bike, MapPin, AlignLeft, Search, DollarSign, Store, Camera } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { X, Loader2, CheckCircle, Bike, MapPin, AlignLeft, DollarSign, Store, Camera } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import { useErrorStore } from "@/stores/errorStore";
-import EnderecoForm, { type EnderecoValue, ENDERECO_VAZIO, enderecoDaVenda, type EnderecoVendaFields } from "@/components/endereco/EnderecoForm";
+import { type EnderecoValue, ENDERECO_VAZIO, enderecoDaVenda, type EnderecoVendaFields } from "@/components/endereco/EnderecoForm";
 import ClienteSelector, { type ClienteOption } from "@/components/metal/ClienteSelector";
+import ConfirmarEnderecoModal, { enderecoCompleto } from "@/components/entregas/ConfirmarEnderecoModal";
 import { precisaValorCobradoDoCliente } from "@/lib/frete-avulso-valor-cobrado";
 
 const C = {
@@ -143,12 +167,55 @@ const C = {
   cinzaBorder: "#E5E7EB",
 };
 
-/** Resultado da busca de venda (consultora) — subconjunto de /api/vendas?q= */
+/** Resultado da busca de venda — subconjunto de /api/vendas?cliente_id=. */
 interface VendaBusca {
   id: number;
   numero_venda: string;
   cliente_nome: string | null;
   total_venda: number;
+  situacao: string;
+  data_venda: string;
+}
+
+/** REGRA DE NEGÓCIO (04/08/2026): janela de situações que criarFreteAvulso
+ *  aceita pra vincular frete avulso a uma venda (ver src/lib/entrega-venda.ts,
+ *  JANELA_FRETE_AVULSO_COM_VENDA) — refletida aqui SÓ pra desabilitar/avisar
+ *  na UI, não é uma trava nova. Vendas fora disso aparecem na lista (o
+ *  Jonathan pediu sem filtro), mas desabilitadas com o motivo.
+ *  IMPACTO SE DIVERGIR DO BACKEND: UI deixaria clicável uma venda que o
+ *  servidor rejeitaria com 400 — sempre espelhar a mesma lista. */
+const JANELA_FRETE_AVULSO_COM_VENDA = ["aprovado", "em_rota", "entregue"];
+
+function labelSituacaoVenda(situacao: string): string {
+  const labels: Record<string, string> = {
+    rascunho: "Rascunho", aprovado: "Aprovado", em_rota: "Em rota",
+    entregue: "Entregue", concluido: "Concluída", cancelado: "Cancelada",
+    virou_credito: "Virou crédito",
+  };
+  return labels[situacao] ?? situacao;
+}
+
+/** Endereço de cadastro trazido por GET /api/contatos/busca (03/08/2026). */
+interface ClienteComEndereco extends ClienteOption {
+  endereco?: string | null;
+  numero?: string | null;
+  complemento?: string | null;
+  bairro?: string | null;
+  municipio?: string | null;
+  uf?: string | null;
+  cep?: string | null;
+}
+
+function enderecoDoCadastro(c: ClienteComEndereco): EnderecoValue {
+  return {
+    cep: c.cep ?? "",
+    logradouro: c.endereco ?? "",
+    numero: c.numero ?? "",
+    complemento: c.complemento ?? "",
+    bairro: c.bairro ?? "",
+    cidade: c.municipio ?? "",
+    uf: c.uf ?? "",
+  };
 }
 
 /** Campos de endereço de entrega retornados por GET /api/vendas/[id] —
@@ -241,21 +308,30 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   const [descricao, setDescricao] = useState("");
   const [observacoes, setObservacoes] = useState("");
 
-  // Busca de venda + endereço editável (só modo consultora)
-  const [vendaBusca, setVendaBusca] = useState("");
-  const [vendasResultado, setVendasResultado] = useState<VendaBusca[]>([]);
-  const [buscandoVenda, setBuscandoVenda] = useState(false);
   const [vendaSelecionada, setVendaSelecionada] = useState<VendaBusca | null>(null);
-  // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): antes era um
-  // texto único (textarea); agora é o valor controlado do EnderecoForm.
+  // REGRA DE NEGÓCIO (04/08/2026): vendas do cliente selecionado, buscadas
+  // sozinho (sem digitar nada) assim que o cliente é escolhido — substitui o
+  // buscador de venda por número. Ver comentário no topo do arquivo.
+  const [vendasDoCliente, setVendasDoCliente] = useState<VendaBusca[]>([]);
+  const [carregandoVendasDoCliente, setCarregandoVendasDoCliente] = useState(false);
+  // true depois de clicar "Nenhuma dessas" — some a caixa de sugestão até o
+  // cliente mudar de novo (link discreto reabre, ver JSX).
+  const [sugestaoDispensada, setSugestaoDispensada] = useState(false);
+  // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): valor
+  // controlado, mas agora só existe DENTRO do ConfirmarEnderecoModal — o
+  // formulário principal não mostra mais o EnderecoForm.
   const [enderecoEntrega, setEnderecoEntrega] = useState<EnderecoValue>(ENDERECO_VAZIO);
   const [carregandoEndereco, setCarregandoEndereco] = useState(false);
+  // REGRA DE NEGÓCIO (04/08/2026): abre só ao clicar "Solicitar frete
+  // avulso", depois de validar os campos do formulário principal — ver
+  // handleAbrirConfirmacaoEndereco.
+  const [mostrarPopupEndereco, setMostrarPopupEndereco] = useState(false);
   const [freteCobradoConsultora, setFreteCobradoConsultora] = useState("");
 
   // REGRA DE NEGÓCIO (03/08/2026 — "obrigatório o nome do cliente"): só
   // usado quando !vendaFixada (Tarefas e Entregas-direto) — com vendaFixada,
   // o cliente vem direto de `contatoIdInicial` (prop), sem seletor visível.
-  const [clienteSelecionado, setClienteSelecionado] = useState<ClienteOption | null>(null);
+  const [clienteSelecionado, setClienteSelecionado] = useState<ClienteComEndereco | null>(null);
   // Id efetivo enviado ao backend nos dois casos — unifica a checagem de
   // obrigatoriedade abaixo (disabledFormularioCompleto) e o submit.
   // REGRA DE NEGÓCIO (03/08/2026): prioriza contatoIdInicial (vendaFixada
@@ -278,41 +354,43 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
 
   const freteCalculado = REGIOES.find(r => r.value === regiao)?.frete ?? 0;
 
-  // ── Busca de venda com debounce (consultora) ──────────────────────────────
-  // REGRA DE NEGÓCIO: reusa GET /api/vendas?q= (mesma listagem paginada usada
-  // na tela de vendas). Esse endpoint exige inicio/fim — usamos uma janela
-  // ampla (3 anos) só para viabilizar a busca por texto. O filtro de
-  // vendedor_id já embutido nessa rota (não-full-access) garante que a
-  // consultora só encontra vendas PRÓPRIAS, sem precisar duplicar a regra de
-  // ownership aqui no front.
-  const buscarVendas = useCallback(async (q: string) => {
-    if (q.length < 2) { setVendasResultado([]); return; }
-    setBuscandoVenda(true);
-    try {
-      const hoje = new Date();
-      const inicio = new Date(hoje);
-      inicio.setFullYear(inicio.getFullYear() - 3);
-      const fmt = (d: Date) => d.toISOString().slice(0, 10);
-      const params = new URLSearchParams({
-        q,
-        inicio: fmt(inicio),
-        fim: fmt(hoje),
-        page_size: "8",
-      });
-      const data = await apiFetch<{ items: VendaBusca[] }>(`/api/vendas?${params.toString()}`);
-      setVendasResultado(Array.isArray(data.items) ? data.items : []);
-    } catch {
-      setVendasResultado([]);
-    } finally {
-      setBuscandoVenda(false);
-    }
-  }, []);
-
+  // ── Vendas do cliente selecionado (04/08/2026) ────────────────────────────
+  // REGRA DE NEGÓCIO: assim que o cliente é escolhido no ClienteSelector,
+  // busca sozinho as vendas dele — substitui o buscador de venda por número.
+  // Reusa GET /api/vendas (mesma listagem paginada da tela de vendas) com o
+  // novo filtro cliente_id. Sem filtro de situação (pedido do Jonathan) — a
+  // janela de quais vendas PODEM ser vinculadas é só visual (ver
+  // JANELA_FRETE_AVULSO_COM_VENDA), não filtra a lista.
   useEffect(() => {
-    if (!mostrarFormularioCompleto || vendaFixada) return;
-    const t = setTimeout(() => buscarVendas(vendaBusca), 300);
-    return () => clearTimeout(t);
-  }, [vendaBusca, buscarVendas, mostrarFormularioCompleto, vendaFixada]);
+    if (!mostrarSeletorCliente) return;
+    setVendaSelecionada(null);
+    setSugestaoDispensada(false);
+    if (!clienteSelecionado) { setVendasDoCliente([]); return; }
+    let cancelado = false;
+    setCarregandoVendasDoCliente(true);
+    (async () => {
+      try {
+        const hoje = new Date();
+        const inicio = new Date(hoje);
+        inicio.setFullYear(inicio.getFullYear() - 3);
+        const fmt = (d: Date) => d.toISOString().slice(0, 10);
+        const params = new URLSearchParams({
+          cliente_id: String(clienteSelecionado.id_contato),
+          inicio: fmt(inicio),
+          fim: fmt(hoje),
+          page_size: "20",
+        });
+        const data = await apiFetch<{ items: VendaBusca[] }>(`/api/vendas?${params.toString()}`);
+        if (!cancelado) setVendasDoCliente(Array.isArray(data.items) ? data.items : []);
+      } catch {
+        if (!cancelado) setVendasDoCliente([]);
+      } finally {
+        if (!cancelado) setCarregandoVendasDoCliente(false);
+      }
+    })();
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteSelecionado?.id_contato, mostrarSeletorCliente]);
 
   // REGRA DE NEGÓCIO (V3): venda fixada (aberto de dentro da tela da venda) —
   // pré-preenche o endereço editável com o que o caller já calculou (cadastro
@@ -325,27 +403,17 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, vendaFixada, enderecoInicial]);
 
-  /** Seleciona a venda e busca o endereço de entrega para pré-preencher o
-   *  EnderecoForm — CAMPO A CAMPO (enderecoDaVenda), não mais concatenado. */
+  /** Seleciona uma venda da sugestão (04/08/2026 — vendasDoCliente) e busca o
+   *  endereço DELA pra sugerir no popup de confirmação (enderecoDaVenda,
+   *  campo a campo, não concatenado). Só chamada pra vendas dentro da janela
+   *  permitida (ver JANELA_FRETE_AVULSO_COM_VENDA) — as demais aparecem
+   *  desabilitadas na lista e não chegam aqui. */
   async function selecionarVenda(v: VendaBusca) {
     setVendaSelecionada(v);
-    setVendaBusca("");
-    setVendasResultado([]);
     setCarregandoEndereco(true);
     try {
       const detalhe = await apiFetch<VendaEnderecoResp>(`/api/vendas/${v.id}`);
       setEnderecoEntrega(enderecoDaVenda(detalhe));
-      // REGRA DE NEGÓCIO (03/08/2026): auto-preenche o cliente a partir da
-      // venda selecionada — mesma chamada que já traz o endereço, sem 2ª
-      // requisição. Continua editável/trocável pelo ClienteSelector.
-      if (detalhe.cliente_id) {
-        setClienteSelecionado({
-          id_contato: detalhe.cliente_id,
-          nome: detalhe.cliente_nome ?? "",
-          cpf_cnpj: detalhe.cliente_cpf_cnpj ?? "",
-          telefone: detalhe.cliente_telefone ?? "",
-        });
-      }
     } catch {
       useErrorStore.getState().push("Erro ao carregar endereço da venda", { level: "warning" });
     } finally {
@@ -367,10 +435,11 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     setDescricao("");
     setObservacoes("");
     setFreteNegociado("");
-    setVendaBusca("");
-    setVendasResultado([]);
     setVendaSelecionada(null);
+    setVendasDoCliente([]);
+    setSugestaoDispensada(false);
     setEnderecoEntrega(ENDERECO_VAZIO);
+    setMostrarPopupEndereco(false);
     setClienteSelecionado(null);
     setFreteCobradoConsultora("");
     setPagante("");
@@ -384,106 +453,89 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
     onClose();
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  /**
+   * REGRA DE NEGÓCIO (04/08/2026): submit do formulário principal NÃO chama
+   * mais a API direto — valida os campos que ficaram no corpo do modal
+   * (descrição/pagante/comprovante/cliente/valor) e abre o popup de
+   * confirmação de endereço. O envio de verdade acontece em
+   * enviarSolicitacao(), chamado pelo popup depois que o endereço é
+   * confirmado ou digitado. Com vendaFixada (endereço já vem pronto da
+   * prop), pula direto pro envio — não há nada pra sugerir/confirmar aqui
+   * dentro do modal.
+   */
+  function handleAbrirConfirmacaoEndereco(e: React.FormEvent) {
     e.preventDefault();
     setErro("");
-    setEnviando(true);
+    try {
+      if (precisaValorCobradoDoCliente(pagante) && freteCobradoConsultora === "") {
+        throw new Error("Informe o valor cobrado do cliente.");
+      }
+      if (!pagante) {
+        throw new Error("Selecione quem paga o frete avulso.");
+      }
+      if (pagante === "cliente" && !comprovanteBase64) {
+        throw new Error("Anexe o comprovante de pagamento do cliente.");
+      }
+      if (!contatoIdEfetivo) {
+        throw new Error("Selecione o cliente da corrida.");
+      }
+      if (vendaFixada) {
+        void enviarSolicitacao(enderecoEntrega);
+      } else {
+        setMostrarPopupEndereco(true);
+      }
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : "Erro ao validar a solicitação");
+    }
+  }
 
+  /** Endereço sugerido pro popup — venda selecionada tem prioridade sobre o
+   *  cadastro do cliente (é mais específico pra esta corrida). null quando
+   *  nenhum dos dois tem endereço completo — popup abre pra digitar. */
+  const enderecoSugerido = vendaSelecionada && enderecoCompleto(enderecoEntrega)
+    ? enderecoEntrega
+    : clienteSelecionado && enderecoCompleto(enderecoDoCadastro(clienteSelecionado))
+      ? enderecoDoCadastro(clienteSelecionado)
+      : null;
+  const fonteSugestao: "venda" | "cadastro" | null = vendaSelecionada && enderecoCompleto(enderecoEntrega)
+    ? "venda"
+    : enderecoSugerido ? "cadastro" : null;
+
+  /** Envio de verdade — chamado direto (vendaFixada) ou pelo
+   *  ConfirmarEnderecoModal depois que o endereço é confirmado/digitado. */
+  async function enviarSolicitacao(endereco: EnderecoValue) {
+    setErro("");
+    setEnviando(true);
     try {
       const freteNegociadoNum = freteNegociado ? parseFloat(freteNegociado.replace(",", ".")) : undefined;
+      const vendaIdEfetivo = vendaId ?? vendaSelecionada?.id;
 
-      // REGRA DE NEGÓCIO (LIMPEZA código morto, 21/07): antes havia um `if
-      // (mostrarFormularioCompleto) {...} else {...}` — o else criava o
-      // avulso pelo formulário ENXUTO (motoboyId/contatoId direto, sem
-      // endereço/pagante). Removido: nenhum caller real chega mais com
-      // `mostrarFormularioCompleto === false` (ver comentário no topo do
-      // arquivo). O corpo abaixo é o único caminho de submit que resta.
-      {
-        // REGRA DE NEGÓCIO (modelo POOL; fix 21/07 — venda deixa de ser
-        // obrigatória; reforma da tela Entregas — mesmo corpo serve o modo
-        // DIRETO com formulário completo, só muda `solicitar`): body NÃO
-        // inclui motoboyId/contatoId/liberacaoResponsavelId — quem preenche
-        // informa o endereço confirmado e o valor cobrado do cliente; a
-        // venda é OPCIONAL (frete avulso pode não partir de uma venda, ex.:
-        // "levar material à loja"). Com venda fixada (V3), o id vem da prop;
-        // sem ela, do buscador (pode ficar undefined se nada foi buscado/
-        // selecionado).
-        const vendaIdEfetivo = vendaId ?? vendaSelecionada?.id;
-        // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): mínimo
-        // exigido é logradouro + número + cidade (validado aqui E no
-        // backend, criarFreteAvulso — defesa em profundidade). `vendaId` NÃO
-        // entra mais nesta validação — é o endereço quem diz para onde ir.
-        if (
-          !enderecoEntrega.logradouro.trim() ||
-          !enderecoEntrega.numero.trim() ||
-          !enderecoEntrega.cidade.trim()
-        ) {
-          throw new Error("Preencha o endereço completo (logradouro, número e cidade).");
-        }
-        // REGRA DE NEGÓCIO (ajuste 21/07 — "loja não pede valor cobrado do
-        // cliente"): só exige o campo quando pagante === 'cliente'. Com
-        // pagante === 'loja' o campo fica escondido e o valor enviado é 0 (a
-        // loja assume o custo) — ver src/lib/frete-avulso-valor-cobrado.ts.
-        // IMPACTO SE REMOVIDO: solicitação com loja pagando fica bloqueada
-        // pedindo um valor que não faz sentido nesse caso.
-        if (precisaValorCobradoDoCliente(pagante) && freteCobradoConsultora === "") {
-          throw new Error("Informe o valor cobrado do cliente.");
-        }
-        // REGRA DE NEGÓCIO (migration 359 — "quem paga"): validado aqui
-        // (front) E no backend (defesa em profundidade — ver
-        // criarFreteAvulso). Comprovante só é exigido quando pagante='cliente'.
-        if (!pagante) {
-          throw new Error("Selecione quem paga o frete avulso.");
-        }
-        if (pagante === "cliente" && !comprovanteBase64) {
-          throw new Error("Anexe o comprovante de pagamento do cliente.");
-        }
-        // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — "obrigatório o
-        // nome do cliente"): validado aqui (front) E no backend
-        // (criarFreteAvulso — defesa em profundidade). Com vendaFixada vem
-        // de contatoIdInicial; sem ela, do ClienteSelector.
-        if (!contatoIdEfetivo) {
-          throw new Error("Selecione o cliente da corrida.");
-        }
-        await apiFetch("/api/entregas-venda/frete-avulso", {
-          method: "POST",
-          body: JSON.stringify({
-            // REGRA DE NEGÓCIO (03/08/2026): Number() por segurança — id_contato
-            // é bigint no Postgres e pode chegar como string (ver ClienteSelector);
-            // o backend também coage (z.coerce), defesa em profundidade.
-            contatoId: Number(contatoIdEfetivo),
-            // REGRA DE NEGÓCIO (intenção explícita; reforma da tela Entregas):
-            // `solicitar: true` só é enviado quando `ehSolicitacao` (=
-            // modoSolicitacao) — é o que faz o backend tratar a chamada como
-            // SOLICITAÇÃO (nasce 'solicitada', cria tarefa no pool). O modo
-            // direto-com-formulário-completo (mostrarFormularioCompleto=true,
-            // ehSolicitacao=false) usa este MESMO corpo mas omite `solicitar`
-            // — a rota trata como criação direta ('pendente', sem tarefa),
-            // igual ao formulário enxuto de sempre.
-            // IMPACTO SE SEMPRE MANDAR true: o modo direto-completo passaria
-            // a gerar solicitação/tarefa em vez de criar liberado na hora.
-            solicitar: ehSolicitacao ? true : undefined,
-            vendaId: vendaIdEfetivo,
-            // REGRA DE NEGÓCIO (migration 355): campo a campo, espelhando os
-            // nomes aceitos pelo Zod schema de route.ts (enderecoEntregaLogradouro
-            // etc.) — antes era um único texto concatenado no client.
-            enderecoEntregaLogradouro: enderecoEntrega.logradouro.trim(),
-            enderecoEntregaNumero: enderecoEntrega.numero.trim(),
-            enderecoEntregaComplemento: enderecoEntrega.complemento.trim() || undefined,
-            enderecoEntregaBairro: enderecoEntrega.bairro.trim() || undefined,
-            enderecoEntregaCidade: enderecoEntrega.cidade.trim(),
-            enderecoEntregaCep: enderecoEntrega.cep.trim() || undefined,
-            enderecoEntregaUf: enderecoEntrega.uf.trim() || undefined,
-            freteCobrado: parseFloat(freteCobradoConsultora.replace(",", ".")) || 0,
-            regiao,
-            freteMotoboyOverride: freteNegociadoNum && freteNegociadoNum > 0 ? freteNegociadoNum : undefined,
-            descricaoAvulso: descricao.trim(),
-            observacoes: observacoes.trim() || undefined,
-            pagante,
-            comprovanteBase64: pagante === "cliente" ? comprovanteBase64 : undefined,
-          }),
-        });
-      }
+      await apiFetch("/api/entregas-venda/frete-avulso", {
+        method: "POST",
+        body: JSON.stringify({
+          // REGRA DE NEGÓCIO (03/08/2026): Number() por segurança — id_contato
+          // é bigint no Postgres e pode chegar como string (ver ClienteSelector);
+          // o backend também coage (z.coerce), defesa em profundidade.
+          contatoId: Number(contatoIdEfetivo),
+          solicitar: ehSolicitacao ? true : undefined,
+          vendaId: vendaIdEfetivo,
+          enderecoEntregaLogradouro: endereco.logradouro.trim(),
+          enderecoEntregaNumero: endereco.numero.trim(),
+          enderecoEntregaComplemento: endereco.complemento.trim() || undefined,
+          enderecoEntregaBairro: endereco.bairro.trim() || undefined,
+          enderecoEntregaCidade: endereco.cidade.trim(),
+          enderecoEntregaCep: endereco.cep.trim() || undefined,
+          enderecoEntregaUf: endereco.uf.trim() || undefined,
+          freteCobrado: parseFloat(freteCobradoConsultora.replace(",", ".")) || 0,
+          regiao,
+          freteMotoboyOverride: freteNegociadoNum && freteNegociadoNum > 0 ? freteNegociadoNum : undefined,
+          descricaoAvulso: descricao.trim(),
+          observacoes: observacoes.trim() || undefined,
+          pagante,
+          comprovanteBase64: pagante === "cliente" ? comprovanteBase64 : undefined,
+        }),
+      });
+      setMostrarPopupEndereco(false);
       setSucesso(true);
       setTimeout(() => {
         resetar();
@@ -491,6 +543,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
         onClose();
       }, 1500);
     } catch (err) {
+      setMostrarPopupEndereco(false);
       setErro(err instanceof Error ? err.message : "Erro ao criar frete avulso");
     } finally {
       setEnviando(false);
@@ -502,15 +555,13 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
   // Validação de submit — cada LAYOUT tem seus próprios campos obrigatórios
   // (formulário completo vs enxuto — não depende de ehSolicitacao/modo de
   // envio, só de quais campos estão na tela).
-  // REGRA DE NEGÓCIO (migration 355 — endereço estruturado; fix 21/07 —
-  // venda deixa de ser obrigatória; reforma da tela Entregas — vale para
-  // solicitação E para o modo direto-com-formulário-completo): mínimo
-  // exigido é logradouro + número + cidade, mesmo padrão validado no
-  // handleSubmit e no backend (criarFreteAvulso). Venda NÃO trava mais o
-  // botão — é opcional.
+  // REGRA DE NEGÓCIO (fix 21/07 — venda deixa de ser obrigatória; 04/08/2026
+  // — endereço saiu do formulário principal, validado no popup): campos
+  // obrigatórios AQUI são só os que continuam visíveis no corpo do modal.
+  // Endereço não trava mais este botão — trava o "Confirmar"/"Sim,
+  // confirmar" do ConfirmarEnderecoModal (ver enderecoCompleto lá).
   const disabledFormularioCompleto =
-    enviando ||
-    !enderecoEntrega.logradouro.trim() || !enderecoEntrega.numero.trim() || !enderecoEntrega.cidade.trim() ||
+    enviando || carregandoEndereco ||
     (precisaValorCobradoDoCliente(pagante) && freteCobradoConsultora === "") || !descricao.trim() ||
     !pagante || (pagante === "cliente" && !comprovanteBase64) ||
     !contatoIdEfetivo;
@@ -711,7 +762,7 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
           // inteiro rolava junto e, no modo solicitação (mais campos), o
           // botão de ação ficava fora da área visível (print do Jonathan).
           // IMPACTO SE REMOVIDO: botão some de novo em telas menores/baixas.
-          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+          <form onSubmit={handleAbrirConfirmacaoEndereco} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
 
             {/* Corpo — rola independente do rodapé */}
             <div style={{ padding: "20px", overflowY: "auto", flex: 1, minHeight: 0 }}>
@@ -757,90 +808,10 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                     <div style={tituloSecao}>A CORRIDA</div>
                     {campoDescricao}
 
-                    {/* Venda (consultora) — escondido quando a venda já vem fixada (V3, aberto de dentro da venda).
-                        REGRA DE NEGÓCIO (fix 21/07 — venda deixa de ser obrigatória): frete avulso pode
-                        não ter venda (ex.: "levar material à loja", "buscar peça") — por isso o rótulo
-                        diz "(opcional)" e a dica explica quando vale a pena buscar. */}
-                    {!vendaFixada && (
-                    <div style={{ marginBottom: 14 }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                        <Search size={13} /> Venda (opcional)
-                      </label>
-                      <div style={{ fontSize: 11, color: C.cinza, marginBottom: 6 }}>
-                        Se a corrida for de uma venda, busque aqui — o endereço vem preenchido.
-                      </div>
-                      {vendaSelecionada ? (
-                        <div style={{
-                          padding: "8px 12px", borderRadius: 8,
-                          border: `1px solid ${C.esmeralda}`,
-                          background: C.esmeraldaLt,
-                          display: "flex", alignItems: "center", justifyContent: "space-between",
-                        }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: C.esmeralda }}>
-                            {vendaSelecionada.numero_venda} — {vendaSelecionada.cliente_nome ?? "Cliente não identificado"}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => { setVendaSelecionada(null); setEnderecoEntrega(ENDERECO_VAZIO); }}
-                            style={{ background: "none", border: "none", cursor: "pointer", color: C.cinza }}
-                          >
-                            <X size={14} />
-                          </button>
-                        </div>
-                      ) : (
-                        <div style={{ position: "relative" }}>
-                          <input
-                            type="text"
-                            placeholder="Buscar por número da venda ou cliente..."
-                            value={vendaBusca}
-                            onChange={e => setVendaBusca(e.target.value)}
-                            style={{
-                              width: "100%", padding: "9px 12px", borderRadius: 8,
-                              border: `1px solid ${C.cremeBorder}`, fontSize: 13,
-                              boxSizing: "border-box",
-                            }}
-                          />
-                          {buscandoVenda && (
-                            <div style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)" }}>
-                              <Loader2 size={14} color={C.cinza} style={{ animation: "spin 1s linear infinite" }} />
-                            </div>
-                          )}
-                          {vendasResultado.length > 0 && (
-                            <div style={{
-                              position: "absolute", top: "100%", left: 0, right: 0,
-                              background: "#fff", border: `1px solid ${C.cremeBorder}`,
-                              borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                              zIndex: 100, maxHeight: 200, overflowY: "auto",
-                            }}>
-                              {vendasResultado.map(v => (
-                                <button
-                                  key={v.id}
-                                  type="button"
-                                  onClick={() => selecionarVenda(v)}
-                                  style={{
-                                    display: "block", width: "100%", textAlign: "left",
-                                    padding: "8px 12px", border: "none",
-                                    background: "none", cursor: "pointer", fontSize: 13,
-                                  }}
-                                  onMouseEnter={e => e.currentTarget.style.background = C.cremeBg}
-                                  onMouseLeave={e => e.currentTarget.style.background = "none"}
-                                >
-                                  <strong>{v.numero_venda}</strong> — {v.cliente_nome ?? "—"}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    )}
-
                     {/* Cliente da corrida — REGRA DE NEGÓCIO (03/08/2026):
                         obrigatório, exceto quando a venda já vem fixada
                         (vendaFixada = cliente inequívoco, vem da prop
-                        contatoIdInicial, sem seletor visível). Buscar/
-                        selecionar uma venda acima auto-preenche este campo
-                        (ainda editável/trocável). */}
+                        contatoIdInicial, sem seletor visível). */}
                     {mostrarSeletorCliente && (
                     <div style={{ marginBottom: 14 }}>
                       <ClienteSelector
@@ -852,23 +823,103 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
                     </div>
                     )}
 
-                    {/* Endereço de entrega — formulário estruturado com busca
-                        por CEP (migration 355). Editável: não altera o
-                        cadastro do cliente/venda, só o que fica gravado na
-                        entrega. */}
-                    <div style={{ marginBottom: 14 }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6 }}>
-                        <MapPin size={13} /> Endereço de entrega *
-                      </label>
-                      {carregandoEndereco ? (
-                        <div style={{ fontSize: 12, color: C.cinza, display: "flex", alignItems: "center", gap: 6 }}>
-                          <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
-                          Carregando endereço da venda...
-                        </div>
-                      ) : (
-                        <EnderecoForm value={enderecoEntrega} onChange={setEnderecoEntrega} />
-                      )}
-                    </div>
+                    {/* Sugestão de venda do cliente — REGRA DE NEGÓCIO
+                        (04/08/2026): substitui o buscador por número. Ao
+                        escolher o cliente acima, busca sozinho as vendas
+                        dele; pergunta se a corrida é de alguma. Vendas fora
+                        da janela de entrega (ver JANELA_FRETE_AVULSO_COM_VENDA)
+                        aparecem desabilitadas com o motivo — não bloqueiam a
+                        lista, só o clique (o backend rejeitaria mesmo). */}
+                    {mostrarSeletorCliente && clienteSelecionado && carregandoVendasDoCliente && (
+                      <div style={{ fontSize: 12, color: C.cinza, display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
+                        <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                        Buscando vendas de {clienteSelecionado.nome}...
+                      </div>
+                    )}
+                    {mostrarSeletorCliente && clienteSelecionado && !carregandoVendasDoCliente && vendasDoCliente.length > 0 && (
+                      <div style={{ marginBottom: 14 }}>
+                        {vendaSelecionada ? (
+                          <div style={{
+                            padding: "8px 12px", borderRadius: 8,
+                            border: `1px solid ${C.esmeralda}`, background: C.esmeraldaLt,
+                            display: "flex", alignItems: "center", justifyContent: "space-between",
+                          }}>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: C.esmeralda }}>
+                              Venda {vendaSelecionada.numero_venda}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => { setVendaSelecionada(null); setEnderecoEntrega(ENDERECO_VAZIO); }}
+                              style={{ background: "none", border: "none", cursor: "pointer", color: C.cinza }}
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ) : sugestaoDispensada ? (
+                          <button
+                            type="button"
+                            onClick={() => setSugestaoDispensada(false)}
+                            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: C.cinza, textDecoration: "underline", padding: 0 }}
+                          >
+                            Corrida avulsa (sem venda) — ver vendas de {clienteSelecionado.nome} de novo
+                          </button>
+                        ) : (
+                          <div style={{ padding: 12, borderRadius: 10, background: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 8 }}>
+                              Essa corrida é de alguma venda de {clienteSelecionado.nome}?
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                              {vendasDoCliente.map(v => {
+                                const habilitada = JANELA_FRETE_AVULSO_COM_VENDA.includes(v.situacao);
+                                return (
+                                  <button
+                                    key={v.id}
+                                    type="button"
+                                    disabled={!habilitada || carregandoEndereco}
+                                    onClick={() => habilitada && selecionarVenda(v)}
+                                    title={habilitada ? undefined : `Não pode vincular — venda ${labelSituacaoVenda(v.situacao).toLowerCase()}`}
+                                    style={{
+                                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                                      padding: "8px 10px", borderRadius: 8, textAlign: "left",
+                                      border: `1px solid ${habilitada ? C.esmeralda : C.cremeBorder}`,
+                                      background: habilitada ? "#fff" : C.cremeBg,
+                                      opacity: habilitada ? 1 : 0.65,
+                                      cursor: habilitada ? "pointer" : "not-allowed",
+                                    }}
+                                  >
+                                    <span>
+                                      <div style={{ fontSize: 13, fontWeight: 600, color: habilitada ? "#1f2937" : C.cinza }}>
+                                        Venda {v.numero_venda} — {new Date(v.data_venda).toLocaleDateString("pt-BR")}
+                                      </div>
+                                      {!habilitada && (
+                                        <div style={{ fontSize: 11, color: C.cinza }}>
+                                          Não pode vincular — venda {labelSituacaoVenda(v.situacao).toLowerCase()}
+                                        </div>
+                                      )}
+                                    </span>
+                                    <span style={{
+                                      fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 12,
+                                      background: habilitada ? C.verdeLt : C.cremeBorder, color: habilitada ? "#065F46" : C.cinza,
+                                    }}>
+                                      {labelSituacaoVenda(v.situacao)}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ textAlign: "center" }}>
+                              <button
+                                type="button"
+                                onClick={() => setSugestaoDispensada(true)}
+                                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, color: C.esmeralda, textDecoration: "underline", padding: 0 }}
+                              >
+                                Nenhuma dessas — corrida avulsa
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Coluna B — Pagamento */}
@@ -1052,6 +1103,21 @@ export default function FreteAvulsoModal({ isOpen, onClose, onCriado, modoSolici
           </form>
         )}
       </div>
+
+      {/* REGRA DE NEGÓCIO (04/08/2026): só existe fora de vendaFixada — com
+          venda fixada o endereço já vem pronto da prop e o submit vai direto
+          (ver handleAbrirConfirmacaoEndereco). */}
+      {!vendaFixada && (
+        <ConfirmarEnderecoModal
+          isOpen={mostrarPopupEndereco}
+          enderecoSugerido={enderecoSugerido}
+          fonte={fonteSugestao}
+          numeroVenda={vendaSelecionada?.numero_venda}
+          onConfirmar={(endereco) => void enviarSolicitacao(endereco)}
+          onCancelar={() => setMostrarPopupEndereco(false)}
+        />
+      )}
+
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
