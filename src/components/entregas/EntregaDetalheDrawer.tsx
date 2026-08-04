@@ -152,6 +152,11 @@ interface EntregaDetalhe {
   is_avulso: boolean;
   descricao_avulso: string | null;
   auto_criado: boolean;
+  /** REGRA DE NEGÓCIO (04/08/2026 — timeline fiel): preenchido só quando a
+   *  corrida passou pelo pool de aprovadores (solicitação) — null em
+   *  criação direta. Ver GET /api/entregas-venda/[id]/route.ts. */
+  liberada_em: string | null;
+  liberada_por_nome: string | null;
 }
 
 // ── Props ───────────────────────────────────────────────────────────────────────
@@ -766,12 +771,17 @@ export default function EntregaDetalheDrawer({
                   }}
                 />
 
-                {/* Evento 1: Criação */}
+                {/* Evento 1: Criação — REGRA DE NEGÓCIO (04/08/2026, pedido do
+                    Jonathan — timeline fiel): título vira "Solicitada" quando
+                    a corrida passou (ou está passando) pelo pool de
+                    aprovadores — `situacao==='solicitada'` (ainda aguardando)
+                    OU `liberada_em` preenchido (já foi aprovada). Criação
+                    direta (sem aprovação) continua "Criada". */}
                 <TimelineItem
                   icon={<Clock size={12} />}
                   iconBg={C.esmeraldaLt}
                   iconColor={C.esmeralda}
-                  title="Criada"
+                  title={detalhe.situacao === "solicitada" || detalhe.liberada_em ? "Solicitada" : "Criada"}
                   date={fmtDtHr(detalhe.created_at)}
                   subtitle={
                     detalhe.criado_por_nome
@@ -780,6 +790,30 @@ export default function EntregaDetalheDrawer({
                   }
                   active
                 />
+
+                {/* Evento 1.5: Aprovada — REGRA DE NEGÓCIO (04/08/2026,
+                    pedido do Jonathan — timeline fiel): só aparece quando a
+                    corrida passou pelo pool de aprovadores (liberada_em
+                    preenchido). Conferido no banco (04/08/2026): quem aprova
+                    NUNCA é a mesma pessoa que solicitou — dado confiável.
+                    IMPACTO SE REMOVIDO: timeline volta a esconder quem
+                    liberou a solicitação, dando a entender que quem criou
+                    também aprovou. */}
+                {detalhe.liberada_em && (
+                  <TimelineItem
+                    icon={<CheckCircle size={12} />}
+                    iconBg={C.esmeraldaLt}
+                    iconColor={C.esmeralda}
+                    title="Aprovada"
+                    date={fmtDtHr(detalhe.liberada_em)}
+                    subtitle={
+                      detalhe.liberada_por_nome
+                        ? `por ${detalhe.liberada_por_nome}`
+                        : undefined
+                    }
+                    active
+                  />
+                )}
 
                 {/* Evento 2: Saída (motoboy retirou) */}
                 {detalhe.data_saida && (
