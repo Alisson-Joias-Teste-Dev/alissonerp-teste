@@ -147,6 +147,14 @@ Somava a isso que as rotas gravavam `${body.pct_comissao}` **cru**: a comissão 
 
 **Também corrigido:** o recálculo de `tarefas/[id]/aprovacao/route.ts` varria **todos** os itens da venda usando `pct_desconto`, sem filtrar aliança — aprovar um desconto numa venda com aliança substituía a comissão da aliança pela faixa. Agora respeita a mesma fronteira e mede pelos preços.
 
+**A tela precisa MOSTRAR a promoção, senão o número certo vira chamado.** Com a comissão corrigida e a tela intacta, a aba Produtos exibia `preço lista 599,00 · % Desc — · comissão 0,50%`: sem desconto nenhum à vista e comissão de piso. A consultora abre chamado — e tem razão, porque pela tela não existe desconto. Item em campanha passa a mostrar três apoios: o selo `promoção · <campanha>` no nome, `cheio R$ 890,00` riscado sob o preço lista, `promo 32,70%` sob o "—" da coluna % Desc e `faixa de 32,70%` sob a comissão. Item sem campanha fica idêntico ao de antes. Vale para a aba Produtos do detalhe da venda **e** para a tela de nova venda.
+
+⚠️ A coluna **% Desc continua "—"** de propósito: ali é o desconto de **alçada**, e ele é zero mesmo. A promoção aparece embaixo, separada, porque é outra conta.
+
+⚠️ A prévia de comissão do detalhe da venda usava `getComissao(pct_desconto)` ao editar — mostrava 4,00% e virava 0,50% depois de salvar. Agora a prévia usa a mesma base do servidor.
+
+🔴 **A migration 366 é PRÉ-REQUISITO DURO do deploy.** `GET /api/vendas/[id]` seleciona `ive.preco_lista_cheio` direto: subir o código sem a coluna derruba o detalhe da venda inteiro (500).
+
 **Fica de fora (vai para o ERP novo, decisão do Jonathan em 03/08/2026):** o `Math.min(maxDesconto, ...)` de `NovaVendaClientV2` não limita desconto nenhum — limita só **o número gravado**. Digitando o preço final em vez do percentual, a peça sai com 23,39% de desconto e o registro diz 20% (o teto da vendedora), sem aprovação de ninguém; o servidor não pega porque confere o número já maquiado. É contorno de **alçada**, não de comissão (casos 15275 e 15751). Não mexer neste sistema.
 
 Arquivos: `src/lib/comissao-item.ts`, `supabase/migrations/366_comissao_preco_lista_cheio.sql`, `src/app/api/vendas/route.ts`, `src/app/api/vendas/[id]/itens/{route,[itemId]/route}.ts`, `src/app/api/vendas/solicitacoes-desconto/[id]/route.ts`, `src/app/api/tarefas/[id]/aprovacao/route.ts`.

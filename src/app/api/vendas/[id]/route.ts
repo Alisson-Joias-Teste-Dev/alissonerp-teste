@@ -124,6 +124,13 @@ export async function GET(
       ive.preco_lista, ive.pct_desconto, ive.preco_unitario, ive.total_item,
       ive.pct_comissao, ive.valor_comissao, ive.markup_aplicado,
       ive.desconto_autorizado_por, ive.observacao, ive.peso_estimado, ive.personalizacao, ive.created_at,
+      -- ── Promoção: o que explica a comissão na tela ──────────────────────────
+      -- Sem isto a aba Produtos mostra "preço lista 599,00 · % Desc — · comissão
+      -- 0,50%" e não há como a consultora entender de onde saiu o 0,50%. O que
+      -- puxa a faixa é o desconto contra o preço CHEIO da campanha, e ele não
+      -- aparecia em lugar nenhum. Ver docs/regras-negocio/comercial.md §2.1.2.
+      ive.preco_lista_cheio,
+      promo.nome_campanha AS promocao_nome,
       -- Dados de upgrade (se existirem)
       iuv.peso_gramas      AS upgrade_peso_gramas,
       iuv.peso_liquido     AS upgrade_peso_liquido,
@@ -133,6 +140,20 @@ export async function GET(
       iuv.cofre_registrado AS upgrade_cofre_registrado
     FROM alissonerp.itens_venda_erp ive
     LEFT JOIN alissonerp.itens_venda_upgrade iuv ON iuv.item_venda_id = ive.id
+    -- ⚠️ LATERAL com LIMIT 1, nunca JOIN direto em promocao_itens: um produto
+    -- pode estar em DUAS campanhas sobrepostas na mesma data (AJ4895 em
+    -- 31/07/2026) e o join direto DUPLICA a linha do item na venda.
+    -- Mesmo desempate de vw_produto_preco_vigente (data_inicio DESC, id DESC).
+    LEFT JOIN LATERAL (
+      SELECT pp.nome_campanha
+      FROM alissonerp.promocao_itens pi
+      JOIN alissonerp.promocoes_produtos pp ON pp.id = pi.promocao_id
+      WHERE pi.produto_id = ive.produto_id
+        AND ${venda.data_venda}::date >= pp.data_inicio
+        AND ${venda.data_venda}::date <= pp.data_fim
+      ORDER BY pp.data_inicio DESC, pp.id DESC
+      LIMIT 1
+    ) promo ON true
     WHERE ive.venda_id = ${vendaId}
     ORDER BY ive.id
   `;

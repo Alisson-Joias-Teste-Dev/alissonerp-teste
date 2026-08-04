@@ -2862,6 +2862,19 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                 Sob encomenda · estoque: {item.saldo_disponivel}
                               </span>
                             )}
+                            {/* Promoção: sem isto a linha fica "lista 599,00 · desc 0 ·
+                                comissão 0,50%" e não há como explicar o 0,50%. O que puxa
+                                a faixa é o desconto contra o preço CHEIO da campanha.
+                                Ver docs/regras-negocio/comercial.md §2.1.2. */}
+                            {(item.preco_lista_original ?? 0) > item.preco_lista && (
+                              <span className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded mt-0.5"
+                                style={{ backgroundColor: "#E8F0EC", color: "#184036" }}>
+                                promoção{item.promocao_nome ? ` · ${item.promocao_nome}` : ""}
+                                {" · "}
+                                {((((item.preco_lista_original ?? 0) - item.preco_lista) / (item.preco_lista_original ?? 1)) * 100)
+                                  .toFixed(2).replace(".", ",")}%
+                              </span>
+                            )}
                           </td>
                           {(tipoVenda === "produto" || tipoVenda === "garantia") && (
                             <td className="px-3 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{item.sku ?? "—"}</td>
@@ -2876,6 +2889,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                               value={item.preco_lista}
                               onCommit={val => updateItem(item._key, "preco_lista", val)}
                             />
+                            {(item.preco_lista_original ?? 0) > item.preco_lista && (
+                              <div className="text-[10px] mt-0.5" style={{ color: "#9CA3AF" }}>
+                                cheio <span style={{ textDecoration: "line-through" }}>{fmt(item.preco_lista_original ?? 0)}</span>
+                              </div>
+                            )}
                           </td>
                           {(tipoVenda === "produto" || tipoVenda === "garantia") && (<>
                             <td className="px-3 py-2.5">
@@ -2953,6 +2971,15 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                   </span>
                                 </span>
                               ) : "—"}
+                              {(item.preco_lista_original ?? 0) > item.preco_lista && (() => {
+                                const cheio = item.preco_lista_original ?? 0;
+                                const desc = Math.max(0, Math.round(((cheio - item.preco_unitario) / cheio) * 10000) / 100);
+                                return (
+                                  <div className="text-[10px] font-normal" style={{ color: "#9CA3AF" }}>
+                                    faixa de {desc.toFixed(2).replace(".", ",")}%
+                                  </div>
+                                );
+                              })()}
                             </td>
                           )}
                           <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>

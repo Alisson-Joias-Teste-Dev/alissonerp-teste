@@ -72,6 +72,14 @@ interface ItemVenda {
   preco_unitario: number; total_item: number; pct_comissao: number;
   valor_comissao: number; peso_estimado: number | null; unidade: string | null;
   observacao?: string | null;
+  /** Preço CHEIO da campanha (migration 366). Num item em promoção,
+   *  `preco_lista` guarda o preço PROMOCIONAL — este é o de verdade, e é dele
+   *  que sai a faixa de comissão. Igual a `preco_lista` fora de promoção.
+   *  Sem ele a tela mostrava "lista 599,00 · % Desc — · comissão 0,50%" e não
+   *  havia como a consultora entender de onde saiu o 0,50%.
+   *  Ver docs/regras-negocio/comercial.md §2.1.2. */
+  preco_lista_cheio?: number | null;
+  promocao_nome?: string | null;
   /** Markup gravado quando o item vem de orçamento (aliança/peça). Quando
    *  presente, a comissão usa commissionForMarkup (curva). Quando null,
    *  cai na faixas_comissao por desconto. */
@@ -147,6 +155,8 @@ interface Venda {
     quantidade: number; preco_lista: number; pct_desconto: number;
     preco_unitario: number; total_item: number; pct_comissao: number;
     valor_comissao: number; observacao: string | null; peso_estimado?: number | null;
+    preco_lista_cheio?: number | null;
+    promocao_nome?: string | null;
     markup_aplicado?: number | null;
     personalizacao?: { valor?: string; preco_por_letra?: number; peso_por_letra?: number } | null;
     /** Dados de upgrade (nulo se não for item upgrade) */
@@ -868,6 +878,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       preco_unitario: i.preco_unitario, total_item: i.total_item,
       pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao,
       peso_estimado: i.peso_estimado ?? null, unidade: null, observacao: i.observacao,
+      preco_lista_cheio: i.preco_lista_cheio ?? null,
+      promocao_nome: i.promocao_nome ?? null,
       markup_aplicado: i.markup_aplicado ?? null,
       personalizacao: i.personalizacao ?? null,
       upgrade: i.upgrade ?? null,
@@ -3106,6 +3118,17 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       <tr><td colSpan={10} className="px-3 py-8 text-center text-sm" style={{ color: "#9CA3AF" }}>Nenhum produto adicionado</td></tr>
                     )}
                     {itens.map((item, idx) => {
+                      // ── Promoção: o que explica a comissão nesta linha ──────────
+                      // Num item em campanha, `preco_lista` é o preço PROMOCIONAL.
+                      // O que puxa a faixa é o desconto contra o preço CHEIO. Sem
+                      // mostrar isso, a linha fica "lista 599,00 · % Desc — ·
+                      // comissão 0,50%" e a consultora abre chamado — com razão,
+                      // porque pela tela não existe desconto nenhum.
+                      // % Desc continua sendo o desconto de ALÇADA (sobre o promo)
+                      // e fica "—" mesmo: promoção é pré-aprovada, não pede
+                      // aprovação. Ver docs/regras-negocio/comercial.md §2.1.2.
+                      const cheioItem = Number(item.preco_lista_cheio ?? item.preco_lista);
+                      const emPromocao = cheioItem > Number(item.preco_lista);
                       return (<Fragment key={item._key}>
                       <tr className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                         <td className="px-2 py-2 tabular-nums" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
@@ -3121,6 +3144,14 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                               style={{ backgroundColor: "#D1FAE5", color: "#065F46" }}>
                               Upgrade
                             </span>
+                          )}
+                          {emPromocao && (
+                            <div className="mt-1">
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                                style={{ backgroundColor: "#E8F0EC", color: "#184036" }}>
+                                promoção{item.promocao_nome ? ` · ${item.promocao_nome}` : ""}
+                              </span>
+                            </div>
                           )}
                         </td>
                         <td className="px-2 py-2 font-mono" style={{ color: "#6B7280" }}>{item.sku}</td>
@@ -3146,7 +3177,14 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                           })()}
                         </td>
                         <td className="px-2 py-2" style={{ color: "#9CA3AF" }}>{item.unidade ?? "un"}</td>
-                        <td className="px-2 py-2 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
+                        <td className="px-2 py-2 tabular-nums" style={{ color: "#374151" }}>
+                          {fmt(item.preco_lista)}
+                          {emPromocao && (
+                            <div className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                              cheio <span style={{ textDecoration: "line-through" }}>{fmt(cheioItem)}</span>
+                            </div>
+                          )}
+                        </td>
                         {(() => {
                           const editandoPreco = localPrecoUn[item.id!] !== undefined;
                           const effPct = editandoPreco
@@ -3165,7 +3203,16 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                           const effTotal    = effPrecoUn * item.quantidade;
                           const effDescVal  = item.preco_lista * effPct / 100;
                           const editandoDesc  = editandoPreco || localPct[item.id!] !== undefined;
-                          const effPctComissao = editandoDesc ? getComissao(effPct) : item.pct_comissao;
+                          // Desconto que decide a FAIXA: contra o preço CHEIO da
+                          // campanha, não contra o promocional. É o número que a
+                          // consultora precisa ver pra conferir na tabela de faixas.
+                          const descComissao = cheioItem > 0
+                            ? Math.max(0, Math.round(((cheioItem - effPrecoUn) / cheioItem) * 10000) / 100)
+                            : 0;
+                          // Ao editar, a prévia usa a MESMA base do servidor. Antes
+                          // era getComissao(effPct), que ignora promoção: a tela
+                          // mostrava 4,00% e o valor virava 0,50% depois de salvar.
+                          const effPctComissao = editandoDesc ? getComissao(descComissao) : item.pct_comissao;
                           const effValComissao = editandoDesc ? effTotal * effPctComissao / 100 : item.valor_comissao;
                           return (<>
                         <td className="px-2 py-2 tabular-nums text-center" style={{ color: effPct > 0 ? "#D97706" : "#9CA3AF" }}>
@@ -3199,6 +3246,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                               )}
                             </div>
                           ) : (effPct > 0 ? `${effPct}%` : "—")}
+                          {emPromocao && (
+                            <div className="text-[10px]" style={{ color: "#184036" }}>
+                              promo {(((cheioItem - item.preco_lista) / cheioItem) * 100).toFixed(2).replace(".", ",")}%
+                            </div>
+                          )}
                         </td>
                         {edit.limited && (
                           <td className="px-2 py-2 tabular-nums text-right" style={{ color: "#374151" }}>
@@ -3246,6 +3298,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                               </span>
                             </span>
                           ) : "—"}
+                          {emPromocao && (
+                            <div className="text-[10px] font-normal" style={{ color: "#9CA3AF" }}>
+                              faixa de {descComissao.toFixed(2).replace(".", ",")}%
+                            </div>
+                          )}
                         </td>
                         <td className="px-2 py-2 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(effTotal)}</td>
                           </>);
