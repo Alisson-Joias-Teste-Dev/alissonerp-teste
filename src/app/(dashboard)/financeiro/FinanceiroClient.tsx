@@ -195,6 +195,79 @@ const fmtDate = (d: string | null) => {
 const fmtPct = (n: number, zeroComoTraco = false) =>
   zeroComoTraco && n === 0 ? "—" : `${n.toFixed(2).replace(".", ",")}%`;
 
+/** Uma VENDA no extrato: os pagamentos dela que comissionaram naquele mês. */
+interface GrupoVenda {
+  chave: string;
+  data: string;
+  data_fim: string;
+  descricao: string;
+  pedido: string | null;
+  venda_id: number | null;
+  valor_pago: number | null;
+  base_comissao: number | null;
+  valor: number;
+  previsto: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pagamentos: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  itens: any[];
+}
+
+/**
+ * Agrupa as linhas de "Comissões do mês" por VENDA.
+ *
+ * O PORQUÊ (Jonathan, 04/08/2026): a comissão nasce por PAGAMENTO, então um
+ * pedido pago em parcelas virava várias linhas soltas e ninguém sabia se era a
+ * mesma venda ou vendas diferentes. Em julho/2026 a Germana tinha 120 linhas
+ * para 78 pedidos, e o pedido 15310 sozinho ocupava 12 linhas.
+ *
+ * ⚠️ Agrupa SÓ a visualização. O saldo e o Resumo continuam vindo prontos do
+ * servidor — se este agrupamento estiver errado, a conta do extrato não muda.
+ *
+ * 138 dos 187 pedidos de julho têm um pagamento só: esses ficam IDÊNTICOS ao
+ * que eram, com a forma na descrição. Só quem tem 2+ troca para "N pagamentos".
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const agruparPorVenda = (linhas: any[]): GrupoVenda[] => {
+  const grupos = new Map<string, GrupoVenda>();
+  const soltas: GrupoVenda[] = [];
+
+  linhas.forEach((l, i) => {
+    const base: GrupoVenda = {
+      chave: `v${l.venda_id}`,
+      data: l.data, data_fim: l.data,
+      descricao: l.descricao, pedido: l.pedido, venda_id: l.venda_id,
+      valor_pago: l.valor_pago, base_comissao: l.base_comissao,
+      valor: Number(l.valor), previsto: !!l.previsto,
+      pagamentos: [l], itens: Array.isArray(l.itens) ? l.itens : [],
+    };
+    // Linha sem venda não agrupa: não há o que juntar e forçar viraria uma
+    // linha "fantasma" somando fatos diferentes.
+    if (l.venda_id == null) { soltas.push({ ...base, chave: `s${i}` }); return; }
+
+    const g = grupos.get(base.chave);
+    if (!g) { grupos.set(base.chave, base); return; }
+    g.valor += Number(l.valor);
+    g.valor_pago = (g.valor_pago ?? 0) + (l.valor_pago ?? 0);
+    g.previsto = g.previsto || !!l.previsto;
+    if (l.data < g.data) g.data = l.data;
+    if (l.data > g.data_fim) g.data_fim = l.data;
+    g.pagamentos.push(l);
+    if (g.itens.length === 0 && Array.isArray(l.itens)) g.itens = l.itens;
+  });
+
+  for (const g of grupos.values()) {
+    if (g.pagamentos.length > 1) {
+      const n = g.pagamentos.length;
+      g.descricao = `${g.pagamentos[0].cliente ?? "—"}`
+        + (g.pedido ? ` · pedido ${g.pedido}` : "")
+        + ` · ${n} pagamentos`;
+    }
+  }
+
+  return [...grupos.values(), ...soltas].sort((a, b) => a.data.localeCompare(b.data));
+};
+
 const isVencido = (d: string | null, situacao: string) => {
   if (situacao !== "pendente" || !d) return false;
   const venc = d.slice(0, 10);
@@ -3640,8 +3713,12 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
             </div>
 
             {secoes.map(sec => {
-              const linhas = detalhe.baldes[sec.chave] ?? [];
-              const total = linhas.reduce((s: number, l: any) => s + Number(l.valor), 0);
+              const brutas = detalhe.baldes[sec.chave] ?? [];
+              // Só "Comissões do mês" agrupa por venda. Nos outros baldes cada
+              // linha já é um fato único (uma devolução, um ajuste, um
+              // pagamento) — agrupar ali juntaria coisas diferentes.
+              const linhas: any[] = sec.colunas ? agruparPorVenda(brutas) : brutas;
+              const total = brutas.reduce((s: number, l: any) => s + Number(l.valor), 0);
               return (
                 <div key={sec.chave} className="rounded-xl bg-white border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
                   <div className="px-4 py-3 border-b" style={{ borderColor: C.cremeBorder }}>
@@ -3665,14 +3742,23 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
                           {linhas.map((l: any, i: number) => {
                             const chave = `${sec.chave}-${i}`;
                             const itens: any[] = Array.isArray(l.itens) ? l.itens : [];
-                            const abre = itens.length > 0;
+                            const pagamentos: any[] = Array.isArray(l.pagamentos) ? l.pagamentos : [];
+                            // Abre quando há itens OU quando a venda teve mais de um
+                            // pagamento — nesse caso o detalhe é a única forma de ver
+                            // quais formas comissionaram e em que dia.
+                            const abre = itens.length > 0 || pagamentos.length > 1;
                             const aberta = linhaAberta === chave;
                             const nCols = sec.colunas ? 5 : 3;
+                            // Data vira faixa quando os pagamentos caem em dias
+                            // diferentes; um dia só continua mostrando um dia só.
+                            const rotuloData = l.data_fim && l.data_fim !== l.data
+                              ? `${fmtDate(l.data)} – ${fmtDate(l.data_fim)}`
+                              : fmtDate(l.data);
                             return (
                               <Fragment key={chave}>
                                 <tr className="border-t" style={{ borderColor: C.cremeBorder, cursor: abre ? "pointer" : undefined }}
                                   onClick={abre ? () => setLinhaAberta(aberta ? null : chave) : undefined}>
-                                  <td className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: C.cinza }}>{fmtDate(l.data)}</td>
+                                  <td className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: C.cinza }}>{rotuloData}</td>
                                   <td className="px-3 py-2 text-xs" style={{ color: "#1A1A1A" }}>
                                     <span className="inline-block w-3 mr-1" style={{ color: C.cinza }}>
                                       {abre ? (aberta ? "▾" : "▸") : ""}
@@ -3699,6 +3785,54 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
                                 {aberta && (
                                   <tr>
                                     <td colSpan={nCols} className="px-3 pb-3 pt-1" style={{ backgroundColor: C.cremeBg }}>
+                                      {/* Pagamentos: responde POR QUE esse valor.
+                                          Só aparece quando há mais de um — com um
+                                          pagamento só, a linha de cima já diz tudo.
+                                          NÃO corta a lista: o pedido 15310 tem 12
+                                          pagamentos e é justamente o que alguém vai
+                                          querer conferir. */}
+                                      {pagamentos.length > 1 && (
+                                        <>
+                                          <p className="px-2 pt-2 pb-1 text-[11px] font-semibold" style={{ color: C.cinza }}>
+                                            Pagamentos que comissionaram ({pagamentos.length})
+                                          </p>
+                                          <table className="w-full text-[11px] mb-3">
+                                            <thead>
+                                              <tr>
+                                                <th className="px-2 py-1 text-left font-semibold" style={{ color: C.cinza }}>Data</th>
+                                                <th className="px-2 py-1 text-left font-semibold" style={{ color: C.cinza }}>Forma</th>
+                                                <th className="px-2 py-1 text-right font-semibold whitespace-nowrap" style={{ color: C.cinza }}>Valor pago</th>
+                                                <th className="px-2 py-1 text-right font-semibold" style={{ color: C.cinza }}>Comissão</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {pagamentos.map((p: any, k: number) => (
+                                                <tr key={k}>
+                                                  <td className="px-2 py-1 whitespace-nowrap" style={{ color: C.cinza }}>{fmtDate(p.data)}</td>
+                                                  <td className="px-2 py-1" style={{ color: "#1A1A1A" }}>
+                                                    {p.forma ?? "—"}
+                                                    {p.previsto && (
+                                                      <span className="ml-1.5 px-1 py-0.5 rounded text-[9px] font-medium"
+                                                        style={{ backgroundColor: C.ambarLt, color: C.ambar }}>a lançar</span>
+                                                    )}
+                                                  </td>
+                                                  <td className="px-2 py-1 text-right tabular-nums" style={{ color: C.cinza }}>
+                                                    {p.valor_pago != null ? fmt(p.valor_pago) : "—"}
+                                                  </td>
+                                                  <td className="px-2 py-1 text-right tabular-nums font-medium" style={{ color: "#1A1A1A" }}>
+                                                    {fmt(Math.abs(Number(p.valor)))}
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </>
+                                      )}
+                                      {itens.length > 0 && (
+                                        <p className="px-2 pb-1 text-[11px] font-semibold" style={{ color: C.cinza }}>
+                                          Itens da venda
+                                        </p>
+                                      )}
                                       <table className="w-full text-[11px]">
                                         <thead>
                                           <tr>
