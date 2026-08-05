@@ -2206,9 +2206,13 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   // 06/2026, o fluxo atual é rascunho → aprovado → em_rota → entregue.
   // IMPACTO SE ALTERADO: tirar 'entregue' esconde o botão no cenário de ajuste
   // pós-entrega; incluir 'rascunho' deixaria pedir frete de venda não fechada.
-  const podeSolicitarFreteAvulsoAqui =
-    podeSolicitarFreteAvulso(role) &&
-    ["aprovado", "em_rota", "entregue"].includes(venda.situacao);
+  // DESATIVADO temporariamente (pedido do Jonathan, 05/08/2026) — o atalho
+  // "Solicitar frete avulso" de dentro da venda fica escondido por enquanto.
+  // Reverter: trocar a linha abaixo de volta pela condição original comentada.
+  const podeSolicitarFreteAvulsoAqui = false;
+  // const podeSolicitarFreteAvulsoAqui =
+  //   podeSolicitarFreteAvulso(role) &&
+  //   ["aprovado", "em_rota", "entregue"].includes(venda.situacao);
   // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): endereço
   // sugerido para pré-preencher o EnderecoForm do modal de frete avulso —
   // CAMPO A CAMPO (enderecoDaVenda), não mais concatenado num texto único.
