@@ -46,6 +46,15 @@ export interface LinhaExtrato {
   descricao: string;
   pedido: string | null;
   venda_id: number | null;
+  /** Cliente e forma SOLTOS, além de já virem dentro de `descricao`.
+   *
+   *  O PORQUÊ (04/08/2026): a tela agrupa as linhas por VENDA — um pedido pago
+   *  em 3 parcelas vira UMA linha, e as formas aparecem dentro. Para remontar a
+   *  descrição do grupo ("Cliente · pedido X · 3 pagamentos") e listar a forma
+   *  de cada pagamento, o front precisa dos dois separados; extrair da string
+   *  pronta quebraria no primeiro cliente com " · " no nome. */
+  cliente: string | null;
+  forma: string | null;
   valor_pago: number | null;
   base_comissao: number | null;
   /** Itens da venda — o detalhe que abre ao clicar na linha. `null` quando a
@@ -261,6 +270,8 @@ export async function linhasExtrato(
         : `${g.cliente ?? "—"}${g.pedido ? ` · pedido ${g.pedido}` : ""}${g.forma ? ` · ${g.forma.toLowerCase()}` : ""}`,
       pedido: g.pedido,
       venda_id: g.venda_id,
+      cliente: g.cliente,
+      forma: g.forma,
       valor_pago: g.valor_pagamento ? Number(g.valor_pagamento) : null,
       base_comissao: g.valor_venda ? Number(g.valor_venda) : null,
       itens: null,
@@ -281,6 +292,8 @@ export async function linhasExtrato(
         : `${p.cliente ?? "—"} · pedido ${p.pedido} · ${p.forma.toLowerCase()}`,
       pedido: p.pedido,
       venda_id: p.venda_id,
+      cliente: p.cliente,
+      forma: p.forma,
       valor_pago: Number(p.valor_pagamento),
       base_comissao: Number(p.total_venda),
       itens: null,
@@ -304,6 +317,8 @@ export async function linhasExtrato(
         + (b.pago_em ? ` · pago em ${b.pago_em.split("-").reverse().join("/")}` : ""),
       pedido: null,
       venda_id: null,
+      cliente: null,
+      forma: null,
       valor_pago: null,
       base_comissao: null,
       itens: null,
