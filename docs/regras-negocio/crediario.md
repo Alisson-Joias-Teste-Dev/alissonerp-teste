@@ -105,6 +105,18 @@ Já está correta e é **regime de caixa**: a comissão é proporcional ao valor
 ## 6. Quem registra e como
 
 - **A consultora** registra o pagamento (todas as formas permitidas) e **acompanha seus próprios pendentes**.
+
+**Quem pode dar baixa (matriz fechada em 06/08/2026):** gerente_loja / admin / desenvolvedor / diretor veem e baixam tudo; **a consultora baixa, mas SÓ a venda DELA**. A trava é sempre o *ownership* (`requireCrediarioOwnership` por conta, `requireVendaOwnership` por venda), **nunca** a lista de papéis — tirar o ownership reabre o vetor de baixar venda de colega (recebimento fantasma + comissão no nome errado).
+
+| Rota | Papéis | Trava de dono |
+|---|---|---|
+| `registrar-pagamento` (drawer, 9 formas) | full + consultora | `requireCrediarioOwnership` |
+| `verificar-mp` (Manual MP) | full + consultora | `requireCrediarioOwnership` |
+| `receber-cascata` ("+ Receber pagamento") | full + consultora | `requireVendaOwnership` |
+| `cobrar-pix` / `cobrar-cartao` (gera QR/maquininha) | qualquer usuário válido | — (gerar cobrança não move dinheiro; quem confirma é o gateway) |
+| `verificar-pagbank` | full | — (**integração PagBank não existe ainda** — rota parada) |
+
+Antes de 06/08/2026 a matriz era incoerente: a tela mostrava o painel de baixa pra consultora, ela tomava **403** no Dinheiro/Pix e **conseguia** baixar por "Manual (MP)" — ou seja, o único caminho aberto pra ela era o que menos exige prova. O botão "+ Receber pagamento" ficava escondido dela de propósito, porque a cascata não tinha trava de dono.
 - Segue o **fluxo de pagamento atual da venda**: dinheiro entra no cofre com o número da venda + nome da consultora; ela se responsabiliza na conferência.
 
 **Onde o plano (parcelamento/sinal) é escolhido:** ao selecionar a forma **"A Receber"**, o painel "Pagamento a prazo (crediário)" (Mensal / Em X dias / Sinal) aparece em DOIS lugares — no **wizard de Nova Venda** (passos Pagamento e Revisão) e na **tela de detalhe da venda enquanto ela é rascunho**. Componente único: `src/components/vendas/PainelCrediario.tsx`; preview em `src/lib/credi-preview.ts` (espelha o gatilho). O plano vai gravado em `pagamentos_venda.credi_tipo`/`credi_param` (o detalhe usa `POST /api/vendas/[id]/pagamentos`); o gatilho `fn_venda_gerar_conta_receber` lê na aprovação. Venda **já aprovada** não mostra o painel — baixa só pela porta única do Crediário.

@@ -1828,12 +1828,12 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   // Quem pode registrar baixa: gerente + consultora (no back, a consultora
   // só baixa conta de venda DELA — ownership em requireCrediarioOwnership).
   const podeBaixar = isGerente || userRole === "consultora";
-  // Cascata (recebe várias parcelas de uma vez): restrita a gerente/dev/admin/
-  // diretor. NÃO libera consultora aqui — a rota nova ainda não tem a mesma
-  // trava de "só a venda dela" que o baixa avulso tem (ownership pendente,
-  // já sinalizado ao Jonathan como pendência separada). Evita alargar esse
-  // buraco enquanto ele não for corrigido.
-  const podeCascata = isGerente || userRole === "diretor";
+  // Cascata (recebe várias parcelas de uma vez): mesma regra da baixa avulsa.
+  // A consultora entrou em 06/08/2026, junto com a trava de dono da venda
+  // (requireVendaOwnership) na rota receber-cascata — antes disso ela ficava
+  // de fora aqui de propósito, porque a rota aceitaria a venda de qualquer
+  // colega. Se a trava sair da rota, esta linha tem que voltar a excluí-la.
+  const podeCascata = podeBaixar || userRole === "diretor";
 
   // Deep-link "Receber no Crediario" (vindo da tela da venda):
   // /crediario?venda=<id> abre direto o drawer da conta pendente daquela venda,
