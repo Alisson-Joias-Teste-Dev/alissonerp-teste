@@ -55,6 +55,14 @@ export interface LinhaExtrato {
    *  pronta quebraria no primeiro cliente com " · " no nome. */
   cliente: string | null;
   forma: string | null;
+  /** Data da VENDA (não a do pagamento).
+   *
+   *  O PORQUÊ (Jonathan, 04/08/2026): a comissão segue o DINHEIRO, então uma
+   *  venda de maio paga em julho aparece em julho — e a consultora não tem como
+   *  saber disso olhando a linha. Em julho/2026 a Germana tinha 11 pedidos de
+   *  outros meses no extrato (R$519,95), um deles de MARÇO DE 2025.
+   *  A tela pinta a data de âmbar quando o mês da venda difere da competência. */
+  data_venda: string | null;
   valor_pago: number | null;
   base_comissao: number | null;
   /** Itens da venda — o detalhe que abre ao clicar na linha. `null` quando a
@@ -167,6 +175,7 @@ export async function linhasExtrato(
     consultora_id: number; consultora_nome: string | null; data: string;
     venda_id: number | null; pedido: string | null; cliente: string | null;
     forma: string | null; valor_pagamento: string; valor_venda: string;
+    data_venda: string | null;
     valor: string; tipo_item: string; devolucao_id: number | null;
   }>>`
     SELECT fi.consultora_id, ve.nome AS consultora_nome,
@@ -174,6 +183,7 @@ export async function linhasExtrato(
            fi.venda_id, fi.numero_venda_snapshot AS pedido,
            fi.cliente_nome_snapshot AS cliente, fi.forma_recebimento AS forma,
            fi.valor_pagamento::text, fi.valor_venda::text,
+           fi.data_venda::text,
            fi.comissao_calculada::text AS valor, fi.tipo_item, fi.devolucao_id
     FROM alissonerp.fechamento_comissao_itens fi
     LEFT JOIN public.vendedores ve ON ve.id_vendedor = fi.consultora_id
@@ -187,7 +197,8 @@ export async function linhasExtrato(
   const previstos = await sql<Array<{
     consultora_id: number; consultora_nome: string | null; data: string;
     venda_id: number; pedido: string; cliente: string | null; forma: string;
-    valor_pagamento: string; total_venda: string; valor: string; comissionavel: boolean;
+    valor_pagamento: string; total_venda: string; data_venda: string | null;
+    valor: string; comissionavel: boolean;
     vale_numero: string | null; vale_pedido_origem: string | null;
   }>>`
     -- ::int obrigatorio: vendas_erp.vendedor_id e BIGINT e o postgres.js devolve
@@ -198,6 +209,7 @@ export async function linhasExtrato(
            pv.data_confirmacao::date::text AS data,
            v.id AS venda_id, v.numero_venda AS pedido, c.nome AS cliente,
            pv.forma, pv.valor::text AS valor_pagamento, v.total_venda::text,
+           v.data_venda::text,
            CASE WHEN pv.comissionavel
                 THEN ROUND(v.total_comissao * LEAST(pv.valor / NULLIF(v.total_venda, 0), 1), 2)
                 ELSE 0 END::text AS valor,
@@ -272,6 +284,7 @@ export async function linhasExtrato(
       venda_id: g.venda_id,
       cliente: g.cliente,
       forma: g.forma,
+      data_venda: g.data_venda,
       valor_pago: g.valor_pagamento ? Number(g.valor_pagamento) : null,
       base_comissao: g.valor_venda ? Number(g.valor_venda) : null,
       itens: null,
@@ -294,6 +307,7 @@ export async function linhasExtrato(
       venda_id: p.venda_id,
       cliente: p.cliente,
       forma: p.forma,
+      data_venda: p.data_venda,
       valor_pago: Number(p.valor_pagamento),
       base_comissao: Number(p.total_venda),
       itens: null,
@@ -319,6 +333,7 @@ export async function linhasExtrato(
       venda_id: null,
       cliente: null,
       forma: null,
+      data_venda: null,
       valor_pago: null,
       base_comissao: null,
       itens: null,
