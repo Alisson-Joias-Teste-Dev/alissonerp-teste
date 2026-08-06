@@ -27,12 +27,6 @@ vi.mock("@/lib/vendas-credito-aprovar", () => ({
 }));
 vi.mock("@/lib/vendas-aprovar", () => ({
   approveVenda: vi.fn(),
-  // A rota também usa verificarSaldoDeclarado (trava de saldo não declarado).
-  // O fluxo "desconto" retorna antes de chamá-la, mas sem o mock qualquer
-  // mudança na ordem dos guards quebraria este arquivo com "not a function".
-  verificarSaldoDeclarado: vi.fn(async () => ({
-    ok: true, total: 0, declarado: 0, falta: 0, mensagem: "",
-  })),
 }));
 vi.mock("@/lib/roles", () => ({
   isFullAccess: vi.fn(() => false),

@@ -2,37 +2,6 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
-## fix(vendas): não aprova venda com saldo sem forma de pagamento declarada (v2.83.2)
-
-**O quê:** ao aprovar uma venda, o sistema agora confere se tudo que foi lançado de pagamento
-fecha o total. Se sobrar saldo, recusa: *"Falta R$ X sem forma de pagamento. Lance o valor que
-falta (ou declare como 'A Receber') antes de aprovar a venda."*
-
-**Por quê:** a venda 15861 (28/07/2026) foi aprovada com R$ 2.000 de Pix num total de R$ 20.524.
-O saldo de R$ 18.524 não tinha plano nenhum, e o gatilho `fn_venda_gerar_conta_receber` caiu no
-`ELSE` genérico e **inventou** um crediário — 1 conta a receber vencendo na data de entrega.
-Ninguém decidiu esse prazo. Agora quem decide é a consultora, na hora.
-
-**Onde estava o furo:** não era a tela de venda (que já tinha guard), era o botão
-**"Solicitar aprovação"** (`POST /api/vendas/[id]/solicitar-aprovacao`), que aprovava direto
-sempre que a venda não tivesse "A Receber" — sem olhar saldo nenhum.
-
-**Como ficou:** regra em fonte única (`verificarSaldoDeclarado`, `src/lib/vendas-aprovar.ts`),
-chamada pelo `approveVenda` (vale para os 8 caminhos que aprovam venda) e pela rota
-`solicitar-aprovacao` (para a mensagem chegar à consultora em vez de virar 502 genérico).
-Bloqueio fica registrado em `webhook_log` — não é SKIP silencioso.
-
-**O que NÃO mudou:** aprovação de desconto, de cartão e de crédito seguem iguais. Pagamento
-ainda **pendente** (Pix/cartão do MP aguardando o webhook) continua valendo como declarado — é o
-fluxo normal da loja. O `ELSE` do gatilho **continua existindo**: é ele que atende ~429 vendas
-por trimestre em que o pagamento confirma segundos depois da aprovação.
-
-**Sem migration.** Só código.
-
-**Backtest** contra as 179 aprovações reais de 18/03 a 05/08/2026: barraria de 11 a 16, cerca de
-1 venda a cada 12 dias — em nenhuma delas a venda estava completa na hora da aprovação.
-Regra de negócio em `docs/regras-negocio/comercial.md` §6.1.
-
 ## feat(comissao): comissão vira EXTRATO — débito de devolução + crédito de vale (migration 363)
 
 **O quê:** a comissão passou a funcionar como extrato bancário. Cada fato vira uma linha datada
