@@ -36,11 +36,17 @@ import { logAudit } from "@/lib/audit";
 import { zodError } from "@/lib/schemas/common";
 import { fetchPayment } from "@/lib/mercado-pago";
 import { internalError } from "@/lib/api-error";
+import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { ForbiddenError } from "@/lib/auth-server";
 
-// Mesma lista de papéis hoje ativa em registrar-pagamento/verificar-pagbank
-// nesta base de código (sem trava de dono de venda — item já sinalizado
-// separadamente ao Jonathan, fora do escopo desta feature).
-const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
+// Mesma lista de papéis do registrar-pagamento.
+//
+// REGRA DE NEGÓCIO (Jonathan, 06/08/2026): a CONSULTORA pode receber, mas SÓ
+// na venda DELA — garantido pelo requireVendaOwnership abaixo, nunca pela
+// lista. Enquanto essa trava não existia aqui, o front escondia o botão
+// "+ Receber pagamento" da consultora de propósito (`podeCascata`); com a
+// trava no lugar, o botão volta a aparecer pra ela.
+const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor", "consultora"];
 
 // Doc de regras de negócio (docs/regras-negocio/crediario.md §6): "a consultora
 // registra o pagamento (TODAS AS FORMAS PERMITIDAS)" — sem restrição de Pix/
@@ -87,6 +93,20 @@ export async function POST(
   `;
   if (!usuario || !PODE_BAIXAR.includes(usuario.role as string)) {
     return NextResponse.json({ error: "Sem permissão para registrar baixa" }, { status: 403 });
+  }
+
+  // Trava de dono: papéis full passam direto; a consultora só recebe na venda
+  // DELA. Aqui a chave é a VENDA (a cascata quita várias parcelas de uma vez),
+  // por isso requireVendaOwnership e não requireCrediarioOwnership. NÃO REMOVER.
+  try {
+    await requireVendaOwnership(
+      { id: user.id, role: usuario.role as string, email: user.email ?? "" },
+      vendaId,
+    );
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
   }
 
   const raw = await req.json().catch(() => ({}));
