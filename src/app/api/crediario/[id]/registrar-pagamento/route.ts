@@ -16,8 +16,9 @@
  *
  * Fluxo completo (tudo dentro de transação SQL):
  *   1. Atualiza contas_receber: ajusta valor e marca como 'pago'
- *   1b. Se pagamento parcial: cria NOVA conta_receber com o restante
- *   2. Confirma pagamento_venda (se total) ou faz split (se parcial)
+ *   1b. Se pagou menos que a PARCELA: cria NOVA conta_receber com o restante
+ *   2. Confirma o pagamento_venda "A Receber" se ele foi quitado por inteiro;
+ *      se ainda sobra crediário (parcelado), faz split — ver `precisaSplit`
  *   3. Registra em comunicacoes_crediario com a forma usada
  *   4. Fora da tx: devolve saldo ao gerente (evita lock)
  *   5. Fora da tx: conclui venda se todos pagamentos confirmados
@@ -130,6 +131,43 @@ export async function POST(
   const ehPagamentoParcial = valorEfetivo < contaValor;
   const valorRestante = ehPagamentoParcial ? contaValor - valorEfetivo : 0;
 
+  /**
+   * REGRA DE NEGÓCIO (crediário PARCELADO) — o "A Receber" da venda é UM só,
+   * mesmo quando o crediário tem N parcelas: a migration 317 gera N linhas em
+   * contas_receber (uma por parcela) mas mantém UMA linha em pagamentos_venda
+   * com forma 'A Receber' (o financiamento inteiro).
+   *
+   * O QUÊ: `ehPagamentoParcial` (acima) responde "o cliente pagou a PARCELA
+   * inteira?" e manda no split da conta a receber. Quem manda no pagamento da
+   * venda é outra pergunta — "sobra 'A Receber' depois deste recebimento?" —
+   * respondida aqui comparando o valor do crediário INTEIRO com o que entrou.
+   *
+   * O PORQUÊ: até 06/08/2026 o PASSO 2 usava `ehPagamentoParcial`. Baixar a
+   * parcela 1/4 de R$ 9.000 confirmava o "A Receber" de R$ 36.000 INTEIRO — a
+   * venda ficava 100% paga com 3 parcelas em aberto e a comissão (regime de
+   * caixa, segue o pagamento confirmado) saía sobre a venda toda. Caso real:
+   * venda 15678 (Germana, 30/06/2026) comissionou R$ 279,00 em vez de
+   * R$ 111,60; o dado foi corrigido em prod em 04/08/2026 (log 399).
+   * É a mesma lógica que a cascata (receber-cascata/route.ts) já faz certo.
+   *
+   * IMPACTO SE REMOVER: volta a comissionar o crediário parcelado inteiro na
+   * primeira baixa, e a 2ª parcela quebra com 500 PAGAMENTO_EXCEDE_TOTAL
+   * (sem "A Receber" pendente, o PASSO 2c cria linha nova por cima do total).
+   *
+   * Crediário de 1 parcela (a maioria): pagamento.valor == valor da conta,
+   * `precisaSplit` dá false e o fluxo é idêntico ao de sempre.
+   * Tolerância de meio centavo = o `Math.abs(a-b) < 0.005` do projeto.
+   */
+  const valorAReceber = pagamento ? Number(pagamento.valor) : 0;
+  const precisaSplit = !!pagamento && valorAReceber > valorEfetivo + 0.005;
+
+  // Quanto continua devendo no pagamento da venda. Medido sobre o "A Receber"
+  // (crediário inteiro), NUNCA sobre a parcela — senão o valor das outras
+  // parcelas some da soma da venda. Invariante: SUM(pagamentos_venda) = total_venda.
+  const restantePagamento = precisaSplit
+    ? Math.round((valorAReceber - valorEfetivo) * 100) / 100
+    : 0;
+
   let saldoDevolvido = false;
 
   let novoCreditoId: number | null = null;
@@ -184,13 +222,15 @@ export async function POST(
       novoCreditoId = nova?.id ?? null;
     }
 
-    // PASSO 2 — Confirmar pagamento_venda (pagamento TOTAL)
+    // PASSO 2 — Confirmar pagamento_venda (quitou o "A Receber" INTEIRO)
+    // Só entra aqui quando o que entrou cobre todo o crediário pendente
+    // (crediário de 1 parcela, ou a última parcela de um parcelado).
     // O campo 'gateway' é preenchido com a forma de recebimento (ex: "Dinheiro").
     // Isso alimenta o texto "via {gateway}" no card de pagamento da venda
     // (VendaDetalheClient.tsx:2573).
     //
     // Para Ouro: salvamos também peso, valor/grama e foto_path da balança.
-    if (pagamento && !ehPagamentoParcial) {
+    if (pagamento && !precisaSplit) {
       if (ouroPeso && ouroValorGrama && ouroFotoPath) {
         await tx`
           UPDATE alissonerp.pagamentos_venda
@@ -214,11 +254,16 @@ export async function POST(
       }
     }
 
-    // PASSO 2b — SPLIT DO PAGAMENTO (pagamento parcial)
-    // Atualiza o pagamento original com o valor pago e cria um NOVO
-    // pagamento_venda 'A Receber' pendente com o valor restante.
+    // PASSO 2b — SPLIT DO PAGAMENTO (sobrou "A Receber")
+    // Reduz o pagamento original ao valor efetivamente recebido (confirmado)
+    // e cria um NOVO pagamento_venda 'A Receber' pendente com o restante.
     // Isso mantém o total da venda consistente (soma dos pagamentos = total_venda).
-    if (pagamento && ehPagamentoParcial) {
+    //
+    // ⚠️ A ORDEM IMPORTA: REDUZIR primeiro, INSERIR depois. O trigger
+    // fn_pagamento_nao_exceder_total (mig 333) recusa qualquer linha que faça
+    // a soma passar do total_venda — inserindo antes de reduzir, a soma
+    // passaria e a baixa morreria com 500 PAGAMENTO_EXCEDE_TOTAL.
+    if (pagamento && precisaSplit) {
       if (ouroPeso && ouroValorGrama && ouroFotoPath) {
         await tx`
           UPDATE alissonerp.pagamentos_venda
@@ -244,7 +289,7 @@ export async function POST(
         INSERT INTO alissonerp.pagamentos_venda
           (venda_id, forma, valor, parcelas, status)
         VALUES (
-          ${vendaId}, 'A Receber', ${valorRestante}, 1, 'pendente'
+          ${vendaId}, 'A Receber', ${restantePagamento}, 1, 'pendente'
         )
       `;
     }

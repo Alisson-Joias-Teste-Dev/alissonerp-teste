@@ -129,14 +129,42 @@ export async function POST(
       : `Pagamento Mercado Pago confirmado — ID ${mpPaymentId}`);
   const vendaId = conta.venda_erp_id as number | null;
 
-  // Pagamento "A Receber" pendente da venda — alvo do split parcial.
+  // Pagamento "A Receber" pendente da venda — alvo do split.
+  // O `valor` é obrigatório na leitura: é ele (o crediário INTEIRO), e não o
+  // valor da parcela, que decide entre confirmar e dividir. Ver `precisaSplit`.
   const [pagamentoAReceber] = vendaId
     ? await sql`
-        SELECT id FROM alissonerp.pagamentos_venda
+        SELECT id, valor FROM alissonerp.pagamentos_venda
         WHERE venda_id = ${vendaId} AND forma = 'A Receber' AND status = 'pendente'
         LIMIT 1
       `
     : [null];
+
+  /**
+   * REGRA DE NEGÓCIO (crediário PARCELADO) — espelha o registrar-pagamento.
+   *
+   * O QUÊ: `ehParcial` (acima) diz se o MP cobriu a PARCELA e manda na conta a
+   * receber. Aqui a pergunta é outra: "sobra 'A Receber' depois deste
+   * recebimento?" — o crediário parcelado tem N contas mas UM só
+   * pagamentos_venda 'A Receber' (mig 317).
+   *
+   * O PORQUÊ: até 06/08/2026 o passo 2 usava `ehParcial`. Baixar a parcela 1/4
+   * de R$ 9.000 por "Manual (MP)" confirmava o "A Receber" de R$ 36.000
+   * inteiro — venda 100% paga com 3 parcelas em aberto e comissão (regime de
+   * caixa) sobre a venda toda. Caso real: venda 15678, R$ 279,00 em vez de
+   * R$ 111,60 (dado corrigido em prod 04/08/2026, log 399).
+   *
+   * IMPACTO SE REMOVER: comissão inflada na 1ª baixa e, sem "A Receber"
+   * pendente, as parcelas seguintes deixam de reconciliar o pagamento da venda.
+   */
+  const valorAReceber = pagamentoAReceber ? Number(pagamentoAReceber.valor) : 0;
+  const precisaSplit = !!pagamentoAReceber && valorAReceber > valorMp + 0.005;
+
+  // Restante medido sobre o "A Receber" (crediário inteiro), NUNCA sobre a
+  // parcela — invariante: SUM(pagamentos_venda) = vendas_erp.total_venda.
+  const restantePagamento = precisaSplit
+    ? Math.round((valorAReceber - valorMp) * 100) / 100
+    : 0;
 
   let novoCreditoId: number | null = null;
 
@@ -171,10 +199,13 @@ export async function POST(
       novoCreditoId = nova?.id ?? null;
     }
 
-    // 2. pagamento_venda "A Receber": confirma (total) ou faz split (parcial).
+    // 2. pagamento_venda "A Receber": confirma se foi quitado por inteiro; se
+    //    ainda sobra crediário (parcelado), divide.
     //    A soma dos pagamentos da venda continua = total (trava mig 333 ok).
+    //    ⚠️ A ORDEM IMPORTA: reduzir o confirmado ANTES de inserir o pendente —
+    //    ao contrário, a soma passa do total e o trigger derruba com 500.
     if (pagamentoAReceber) {
-      if (!ehParcial) {
+      if (!precisaSplit) {
         await tx`
           UPDATE alissonerp.pagamentos_venda
           SET status = 'confirmado', data_confirmacao = NOW(),
@@ -190,7 +221,7 @@ export async function POST(
         `;
         await tx`
           INSERT INTO alissonerp.pagamentos_venda (venda_id, forma, valor, parcelas, status)
-          VALUES (${vendaId}, 'A Receber', ${valorRestante}, 1, 'pendente')
+          VALUES (${vendaId}, 'A Receber', ${restantePagamento}, 1, 'pendente')
         `;
       }
     }
