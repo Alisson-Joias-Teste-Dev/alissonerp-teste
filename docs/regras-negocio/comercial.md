@@ -214,25 +214,6 @@ Não tem feature/endpoint (o PATCH de item só edita venda em `rascunho` e nem m
 - **Reeditar/adicionar item acima do limite INVALIDA a aprovação anterior** (o valor mudou, precisa reaprovar). Ao invalidar, as rotas de itens (`POST` e `PATCH /api/vendas/[id]/itens`) zeram **`desconto_aprovado_por`, `desconto_aprovado_em` E `aprovacao_desconto_tarefa_id`**, e cancelam a tarefa vinculada **só se ainda estava pendente** (`aguardando_aprovacao`) — tarefa já aprovada é histórico, não se reescreve.
 - ⚠️ **Por que limpar `aprovacao_desconto_tarefa_id` é obrigatório:** o front só mostra o botão de solicitar quando esse campo é NULL (`precisaSolicitarDesconto`). Se ficar apontando para uma tarefa já `aprovada`, somem TANTO o botão de solicitar QUANTO o banner de "aguardando" → a venda trava em rascunho sem como reaprovar. Bug corrigido em jun/2026 (venda 15628; outras 4 ficaram presas: 15300, 15312, 15399, 15562).
 
-## 6.1 Não se aprova venda com saldo SEM forma de pagamento declarada (06/08/2026)
-
-**A regra.** Ao passar a venda de `rascunho` para `aprovado`, a soma de **todos os pagamentos lançados** (`pagamentos_venda` com `status IN ('confirmado','pendente')`, qualquer forma) tem que fechar o `total_venda`. Se sobrar saldo, a aprovação é **recusada** com a mensagem *"Falta R$ X sem forma de pagamento. Lance o valor que falta (ou declare como 'A Receber') antes de aprovar a venda."* Tolerância de R$ 0,01 (ruído de arredondamento em `numeric`).
-
-**Por que existe.** A venda 15861 (28/07/2026) foi aprovada com R$ 2.000 de Pix num total de R$ 20.524. O saldo de R$ 18.524 não tinha plano nenhum, e o gatilho `fn_venda_gerar_conta_receber` caiu no `ELSE` genérico e **inventou** um crediário: 1 conta a receber vencendo na `data_entrega`. Ninguém decidiu esse prazo — o sistema chutou. A trava exige que o saldo seja **declarado** por uma pessoa.
-
-**Onde está.** Fonte única em `verificarSaldoDeclarado()` (`src/lib/vendas-aprovar.ts`). Usada em dois lugares:
-- `approveVenda()` — a trava de verdade; vale para os **8 caminhos** que aprovam venda (tela, webhook MP, confirmação de pagamento, aprovação de crédito, solicitações de alteração, baixa de crédito, tarefas). Bloqueio grava em `webhook_log` (`approveVenda_bloqueado`, motivo `saldo_nao_declarado`) — não é SKIP silencioso.
-- `POST /api/vendas/[id]/solicitar-aprovacao` — só para a mensagem chegar à consultora com 409. Essa rota é **a porta que a loja de fato usa** e era a que aprovava direto sem olhar saldo (`if (totalAReceber === 0) → approveVenda`). Sem essa checagem a consultora receberia 502 "Erro ao aprovar venda" (o `catch` usa `internalError`, que mascara a mensagem).
-
-**O que a regra NÃO exige (medido em produção, não presumido):**
-- ❌ **Não exige pagamento confirmado.** O fluxo normal aprova com o Pix/cartão do Mercado Pago ainda `pendente` — o webhook confirma segundos depois. Exigir "confirmado" barraria ~429 vendas boas por trimestre. A pergunta é *"foi declarado?"*, não *"já caiu na conta?"*.
-- ❌ **Não exige `credi_tipo` no "A Receber".** 4 em cada 10 `A Receber` da loja são lançados sem prazo (20 só em julho/2026). A trava garante que o saldo **existe declarado**, não que o prazo esteja preenchido.
-- ✅ **Pagamento `estornado`/`cancelado` NÃO conta** como declarado — deixou de existir. Contá-lo deixaria a venda passar com o dinheiro já devolvido.
-
-**O `ELSE` genérico do gatilho CONTINUA existindo** — de propósito. Ele é quem atende o fluxo normal: no instante da aprovação o pagamento ainda não confirmou, a conta a receber nasce pelo total e o webhook a quita segundos depois. Foram ~429 vendas assim (R$ 1,55 mi) entre 05 e 08/2026. Remover o `ELSE` quebraria a loja inteira.
-
-**Backtest (179 aprovações reais, 18/03 a 05/08/2026):** a trava barraria de 11 a 16 (a faixa vem de estornos posteriores, que não dá pra reconstruir) — cerca de **1 venda a cada 12 dias**. Em nenhuma delas a venda estava completa no momento da aprovação. Caso limítrofe conhecido: venda 15895, faltavam R$ 20 (provável frete lançado depois dos pagamentos) — pararia, e é o comportamento escolhido pelo Jonathan (barra qualquer centavo, sem piso).
-
 ## 7. Inventário do estoque comercial (v2.80.0)
 
 - **Inventário é auditoria, NÃO ajusta estoque.** Concluir congela a contagem; `ajustes_gerados` é sempre 0. Divergências são tratadas manualmente item a item depois de investigar. (O helper `gerarAjustesDivergencias` existe em `src/lib/inventario-helpers.ts` mas está desligado de propósito.)
