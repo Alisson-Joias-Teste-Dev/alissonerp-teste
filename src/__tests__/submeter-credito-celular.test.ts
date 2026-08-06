@@ -10,7 +10,15 @@ vi.mock("@/lib/db", () => ({ default: sqlMock }));
 
 const mockGetSaldo = vi.fn();
 vi.mock("@/lib/saldo-credito", () => ({ getSaldoDisponivel: mockGetSaldo }));
-vi.mock("@/lib/vendas-aprovar", () => ({ approveVenda: vi.fn() }));
+// verificarSaldoDeclarado entra junto: a rota solicitar-aprovacao importa as
+// duas (trava de saldo não declarado). Sem o mock, "not a function" na 1ª
+// mudança de ordem dos guards.
+vi.mock("@/lib/vendas-aprovar", () => ({
+  approveVenda: vi.fn(),
+  verificarSaldoDeclarado: vi.fn(async () => ({
+    ok: true, total: 0, declarado: 0, falta: 0, mensagem: "",
+  })),
+}));
 vi.mock("@/lib/aprovacao-regras", () => ({ getDescontoThreshold: vi.fn() }));
 vi.mock("@/lib/notificacoes", () => ({ criarNotificacao: vi.fn() }));
 
