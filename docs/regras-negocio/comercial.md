@@ -214,6 +214,34 @@ Não tem feature/endpoint (o PATCH de item só edita venda em `rascunho` e nem m
 - **Reeditar/adicionar item acima do limite INVALIDA a aprovação anterior** (o valor mudou, precisa reaprovar). Ao invalidar, as rotas de itens (`POST` e `PATCH /api/vendas/[id]/itens`) zeram **`desconto_aprovado_por`, `desconto_aprovado_em` E `aprovacao_desconto_tarefa_id`**, e cancelam a tarefa vinculada **só se ainda estava pendente** (`aguardando_aprovacao`) — tarefa já aprovada é histórico, não se reescreve.
 - ⚠️ **Por que limpar `aprovacao_desconto_tarefa_id` é obrigatório:** o front só mostra o botão de solicitar quando esse campo é NULL (`precisaSolicitarDesconto`). Se ficar apontando para uma tarefa já `aprovada`, somem TANTO o botão de solicitar QUANTO o banner de "aguardando" → a venda trava em rascunho sem como reaprovar. Bug corrigido em jun/2026 (venda 15628; outras 4 ficaram presas: 15300, 15312, 15399, 15562).
 
+## 6.1 Não se aprova venda com saldo SEM forma de pagamento declarada (06/08/2026)
+
+**A regra.** Ao passar de `rascunho` para `aprovado`, a soma de **todos os pagamentos lançados** (`pagamentos_venda` com `status IN ('confirmado','pendente')`, qualquer forma) tem que fechar o `total_venda`. Sobrando saldo, a aprovação é recusada: *"Falta R$ X sem forma de pagamento. Lance o valor que falta (ou declare como 'A Receber') antes de aprovar a venda."* Tolerância de R$ 0,01, **sem piso**.
+
+**Por que existe.** A venda 15861 (28/07/2026) foi aprovada com R$ 2.000 de Pix num total de R$ 20.524. O saldo não tinha plano nenhum, e o gatilho `fn_venda_gerar_conta_receber` caiu no `ELSE` genérico e **inventou** um crediário vencendo na `data_entrega`. Ninguém decidiu esse prazo.
+
+**Onde está.** Fonte única em `verificarSaldoDeclarado()` (`src/lib/vendas-aprovar.ts`), usada por `approveVenda()` (a trava real, vale para os **8 caminhos** que aprovam venda) e por `POST /api/vendas/[id]/solicitar-aprovacao` (só para o 409 com mensagem — o `catch` de lá usa `internalError`, que mascararia tudo em "Erro ao aprovar venda"). Essa rota é **a porta que a loja de fato usa** e era a que aprovava direto sem olhar saldo.
+
+**O que a regra NÃO exige (medido em produção):**
+- ❌ Pagamento **confirmado**. O fluxo normal aprova com o Pix/cartão do MP ainda `pendente` — o webhook confirma segundos depois. Exigir confirmado barraria ~429 vendas boas por trimestre.
+- ❌ `credi_tipo` no "A Receber". 4 em cada 10 são lançados sem prazo (20 só em julho/2026).
+- ✅ `estornado`/`cancelado` **não contam** — deixaram de ser pagamento.
+
+**O `ELSE` do gatilho CONTINUA existindo**, de propósito: é ele que atende o fluxo normal (~429 vendas / R$ 1,55 mi entre 05 e 08/2026), em que a conta nasce na aprovação e o webhook a quita segundos depois. Remover quebraria a loja.
+
+### 🔴 Blindagem — leia antes de mexer nesta trava
+
+A 1ª versão (PR #142, mergeada e revertida em 06/08/2026) **derrubou produção**. O sistema entrou em loop de reinício com `UNDEFINED_VALUE` e erro dentro do handler de socket do driver. **A causa nunca foi provada** — não houve como recuperar o log, e a falha não reproduziu em build de produção local. O que mudou na versão atual:
+
+1. **A trava SÓ LÊ.** A 1ª versão gravava em `webhook_log` copiando o formato do guard de desconto logo acima — e aquele INSERT tem `'texto >${var}%'` com interpolação **dentro de aspas**: o driver manda 2 parâmetros para uma query que só usa 1, o que é recusado no meio do protocolo e pode deixar a conexão do pool inutilizável. Nenhuma escrita no caminho da aprovação.
+2. **Uma query, um parâmetro, validado como inteiro finito antes de encostar no driver** — `undefined`/NaN nunca chegam ao postgres.js (`UNDEFINED_VALUE` aborta a query no meio da escrita).
+3. **Falha aberta.** Qualquer erro inesperado dentro da trava → a venda **aprova** e o erro vai pro log. Conferência que derruba a loja é pior que a falha que ela previne.
+4. **Chave de desligar sem deploy:** `configuracoes_sistema.chave = 'trava_saldo_nao_declarado'` com valor `false`/`0`/`off`. Ausente = ligada.
+
+Regra de ferro daqui pra frente: **testar com build de produção** (`npm run build` + `node .next/standalone/server.js`), não só com `npm run dev`. Os erros da queda eram todos de `.next/server/chunks` — ambiente que o dev não exercita.
+
+**Backtest** (179 aprovações reais, 18/03 a 05/08/2026): barraria de 11 a 16 — cerca de 1 venda a cada 12 dias. Caso limítrofe conhecido: venda 15895, faltavam R$ 20 (provável frete) — para, e é o comportamento escolhido.
+
 ## 7. Inventário do estoque comercial (v2.80.0)
 
 - **Inventário é auditoria, NÃO ajusta estoque.** Concluir congela a contagem; `ajustes_gerados` é sempre 0. Divergências são tratadas manualmente item a item depois de investigar. (O helper `gerarAjustesDivergencias` existe em `src/lib/inventario-helpers.ts` mas está desligado de propósito.)

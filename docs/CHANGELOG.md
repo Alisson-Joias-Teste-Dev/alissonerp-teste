@@ -2,6 +2,41 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(vendas): trava de saldo nao declarado — versao BLINDADA (v2.83.2)
+
+**O que faz:** ao aprovar uma venda, confere se tudo que foi lancado de pagamento fecha o total.
+Sobrando saldo, recusa: *"Falta R$ X sem forma de pagamento. Lance o valor que falta (ou declare
+como 'A Receber') antes de aprovar a venda."*
+
+**Por que:** a venda 15861 (28/07) foi aprovada com R$ 2.000 de Pix num total de R$ 20.524. O
+gatilho `fn_venda_gerar_conta_receber` caiu no ELSE generico e INVENTOU um crediario vencendo na
+data de entrega. O furo era o botao "Solicitar aprovacao"
+(`POST /api/vendas/[id]/solicitar-aprovacao`), que aprovava direto sem olhar saldo.
+
+**🔴 Esta e a 2a tentativa.** A 1a (PR #142) derrubou producao em 06/08/2026 — loop de reinicio com
+`UNDEFINED_VALUE` e erro no handler de socket do driver. A causa **nunca foi provada** (log
+irrecuperavel; nao reproduziu em build de producao local). A versao atual foi reprojetada para nao
+ser capaz de derrubar nada:
+
+1. **So le.** Zero escrita no banco. A 1a versao gravava em `webhook_log` copiando o formato do
+   guard de desconto acima — e aquele INSERT tem interpolacao DENTRO de aspas, mandando 2
+   parametros para uma query que usa 1 (recusado no meio do protocolo; pode inutilizar a conexao
+   do pool).
+2. **Uma query, um parametro, validado como inteiro finito** antes de chegar ao driver.
+3. **Falha aberta.** Qualquer erro inesperado dentro da trava deixa a venda aprovar e registra no
+   log.
+4. **Chave de desligar sem deploy:** `configuracoes_sistema.chave='trava_saldo_nao_declarado'`
+   com valor `false`. Ausente = ligada.
+
+**Testado com BUILD DE PRODUCAO** (`node .next/standalone/server.js`), nao so com `npm run dev` —
+foi essa a lacuna da 1a tentativa. 4 cenarios: bloqueio, desligar pela config, religar, e venda
+inexistente. Servidor de pe em todos.
+
+**Nao mudou:** aprovacao de desconto/cartao/credito; pagamento `pendente` continua valendo como
+declarado; o ELSE do gatilho continua existindo (atende ~429 vendas/trimestre). Sem migration.
+
+Regra e blindagem em `docs/regras-negocio/comercial.md` §6.1.
+
 ## feat(comissao): comissão vira EXTRATO — débito de devolução + crédito de vale (migration 363)
 
 **O quê:** a comissão passou a funcionar como extrato bancário. Cada fato vira uma linha datada
