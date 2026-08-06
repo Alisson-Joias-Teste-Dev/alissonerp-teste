@@ -619,6 +619,32 @@ export async function approveVenda(
     throw new Error(`Venda tem desconto acima de ${approveVendaThreshold}% aguardando aprovação. Solicite aprovação de desconto antes de prosseguir.`);
   }
 
+  // ── Bloquear aprovação se sobra saldo SEM forma de pagamento declarada ────
+  // REGRA DE NEGÓCIO (06/08/2026): não se aprova venda com saldo que ninguém
+  // declarou como vai ser pago. A venda 15861 foi aprovada com R$ 2.000 de Pix
+  // num total de R$ 20.524; o gatilho fn_venda_gerar_conta_receber caiu no ELSE
+  // genérico e INVENTOU um crediário vencendo na data de entrega.
+  //
+  // A conta e as decisões de projeto vivem em verificarSaldoDeclarado() (fim
+  // deste arquivo). Aqui só o bloqueio.
+  //
+  // ⚠️ NÃO gravar em webhook_log aqui. A 1ª versão desta trava (PR #142) fazia
+  // um INSERT copiando o formato do guard de desconto acima — e aquele INSERT
+  // tem `'texto >${var}%'` com interpolação DENTRO de aspas, o que faz o driver
+  // mandar 2 parâmetros para uma query que só usa 1. Isso é recusado no meio do
+  // protocolo e pode deixar a conexão do pool embaralhada. Produção caiu em
+  // 06/08/2026 logo após aquele deploy. A causa nunca foi provada (não houve
+  // log), mas esta versão não escreve NADA no banco — só lê. Se for reintroduzir
+  // registro de auditoria aqui, use uma query com parâmetros de verdade e teste
+  // com build de produção, não com `npm run dev`.
+  const saldo = await verificarSaldoDeclarado(vendaId);
+  if (!saldo.ok) {
+    console.error(
+      `[approveVenda] BLOQUEADO venda=${vendaId}: falta ${saldo.falta} de ${saldo.total} sem forma de pagamento declarada`,
+    );
+    throw new Error(saldo.mensagem);
+  }
+
   // 1. Envia pro Tiny (noop se tiny_pedido_id já existe)
   let tinyErro: string | undefined;
   try {
@@ -877,4 +903,112 @@ export async function estornarVenda(
       cr_canceladas: crResult.length,
     };
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// verificarSaldoDeclarado — a venda pode ser aprovada com este saldo?
+//
+// REGRA DE NEGÓCIO (06/08/2026, decisão do Jonathan): não se aprova venda que
+// tenha saldo SEM forma de pagamento declarada. Se falta dinheiro, alguém tem
+// que dizer COMO ele vai entrar (Pix, cartão, vale, ouro, ou "A Receber") —
+// não o sistema adivinhar. Sem piso: barra qualquer diferença acima de 1 centavo.
+//
+// Conta: soma de TODOS os pagamentos lançados (`confirmado` + `pendente`,
+// qualquer forma) contra `total_venda`.
+//   • Pendente CONTA: o fluxo normal aprova com o Pix/cartão do Mercado Pago
+//     ainda aguardando o webhook, que confirma segundos depois. Exigir
+//     "confirmado" barraria ~429 vendas boas por trimestre.
+//   • `estornado`/`cancelado` NÃO contam: deixaram de ser pagamento.
+//   • `credi_tipo` NÃO é exigido: 4 em cada 10 "A Receber" da loja são lançados
+//     sem prazo. A trava garante que o saldo EXISTE declarado, não o prazo.
+//
+// ── BLINDAGEM (por que este código é chato de propósito) ──────────────────
+// Esta função é uma CONFERÊNCIA. Conferência não pode derrubar a loja.
+//   1) SÓ LÊ. Nenhum INSERT/UPDATE. Uma escrita a mais no caminho da aprovação
+//      é superfície de risco sem contrapartida.
+//   2) UMA query, UM parâmetro, e o parâmetro é validado como inteiro finito
+//      ANTES de encostar no driver — `undefined`/NaN nunca chegam ao postgres.js
+//      (é o erro `UNDEFINED_VALUE`, que aborta a query no meio da escrita e pode
+//      deixar a conexão do pool inutilizável para as requisições seguintes).
+//   3) FALHA ABERTA. Qualquer erro inesperado → devolve ok:true e deixa a venda
+//      aprovar, registrando no log. Uma trava de conferência que derruba o
+//      sistema é pior que a falha que ela previne.
+//   4) CHAVE DE DESLIGAR sem deploy: `configuracoes_sistema.chave =
+//      'trava_saldo_nao_declarado'` com valor 'false'/'0'/'off' desliga na hora.
+//      Ausente = ligada (é o padrão).
+//
+// IMPACTO SE ALTERADO: mexer na conta aqui muda a trava nos dois lugares que a
+// usam (approveVenda e a rota solicitar-aprovacao). Não copiar a query pra outro
+// arquivo. E não remover o try/catch — ele é o que garante o item 3.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface SaldoDeclarado {
+  ok: boolean;
+  total: number;
+  declarado: number;
+  falta: number;
+  mensagem: string;
+}
+
+/** Resposta de "pode passar" — usada também quando a trava falha ou está desligada. */
+function saldoLiberado(total = 0, declarado = 0): SaldoDeclarado {
+  return { ok: true, total, declarado, falta: 0, mensagem: "" };
+}
+
+export async function verificarSaldoDeclarado(vendaId: number): Promise<SaldoDeclarado> {
+  // (2) O parâmetro nunca sai daqui sem ser um inteiro de verdade.
+  const id = Number(vendaId);
+  if (!Number.isInteger(id) || id <= 0) {
+    console.error(`[verificarSaldoDeclarado] vendaId invalido (${String(vendaId)}) — liberando`);
+    return saldoLiberado();
+  }
+
+  try {
+    const [row] = await sql`
+      SELECT
+        v.total_venda::numeric AS total_venda,
+        COALESCE((
+          SELECT SUM(p.valor) FROM alissonerp.pagamentos_venda p
+          WHERE p.venda_id = v.id AND p.status IN ('confirmado', 'pendente')
+        ), 0)::numeric AS total_declarado,
+        COALESCE((
+          SELECT cs.valor FROM alissonerp.configuracoes_sistema cs
+          WHERE cs.chave = 'trava_saldo_nao_declarado'
+        ), 'true') AS trava_ligada
+      FROM alissonerp.vendas_erp v
+      WHERE v.id = ${id}
+    `;
+
+    if (!row) return saldoLiberado();
+
+    // (4) Chave de desligar — vale na hora, sem deploy.
+    const ligada = !["false", "0", "off", "nao", "não"].includes(
+      String(row.trava_ligada ?? "true").trim().toLowerCase(),
+    );
+    if (!ligada) {
+      console.error(`[verificarSaldoDeclarado] venda=${id}: trava DESLIGADA por configuracoes_sistema`);
+      return saldoLiberado(Number(row.total_venda ?? 0), Number(row.total_declarado ?? 0));
+    }
+
+    const total = Number(row.total_venda ?? 0);
+    const declarado = Number(row.total_declarado ?? 0);
+    if (!Number.isFinite(total) || !Number.isFinite(declarado)) return saldoLiberado();
+
+    const falta = Number((total - declarado).toFixed(2));
+    // Tolerância de R$ 0,01 — mesma dos demais guards de pagamento do sistema.
+    if (falta <= 0.01) return saldoLiberado(total, declarado);
+
+    const faltaFmt = falta.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    return {
+      ok: false,
+      total,
+      declarado,
+      falta,
+      mensagem: `Falta ${faltaFmt} sem forma de pagamento. Lance o valor que falta (ou declare como "A Receber") antes de aprovar a venda.`,
+    };
+  } catch (err) {
+    // (3) FALHA ABERTA — de propósito. Ver blindagem no cabeçalho.
+    console.error(`[verificarSaldoDeclarado] ERRO na venda=${id}, liberando a aprovacao:`, err);
+    return saldoLiberado();
+  }
 }
