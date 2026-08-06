@@ -2,6 +2,53 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(crediario): webhook do MP fecha a parcela paga pelo QR (v2.83.5)
+
+**O que faz:** quando o cliente paga a parcela do crediario pelo QR Pix / maquininha gerados na
+tela do Crediario, o webhook do Mercado Pago passa a FECHAR a parcela — antes ele so confirmava o
+pagamento e deixava a parcela aberta.
+
+**Por que:** `src/lib/crediario-baixa-automatica.ts` (`fecharContaReceberAposPagamentoMp`) existia
+desde o redesenho do crediario e **NUNCA foi chamada por rota nenhuma** — codigo morto. Os
+comentarios de `cobrar-pix/route.ts`, `cobrar-cartao/route.ts` e do `CrediarioClient.tsx` afirmam
+que "o webhook fecha a conta"; a fiacao nunca existiu.
+
+Em producao: o cliente pagava, o dinheiro entrava, o pagamento era confirmado e **a parcela ficava
+pendente para sempre** — o cron seguia cobrando quem ja tinha pago.
+
+- **15769** — R$ 100,00 pagos em 18/07 (MP aprovado). Cobranca "vence em breve" enviada em 03/08.
+- **15312** — R$ 347,20 pagos em 03/08 (MP aprovado, liquido 345,12). Cobranca **de atraso**
+  enviada em 04/08.
+
+As duas contas foram fechadas na mao em 06/08/2026 (log 402, assinado). Este commit corrige o
+CODIGO.
+
+**A correcao (3 pontos):**
+1. `webhooks/mercado-pago/route.ts`: chama a lib nos **dois** caminhos que confirmam pagamento
+   (`merchant_order` e `payment`), dentro da MESMA transacao.
+2. A lib passa a fechar a **parcela que a cobranca mirava**
+   (`gateway_payload.conta_receber_id`, gravado pelo cobrar-pix/cobrar-cartao); sem essa
+   referencia, segue fechando a mais antiga em aberto. Importa em crediario parcelado — o cliente
+   pode pagar o QR da parcela 2 antes da 1.
+3. A lib passa a **dividir o "A Receber"** quando o crediario e parcelado: o QR cobra UMA parcela,
+   mas o webhook confirmava o pagamento INTEIRO — era o mesmo bug de comissao corrigido nas baixas
+   manuais na v2.83.3, so que pelo caminho do gateway. Reduz o confirmado ANTES de inserir o
+   pendente (senao o trigger da mig 333 derruba a transacao do webhook).
+
+**Atomico de proposito:** erro no fechamento derruba a transacao inteira e o MP reenvia o webhook.
+Melhor reprocessar do que confirmar o dinheiro e deixar a parcela aberta — foi esse "meio caminho"
+que gerou o passivo. Excecao: sem `mp_system_user_id` configurado, a parcela nao fecha (a
+auditoria nao teria autor), o pagamento vale e o log grita pedindo baixa manual.
+
+**Custo zero no caminho comum:** venda a vista sai da funcao antes de qualquer consulta (so age
+quando a forma confirmada e 'A Receber').
+
+**Sem migration.** 8 testes novos da lib (parcela certa · split do parcelado · ordem
+reduzir-antes-de-inserir · 1 parcela sem split · no-op · saldo do gerente). Suite com as mesmas
+118 falhas PRE-EXISTENTES do main.
+
+Regra: `docs/regras-negocio/crediario.md` §6.
+
 ## fix(crediario): baixar 1 parcela nao confirma o crediario inteiro (v2.83.3)
 
 **O que faz:** ao dar baixa numa parcela de um crediario PARCELADO, o sistema passa a confirmar

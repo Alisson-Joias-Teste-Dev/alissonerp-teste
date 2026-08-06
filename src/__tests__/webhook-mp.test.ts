@@ -431,7 +431,9 @@ describe("POST /api/webhooks/mercado-pago", () => {
               capturedUpdate = vals;
             }
             // SELECT pagTx
-            if (joined.includes("SELECT id, status, gateway_payload")) {
+            // (a rota passou a ler tambem a `forma`, pro fechamento da parcela
+            // do crediario — casar por prefixo evita quebrar de novo por coluna nova)
+            if (joined.includes("SELECT id, status") && joined.includes("gateway_payload")) {
               return Promise.resolve([{
                 id: PAGAMENTO_ID,
                 status: "pendente",
