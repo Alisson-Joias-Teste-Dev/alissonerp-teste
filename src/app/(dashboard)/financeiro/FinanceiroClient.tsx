@@ -203,6 +203,7 @@ interface GrupoVenda {
   descricao: string;
   pedido: string | null;
   venda_id: number | null;
+  data_venda: string | null;
   valor_pago: number | null;
   base_comissao: number | null;
   valor: number;
@@ -237,6 +238,7 @@ const agruparPorVenda = (linhas: any[]): GrupoVenda[] => {
       chave: `v${l.venda_id}`,
       data: l.data, data_fim: l.data,
       descricao: l.descricao, pedido: l.pedido, venda_id: l.venda_id,
+      data_venda: l.data_venda ?? null,
       valor_pago: l.valor_pago, base_comissao: l.base_comissao,
       valor: Number(l.valor), previsto: !!l.previsto,
       pagamentos: [l], itens: Array.isArray(l.itens) ? l.itens : [],
@@ -3770,6 +3772,19 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
                                         onClick={e => e.stopPropagation()}
                                         className="hover:underline" style={{ color: C.esmeralda }}>{l.descricao}</a>
                                     ) : l.descricao}
+                                    {/* Data da VENDA. A comissão segue o dinheiro, então
+                                        venda de maio paga em julho cai em julho — e a linha
+                                        não dizia isso. Âmbar quando o mês da venda difere da
+                                        competência: em julho/2026 a Germana tinha 11 pedidos
+                                        de outros meses, um deles de MARÇO DE 2025. */}
+                                    {sec.colunas && l.data_venda && (() => {
+                                      const outroMes = l.data_venda.slice(0, 7) !== competencia;
+                                      return (
+                                        <span style={{ color: outroMes ? C.ambar : C.cinza }}>
+                                          {" · venda "}{fmtDate(l.data_venda)}
+                                        </span>
+                                      );
+                                    })()}
                                     {l.previsto && (
                                       <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium"
                                         style={{ backgroundColor: C.ambarLt, color: C.ambar }}>a lançar</span>
