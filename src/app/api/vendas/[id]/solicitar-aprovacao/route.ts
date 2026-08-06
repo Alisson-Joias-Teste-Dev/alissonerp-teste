@@ -16,7 +16,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { submeterVendaParaAprovacaoCredito } from "@/lib/vendas-credito-aprovar";
 import { HttpError } from "@/lib/devolucoes";
-import { approveVenda } from "@/lib/vendas-aprovar";
+import { approveVenda, verificarSaldoDeclarado } from "@/lib/vendas-aprovar";
 import { avaliarRegras, criarTarefaAprovacao, getDescontoThreshold, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
@@ -327,6 +327,25 @@ export async function POST(
       }
       return internalError("[POST /api/vendas/[id]/solicitar-aprovacao]", err);
     }
+  }
+
+  // ── Saldo sem forma de pagamento declarada bloqueia a aprovação ───────────
+  // REGRA DE NEGÓCIO (06/08/2026): esta é a porta que a loja de fato usa para
+  // aprovar venda — o botão "Solicitar aprovação". Até aqui ela aprovava direto
+  // sem olhar saldo nenhum, e foi por ela que passou a venda 15861 (R$ 2.000 de
+  // Pix num total de R$ 20.524, R$ 18.524 sem plano nenhum).
+  //
+  // A trava DE VERDADE está no approveVenda (vale para os 8 caminhos). Esta
+  // checagem existe só para a mensagem chegar à consultora: o catch abaixo usa
+  // internalError, que mascara qualquer erro em "Erro ao aprovar venda" — a
+  // consultora não saberia o que fazer. Mesma conta, uma fonte só
+  // (verificarSaldoDeclarado), sem duplicar a regra.
+  //
+  // IMPACTO SE REMOVIDO: a trava continua funcionando, mas a consultora recebe
+  // 502 "Erro ao aprovar venda" e abre chamado em vez de lançar o que falta.
+  const saldoDeclarado = await verificarSaldoDeclarado(vendaId);
+  if (!saldoDeclarado.ok) {
+    return NextResponse.json({ error: saldoDeclarado.mensagem }, { status: 409 });
   }
 
   // Sem "A Receber" — aprovar direto (qualquer role, incluindo consultora).
