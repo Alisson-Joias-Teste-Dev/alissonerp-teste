@@ -49,6 +49,37 @@ reduzir-antes-de-inserir · 1 parcela sem split · no-op · saldo do gerente). S
 
 Regra: `docs/regras-negocio/crediario.md` §6.
 
+## fix(crediario): consultora da baixa na venda DELA — matriz de permissao fechada (v2.83.4)
+
+**O que faz:** a consultora passa a poder registrar o recebimento do crediario, mas **so nas
+vendas dela**. Quem garante isso e a trava de dono (ownership), nao a lista de cargos.
+
+**Por que:** a matriz estava incoerente e o buraco era o pior caminho possivel. A tela do
+crediario mostrava o painel de baixa pra consultora (`podeBaixar` ja incluia ela), mas:
+- `registrar-pagamento` (Dinheiro, Pix, Ouro, Vale-Troca...) **nao aceitava** consultora -> 403;
+- `verificar-mp` ("Manual (MP)") **aceitava** -> ela conseguia baixar por ali;
+- `receber-cascata` nao aceitava e **nao tinha trava de dono** — por isso o botao
+  "+ Receber pagamento" ficava escondido dela de proposito.
+
+Resultado pratico: o unico caminho aberto pra consultora era o "Manual (MP)".
+
+**A correcao:**
+1. `registrar-pagamento`: + `consultora` na lista + `requireCrediarioOwnership` (mesma trava que
+   o `verificar-mp` ja usava).
+2. `receber-cascata`: + `consultora` + `requireVendaOwnership` (aqui a chave e a VENDA, porque a
+   cascata quita varias parcelas de uma vez).
+3. Front (`CrediarioClient.tsx`): `podeCascata` volta a seguir o `podeBaixar` — com a trava na
+   rota, o botao "+ Receber pagamento" pode aparecer pra ela.
+
+**NAO mudou:** `cobrar-pix`/`cobrar-cartao` seguem liberados pra qualquer usuario valido (gerar
+cobranca nao move dinheiro — quem confirma e o gateway). `verificar-pagbank` fica como esta: a
+integracao com o PagBank ainda nao existe.
+
+**Sem migration.** 3 testes novos (consultora na venda dela = 200; na venda de colega = 403;
+conta inexistente = 404). Suite com as mesmas 118 falhas PRE-EXISTENTES do main.
+
+Regra e matriz completa: `docs/regras-negocio/crediario.md` §6.
+
 ## fix(crediario): baixar 1 parcela nao confirma o crediario inteiro (v2.83.3)
 
 **O que faz:** ao dar baixa numa parcela de um crediario PARCELADO, o sistema passa a confirmar

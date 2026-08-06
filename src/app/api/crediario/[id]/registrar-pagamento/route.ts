@@ -33,11 +33,21 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { creditarSaldo } from "@/lib/saldo-credito";
 import { logAudit } from "@/lib/audit";
 import { zodError } from "@/lib/schemas/common";
+import { requireCrediarioOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { ForbiddenError } from "@/lib/auth-server";
 
 // Quem pode dar baixa manual (emergência ou formas não-MP).
 // ATENÇÃO: Esta rota NÃO verifica Mercado Pago — é confiança pura.
 // Use verificar-mp para baixas com ID do Mercado Pago.
-const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
+//
+// REGRA DE NEGÓCIO (Jonathan, 06/08/2026): a CONSULTORA pode dar baixa, mas
+// SÓ na venda DELA — quem garante isso é o requireCrediarioOwnership abaixo,
+// nunca a lista de papéis. Antes dessa data a lista não tinha 'consultora' e
+// a tela mostrava o painel de baixa pra ela assim mesmo: ela escolhia
+// Dinheiro/Pix e tomava 403, mas conseguia baixar por "Manual (MP)"
+// (verificar-mp já aceitava consultora). Ou seja, o caminho aberto era
+// justamente o que exige menos prova de ninguém.
+const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor", "consultora"];
 
 // REGRA DE NEGÓCIO (06/07/2026): formas que NÃO são dinheiro novo — nunca
 // geram comissão. Ver comercial.md §2 e migration 341. Antes disso,
@@ -75,6 +85,21 @@ export async function POST(
   `;
   if (!usuario || !PODE_BAIXAR.includes(usuario.role as string)) {
     return NextResponse.json({ error: "Sem permissão para registrar baixa" }, { status: 403 });
+  }
+
+  // Trava de dono: papéis full (gerente/admin/dev/diretor) passam direto; a
+  // consultora só segue se a conta for de uma venda DELA. Fecha o vetor de
+  // baixar venda de colega — recebimento fantasma e comissão no nome errado.
+  // Mesma trava que o verificar-mp já usa. NÃO REMOVER.
+  try {
+    await requireCrediarioOwnership(
+      { id: user.id, role: usuario.role as string, email: user.email ?? "" },
+      contaId,
+    );
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
   }
 
   const [conta] = await sql`
