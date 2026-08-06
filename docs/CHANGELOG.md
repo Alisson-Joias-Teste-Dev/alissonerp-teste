@@ -2,6 +2,58 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(crediario): baixar 1 parcela nao confirma o crediario inteiro (v2.83.3)
+
+**O que faz:** ao dar baixa numa parcela de um crediario PARCELADO, o sistema passa a confirmar
+só o valor que entrou e deixa o restante pendente, em vez de carimbar o crediario inteiro como
+recebido.
+
+**Por que:** um crediario de N parcelas gera N linhas em `contas_receber` mas UMA só linha
+`'A Receber'` em `pagamentos_venda` (mig 317). A baixa perguntava *"o cliente pagou a parcela
+inteira?"* e, como pagou, confirmava o `'A Receber'` INTEIRO. A venda ficava 100% paga com
+parcelas em aberto e a **comissao (regime de caixa) saía sobre a venda toda**.
+
+Caso real — **venda 15678** (Germana, 30/06/2026): R$ 45.000, Pix R$ 9.000 + A Receber
+R$ 36.000 em 4x. Baixaram a parcela 1/4 (R$ 9.000) em 29/07 e o sistema lançou **R$ 279,00** de
+comissao em vez de **R$ 111,60** — R$ 167,40 a mais. O dado foi corrigido em producao em
+04/08/2026 (log 399); este commit corrige o CODIGO.
+
+**A correcao:** a pergunta virou *"sobra 'A Receber' depois deste recebimento?"* (`precisaSplit`).
+Sobrando, o pagamento e dividido — reduz o confirmado para o valor recebido e abre um
+`'A Receber'` pendente com o resto. E o mesmo desenho que a rota da cascata
+(`receber-cascata`) ja usava certo.
+
+**Dois efeitos colaterais do mesmo defeito, corrigidos junto:**
+1. A **2a parcela quebrava com 500 PAGAMENTO_EXCEDE_TOTAL** — sem `'A Receber'` pendente, a rota
+   caía no fallback e criava uma linha nova por cima do total da venda.
+2. Um **pagamento parcial DE UMA PARCELA** sumia com o resto do crediario: o pendente nascia com
+   o resto da parcela (R$ 4.000) em vez do resto do crediario (R$ 31.000).
+
+⚠️ **A ordem importa:** reduzir o pagamento confirmado ANTES de inserir o pendente. Ao contrario,
+a soma passa do `total_venda` e o trigger `fn_pagamento_nao_exceder_total` (mig 333) derruba a
+baixa.
+
+**Arquivos:** `src/app/api/crediario/[id]/registrar-pagamento/route.ts` e
+`src/app/api/crediario/[id]/verificar-mp/route.ts`. **Sem migration.** Cascata, drawer, as 9
+formas de recebimento, `cobrar-pix` e `cobrar-cartao` **nao foram tocados**.
+
+**Escala:** 608 vendas com crediario nos ultimos 4 meses — 584 de 1 parcela (comportamento
+IDENTICO ao de antes) e 24 parceladas. Em producao, 3 vendas estavam na mira (15860, 15763,
+15853).
+
+**Testado:** venda 15678 no banco local, pelo navegador — parcela 1/4 baixada em Dinheiro
+dividiu o A Receber em 9.000 confirmado + 27.000 pendente, comissao de R$ 55,80 (nao 223,20);
+parcela 2/4 em seguida devolveu 200 OK (sem PAGAMENTO_EXCEDE_TOTAL); `SUM(pagamentos_venda)` =
+`total_venda` = R$ 45.000 nos dois passos; venda 15777 (1 parcela) sem nenhuma mudanca de
+comportamento. 9 testes novos (5 em `crediario-registrar-pagamento.test.ts`, 4 no arquivo novo
+`crediario-verificar-mp-parcelado.test.ts`, este com o Mercado Pago mockado porque a API do MP
+nao existe no ambiente local). Suite: 118 falhas PRE-EXISTENTES, iguais a baseline do main.
+
+**Pendencia sinalizada, NAO feita:** `verificar-pagbank/route.ts` tem o MESMO defeito (confirma
+o `'A Receber'` sem olhar o valor). Fora do escopo autorizado — tarefa separada.
+
+Regra: `docs/regras-negocio/comercial.md` §2 e `docs/regras-negocio/crediario.md` §6.
+
 ## fix(vendas): trava de saldo nao declarado — versao BLINDADA (v2.83.2)
 
 **O que faz:** ao aprovar uma venda, confere se tudo que foi lancado de pagamento fecha o total.
