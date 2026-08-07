@@ -4,7 +4,7 @@
 > Fonte de schema (colunas/tabelas) = `docs/schema/` (auto-gerado). Aqui é o **porquê** e o **como** do negócio.
 > ⚠️ O PR #141 (`fix/protocolo-ida-lista-fabrica`, ainda não mergeado) também cria este arquivo com a documentação da lista de Ida. Na hora do merge, **mesclar os dois** — nenhum dos dois conteúdos substitui o outro.
 
-Última atualização: 2026-08-07 (PROTOCOLO DE TRANSFERÊNCIA DE ESTOQUE — tipo novo `transferencia`: movimenta produto do estoque comercial entre dois locais quaisquer (`locais_estoque`), com solicitação, reserva, transporte opcional por motoboy e recebimento no destino. Reusa `protocolos` + `protocolo_produtos` + `transferencias_estoque_comercial`; nenhuma tabela nova, nenhuma tela nova. Migration 368. Ver §5).
+Última atualização: 2026-08-07 (PROTOCOLO DE TRANSFERÊNCIA DE ESTOQUE — tipo novo `transferencia`: movimenta produto do estoque comercial entre dois locais quaisquer (`locais_estoque`), com solicitação, reserva, transporte opcional por motoboy e recebimento no destino. Reusa `protocolos` + `protocolo_produtos` + `transferencias_estoque_comercial`; nenhuma tabela nova, nenhuma tela nova. Migration 369 — os números 367 e 368 já estavam tomados pelas branches `fix/protocolo-ida-oculta-na-fabrica` e `fix/pedra-peso-totais-ordem`, ainda não mergeadas. Ver §5).
 
 ---
 
@@ -118,7 +118,7 @@ O formulário lista `locais_estoque` ativos, **menos** o grupo `Em Transito` (id
 | `ConcluirProtocoloModal` | bloco de produtos, ao lado do bloco de ordens e do de sangria — o modal já trata protocolo sem ordens |
 | `ProtocoloMotoboy` | card de confirmar coleta, mesmo botão e mesma foto dos outros tipos |
 
-### 5.8 Migration 368
+### 5.8 Migration 369
 
 | Mudança | Para quê |
 |---|---|
@@ -128,3 +128,5 @@ O formulário lista `locais_estoque` ativos, **menos** o grupo `Em Transito` (id
 | `reservas_estoque_comercial.protocolo_id` (FK, nulo) | saber qual reserva soltar na coleta ou no cancelamento |
 | `protocolos.motivo_cancelamento` (texto) | motivo obrigatório ao cancelar |
 | `ALTER TYPE enum_etapas_protocolo ADD VALUE 'cancelado'` | aditivo — nenhum código existente compara com ele |
+
+⚠️ **O homolog estava com a migration 360 faltando** (o fix da dupla reversão no cancelamento de transferência, em produção desde julho). Enquanto faltou, cancelar transferência **inflava** o saldo da origem em +quantidade lá — qualquer teste de cancelamento feito no homolog dava resultado errado, deste módulo ou de outro. A 360 foi aplicada no homolog em 07/08/2026 e o teste do ciclo foi refeito depois disso.
