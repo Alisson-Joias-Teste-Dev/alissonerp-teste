@@ -28,19 +28,22 @@ export async function GET(_req: NextRequest) {
 
   const depositoId = caller.deposito_id as number;
 
+  // categoria_id vai junto porque a tela precisa saber se é PEDRA (categoria 2):
+  // pedra é pesada em grama na balança mas o saldo aqui vem em quilate.
   const insumos = await sql`
     SELECT
       vs.insumo_id,
       i.nome        AS insumo_nome,
       i.sku,
       i.unidade,
+      i.categoria_id,
       SUM(vs.saldo) AS saldo
     FROM alissonerp.vw_saldo_estoque vs
     JOIN alissonerp.insumos i ON i.id = vs.insumo_id
     WHERE vs.deposito_id = ${depositoId}
       AND vs.insumo_id   != 1
       AND vs.saldo        > 0.0001
-    GROUP BY vs.insumo_id, i.nome, i.sku, i.unidade
+    GROUP BY vs.insumo_id, i.nome, i.sku, i.unidade, i.categoria_id
     HAVING SUM(vs.saldo) > 0.0001
     ORDER BY i.nome
   `;
@@ -48,11 +51,12 @@ export async function GET(_req: NextRequest) {
   return NextResponse.json({
     deposito_id: depositoId,
     insumos: insumos.map(r => ({
-      insumo_id:   r.insumo_id,
-      insumo_nome: r.insumo_nome,
-      sku:         r.sku ?? null,
-      unidade:     r.unidade ?? "g",
-      saldo:       parseFloat(parseFloat(String(r.saldo)).toFixed(4)),
+      insumo_id:    r.insumo_id,
+      insumo_nome:  r.insumo_nome,
+      sku:          r.sku ?? null,
+      unidade:      r.unidade ?? "g",
+      categoria_id: r.categoria_id ?? null,
+      saldo:        parseFloat(parseFloat(String(r.saldo)).toFixed(4)),
     })),
   });
 }
