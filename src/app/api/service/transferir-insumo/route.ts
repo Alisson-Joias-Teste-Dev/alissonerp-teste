@@ -70,6 +70,24 @@ export async function POST(req: NextRequest) {
     const [insumo] = await sql`SELECT id, nome, categoria_id FROM alissonerp.insumos WHERE id = ${insumoId}`;
     if (!insumo) return NextResponse.json({ error: "Insumo não encontrado" }, { status: 404 });
 
+    /**
+     * O QUE FAZ: converte a quantidade digitada para a unidade do estoque.
+     *
+     * O PORQUÊ: pedra é pesada na balança em GRAMA, mas o estoque de pedra é
+     * controlado em QUILATE (1 ct = 0,2 g) — é assim que ela entra por compra e
+     * sai por apontamento. Metal e demais insumos já são gramas nas duas pontas.
+     *
+     * IMPACTO se remover: a grama entra no razão como se fosse quilate. Foi
+     * exatamente isso que aconteceu com a Mossanite PD-1352 (movimentação 3400,
+     * 07/08/2026): 2 pedras de 1,2 g entraram como 2,4 num estoque em ct, onde
+     * deviam ser 12 — e o apontamento seguinte foi barrado por saldo.
+     */
+    const isPedra = (insumo.categoria_id as number) === 2;
+    const quantidadeEstoque = isPedra
+      ? parseFloat((quantidade / 0.2).toFixed(4))
+      : quantidade;
+    const unidade = isPedra ? "ct" : "g";
+
     // ── 3. Verificar saldo da origem ──────────────────────────────────────────
     const saldoRows = await sql`
       SELECT COALESCE(SUM(saldo), 0) AS saldo
@@ -77,9 +95,9 @@ export async function POST(req: NextRequest) {
       WHERE deposito_id = ${origemId} AND insumo_id = ${insumoId}
     `;
     const saldoAtual = parseFloat(String(saldoRows[0]?.saldo ?? 0));
-    if (saldoAtual < quantidade) {
+    if (saldoAtual < quantidadeEstoque) {
       return NextResponse.json(
-        { error: `Saldo insuficiente. Disponível: ${saldoAtual.toFixed(4)}, solicitado: ${quantidade.toFixed(4)}` },
+        { error: `Saldo insuficiente. Disponível: ${saldoAtual.toFixed(4)}${unidade}, solicitado: ${quantidadeEstoque.toFixed(4)}${unidade}` },
         { status: 422 }
       );
     }
@@ -118,15 +136,17 @@ export async function POST(req: NextRequest) {
 
     // ── 7. Dupla-entrada em transação ─────────────────────────────────────────
     await (sql as unknown as { begin: (fn: (tx: typeof sql) => Promise<void>) => Promise<void> }).begin(async (tx) => {
+      // As duas pernas usam quantidadeEstoque (ct para pedra, g para o resto) —
+      // nunca a quantidade digitada crua, senão a unidade do razão fica mista.
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
           (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, obs, data_hora)
-        VALUES (${insumoId}, ${origemId}, ${localOrigem}, 0, ${quantidade}, 'SA', ${obs}, NOW())
+        VALUES (${insumoId}, ${origemId}, ${localOrigem}, 0, ${quantidadeEstoque}, 'SA', ${obs}, NOW())
       `;
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
           (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, obs, data_hora)
-        VALUES (${insumoId}, ${destId}, ${localDest}, ${quantidade}, 0, 'EA', ${obs}, NOW())
+        VALUES (${insumoId}, ${destId}, ${localDest}, ${quantidadeEstoque}, 0, 'EA', ${obs}, NOW())
       `;
     });
 
