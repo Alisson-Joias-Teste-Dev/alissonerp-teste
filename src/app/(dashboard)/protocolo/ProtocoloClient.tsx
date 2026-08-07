@@ -130,6 +130,8 @@ interface Props {
   aprovacoes: AprovacaoRow[];
   entregas: EntregaRow[];
   tiposProtocoloPermitidos?: string[];
+  /** Quem esta marcado como transportador pode confirmar a coleta de uma transferencia. */
+  podeColetar?: boolean;
 }
 
 const TIPO_LABEL: Record<string, string> = {
@@ -214,7 +216,7 @@ function destinoLabel(destino: string | null | undefined) {
   return destino ?? "—";
 }
 
-export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos = [] }: Props) {
+export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos = [], podeColetar = false }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("ida");
 
@@ -228,6 +230,7 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
   const [subSelecao, setSubSelecao] = useState<{ direcao: "ida" | "volta"; tipo: string } | null>(null);
 
   const [concluirProt, setConcluirProt] = useState<ProtocoloRow | null>(null);
+  const [acaoProt, setAcaoProt] = useState<"chegada" | "coleta">("chegada");
   const [isPending, startTransition] = useTransition();
   const [concluidos, setConcluidos] = useState<ProtocoloConcluido[] | null>(null);
   const [fotoModal, setFotoModal] = useState<{ url: string; titulo: string } | null>(null);
@@ -462,7 +465,9 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
         <ProtocoloTable
           rows={ida}
           direcao="ida"
-          onConcluir={(row) => setConcluirProt(row)}
+          onConcluir={(row) => { setAcaoProt("chegada"); setConcluirProt(row); }}
+          onColetar={(row) => { setAcaoProt("coleta"); setConcluirProt(row); }}
+          podeColetar={podeColetar}
           onAbrirFoto={abrirFotoModal}
           filtro={filtroIda}
           onFiltroChange={setFiltroIda}
@@ -474,7 +479,9 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
         <ProtocoloTable
           rows={volta}
           direcao="volta"
-          onConcluir={(row) => setConcluirProt(row)}
+          onConcluir={(row) => { setAcaoProt("chegada"); setConcluirProt(row); }}
+          onColetar={(row) => { setAcaoProt("coleta"); setConcluirProt(row); }}
+          podeColetar={podeColetar}
           onAbrirFoto={abrirFotoModal}
           filtro={filtroVolta}
           onFiltroChange={setFiltroVolta}
@@ -631,12 +638,13 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
       {concluirProt && (
         <ConcluirProtocoloModal
           isOpen={true}
-          onClose={() => setConcluirProt(null)}
+          onClose={() => { setConcluirProt(null); setAcaoProt("chegada"); }}
           protocoloId={concluirProt.id}
           direcao={tab === "ida" ? "ida" : "volta"}
           totalOrdens={concluirProt.total_ordens}
           tipoProtocolo={concluirProt.tipo_protocolo}
-          onSuccess={() => { setConcluirProt(null); refresh(); }}
+          acao={acaoProt}
+          onSuccess={() => { setConcluirProt(null); setAcaoProt("chegada"); refresh(); }}
         />
       )}
 
@@ -760,6 +768,8 @@ function ProtocoloTable({
   rows,
   direcao,
   onConcluir,
+  onColetar,
+  podeColetar,
   onAbrirFoto,
   filtro,
   onFiltroChange,
@@ -767,6 +777,8 @@ function ProtocoloTable({
   rows: ProtocoloRow[];
   direcao: "ida" | "volta";
   onConcluir: (row: ProtocoloRow) => void;
+  onColetar: (row: ProtocoloRow) => void;
+  podeColetar: boolean;
   onAbrirFoto: (url: string | null | undefined, titulo: string) => void;
   filtro: Filtro;
   onFiltroChange: (f: Filtro) => void;
@@ -873,13 +885,21 @@ function ProtocoloTable({
                   </div>
                 ),
               }] : []),
-              { label: "Ação", valor: r.etapas === "pendente" ? (
+              { label: "Ação", valor: r.tipo_protocolo === "transferencia" && r.estado_transferencia === "solicitado" && podeColetar ? (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onColetar(r); }}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold"
+                  style={{ backgroundColor: "#EEF2FF", color: "#4338CA" }}
+                >
+                  <Package size={11} /> Coletar
+                </button>
+              ) : r.etapas === "pendente" ? (
                 <button
                   onClick={(e) => { e.stopPropagation(); onConcluir(r); }}
                   className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold"
                   style={{ backgroundColor: "#18403612", color: C.esmeralda }}
                 >
-                  <CheckCircle2 size={11} /> Concluir
+                  <CheckCircle2 size={11} /> {r.tipo_protocolo === "transferencia" ? "Chegou" : "Concluir"}
                 </button>
               ) : "—" },
             ]}
@@ -949,13 +969,28 @@ function ProtocoloTable({
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  {r.etapas === "pendente" && (
+                  {/*
+                    REGRA DE NEGÓCIO: numa transferência, enquanto ninguém pegou
+                    as peças o botão é "Coletar" (e só aparece para quem está
+                    marcado como transportador — o motoboy faz isso pelo celular).
+                    Depois que saiu, o botão vira o de sempre: confirmar a chegada.
+                  */}
+                  {r.tipo_protocolo === "transferencia" && r.estado_transferencia === "solicitado" && podeColetar && (
+                    <button
+                      onClick={() => onColetar(r)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold ml-auto"
+                      style={{ backgroundColor: "#EEF2FF", color: "#4338CA" }}
+                    >
+                      <Package size={12} /> Coletar
+                    </button>
+                  )}
+                  {r.etapas === "pendente" && !(r.tipo_protocolo === "transferencia" && r.estado_transferencia === "solicitado" && podeColetar) && (
                     <button
                       onClick={() => onConcluir(r)}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold ml-auto"
                       style={{ backgroundColor: "#18403612", color: C.esmeralda }}
                     >
-                      <CheckCircle2 size={12} /> Concluir
+                      <CheckCircle2 size={12} /> {r.tipo_protocolo === "transferencia" ? "Chegou" : "Concluir"}
                     </button>
                   )}
                 </td>

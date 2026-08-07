@@ -56,6 +56,19 @@ export async function GET(req: NextRequest) {
   const userId = req.nextUrl.searchParams.get("user_id");
   const todos = req.nextUrl.searchParams.get("todos") === "true";
 
+  /**
+   * REGRA DE NEGÓCIO: transferência de estoque não tem dono até alguém pegar as
+   * peças. Enquanto está `pendente` sem `motoboy_id`, ela aparece para TODOS os
+   * transportadores — é a fila de quem pode levar. Depois que alguém confirma a
+   * coleta, o protocolo passa a ser dele e some da fila dos outros.
+   * IMPACTO SE REMOVIDO: a solicitação não apareceria para ninguém no app, já que
+   * ela nasce sem motoboy — a peça nunca sairia da loja.
+   */
+  const [quemVe] = await sql`
+    SELECT is_transportador FROM alissonerp.usuarios WHERE id = ${user.id}::uuid
+  `;
+  const ehTransportador = Boolean(quemVe?.is_transportador);
+
   const rows = todos
     ? await sql`
         SELECT p.id, p.direcao::text, p.etapas::text, p.created_at, p.tipo_protocolo,
@@ -75,7 +88,14 @@ export async function GET(req: NextRequest) {
           (SELECT nome FROM alissonerp.locais_estoque WHERE id = p.local_origem_id)  AS local_origem_nome,
           (SELECT nome FROM alissonerp.locais_estoque WHERE id = p.local_destino_id) AS local_destino_nome
         FROM alissonerp.protocolos p
-        WHERE p.created_by = ${userId}::uuid OR p.motoboy_id = ${userId}::uuid
+        WHERE p.created_by = ${userId}::uuid
+           OR p.motoboy_id = ${userId}::uuid
+           OR (
+             ${ehTransportador}
+             AND p.tipo_protocolo = 'transferencia'
+             AND p.etapas = 'pendente'
+             AND p.motoboy_id IS NULL
+           )
         ORDER BY p.created_at DESC LIMIT 50
       `;
 
@@ -178,8 +198,18 @@ export async function POST(req: NextRequest) {
    * IMPACTO SE REMOVIDO: a peça segue vendável no PDV entre a solicitação e a
    *   coleta, e o conflito só aparece na hora da entrega.
    *
-   * `motoboy_id` fica NULO quando o trajeto não tem transporte (mesmo prédio) —
-   * ao contrário dos outros tipos, que assumem o criador como motoboy.
+   * REGRA DE NEGÓCIO (decisão do Jonathan, 07/08): a solicitação NÃO escolhe
+   * quem transporta. `motoboy_id` nasce NULO e só é preenchido no ato da coleta,
+   * com quem de fato pegou as peças.
+   * POR QUE: na prática quase sempre é o mesmo motoboy, mas em muitos dias quem
+   * leva é outra pessoa que está na loja na hora. Escolher na solicitação erra a
+   * maior parte das vezes e obriga a corrigir depois; registrar quem pegou é a
+   * informação que importa e é sempre verdadeira.
+   * IMPACTO SE ALTERADO: voltar a fixar o motoboy na criação faz o protocolo
+   * aparecer só para uma pessoa — quem realmente levou não consegue confirmar.
+   *
+   * Trajeto sem transporte (mesmo prédio) não precisa ser declarado: se ninguém
+   * coletar, quem confirma a chegada registra saída e entrada no mesmo ato.
    */
   if (isTransferencia) {
     if (!local_origem_id || !local_destino_id) {
@@ -201,7 +231,7 @@ export async function POST(req: NextRequest) {
             (direcao, etapas, motoboy_id, foto_criacao, created_by, tipo_protocolo,
              local_origem_id, local_destino_id)
           VALUES
-            ('ida', 'pendente', ${motoboy_id ?? null}::uuid, ${foto_criacao ?? null},
+            ('ida', 'pendente', NULL, ${foto_criacao ?? null},
              ${user.id}::uuid, ${TIPO_PROTOCOLO_TRANSFERENCIA},
              ${local_origem_id}, ${local_destino_id})
           RETURNING id
@@ -219,7 +249,6 @@ export async function POST(req: NextRequest) {
         dados_depois: {
           tipo_protocolo: TIPO_PROTOCOLO_TRANSFERENCIA,
           local_origem_id, local_destino_id,
-          motoboy_id: motoboy_id ?? null,
           itens: itens.length,
         },
       });

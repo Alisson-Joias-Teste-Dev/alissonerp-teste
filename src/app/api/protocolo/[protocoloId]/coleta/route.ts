@@ -18,18 +18,20 @@ const ColetaSchema = z.object({
 /**
  * POST /api/protocolo/[protocoloId]/coleta — passo 2 da transferência de estoque.
  *
- * O QUE: o motoboy confirma, com foto, que pegou as peças. Aqui o estoque SAI do
- *   local de origem e a reserva da solicitação é efetivada — a partir deste
- *   instante a peça está "em rota" (transferência `pendente`, ninguém recebeu).
- * POR QUE só o motoboy do protocolo: é ele quem assume a responsabilidade física
- *   pelo caminho. Mesma lógica dos protocolos de ordem, onde o motoboy é quem
- *   abre o transporte — e continua sem poder concluir (quem recebe é o destino).
+ * O QUE: quem vai levar as peças confirma, com foto, que as pegou. Aqui o estoque
+ *   SAI do local de origem, a reserva da solicitação é efetivada e o protocolo
+ *   passa a registrar QUEM levou (`motoboy_id`). A partir deste instante a peça
+ *   está "em rota" (transferência `pendente`, ninguém recebeu).
+ * POR QUE qualquer transportador, e não uma pessoa escolhida na solicitação: na
+ *   prática quase sempre é o mesmo motoboy, mas em muitos dias quem leva é outra
+ *   pessoa que está na loja na hora. Quem pega é quem confirma — e é isso que
+ *   fica gravado, sempre verdadeiro.
  * IMPACTO SE ALTERADO/REMOVIDO: sem este passo, a peça só sairia do estoque na
- *   chegada — e o período em que ela está com o motoboy ficaria invisível, que é
+ *   chegada — e o período em que ela está no caminho ficaria invisível, que é
  *   exatamente o buraco que este módulo veio fechar.
  *
- * Trajeto SEM transporte (mesmo prédio) não passa por aqui: `motoboy_id` nulo, a
- * saída e a entrada acontecem juntas no recebimento.
+ * Trajeto sem transporte (mesmo prédio) simplesmente não passa por aqui: ninguém
+ * coleta, e quem confirma a chegada registra saída e entrada no mesmo ato.
  */
 export async function POST(
   req: NextRequest,
@@ -61,14 +63,28 @@ export async function POST(
   if (prot.etapas !== "pendente") {
     return NextResponse.json({ error: `Protocolo já está ${prot.etapas}.` }, { status: 409 });
   }
-  if (!prot.motoboy_id) {
+  if (prot.motoboy_id && prot.motoboy_id !== user.id) {
     return NextResponse.json(
-      { error: "Este protocolo não tem transporte. A saída acontece na confirmação de chegada." },
+      { error: "Outra pessoa já confirmou a coleta destas peças." },
       { status: 409 }
     );
   }
-  if (prot.motoboy_id !== user.id && !isFullAccess(user.role)) {
-    return NextResponse.json({ error: "Só o motoboy deste protocolo pode confirmar a coleta." }, { status: 403 });
+
+  /**
+   * REGRA DE NEGÓCIO: só quem está marcado como transportador (`is_transportador`,
+   * mesma marca que a tela de entregas já usa) pode dizer "peguei" — é quem assume
+   * a responsabilidade física pelo caminho. Não é papel: o Lenilson é motoboy, mas
+   * o gerente e o dono também levam peça, e nenhum dos dois deveria virar motoboy
+   * no sistema só por isso.
+   */
+  const [quemColeta] = await sql`
+    SELECT is_transportador FROM alissonerp.usuarios WHERE id = ${user.id}::uuid
+  `;
+  if (!quemColeta?.is_transportador && !isFullAccess(user.role)) {
+    return NextResponse.json(
+      { error: "Só quem está cadastrado como transportador pode confirmar a coleta." },
+      { status: 403 }
+    );
   }
 
   const [jaSaiu] = await sql`
@@ -85,11 +101,12 @@ export async function POST(
       begin: (fn: (tx: typeof sql) => Promise<number[]>) => Promise<number[]>;
     }).begin(async (tx) => {
       const criadas = await registrarSaidaProtocolo(tx, id, user.id);
-      // A foto do transporte é a foto de criação do protocolo — quem cria a
-      // solicitação (a loja) não tem a peça em mãos; quem fotografa é quem pega.
+      // Grava QUEM levou (é aqui que se sabe, não na solicitação) e a foto da
+      // retirada — quem cria a solicitação não tem a peça em mãos; quem
+      // fotografa é quem pega.
       await tx`
         UPDATE alissonerp.protocolos
-        SET foto_criacao = ${foto_path}, updated_at = now()
+        SET motoboy_id = ${user.id}::uuid, foto_criacao = ${foto_path}, updated_at = now()
         WHERE id = ${id}
       `;
       return criadas;

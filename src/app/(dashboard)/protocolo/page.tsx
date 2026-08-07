@@ -23,13 +23,21 @@ export default async function ProtocoloPage() {
 
   // Buscar permissões de protocolo do usuário logado
   let tiposProtocoloPermitidos: string[] = [];
+  let podeColetar = false;
   if (user) {
     const [usuario] = await sql`
-      SELECT role::text AS role, tipos_protocolo_permitidos
+      SELECT role::text AS role, tipos_protocolo_permitidos, is_transportador
       FROM alissonerp.usuarios
       WHERE id = ${user.id}::uuid LIMIT 1
     `;
     if (usuario) {
+      /**
+       * REGRA DE NEGÓCIO: quem pode confirmar a coleta de uma transferência é
+       * quem está marcado como transportador — o motoboy usa o app do celular, o
+       * gerente e o dono usam esta tela. Ninguém precisa trocar de papel no ERP
+       * só porque levou uma peça.
+       */
+      podeColetar = Boolean(usuario.is_transportador) || FULL_ACCESS_ROLES.includes(usuario.role);
       tiposProtocoloPermitidos = FULL_ACCESS_ROLES.includes(usuario.role)
         ? ALL_TIPOS_PROTOCOLO
         : (usuario.tipos_protocolo_permitidos ?? []);
@@ -134,6 +142,7 @@ export default async function ProtocoloPage() {
       aprovacoes={aprovacoes as any[]}
       entregas={entregas as any[]}
       tiposProtocoloPermitidos={tiposProtocoloPermitidos}
+      podeColetar={podeColetar}
     />
   );
 }

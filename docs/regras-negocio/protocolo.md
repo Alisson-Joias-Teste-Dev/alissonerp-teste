@@ -69,12 +69,20 @@ A partir daqui, **transferência de estoque comercial nasce de um protocolo** �
 
 | Passo | Quem | O que grava | Efeito no estoque |
 |---|---|---|---|
-| 1. Solicitar | quem tem `transferencia` em `tipos_protocolo_permitidos` | `protocolos` (`tipo_protocolo='transferencia'`, `etapas='pendente'`, origem, destino, motoboy opcional) + `protocolo_produtos` (SKU + quantidade) | **reserva** cada item no local de origem (`reservas_estoque_comercial`, `status='ativo'`) — a peça continua no saldo físico mas sai do disponível, ninguém vende no PDV |
-| 2. Coletar | motoboy (só quando há transporte) | cria `transferencias_estoque_comercial` (`status='pendente'`) por item, vinculada ao protocolo, + foto | **saída no local de origem** (trigger `fn_transferencia_ec_envio`) e a reserva é **efetivada** (deixa de segurar saldo que já saiu) |
+| 1. Solicitar | quem tem `transferencia` em `tipos_protocolo_permitidos` | `protocolos` (`tipo_protocolo='transferencia'`, `etapas='pendente'`, origem, destino, **`motoboy_id` NULO**) + `protocolo_produtos` (SKU + quantidade) | **reserva** cada item no local de origem (`reservas_estoque_comercial`, `status='ativo'`) — a peça continua no saldo físico mas sai do disponível, ninguém vende no PDV |
+| 2. Coletar | quem está marcado como `is_transportador` | grava `motoboy_id` = quem confirmou + foto; cria `transferencias_estoque_comercial` (`status='pendente'`) por item, vinculada ao protocolo | **saída no local de origem** (trigger `fn_transferencia_ec_envio`) e a reserva é **efetivada** (deixa de segurar saldo que já saiu) |
 | 3. Receber | `ROLES_CONCLUIR_PROTOCOLO` | `etapas='concluido'` + foto; conclui cada transferência vinculada | **entrada no local de destino** (trigger `fn_transferencia_ec_recebimento`) |
 | — Cancelar | quem solicitou ou quem conclui | `etapas='cancelado'` + motivo obrigatório | solta a reserva (`status='cancelado'`); se já havia saído, cancela a transferência, que estorna a saída |
 
-**Trajeto sem motoboy:** quando origem e destino ficam no mesmo prédio (hoje Reposição ↔ Loja, 210 das 271 transferências), o solicitante marca "sem motoboy" e o passo 2 desaparece — quem recebe faz a saída e a entrada no mesmo ato de confirmar. O campo `motoboy_id` fica nulo. Se amanhã esse trajeto passar a exigir transporte, é só escolher o motoboy no formulário: **nada muda no banco**.
+### 5.2.1 Quem transporta NÃO é escolhido na solicitação
+
+**Regra do Jonathan (07/08):** a solicitação não aponta uma pessoa. Enquanto está `pendente` com `motoboy_id` nulo, ela aparece para **todos os transportadores** — é a fila de quem pode levar. Quem pegar as peças confirma a coleta, e é aí que `motoboy_id` é gravado.
+
+**Por quê:** na prática quase sempre é o mesmo motoboy, mas em muitos dias quem leva é outra pessoa que está na loja na hora (o gerente, o dono). Escolher na solicitação erra a maior parte das vezes e obriga a corrigir depois; registrar quem pegou é a informação que importa e é sempre verdadeira.
+
+**Quem pode coletar:** quem tem `usuarios.is_transportador` (a mesma marca que a tela de entregas já usa) — não é papel. O Lenilson é `motoboy` e usa o app do celular; gerente e dono usam o botão "Coletar" na própria tela `/protocolo`. Ninguém precisa trocar de papel no ERP só porque levou uma peça. Depois que alguém confirma, o protocolo é dele e some da fila dos outros (segunda tentativa devolve 409).
+
+**Trajeto sem transporte** (mesmo prédio — hoje Reposição ↔ Loja, 210 das 271 transferências) **não é declarado**: simplesmente ninguém coleta, e quem confirma a chegada registra a saída e a entrada no mesmo ato. Se amanhã esse trajeto passar a exigir transporte, alguém coleta e pronto — **nada muda no banco nem no formulário**.
 
 ### 5.3 Estado é derivado, não é coluna
 
@@ -114,9 +122,10 @@ O formulário lista `locais_estoque` ativos, **menos** o grupo `Em Transito` (id
 |---|---|
 | `/protocolo`, aba **Ida** | os protocolos de transferência entram pelo filtro que já existe |
 | Botão **Novo Protocolo Ida** (dropdown por tipo) | mais um tipo, vindo de `tipos_protocolo_permitidos` |
-| `NovaProtocoloModal` | modo `produtos` (origem, destino, transporte, lista de SKU + quantidade), ao lado dos modos `ordens` e `sangria` que já existem |
-| `ConcluirProtocoloModal` | bloco de produtos, ao lado do bloco de ordens e do de sangria — o modal já trata protocolo sem ordens |
-| `ProtocoloMotoboy` | card de confirmar coleta, mesmo botão e mesma foto dos outros tipos |
+| `NovaProtocoloModal` | modo `transferencia` (origem, destino, lista de SKU + quantidade), ao lado dos modos `ordens` e `sangria` que já existem |
+| `ConcluirProtocoloModal` | bloco de produtos + prop `acao`: o mesmo modal serve a **coleta** e a **chegada** — o ritual é idêntico (conferir a lista, fotografar), só muda o texto e para onde vai a confirmação |
+| Coluna de ação da aba Ida | botão **Coletar** enquanto está solicitado (só para `is_transportador`), **Chegou** depois que saiu |
+| `ProtocoloMotoboy` | a fila mostra também as solicitações sem dono; card de confirmar coleta com a mesma foto dos outros tipos |
 
 ### 5.8 Migration 369
 

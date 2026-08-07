@@ -57,11 +57,6 @@ interface LocalOption {
   parent_local_id?: number | null;
 }
 
-interface TransportadorOption {
-  id: string;
-  nome: string | null;
-}
-
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -91,10 +86,8 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, tipoProto
 
   // ─── Transferência de estoque ──────────────────────────────────────────────
   const [locais, setLocais] = useState<LocalOption[]>([]);
-  const [transportadores, setTransportadores] = useState<TransportadorOption[]>([]);
   const [localOrigemId, setLocalOrigemId] = useState<number | "">("");
   const [localDestinoId, setLocalDestinoId] = useState<number | "">("");
-  const [motoboyId, setMotoboyId] = useState<string>("");
   const [produtos, setProdutos] = useState<ProdutoEstoqueOption[]>([]);
   const [itens, setItens] = useState<Record<number, number>>({}); // produto_id -> quantidade
 
@@ -119,7 +112,6 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, tipoProto
     if (modo === "transferencia") {
       setLocalOrigemId("");
       setLocalDestinoId("");
-      setMotoboyId("");
       setProdutos([]);
       setItens({});
       /**
@@ -128,14 +120,10 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, tipoProto
        * local que a API vai recusar. "Em Trânsito" e seus sub-locais ficam de fora:
        * trânsito é a própria transferência pendente, não um local com saldo.
        */
-      Promise.all([
-        fetch("/api/locais-estoque").then((r) => r.json()).catch(() => []),
-        fetch("/api/usuarios/transportadores").then((r) => r.json()).catch(() => []),
-      ])
-        .then(([locaisData, transpData]) => {
-          setLocais((Array.isArray(locaisData) ? locaisData : []).filter(localElegivelTransferencia));
-          setTransportadores(Array.isArray(transpData) ? transpData : []);
-        })
+      fetch("/api/locais-estoque")
+        .then((r) => r.json())
+        .then((locaisData) => setLocais((Array.isArray(locaisData) ? locaisData : []).filter(localElegivelTransferencia)))
+        .catch(() => setLocais([]))
         .finally(() => setLoadingItens(false));
     } else if (modo === "sangria") {
       // Carregar baixas pendentes de protocolo do destino específico
@@ -251,7 +239,6 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, tipoProto
           tipo_protocolo: "transferencia",
           local_origem_id: localOrigemId,
           local_destino_id: localDestinoId,
-          motoboy_id: motoboyId || undefined,
           itens: Object.entries(itens).map(([produto_id, quantidade]) => ({
             produto_id: Number(produto_id),
             quantidade,
@@ -382,7 +369,7 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, tipoProto
 
         {/* Trajeto (só transferência): origem, destino e transporte */}
         {isTransferencia && (
-          <div className="px-6 pt-4 pb-1 shrink-0 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="px-6 pt-4 pb-1 shrink-0 grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-medium mb-1" style={{ color: "#6B7280" }}>Origem</label>
               <select
@@ -407,25 +394,19 @@ export default function NovaProtocoloModal({ isOpen, onClose, direcao, tipoProto
                 {locais.filter((l) => l.id !== localOrigemId).map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
               </select>
             </div>
-            <div>
-              {/*
-                REGRA DE NEGÓCIO: transporte é OPCIONAL. Quando origem e destino
-                ficam no mesmo prédio (hoje Reposição ↔ Loja), não há motoboy: a
-                peça sai e entra no mesmo ato, na confirmação de chegada. Escolher
-                um motoboy acrescenta o passo da coleta, com foto.
-              */}
-              <label className="block text-[11px] font-medium mb-1" style={{ color: "#6B7280" }}>Transporte</label>
-              <select
-                value={motoboyId}
-                onChange={(e) => setMotoboyId(e.target.value)}
-                className="w-full px-3 py-2.5 md:py-2 rounded-lg border text-base md:text-sm focus:outline-none bg-white"
-                style={{ borderColor: C.cremeBorder }}
-              >
-                <option value="">Sem motoboy (mesmo prédio)</option>
-                {transportadores.map((t) => <option key={t.id} value={t.id}>{t.nome ?? "Sem nome"}</option>)}
-              </select>
-            </div>
           </div>
+        )}
+
+        {/*
+          REGRA DE NEGÓCIO: a solicitação NÃO escolhe quem transporta. Quem pegar
+          as peças confirma a coleta no protocolo, e é aí que fica registrado quem
+          levou. Se o trajeto é dentro do mesmo prédio, ninguém coleta e quem
+          confirma a chegada registra tudo de uma vez.
+        */}
+        {isTransferencia && (
+          <p className="px-6 pb-1 text-[11px]" style={{ color: "#9CA3AF" }}>
+            Quem levar as peças confirma a coleta no protocolo — não precisa escolher agora.
+          </p>
         )}
 
         {/* Search */}

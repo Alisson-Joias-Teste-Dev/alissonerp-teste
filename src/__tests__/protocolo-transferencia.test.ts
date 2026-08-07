@@ -6,10 +6,11 @@
  *      TEM que criar reserva na origem.
  *   2. Reserva ficar pendurada depois que a peça já saiu (dupla contagem) ou
  *      depois de um cancelamento (peça presa fora do estoque para sempre).
- *   3. O trajeto sem motoboy (Reposição → Loja, mesmo prédio — 210 das 271
+ *   3. O trajeto sem transporte (Reposição → Loja, mesmo prédio — 210 das 271
  *      transferências existentes) não registrar a SAÍDA: a chegada precisa
  *      fazer saída e entrada no mesmo ato.
- *   4. Alguém que não é o motoboy do protocolo dar o "peguei" por ele.
+ *   4. Quem não é transportador dar o "peguei", ou duas pessoas coletarem o
+ *      mesmo protocolo.
  *   5. Protocolo de transferência ser gravado com direcao='volta' — isso
  *      dispararia fn_reposicao_entrada_volta e o sumiria da aba Ida.
  *
@@ -48,6 +49,7 @@ let cenario: {
   itens: { produto_id: number; quantidade: number }[];
   transferenciasPendentes: { id: number }[];
   transferenciasConcluidas: { id: number }[];
+  ehTransportador: boolean;
 };
 
 /** Registra toda query executada, para as asserções. */
@@ -73,6 +75,9 @@ const sqlMock = Object.assign(
 
     if (sql.includes("tipos_protocolo_permitidos")) {
       return Promise.resolve([{ role: cenario.role, tipos_protocolo_permitidos: cenario.tiposPermitidos }]);
+    }
+    if (sql.includes("is_transportador")) {
+      return Promise.resolve([{ is_transportador: cenario.ehTransportador }]);
     }
     if (sql.includes("FROM alissonerp.locais_estoque WHERE id IN")) {
       const pedidos = values.flat() as number[];
@@ -164,6 +169,7 @@ beforeEach(() => {
     ],
     transferenciasPendentes: [],
     transferenciasConcluidas: [],
+    ehTransportador: true,
   };
   sqlMock.mockClear();
 });
@@ -200,16 +206,17 @@ describe("POST /api/protocolo — solicitação de transferência", () => {
     expect(insert.values).toContain(FABRICA);
   });
 
-  it("deixa motoboy_id NULO quando o trajeto não tem transporte", async () => {
+  it("nasce SEM dono — quem transporta só se sabe na coleta", async () => {
     await postProtocolo(req("/api/protocolo", solicitacaoValida));
     const insert = queriesCom("INSERT INTO alissonerp.protocolos")[0];
-    expect(insert.values[0]).toBeNull();
+    expect(insert.sql).toContain("'ida', 'pendente', NULL");
+    expect(insert.values).not.toContain(OUTRO_USER);
   });
 
-  it("guarda o motoboy escolhido quando há transporte", async () => {
+  it("ignora motoboy_id enviado no corpo — a solicitação não escolhe quem leva", async () => {
     await postProtocolo(req("/api/protocolo", { ...solicitacaoValida, motoboy_id: OUTRO_USER }));
     const insert = queriesCom("INSERT INTO alissonerp.protocolos")[0];
-    expect(insert.values[0]).toBe(OUTRO_USER);
+    expect(insert.values).not.toContain(OUTRO_USER);
   });
 
   it("recusa sem trajeto", async () => {
@@ -261,14 +268,39 @@ describe("POST /api/protocolo/[id]/coleta — a peça sai da origem", () => {
   beforeEach(() => {
     authUser.role = "motoboy";
     authUser.id = OUTRO_USER;
+    cenario.ehTransportador = true;
+    // Solicitação ainda sem dono: qualquer transportador pode pegar.
     cenario.protocolo = {
       id: PROTOCOLO_ID,
       tipo_protocolo: "transferencia",
       etapas: "pendente",
-      motoboy_id: OUTRO_USER,
+      motoboy_id: null,
       local_origem_id: LOJA,
       local_destino_id: FABRICA,
     };
+  });
+
+  it("grava QUEM levou — é na coleta que se sabe, não na solicitação", async () => {
+    const res = await postColeta(req(`/api/protocolo/${PROTOCOLO_ID}/coleta`, { foto_path: "coleta/1.jpg" }), params());
+    expect(res.status).toBe(200);
+    const marca = queriesCom("SET motoboy_id")[0];
+    expect(marca).toBeDefined();
+    expect(marca.values).toContain(OUTRO_USER);
+  });
+
+  it("recusa quem não está cadastrado como transportador", async () => {
+    cenario.ehTransportador = false;
+    authUser.role = "consultora";
+    const res = await postColeta(req(`/api/protocolo/${PROTOCOLO_ID}/coleta`, { foto_path: "x.jpg" }), params());
+    expect(res.status).toBe(403);
+    expect(rodou("INSERT INTO alissonerp.transferencias_estoque_comercial")).toBe(false);
+  });
+
+  it("recusa se outra pessoa já pegou as peças", async () => {
+    cenario.protocolo!.motoboy_id = "33333333-3333-4333-8333-333333333333";
+    const res = await postColeta(req(`/api/protocolo/${PROTOCOLO_ID}/coleta`, { foto_path: "x.jpg" }), params());
+    expect(res.status).toBe(409);
+    expect(rodou("INSERT INTO alissonerp.transferencias_estoque_comercial")).toBe(false);
   });
 
   it("cria uma transferência por item e EFETIVA as reservas", async () => {
@@ -292,20 +324,6 @@ describe("POST /api/protocolo/[id]/coleta — a peça sai da origem", () => {
   it("exige foto", async () => {
     const res = await postColeta(req(`/api/protocolo/${PROTOCOLO_ID}/coleta`, {}), params());
     expect(res.status).toBe(400);
-    expect(rodou("INSERT INTO alissonerp.transferencias_estoque_comercial")).toBe(false);
-  });
-
-  it("recusa quem não é o motoboy daquele protocolo", async () => {
-    authUser.id = "33333333-3333-4333-8333-333333333333";
-    const res = await postColeta(req(`/api/protocolo/${PROTOCOLO_ID}/coleta`, { foto_path: "x.jpg" }), params());
-    expect(res.status).toBe(403);
-    expect(rodou("INSERT INTO alissonerp.transferencias_estoque_comercial")).toBe(false);
-  });
-
-  it("recusa coleta em protocolo sem transporte — a saída é na chegada", async () => {
-    cenario.protocolo!.motoboy_id = null;
-    const res = await postColeta(req(`/api/protocolo/${PROTOCOLO_ID}/coleta`, { foto_path: "x.jpg" }), params());
-    expect(res.status).toBe(409);
     expect(rodou("INSERT INTO alissonerp.transferencias_estoque_comercial")).toBe(false);
   });
 
