@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
-import { ROLES_CONCLUIR_PROTOCOLO } from "@/lib/roles";
+import { ROLES_CONCLUIR_PROTOCOLO, hasRole } from "@/lib/roles";
+import {
+  TIPO_PROTOCOLO_TRANSFERENCIA,
+  ErroTransferencia,
+  receberTransferenciaProtocolo,
+  cancelarTransferenciaProtocolo,
+} from "@/lib/protocolo-transferencia";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { authOr401 } from "@/lib/auth-server";
 import { zodError } from "@/lib/schemas/common";
@@ -15,6 +21,8 @@ const ProtocoloPatchSchema = z.object({
     ordem_id: z.coerce.number().int().positive(),
     foto_base64: z.string(),
   })).optional(),
+  // Transferência de estoque: obrigatório quando etapas='cancelado'.
+  motivo_cancelamento: z.string().max(500).optional(),
 }).passthrough();
 
 // GET /api/protocolo/[protocoloId] — ordens do protocolo
@@ -67,10 +75,14 @@ export async function PATCH(
    * pode abrir e concluir. Só fabrica/service/sangria/ouro exigem os papéis
    * de ROLES_PROTOCOLO_PATCH/ROLES_CONCLUIR_PROTOCOLO.
    */
-  const [protoAtual] = await sql`SELECT tipo_protocolo FROM alissonerp.protocolos WHERE id = ${id}`;
+  const [protoAtual] = await sql`
+    SELECT tipo_protocolo, etapas::text AS etapas, created_by
+    FROM alissonerp.protocolos WHERE id = ${id}
+  `;
   const isInterno = protoAtual?.tipo_protocolo === "interno";
+  const isTransferencia = protoAtual?.tipo_protocolo === TIPO_PROTOCOLO_TRANSFERENCIA;
 
-  if (!isInterno && !ROLES_PROTOCOLO_PATCH.includes(user.role)) {
+  if (!isInterno && !isTransferencia && !ROLES_PROTOCOLO_PATCH.includes(user.role)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
@@ -78,7 +90,74 @@ export async function PATCH(
   const parsed = ProtocoloPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;
-  const { etapas, recebedor_id, foto_conclusao, ordens_detalhes } = body;
+  const { etapas, recebedor_id, foto_conclusao, ordens_detalhes, motivo_cancelamento } = body;
+
+  /**
+   * TRANSFERÊNCIA DE ESTOQUE — passos 3 (receber) e cancelamento.
+   *
+   * Tratada em bloco próprio, e não pelo UPDATE genérico abaixo, porque aqui a
+   * mudança de etapa MOVE ESTOQUE: concluir dá entrada no destino (e, no trajeto
+   * sem transporte, a saída na origem no mesmo ato); cancelar solta a reserva e
+   * estorna a saída, se já tinha havido. Estado do protocolo e movimento de
+   * estoque precisam cair juntos ou não cair — daí a transação.
+   *
+   * IMPACTO SE ALTERADO: protocolo concluído sem a entrada correspondente deixa a
+   * peça sem lugar nenhum — fora da origem e fora do destino.
+   */
+  if (isTransferencia) {
+    if (!hasRole(user.role, ROLES_CONCLUIR_PROTOCOLO) && !(etapas === "cancelado" && protoAtual.created_by === user.id)) {
+      return NextResponse.json(
+        { error: "Apenas gerentes ou administradores podem receber a transferência. O cancelamento também pode ser feito por quem solicitou." },
+        { status: 403 }
+      );
+    }
+    if (etapas !== "concluido" && etapas !== "cancelado") {
+      return NextResponse.json({ error: "Etapa inválida para transferência de estoque." }, { status: 400 });
+    }
+    if (protoAtual.etapas !== "pendente") {
+      return NextResponse.json({ error: `Protocolo já está ${protoAtual.etapas}.` }, { status: 409 });
+    }
+    if (etapas === "concluido" && !foto_conclusao) {
+      return NextResponse.json({ error: "Foto de confirmação é obrigatória." }, { status: 400 });
+    }
+    if (etapas === "cancelado" && !motivo_cancelamento?.trim()) {
+      return NextResponse.json({ error: "Informe o motivo do cancelamento." }, { status: 400 });
+    }
+
+    try {
+      await (sql as unknown as {
+        begin: (fn: (tx: typeof sql) => Promise<void>) => Promise<void>;
+      }).begin(async (tx) => {
+        if (etapas === "concluido") {
+          await receberTransferenciaProtocolo(tx, id, user.id);
+          await tx`
+            UPDATE alissonerp.protocolos
+            SET etapas = 'concluido',
+                recebedor_id = ${recebedor_id ?? user.id}::uuid,
+                foto_conclusao = ${foto_conclusao ?? null},
+                updated_at = now()
+            WHERE id = ${id}
+          `;
+        } else {
+          await cancelarTransferenciaProtocolo(tx, id);
+          await tx`
+            UPDATE alissonerp.protocolos
+            SET etapas = 'cancelado',
+                motivo_cancelamento = ${motivo_cancelamento!.trim()},
+                updated_at = now()
+            WHERE id = ${id}
+          `;
+        }
+      });
+    } catch (e) {
+      if (e instanceof ErroTransferencia) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+      throw e;
+    }
+
+    return NextResponse.json({ id, etapas });
+  }
 
   // Validar role ao concluir (protocolo interno não valida)
   if (!isInterno && etapas === "concluido" && recebedor_id) {

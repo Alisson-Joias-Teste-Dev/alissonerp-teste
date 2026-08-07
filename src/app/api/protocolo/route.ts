@@ -11,6 +11,13 @@ import {
 } from "@/lib/payload-limits";
 import { zodError, IdSchema, UuidSchema } from "@/lib/schemas/common";
 import { STATUS_BAIXA_OURO } from "@/lib/cofre-ouro-status";
+import {
+  TIPO_PROTOCOLO_TRANSFERENCIA,
+  ErroTransferencia,
+  validarTrajeto,
+  validarSaldoDisponivel,
+  reservarItensProtocolo,
+} from "@/lib/protocolo-transferencia";
 
 const ProtocoloPostSchema = z.object({
   direcao: z.enum(["ida", "volta"]).optional(), // protocolo interno não usa direção
@@ -21,9 +28,19 @@ const ProtocoloPostSchema = z.object({
   foto_criacao: z.string().max(LIMITS.IMAGE_BASE64_MAX).optional(),
   user_id: UuidSchema.optional(),
   tipo_protocolo: z.string().max(50).optional(),
+  // Transferência de estoque: trajeto no cabeçalho + itens com quantidade.
+  // `itens` existe separado de `produto_ids` (que é do protocolo interno legado,
+  // sem quantidade) para não mudar o contrato de quem já chama a rota.
+  local_origem_id: IdSchema.optional(),
+  local_destino_id: IdSchema.optional(),
+  itens: z.array(z.object({
+    produto_id: IdSchema,
+    quantidade: z.number().int().positive("quantidade deve ser > 0"),
+  })).min(1, "Informe ao menos uma peça").max(LIMITS.ORDENS_LOTE_MAX).optional(),
 }).refine(
-  (data) => (data.ordem_ids && data.ordem_ids.length > 0) || data.baixa_id || (data.produto_ids && data.produto_ids.length > 0),
-  { message: "Informe ao menos um ordem_ids, baixa_id ou produto_ids" }
+  (data) => (data.ordem_ids && data.ordem_ids.length > 0) || data.baixa_id
+    || (data.produto_ids && data.produto_ids.length > 0) || (data.itens && data.itens.length > 0),
+  { message: "Informe ao menos um ordem_ids, baixa_id, produto_ids ou itens" }
 );
 
 // GET /api/protocolo?user_id=UUID — lista protocolos do motoboy (ou todos se todos=true)
@@ -43,14 +60,20 @@ export async function GET(req: NextRequest) {
     ? await sql`
         SELECT p.id, p.direcao::text, p.etapas::text, p.created_at, p.tipo_protocolo,
           (SELECT count(*)::int FROM alissonerp.protocolo_ordens po WHERE po.protocolo_id = p.id) AS total_ordens,
-          (SELECT count(*)::int FROM alissonerp.protocolo_produtos pp WHERE pp.protocolo_id = p.id) AS total_produtos
+          (SELECT count(*)::int FROM alissonerp.protocolo_produtos pp WHERE pp.protocolo_id = p.id) AS total_produtos,
+          -- Trajeto da transferência de estoque; nulo nos demais tipos.
+          (SELECT nome FROM alissonerp.locais_estoque WHERE id = p.local_origem_id)  AS local_origem_nome,
+          (SELECT nome FROM alissonerp.locais_estoque WHERE id = p.local_destino_id) AS local_destino_nome
         FROM alissonerp.protocolos p
         ORDER BY p.created_at DESC LIMIT 50
       `
     : await sql`
         SELECT p.id, p.direcao::text, p.etapas::text, p.created_at, p.tipo_protocolo,
           (SELECT count(*)::int FROM alissonerp.protocolo_ordens po WHERE po.protocolo_id = p.id) AS total_ordens,
-          (SELECT count(*)::int FROM alissonerp.protocolo_produtos pp WHERE pp.protocolo_id = p.id) AS total_produtos
+          (SELECT count(*)::int FROM alissonerp.protocolo_produtos pp WHERE pp.protocolo_id = p.id) AS total_produtos,
+          -- Trajeto da transferência de estoque; nulo nos demais tipos.
+          (SELECT nome FROM alissonerp.locais_estoque WHERE id = p.local_origem_id)  AS local_origem_nome,
+          (SELECT nome FROM alissonerp.locais_estoque WHERE id = p.local_destino_id) AS local_destino_nome
         FROM alissonerp.protocolos p
         WHERE p.created_by = ${userId}::uuid OR p.motoboy_id = ${userId}::uuid
         ORDER BY p.created_at DESC LIMIT 50
@@ -73,7 +96,10 @@ export async function POST(req: NextRequest) {
   const raw = await req.json().catch(() => ({}));
   const parsed = ProtocoloPostSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
-  const { direcao, ordem_ids, baixa_id, produto_ids, motoboy_id, foto_criacao, user_id, tipo_protocolo } = parsed.data;
+  const {
+    direcao, ordem_ids, baixa_id, produto_ids, motoboy_id, foto_criacao, user_id, tipo_protocolo,
+    local_origem_id, local_destino_id, itens,
+  } = parsed.data;
   void user_id; // body.user_id é ignorado intencionalmente (usa user.id da sessão)
 
   // Defesa em profundidade — zod ja limita, helper retorna 413 explicito.
@@ -96,7 +122,19 @@ export async function POST(req: NextRequest) {
    * (não é ida/volta pra fábrica, é só um "abriu" → "confirmou recebimento").
    */
   const isInterno = tipoFinal === "interno";
-  const direcaoFinal = direcao ?? "ida";
+  /**
+   * REGRA DE NEGÓCIO: transferência de estoque move PRODUTO entre dois locais
+   * (`locais_estoque`), não ordem nem ouro. A direção ida/volta perde o sentido
+   * aqui — o trajeto real é origem → destino — e fica gravada SEMPRE como 'ida'
+   * por dois motivos concretos: (1) `fn_reposicao_entrada_volta` dispara em
+   * direcao='volta' + concluído e não tem nada a ver com transferência;
+   * (2) a aba Ida da tela /protocolo filtra direcao='ida', então o protocolo
+   * aparece na tela que já existe sem mudar filtro nenhum.
+   * IMPACTO SE ALTERADO: gravar 'volta' some da aba Ida e chama a regra de
+   * reposição indevidamente.
+   */
+  const isTransferencia = tipoFinal === TIPO_PROTOCOLO_TRANSFERENCIA;
+  const direcaoFinal = isTransferencia ? "ida" : (direcao ?? "ida");
 
   // Validar permissão do usuário autenticado (admin/dev ignoram; interno não valida)
   if (!isInterno) {
@@ -126,6 +164,72 @@ export async function POST(req: NextRequest) {
           );
         }
       }
+    }
+  }
+
+  /**
+   * TRANSFERÊNCIA DE ESTOQUE — passo 1 (solicitação).
+   *
+   * O QUE: cria o protocolo com trajeto, guarda os itens e RESERVA cada peça no
+   *   local de origem. Nenhum movimento de estoque acontece aqui: a peça continua
+   *   fisicamente onde está, só sai do disponível.
+   * POR QUE em transação: reserva sem item (ou item sem reserva) deixaria peça
+   *   presa fora do estoque sem nada apontando para ela.
+   * IMPACTO SE REMOVIDO: a peça segue vendável no PDV entre a solicitação e a
+   *   coleta, e o conflito só aparece na hora da entrega.
+   *
+   * `motoboy_id` fica NULO quando o trajeto não tem transporte (mesmo prédio) —
+   * ao contrário dos outros tipos, que assumem o criador como motoboy.
+   */
+  if (isTransferencia) {
+    if (!local_origem_id || !local_destino_id) {
+      return NextResponse.json({ error: "Informe o local de origem e o de destino." }, { status: 400 });
+    }
+    if (!itens || itens.length === 0) {
+      return NextResponse.json({ error: "Informe ao menos uma peça." }, { status: 400 });
+    }
+
+    try {
+      const protocoloId = await (sql as unknown as {
+        begin: (fn: (tx: typeof sql) => Promise<number>) => Promise<number>;
+      }).begin(async (tx) => {
+        await validarTrajeto(tx, local_origem_id, local_destino_id);
+        await validarSaldoDisponivel(tx, itens, local_origem_id);
+
+        const [criado] = await tx`
+          INSERT INTO alissonerp.protocolos
+            (direcao, etapas, motoboy_id, foto_criacao, created_by, tipo_protocolo,
+             local_origem_id, local_destino_id)
+          VALUES
+            ('ida', 'pendente', ${motoboy_id ?? null}::uuid, ${foto_criacao ?? null},
+             ${user.id}::uuid, ${TIPO_PROTOCOLO_TRANSFERENCIA},
+             ${local_origem_id}, ${local_destino_id})
+          RETURNING id
+        `;
+
+        await reservarItensProtocolo(tx, criado.id, itens, local_origem_id, user.id);
+        return criado.id as number;
+      });
+
+      await logAudit(sql, {
+        tabela: "protocolos",
+        operacao: "INSERT",
+        registro_id: protocoloId,
+        usuario_id: user.id,
+        dados_depois: {
+          tipo_protocolo: TIPO_PROTOCOLO_TRANSFERENCIA,
+          local_origem_id, local_destino_id,
+          motoboy_id: motoboy_id ?? null,
+          itens: itens.length,
+        },
+      });
+
+      return NextResponse.json({ id: protocoloId });
+    } catch (e) {
+      if (e instanceof ErroTransferencia) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+      throw e;
     }
   }
 
