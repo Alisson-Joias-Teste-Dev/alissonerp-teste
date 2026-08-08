@@ -26,12 +26,22 @@ export async function GET(
       SUM(a.qtd)   AS total_qtd,
       -- Metal: qtd já é gramas
       SUM(CASE WHEN i.categoria_id = ${metalCategoriaId} THEN a.qtd ELSE 0 END) AS peso_metal,
-      -- Pedras: qtd (unidades) × peso_pedra do insumo
+      -- Pedras, peso em GRAMA. Dois fluxos:
+      --   por peso (peso_ct preenchido): a.qtd JA E a grama da balanca
+      --   antigo  (peso_ct vazio):       a.qtd e peca -> grama = qtd x peso da pedra
+      -- Usar sempre a formula antiga fazia grama x grama (2,4 g virava 2,88 g).
       SUM(CASE WHEN i.categoria_id = ${pedraCategoriaId}
-               THEN a.qtd * COALESCE(i.peso_pedra, 0)
+               THEN CASE WHEN COALESCE(a.peso_ct, 0) > 0
+                         THEN a.qtd
+                         ELSE a.qtd * COALESCE(i.peso_pedra, 0) END
                ELSE 0 END)                                      AS peso_pedras,
-      -- Qtd de pedras (unidades)
-      SUM(CASE WHEN i.categoria_id = ${pedraCategoriaId} THEN a.qtd ELSE 0 END) AS qtd_pedras,
+      -- Contagem de PECAS. No fluxo por peso ela e derivada do peso, arredondada
+      -- pra baixo -- mesma regra da migration 368 ("sempre pra menos").
+      SUM(CASE WHEN i.categoria_id = ${pedraCategoriaId}
+               THEN CASE WHEN COALESCE(a.peso_ct, 0) > 0
+                         THEN COALESCE(FLOOR(a.qtd / NULLIF(i.peso_pedra, 0)), 0)
+                         ELSE a.qtd END
+               ELSE 0 END)                                      AS qtd_pedras,
       -- Sprint 3: peso em quilates (ct)
       SUM(CASE WHEN i.categoria_id = ${pedraCategoriaId} THEN COALESCE(a.peso_ct, 0) ELSE 0 END) AS pedras_ct,
       COALESCE(MIN(i.categoria_id), 0)::int                    AS categoria_id
