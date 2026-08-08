@@ -205,9 +205,10 @@ export async function registrarSaidaProtocolo(
       VALUES
         (${item.produto_id}, ${item.quantidade}, ${prot.local_origem_id}, ${prot.local_destino_id},
          ${"Protocolo #" + protocoloId}, ${protocoloId}, ${userId}::uuid)
-      RETURNING id
+      RETURNING id, movimento_saida_id
     `;
     criadas.push(transf.id);
+    await carimbarProtocoloNoMovimento(tx, transf.movimento_saida_id, protocoloId);
   }
 
   await tx`
@@ -217,6 +218,38 @@ export async function registrarSaidaProtocolo(
   `;
 
   return criadas;
+}
+
+/**
+ * Carimba o protocolo no movimento de estoque que o gatilho acabou de criar.
+ *
+ * O QUE: preenche `movimentacoes_estoque_comercial.protocolo_id` (coluna que já
+ *   existia, usada pela conversão de SKU) e acrescenta o número do protocolo na
+ *   observação da linha.
+ * POR QUE: quem audita o extrato de um produto vê "Transferência #281 → Fabrica"
+ *   e precisa saber qual protocolo autorizou aquilo — quem pediu, quem levou,
+ *   quem recebeu e as fotos estão todos pendurados no protocolo, não na
+ *   transferência.
+ * IMPACTO SE REMOVIDO: a saída e a entrada continuam corretas, mas voltam a ser
+ *   órfãs no extrato: dá para ver que a peça se moveu e não POR QUE se moveu.
+ *
+ * Feito aqui e não dentro do gatilho de propósito: `fn_transferencia_ec_envio` e
+ * `fn_transferencia_ec_recebimento` servem TODAS as transferências, inclusive as
+ * criadas direto pela tela de estoque (sem protocolo). Mexer neles para uma
+ * coluna que só a transferência-de-protocolo usa arriscaria o caminho antigo.
+ */
+async function carimbarProtocoloNoMovimento(
+  tx: typeof sql,
+  movimentoId: number | null | undefined,
+  protocoloId: number
+): Promise<void> {
+  if (!movimentoId) return;
+  await tx`
+    UPDATE alissonerp.movimentacoes_estoque_comercial
+    SET protocolo_id = ${protocoloId},
+        observacao = COALESCE(observacao, '') || ' · protocolo #' || ${protocoloId}::text
+    WHERE id = ${movimentoId} AND protocolo_id IS NULL
+  `;
 }
 
 /**
@@ -285,11 +318,17 @@ export async function receberTransferenciaProtocolo(
     await registrarSaidaProtocolo(tx, protocoloId, userId);
   }
 
-  await tx`
+  const concluidas = await tx`
     UPDATE alissonerp.transferencias_estoque_comercial
     SET status = 'concluido', recebido_por = ${userId}::uuid
     WHERE protocolo_id = ${protocoloId} AND status = 'pendente'
+    RETURNING movimento_entrada_id
   `;
+
+  // A entrada no destino também aponta o protocolo — mesma razão da saída.
+  for (const t of concluidas) {
+    await carimbarProtocoloNoMovimento(tx, t.movimento_entrada_id as number | null, protocoloId);
+  }
 }
 
 /**

@@ -61,7 +61,7 @@ interface Reserva {
   ordem_id:     number | null;
   numero_ordem: string | null;
   tipo_ordem:   string | null;
-  tipo_reserva: "venda" | "conversao_sku" | "conversao_estoque" | "ordem" | "indefinida";
+  tipo_reserva: "venda" | "conversao_sku" | "conversao_estoque" | "ordem" | "protocolo" | "indefinida";
   origem_label: string;
   created_at:   string;
 }
@@ -144,6 +144,10 @@ const RESERVA_TIPO_VISUAL: Record<Reserva["tipo_reserva"], { label: string; bg: 
   conversao_sku: { label: "Conversao SKU", bg: "#F3E8FF", color: "#7E22CE" },
   conversao_estoque: { label: "Conversao Estoque", bg: "#DCFCE7", color: "#166534" },
   ordem: { label: "Ordem", bg: "#FEF3C7", color: "#92400E" },
+  // Reserva de protocolo de transferencia: a peca esta segurada na origem
+  // enquanto ninguem coleta. Nao e bloqueio comercial nem de producao — e
+  // transporte esperando acontecer.
+  protocolo: { label: "Aguardando coleta", bg: "#EEF2FF", color: "#4338CA" },
   indefinida: { label: "Indefinida", bg: "#F3F4F6", color: "#4B5563" },
 };
 
