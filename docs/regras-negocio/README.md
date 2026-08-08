@@ -24,7 +24,7 @@
 | PCP / Produção | `pcp.md` | ⬜ a capturar |
 | Ordens | `ordens.md` | 🟨 só **garantia** documentado (17/07) — os outros 8 tipos, a capturar |
 | Metal/Ouro (purificação, ligação, quebra, cofre) | `metal.md` | ⬜ a capturar |
-| Protocolo | `protocolo.md` | ⬜ a capturar |
+| Protocolo (transporte de ordem, ouro e estoque) | `protocolo.md` | ✅ documentado |
 | Devolução | `devolucao.md` | ⬜ a capturar |
 | Precificação (curva) | `precificacao.md` | ⬜ a capturar |
 | Admin (usuários, permissões, parâmetros) | `admin.md` | ⬜ a capturar |

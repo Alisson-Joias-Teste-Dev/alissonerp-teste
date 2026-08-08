@@ -42,16 +42,39 @@ interface SangriaBaixaInfo {
   created_at: string;
 }
 
+/**
+ * REGRA DE NEGÓCIO: numa transferência de estoque, quem recebe precisa ver o que
+ * está conferindo — o trajeto, quem trouxe e a lista de SKU + quantidade. Mesma
+ * ideia da sangria, que não deixa concluir sem mostrar o peso do metal.
+ */
+interface TransferenciaInfo {
+  estado: string;
+  local_origem_nome: string | null;
+  local_destino_nome: string | null;
+  motoboy_nome: string | null;
+  solicitante_nome: string | null;
+  itens: { produto_id: number; sku: string | null; nome_produto: string | null; quantidade: number }[];
+}
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   protocoloId: number;
   direcao: "ida" | "volta";
   totalOrdens: number;
+  tipoProtocolo?: string | null;
+  /**
+   * REGRA DE NEGÓCIO: o mesmo modal serve os dois momentos em que a peça troca de
+   * mão numa transferência — "coleta" (quem leva confirma que pegou; o estoque sai
+   * da origem) e "chegada" (quem recebe confirma; o estoque entra no destino).
+   * O ritual é idêntico: conferir a lista de peças e fotografar. Só muda o texto
+   * e para onde a confirmação vai.
+   */
+  acao?: "chegada" | "coleta";
   onSuccess?: () => void;
 }
 
-export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, direcao, totalOrdens, onSuccess }: Props) {
+export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, direcao, totalOrdens, tipoProtocolo, acao = "chegada", onSuccess }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -61,9 +84,17 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
   const [ordens, setOrdens] = useState<OrdemRow[] | null>(null);
   const [ordensDetalhes, setOrdensDetalhes] = useState<OrdemDetalheFoto[]>([]);
   const [sangriaBaixa, setSangriaBaixa] = useState<SangriaBaixaInfo | null>(null);
+  const [transferencia, setTransferencia] = useState<TransferenciaInfo | null>(null);
+  const [cancelando, setCancelando] = useState(false);
+  const [motivoCancelamento, setMotivoCancelamento] = useState("");
+
+  const isTransferencia = tipoProtocolo === "transferencia";
 
   useEffect(() => {
     if (!isOpen) return;
+    setTransferencia(null);
+    setCancelando(false);
+    setMotivoCancelamento("");
     setError("");
     setSuccess(false);
     setFotoFile(null);
@@ -80,6 +111,15 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
       const d = await res.json().catch(() => ({}));
       setUserRole(d.role ?? "unknown");
     });
+
+    if (isTransferencia) {
+      setOrdens([]);
+      fetch(`/api/protocolo/${protocoloId}/produtos`)
+        .then((r) => r.json())
+        .then((d) => setTransferencia(d?.itens ? d : null))
+        .catch(() => setTransferencia(null));
+      return;
+    }
 
     fetch(`/api/protocolo/${protocoloId}`)
       .then((r) => r.json())
@@ -121,7 +161,7 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
         }
       })
       .catch(() => setOrdens([]));
-  }, [isOpen, protocoloId]);
+  }, [isOpen, protocoloId, isTransferencia]);
 
   function updateOrdemFoto(ordemId: number, file: File | null) {
     setOrdensDetalhes(prev => prev.map(od =>
@@ -131,8 +171,43 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
     ));
   }
 
+  /**
+   * Coleta: sobe a foto da retirada e chama a rota que faz a peça SAIR da origem.
+   * Quem confirma é quem está com a peça na mão — o backend só aceita de quem
+   * está cadastrado como transportador, e grava essa pessoa no protocolo.
+   */
+  async function handleColeta() {
+    setError("");
+    if (!fotoFile) { setError("Foto das peças é obrigatória."); return; }
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      const fotoPath = `coleta/${protocoloId}/${Date.now()}.jpg`;
+      const { error: upErr } = await supabase.storage
+        .from("protocolo-fotos")
+        .upload(fotoPath, fotoFile, { contentType: fotoFile.type || "image/jpeg", upsert: false });
+      if (upErr) throw new Error(`Upload foto: ${upErr.message}`);
+
+      const res = await fetch(`/api/protocolo/${protocoloId}/coleta`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ foto_path: fotoPath }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`);
+      setSuccess(true);
+      setTimeout(() => { onSuccess?.(); onClose(); }, 1200);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Erro ao confirmar coleta");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleSubmit() {
     setError("");
+
+    if (acao === "coleta") return handleColeta();
 
     // Sangria exige peso carregado da baixa vinculada (não receber às cegas)
     if (isSangria && (!sangriaBaixa || !sangriaBaixa.gramas || sangriaBaixa.gramas <= 0)) {
@@ -197,6 +272,34 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
     }
   }
 
+  /**
+   * REGRA DE NEGÓCIO: cancelar solta a reserva que a solicitação criou e, se a
+   * peça já tinha saído da origem, estorna a saída (a peça volta ao saldo de lá).
+   * O motivo é obrigatório — o banco também exige (chk_protocolo_cancelado_motivo).
+   * IMPACTO SE REMOVIDO: solicitação abandonada segura a peça fora do estoque
+   * disponível para sempre.
+   */
+  async function handleCancelar() {
+    setError("");
+    if (!motivoCancelamento.trim()) { setError("Informe o motivo do cancelamento."); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/protocolo/${protocoloId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ etapas: "cancelado", motivo_cancelamento: motivoCancelamento.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`);
+      setSuccess(true);
+      setTimeout(() => { onSuccess?.(); onClose(); }, 1200);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Erro ao cancelar transferência");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function handleClose() {
     setError("");
     setSuccess(false);
@@ -207,14 +310,22 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
 
   if (!isOpen) return null;
 
-  const isSangria = totalOrdens === 0;
-  const descricao = isSangria
-    ? "Confirme o recebimento do metal no destino. A baixa de ouro será atualizada para recebido."
-    : direcao === "ida"
-      ? `Isso criará ${totalOrdens} PCP(s) automaticamente e moverá as ordens para "em andamento".`
-      : `Isso criará ${totalOrdens} aprovação(ões) de consultora automaticamente.`;
+  const isSangria = !isTransferencia && totalOrdens === 0;
+  const descricao = acao === "coleta"
+    ? "Confira as peças e fotografe. Ao confirmar, elas saem do estoque da origem e ficam sob sua responsabilidade até a chegada."
+    : isTransferencia
+    ? transferencia?.estado === "em_rota"
+      ? "Confirme a chegada das peças. Elas entram no estoque do local de destino."
+      : "Confirme a chegada das peças. Como este trajeto não tem motoboy, a saída da origem e a entrada no destino acontecem agora, neste mesmo passo."
+    : isSangria
+      ? "Confirme o recebimento do metal no destino. A baixa de ouro será atualizada para recebido."
+      : direcao === "ida"
+        ? `Isso criará ${totalOrdens} PCP(s) automaticamente e moverá as ordens para "em andamento".`
+        : `Isso criará ${totalOrdens} aprovação(ões) de consultora automaticamente.`;
 
-  const bloqueado = userRole !== "" && !ROLES_CONCLUIR_PROTOCOLO.includes(userRole as typeof ROLES_CONCLUIR_PROTOCOLO[number]);
+  const bloqueado = acao === "coleta"
+    ? false
+    : userRole !== "" && !ROLES_CONCLUIR_PROTOCOLO.includes(userRole as typeof ROLES_CONCLUIR_PROTOCOLO[number]);
   const todasFotosConversaoOK = ordensDetalhes.length === 0 || ordensDetalhes.every(od => od.fotoFile !== null);
   const destinoLabel = sangriaBaixa?.destino === "fabrica" ? "Fábrica" : sangriaBaixa?.destino === "service" ? "Service" : sangriaBaixa?.destino === "alisson" ? "Alisson" : "—";
 
@@ -223,9 +334,15 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
       <div className="bg-white w-full max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-md md:mx-4 md:max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10" style={{ borderColor: C.cremeBorder }}>
           <div>
-            <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>Concluir Protocolo{isSangria ? " Sangria" : ""}</h3>
+            <h3 className="text-lg font-semibold" style={{ color: "#111827" }}>
+              {acao === "coleta" ? "Confirmar coleta" : isTransferencia ? "Confirmar chegada" : `Concluir Protocolo${isSangria ? " Sangria" : ""}`}
+            </h3>
             <p className="text-[12px] mt-0.5" style={{ color: "#9CA3AF" }}>
-              Protocolo #{protocoloId} · {isSangria ? "Recebimento de metal" : direcao === "ida" ? "Loja → Fábrica" : "Fábrica → Loja"}
+              Protocolo #{protocoloId} · {
+                isTransferencia
+                  ? `${transferencia?.local_origem_nome ?? "—"} → ${transferencia?.local_destino_nome ?? "—"}`
+                  : isSangria ? "Recebimento de metal" : direcao === "ida" ? "Loja → Fábrica" : "Fábrica → Loja"
+              }
             </p>
           </div>
           <button onClick={handleClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100">
@@ -264,8 +381,41 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
                 </div>
               )}
 
+              {/* Peças da transferência de estoque */}
+              {isTransferencia && (
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color: "#9CA3AF" }}>
+                    <Package size={11} />
+                    Peças neste protocolo ({transferencia?.itens.length ?? "…"})
+                  </p>
+                  <div className="rounded-xl overflow-hidden overflow-y-auto max-h-44" style={{ border: `1px solid ${C.cremeBorder}` }}>
+                    {transferencia === null ? (
+                      <p className="text-center py-4 text-xs" style={{ color: "#9CA3AF" }}>Carregando peças…</p>
+                    ) : transferencia.itens.length === 0 ? (
+                      <p className="text-center py-4 text-xs" style={{ color: "#9CA3AF" }}>Nenhuma peça encontrada</p>
+                    ) : (
+                      <table className="w-full text-xs">
+                        <tbody>
+                          {transferencia.itens.map((it, i) => (
+                            <tr key={it.produto_id} style={{ borderTop: i > 0 ? `1px solid ${C.cremeBorder}` : undefined }}>
+                              <td className="px-3 py-2 font-mono font-semibold" style={{ color: C.esmeralda }}>{it.sku ?? `#${it.produto_id}`}</td>
+                              <td className="px-3 py-2 truncate max-w-[150px]" style={{ color: "#374151" }}>{it.nome_produto ?? "—"}</td>
+                              <td className="px-3 py-2 font-mono text-right" style={{ color: "#6B7280" }}>{it.quantidade}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                  <p className="text-[11px] mt-1.5" style={{ color: "#9CA3AF" }}>
+                    Solicitado por {transferencia?.solicitante_nome ?? "—"}
+                    {transferencia?.motoboy_nome ? ` · trazido por ${transferencia.motoboy_nome}` : " · sem motoboy"}
+                  </p>
+                </div>
+              )}
+
               {/* Ordens do protocolo */}
-              <div>
+              <div className={isTransferencia ? "hidden" : undefined}>
                 <p className="text-[11px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color: "#9CA3AF" }}>
                   <Package size={11} />
                   Ordens neste protocolo ({ordens?.length ?? "…"})
@@ -386,6 +536,28 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
                   })}
                 </div>
               )}
+
+              {/* Cancelamento da transferência — solta a reserva (e estorna a saída, se já houve) */}
+              {isTransferencia && cancelando && (
+                <div className="rounded-xl p-3 space-y-2" style={{ border: "1px solid #FECACA", backgroundColor: "#FEF2F2" }}>
+                  <p className="text-xs font-semibold" style={{ color: "#991B1B" }}>
+                    Cancelar esta transferência
+                  </p>
+                  <p className="text-[11px]" style={{ color: "#991B1B" }}>
+                    {transferencia?.estado === "em_rota"
+                      ? "As peças voltam para o saldo do local de origem."
+                      : "A reserva é liberada e as peças voltam a ficar disponíveis para venda."}
+                  </p>
+                  <textarea
+                    value={motivoCancelamento}
+                    onChange={(e) => setMotivoCancelamento(e.target.value)}
+                    rows={2}
+                    placeholder="Motivo do cancelamento (obrigatório)"
+                    className="w-full px-3 py-2 rounded-lg border text-[13px] focus:outline-none"
+                    style={{ borderColor: "#FECACA" }}
+                  />
+                </div>
+              )}
             </>
           )}
 
@@ -396,21 +568,42 @@ export default function ConcluirProtocoloModal({ isOpen, onClose, protocoloId, d
           )}
           {success && (
             <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]" style={{ backgroundColor: "#ECFDF5", color: "#059669" }}>
-              <CheckCircle size={14} className="shrink-0" />Protocolo concluído!
+              <CheckCircle size={14} className="shrink-0" />{acao === "coleta" ? "Coleta confirmada! As peças saíram da origem." : "Protocolo concluído!"}
             </div>
           )}
         </div>
 
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t" style={{ borderColor: C.cremeBorder }}>
-          <button onClick={handleClose} className="px-4 py-2 rounded-lg text-[13px]" style={{ color: "#6B7280" }}>Cancelar</button>
-          {!bloqueado && (
+          <button onClick={handleClose} className="px-4 py-2 rounded-lg text-[13px]" style={{ color: "#6B7280" }}>Fechar</button>
+          {isTransferencia && acao !== "coleta" && !bloqueado && (
+            cancelando ? (
+              <button
+                onClick={handleCancelar}
+                disabled={loading || success || !motivoCancelamento.trim()}
+                className="px-4 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
+                style={{ backgroundColor: "#FEF2F2", color: "#DC2626", border: "1px solid #FECACA" }}
+              >
+                {loading ? "Cancelando..." : "Confirmar cancelamento"}
+              </button>
+            ) : (
+              <button
+                onClick={() => setCancelando(true)}
+                disabled={loading || success}
+                className="px-4 py-2 rounded-lg text-[13px] disabled:opacity-50"
+                style={{ color: "#DC2626" }}
+              >
+                Cancelar transferência
+              </button>
+            )
+          )}
+          {!bloqueado && !cancelando && (
             <button
               onClick={handleSubmit}
               disabled={loading || success || !fotoFile || !todasFotosConversaoOK || (isSangria && !sangriaBaixa)}
               className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-semibold disabled:opacity-50"
               style={{ backgroundColor: C.esmeralda, color: C.creme }}
             >
-              {loading ? <><Loader2 size={14} className="animate-spin" />Concluindo...</> : "Confirmar Conclusão"}
+              {loading ? <><Loader2 size={14} className="animate-spin" />{acao === "coleta" ? "Enviando..." : "Concluindo..."}</> : acao === "coleta" ? "Confirmar coleta" : isTransferencia ? "Confirmar chegada" : "Confirmar Conclusão"}
             </button>
           )}
         </div>
