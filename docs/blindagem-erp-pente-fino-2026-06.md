@@ -137,7 +137,16 @@ Itens originais **+**: regras de Metal/Ouro/Estoque/PCP capturadas (0.1); cada t
 
 ## TASK 3 — Comercial → Produção (orçamento → venda → fábrica → entrega)
 
-### 3.A ✅ Bug do cartão fantasma (o "12º") — SPEC COMPLETA
+### 3.A ✅ CORRIGIDO (08/08/2026) — Bug do cartão fantasma (o "12º")
+- **Fix aplicado:** `solicitar-aprovacao/route.ts` (bloco `cartao_desconto`) agora só cria a tarefa
+  se existir pagamento `forma='Cartão de Crédito'` e `status='pendente'` em `pagamentos_venda`.
+  `VendaDetalheClient.tsx` (`cartaoBloqueado`) passou a exigir o mesmo pagamento pendente antes de
+  mostrar o banner/bloquear. Isenção de item promo não foi tocada (continua natural, via `pct_desconto`
+  do item não refletir o desconto da promo). `NovaVendaClientV2.tsx` já checava `pagForma` — sem mudança.
+- **Pendente:** item 4 abaixo (auditoria de pagamentos, teto de edição pós-pago) não faz parte deste fix.
+
+<details>
+<summary>Spec original (referência)</summary>
 - **Regra (documentada):**
   - `comercial.md §2`: comissão e gates olham **forma de pagamento** — `Vale-Troca` e `A Receber` nem comissionam. Pagamento define o tratamento.
   - `promocoes.md` (decisão Jonathan 16/06): **item em promoção é ISENTO do gate de aprovação de desconto, "inclusive do gate de cartão"**. ⚠️ O conserto **tem que preservar essa isenção**.
@@ -149,6 +158,7 @@ Itens originais **+**: regras de Metal/Ouro/Estoque/PCP capturadas (0.1); cada t
   3. Front (`VendaDetalheClient.tsx`): não exibir/disparar o gate de cartão fora de cartão.
   4. **+ pedidos do chefe:** somar auditoria na tabela de pagamentos; teto de edição **depois de pago**.
 - **Como conferir:** venda paga 100% Pix com desconto 25% **não** abre tarefa de aprovação de cartão; venda no cartão com 25% **abre**; item promo 44% **não** abre (isenção).
+</details>
 
 ### 3.B 🔴 Os 11 bugs (B1–B11) — detalhe a reconstruir
 > **O detalhe técnico (causa-raiz, conserto, limpeza de dados) estava no doc que sumiu.** O chefe só
