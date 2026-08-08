@@ -101,7 +101,10 @@ const sqlMock = Object.assign(
       return Promise.resolve(cenario.itens);
     }
     if (sql.includes("INSERT INTO alissonerp.transferencias_estoque_comercial")) {
-      return Promise.resolve([{ id: 777 }]);
+      return Promise.resolve([{ id: 777, movimento_saida_id: 5001 }]);
+    }
+    if (sql.includes("SET status = 'concluido', recebido_por")) {
+      return Promise.resolve([{ movimento_entrada_id: 6001 }]);
     }
     if (sql.includes("FROM alissonerp.transferencias_estoque_comercial")) {
       return Promise.resolve(sql.includes("'concluido'") ? cenario.transferenciasConcluidas : cenario.transferenciasPendentes);
@@ -288,6 +291,14 @@ describe("POST /api/protocolo/[id]/coleta — a peça sai da origem", () => {
     expect(marca.values).toContain(OUTRO_USER);
   });
 
+  it("carimba o protocolo no movimento de SAÍDA (é o que liga o extrato à foto e a quem levou)", async () => {
+    await postColeta(req(`/api/protocolo/${PROTOCOLO_ID}/coleta`, { foto_path: "coleta/1.jpg" }), params());
+    const carimbos = queriesCom("UPDATE alissonerp.movimentacoes_estoque_comercial");
+    expect(carimbos).toHaveLength(2); // um por item
+    expect(carimbos[0].sql).toContain("SET protocolo_id");
+    expect(carimbos[0].values).toEqual([PROTOCOLO_ID, PROTOCOLO_ID, 5001]);
+  });
+
   it("recusa quem não está cadastrado como transportador", async () => {
     cenario.ehTransportador = false;
     authUser.role = "consultora";
@@ -382,6 +393,17 @@ describe("PATCH /api/protocolo/[id] — chegada no destino", () => {
     expect(rodou("SET status = 'concluido'")).toBe(true);
     // e a reserva da solicitação não fica pendurada
     expect(rodou("SET status = 'efetivado'")).toBe(true);
+  });
+
+  it("carimba o protocolo no movimento de ENTRADA", async () => {
+    cenario.transferenciasPendentes = [{ id: 777 }];
+    await patchProtocolo(
+      req(`/api/protocolo/${PROTOCOLO_ID}`, { etapas: "concluido", foto_conclusao: "chegada.jpg" }, "PATCH"),
+      params()
+    );
+    const carimbos = queriesCom("UPDATE alissonerp.movimentacoes_estoque_comercial");
+    expect(carimbos).toHaveLength(1);
+    expect(carimbos[0].values).toEqual([PROTOCOLO_ID, PROTOCOLO_ID, 6001]);
   });
 
   it("exige foto da chegada", async () => {

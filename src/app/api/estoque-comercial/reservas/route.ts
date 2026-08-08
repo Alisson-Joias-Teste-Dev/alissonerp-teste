@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     SELECT
       r.id, r.produto_id, r.quantidade, r.status,
       r.local_estoque_id, le.nome AS local_nome,
-      r.venda_id, r.item_venda_id, r.ordem_id,
+      r.venda_id, r.item_venda_id, r.ordem_id, r.protocolo_id,
       v.numero_venda,
       o.numero_ordem,
       o.tipo_ordem::text AS tipo_ordem,
@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
         WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao_sku' THEN 'conversao_sku'
         WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao' THEN 'conversao_estoque'
         WHEN r.ordem_id IS NOT NULL THEN 'ordem'
+        WHEN r.protocolo_id IS NOT NULL THEN 'protocolo'
         ELSE 'indefinida'
       END AS tipo_reserva,
       CASE
@@ -35,6 +36,7 @@ export async function GET(req: NextRequest) {
         WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao_sku' THEN 'Conversao SKU ' || COALESCE(o.numero_ordem, '#' || r.ordem_id::text)
         WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao' THEN 'Conversao Estoque ' || COALESCE(o.numero_ordem, '#' || r.ordem_id::text)
         WHEN r.ordem_id IS NOT NULL THEN 'Ordem ' || COALESCE(o.numero_ordem, '#' || r.ordem_id::text)
+        WHEN r.protocolo_id IS NOT NULL THEN 'Aguardando coleta - protocolo #' || r.protocolo_id::text
         ELSE 'Origem indefinida'
       END AS origem_label,
       p.nome AS nome_produto, p.sku,

@@ -67,7 +67,7 @@ export async function GET(
     const reservas = await sql`
       SELECT
         r.id, r.quantidade, r.local_estoque_id, r.status,
-        r.venda_id, r.item_venda_id, r.ordem_id,
+        r.venda_id, r.item_venda_id, r.ordem_id, r.protocolo_id,
         v.numero_venda,
         o.numero_ordem,
         o.tipo_ordem::text AS tipo_ordem,
@@ -79,6 +79,10 @@ export async function GET(
           WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao_sku' THEN 'conversao_sku'
           WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao' THEN 'conversao_estoque'
           WHEN r.ordem_id IS NOT NULL THEN 'ordem'
+          -- Reserva criada por um protocolo de transferencia: a peca esta segurada
+          -- na origem enquanto ninguem coleta. Sem este caso ela caia em
+          -- 'indefinida' e quem olha o produto nao sabia por que estava reservada.
+          WHEN r.protocolo_id IS NOT NULL THEN 'protocolo'
           ELSE 'indefinida'
         END AS tipo_reserva,
         CASE
@@ -86,6 +90,7 @@ export async function GET(
           WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao_sku' THEN 'Conversao SKU ' || COALESCE(o.numero_ordem, '#' || r.ordem_id::text)
           WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao' THEN 'Conversao Estoque ' || COALESCE(o.numero_ordem, '#' || r.ordem_id::text)
           WHEN r.ordem_id IS NOT NULL THEN 'Ordem ' || COALESCE(o.numero_ordem, '#' || r.ordem_id::text)
+          WHEN r.protocolo_id IS NOT NULL THEN 'Aguardando coleta - protocolo #' || r.protocolo_id::text
           ELSE 'Origem indefinida'
         END AS origem_label,
         r.created_at
