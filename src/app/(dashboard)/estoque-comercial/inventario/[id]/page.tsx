@@ -23,6 +23,8 @@
  *   - VEREDITO no topo (uma linha: falta/excesso/sem contagem/pendências).
  *   - 4 cartões de MÉTRICA em contagem dupla PEÇAS × SKUs (Faltando/Excesso
  *     continuam clicáveis = filtro). Peça = unidade física; SKU = modelo.
+ *     Os dois cartões de divergência SOMAM TUDO: Faltando = contadas a menos +
+ *     nunca contadas; Excesso = contadas a mais + peças "fora do inventário".
  *   - Faixa ÚNICA de filtros (status + pendência + categoria) em vez do muro
  *     de cartões grandes empilhados.
  *   - Linha do item enxuta: o resultado do detetive vira uma LINHA discreta
@@ -232,7 +234,7 @@ function FiltroChip({ label, count, ativo, color, onClick }: {
 const STATUS_EXPLICACAO: { status: StatusItem | "fora"; label: string; color: string; texto: string }[] = [
   { status: "ok", label: "OK", color: "#059669", texto: "Item foi contado e a quantidade bateu exatamente com o sistema." },
   { status: "faltando", label: "Faltando", color: "#DC2626", texto: "Item foi contado e apareceu MENOS do que o sistema esperava." },
-  { status: "excesso", label: "Excesso", color: "#2563EB", texto: "Item foi contado e apareceu MAIS do que o sistema esperava." },
+  { status: "excesso", label: "Excesso", color: "#2563EB", texto: "Peça que sobrou: item da lista contado a MAIS do que o sistema esperava + peça lida que nem estava na lista (\"Fora do invent.\")." },
   { status: "pendente", label: "Sem contagem", color: "#6B7280", texto: "Ninguém contou esse item ainda — falta informar a quantidade real." },
   { status: "fora", label: "Fora do invent.", color: "#7C3AED", texto: "Etiqueta lida pelo app RFID de um produto que NÃO faz parte da lista deste inventário." },
 ];
@@ -1211,10 +1213,11 @@ export default function InventarioDetalhePage() {
   const faltandoCount = itens.filter(i => getStatus(i) === "faltando").length;
   const semContagem   = itens.filter(i => getStatus(i) === "pendente").length;
   const excessoCount  = itens.filter(i => getStatus(i) === "excesso").length;
-  // "Fora do inventário": etiquetas lidas pelo app de produto fora da lista —
-  // card e filtro PRÓPRIOS (antes ficavam somados no card Excesso e a lista
-  // nunca respeitava filtro nenhum — bug reportado pelo Jonathan v2.82.1)
+  // "Fora do inventário": etiquetas lidas pelo app de produto fora da lista.
+  // Tem chip PRÓPRIO (recorte, igual "Sem contagem" é recorte de "Faltando"),
+  // mas ENTRA no card/filtro Excesso — peça que sobrou é sobra do mesmo jeito.
   const foraCount     = excedentesForaInventario.length;
+  const foraPecas     = excedentesForaInventario.reduce((s, e) => s + e.quantidade, 0);
   const pendAbertas   = itens.filter(i => i.pendencia_obs && i.pendencia_resolvida === null).length;
   const pendResolvidas = itens.filter(i => i.pendencia_resolvida === true).length;
   const pendNaoResolvidas = itens.filter(i => i.pendencia_resolvida === false).length;
@@ -1232,10 +1235,15 @@ export default function InventarioDetalhePage() {
   const naoContadasPecas      = itens.reduce((s, i) => s + (i.quantidade_contada === null ? i.quantidade_sistema : 0), 0);
   const faltandoPecas = faltandoContadasPecas + naoContadasPecas;
   const faltandoSkus  = itens.filter(i => i.quantidade_sistema > (i.quantidade_contada ?? 0)).length;
-  // EXCESSO = só peças contadas A MAIS de itens DA LISTA. O "fora do inventário"
-  //   (etiqueta de produto que nem está na lista) tem seção/filtro próprios.
-  const excessoPecas  = itens.reduce((s, i) => s + (i.diferenca > 0 ? i.diferenca : 0), 0);
-  const excessoSkus   = excessoCount;
+  // EXCESSO = TODA peça que sobrou: contada a MAIS em item DA LISTA + peça lida
+  //   de produto que nem estava na lista ("fora do inventário").
+  //   POR QUÊ: o card é o placar da sobra — igual "Faltando" soma as contadas a
+  //   menos + as nunca contadas, "Excesso" soma os excedentes + os fora da lista.
+  //   Separado, o topo dizia "1 peça a mais" com 4 chips estranhos na loja.
+  //   IMPACTO SE ALTERADO: o placar volta a subestimar a sobra e o filtro Excesso
+  //   deixa de trazer os "fora do inventário" (chip roxo continua como recorte).
+  const excessoPecas  = itens.reduce((s, i) => s + (i.diferenca > 0 ? i.diferenca : 0), 0) + foraPecas;
+  const excessoSkus   = excessoCount + foraCount;
 
   // Categorias existentes NESTE inventário, com a contagem de cada uma —
   // vira o filtro de chips no topo (combinável com status/pendência/busca)
@@ -1287,16 +1295,18 @@ export default function InventarioDetalhePage() {
 
   /**
    * "Chips fora do inventário" (etiqueta lida pelo app de produto que NÃO
-   * está na lista deste inventário) agora respeita categoria + busca, e SÓ
-   * aparece quando o filtro de status é null, "excesso" ou "fora" — clicar
-   * em Faltando/OK/Sem contagem esconde esta seção (bug do Jonathan v2.82.1:
+   * está na lista deste inventário) respeita categoria + busca, e SÓ aparece
+   * quando o filtro de status é null, "excesso" ou "fora" — clicar em
+   * Faltando/OK/Sem contagem esconde esta seção (bug do Jonathan v2.82.1:
    * a lista ficava fixa na tela não importa qual cartão fosse clicado).
+   * O "excesso" está aqui porque o card Excesso soma estes itens — filtrar
+   * por Excesso e não ver os "fora" seria placar de 5 com lista de 1.
    */
   const excedentesFiltrados = excedentesForaInventario.filter(e =>
     (!filtroCategoria || e.categoria_produto === filtroCategoria) &&
     (!filtro || e.sku.toLowerCase().includes(filtro) || e.nome_produto.toLowerCase().includes(filtro))
   );
-  const mostraForaInventario = filtroStatus === null || filtroStatus === "fora";
+  const mostraForaInventario = filtroStatus === null || filtroStatus === "fora" || filtroStatus === "excesso";
 
   const statusMap: Record<string, { label: string; bg: string; txt: string }> = {
     aberto:      { label: "Aberto",      bg: "#DBEAFE", txt: "#1E40AF" },
