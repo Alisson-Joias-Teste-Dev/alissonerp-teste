@@ -210,6 +210,18 @@ export async function POST(
     // se a chave ainda não existir) — antes era o literal 20 hardcoded aqui.
     const limiteCartao = await buscarLimiteDescontoCartao();
 
+    // BLINDAGEM: gate de cartão só se a venda tem pagamento em Cartão de Crédito
+    // de fato pendente. Sem isso, venda paga em Pix/Dinheiro com desconto acima
+    // do limite disparava aprovação de cartão indevidamente (caso da venda 15516).
+    const [pagCartao] = await sql`
+      SELECT 1 FROM alissonerp.pagamentos_venda
+      WHERE venda_id = ${vendaId} AND forma = 'Cartão de Crédito' AND status = 'pendente'
+      LIMIT 1
+    `;
+    if (!pagCartao) {
+      return NextResponse.json({ ok: true, message: "Esta venda não tem pagamento em cartão de crédito." });
+    }
+
     const itensDesconto = await sql`
       SELECT pct_desconto FROM alissonerp.itens_venda_erp
       WHERE venda_id = ${vendaId} AND pct_desconto > ${limiteCartao}

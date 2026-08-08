@@ -2308,8 +2308,12 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   // real do servidor. Fallback 20 = mesmo default do backend (LIMITE_DESCONTO_CARTAO_PADRAO).
   const LIMITE_DESCONTO_CARTAO = venda.limiteDescontoCartao ?? 20;
   const temDescontoCartao = venda.itens.some(i => Number(i.pct_desconto) > LIMITE_DESCONTO_CARTAO);
+  // BLINDAGEM: gate de cartão só vale se a venda tem pagamento em Cartão de
+  // Crédito pendente de fato — senão venda no Pix/Dinheiro com desconto >20%
+  // pedia aprovação de cartão indevidamente (caso da venda 15516).
+  const temPagamentoCartaoPendente = venda.pagamentos.some(p => p.forma === "Cartão de Crédito" && p.status === "pendente");
   const descontoCartaoAprovado = !!venda.desconto_cartao_aprovado_por_nome;
-  const cartaoBloqueado = temDescontoCartao && !descontoCartaoAprovado;
+  const cartaoBloqueado = temDescontoCartao && temPagamentoCartaoPendente && !descontoCartaoAprovado;
   // REGRA DE NEGÓCIO #1: verifica campo próprio de cartão, não de crédito
   const precisaSolicitarDescontoCartao = cartaoBloqueado && !venda.aprovacao_cartao_desconto_tarefa_id && venda.situacao === "rascunho";
   // REGRA DE NEGÓCIO (16/07): quantas aprovações esta venda ainda precisa pedir.
