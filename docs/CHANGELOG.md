@@ -2,6 +2,35 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(inventario): cartao Excesso soma os "fora do inventario" (v2.83.6)
+
+**O que faz:** no detalhe do inventario, o cartao **Excesso** passa a somar TUDO que sobrou —
+pecas contadas a mais de itens da lista **+** pecas "fora do inventario" (etiqueta lida pelo app
+RFID de produto que nem estava na lista). E clicar no cartao passa a mostrar as duas listas.
+
+**Por que:** ficou igual ao cartao **Faltando**, que ja soma "contadas a menos + nunca contadas".
+Separado, o placar do topo do inventario #83 dizia **"1 peca a mais"** enquanto havia **4 chips
+fora da lista** na loja — quem le o topo primeiro (que e todo mundo) subestimava a sobra.
+
+**Onde estava o bug do filtro:** `mostraForaInventario` (linha ~1299 de
+`src/app/(dashboard)/estoque-comercial/inventario/[id]/page.tsx`) so aceitava filtro nulo ou
+`"fora"`. Os proprios comentarios do arquivo (calculo e render) ja diziam "filtro nulo, Excesso
+ou Fora do invent." — o `"excesso"` ficou de fora do codigo. Clicar em Excesso **escondia** os
+fora do inventario em vez de traze-los junto.
+
+**A correcao (so front, nada de banco/API):**
+1. `foraPecas` = soma das quantidades dos itens fora do inventario.
+2. `excessoPecas` += `foraPecas` e `excessoSkus` += `foraCount`.
+3. `mostraForaInventario` aceita tambem `filtroStatus === "excesso"`.
+4. Texto do "!" (STATUS_EXPLICACAO) atualizado.
+
+Os chips **"Sem contagem"** e **"Fora do invent."** continuam como **recorte** de cada cartao —
+servem para isolar o subconjunto, nao para contar em paralelo.
+
+Doc: `docs/regras-negocio/comercial.md` §7.
+
+---
+
 ## fix(crediario): webhook do MP fecha a parcela paga pelo QR (v2.83.5)
 
 **O que faz:** quando o cliente paga a parcela do crediario pelo QR Pix / maquininha gerados na
