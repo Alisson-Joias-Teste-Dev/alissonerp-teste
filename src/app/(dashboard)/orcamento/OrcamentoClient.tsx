@@ -390,6 +390,11 @@ export default function OrcamentoClient({
   const [dirty, setDirty] = useState(false);
   const lockEnabled = config?.snapshot_lock_enabled !== false;
   const isHydratingRef = useRef(false);
+  // Consumida uma vez pelo efeito de auto-busca da pedra (~1478/~1506) — ver
+  // comentário lá. Marcada aqui quando aplicarOrcamento restaura uma pedra
+  // com preço já salvo, pra essa carga não disparar busca no catálogo.
+  const skipPedraLookup1Ref = useRef(false);
+  const skipPedraLookup2Ref = useRef(false);
   const markDirty = useCallback(() => {
     if (isHydratingRef.current) return;
     setDirty(true);
@@ -572,7 +577,14 @@ export default function OrcamentoClient({
           preco_total_rs: Number(p.preco_total_rs ?? 0),
         }));
       setStoneEntries(toEntries(ft.pedras_detalhadas));
-      if (orc.quantidade === 2 && orc.ficha2) setStoneEntries2(toEntries((orc.ficha2 as Record<string, any>).pedras_detalhadas));
+      // Pedra veio com preço salvo (rascunho de verdade, não peça em branco) →
+      // marca pra não buscar preço atual do catálogo nesta carga.
+      if (Number(ft.pedras_detalhadas?.[0]?.preco_total_rs ?? 0) > 0) skipPedraLookup1Ref.current = true;
+      if (orc.quantidade === 2 && orc.ficha2) {
+        const pedras2 = (orc.ficha2 as Record<string, any>).pedras_detalhadas;
+        setStoneEntries2(toEntries(pedras2));
+        if (Number(pedras2?.[0]?.preco_total_rs ?? 0) > 0) skipPedraLookup2Ref.current = true;
+      }
     } else {
       setOrcamentoTipo("peca");
       if (orc.peso) setPecaPeso(Number(orc.peso));
@@ -1396,8 +1408,12 @@ export default function OrcamentoClient({
   // ⚠️ Gate isHydratingRef: durante carga de rascunho, preserva stoneEntries
   // (pedras_detalhadas) salvas no banco. Sem o gate, esse efeito disparava com
   // derivedStoneCount errado e sobrescrevia a entrada salva.
+  // skipPedraLookup1Ref: mesma marca do efeito de auto-busca (~1478). Enquanto
+  // ela ainda não foi consumida (pedra recém-restaurada, catálogo ainda não
+  // consultado), NÃO reconstrói a entrada — senão reescreve com
+  // pedraSelecionada1 ainda null e perde o preço salvo antes da busca rodar.
   useEffect(() => {
-    if (isHydratingRef.current) return;
+    if (isHydratingRef.current || skipPedraLookup1Ref.current) return;
     if (!params.hasStones) {
       setStoneEntries((prev) => prev.length > 0 ? [] : prev);
       return;
@@ -1414,9 +1430,9 @@ export default function OrcamentoClient({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.hasStones, params.stoneType, params.stoneSize, derivedStoneCount, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups, pedraSelecionada1]);
-  // Anel 2 — mesmo gate
+  // Anel 2 — mesmo gate (ver comentário do anel 1)
   useEffect(() => {
-    if (isHydratingRef.current) return;
+    if (isHydratingRef.current || skipPedraLookup2Ref.current) return;
     if (!params2.hasStones) {
       setStoneEntries2((prev) => prev.length > 0 ? [] : prev);
       return;
@@ -1467,11 +1483,26 @@ export default function OrcamentoClient({
   }
 
   // Anel 1
+  // ⚠️ NÃO usar isHydratingRef aqui: a trava de hidratação libera ANTES do
+  // efeito de stoneEntries (~1399) rodar de novo, então a busca assíncrona
+  // ainda dispara com o gate já solto e troca o preço histórico restaurado
+  // de pedras_detalhadas pelo preço ATUAL do catálogo (bug real, confirmado
+  // ao vivo). Em vez de depender de tempo, aplicarOrcamento marca
+  // skipPedraLookup1Ref quando restaura uma pedra com preço salvo — essa
+  // marca (ref, não estado) é consumida UMA vez, na primeira passada em que
+  // hasStones/tipo/tamanho já estão com os valores restaurados, pulando a
+  // busca no catálogo pra essa carga. Qualquer troca de tipo/tamanho feita
+  // pelo vendedor depois disso não tem a marca e busca normalmente.
   useEffect(() => {
     if (!params.hasStones) { setPedraSelecionada1(null); setPedraStatus1("idle"); return; }
     if (!params.stoneType || !params.stoneSize) { setPedraStatus1("idle"); return; }
     // "Outro" não dispara auto-lookup — usuário fica responsável por gerenciar.
     if (params.stoneType === "Outro") { setPedraSelecionada1(null); setPedraStatus1("idle"); return; }
+    if (skipPedraLookup1Ref.current) {
+      skipPedraLookup1Ref.current = false;
+      setPedraStatus1("ok");
+      return;
+    }
     setPedraStatus1("buscando");
     const ctrl = new AbortController();
     buscarPedraNoCatalogo(params.stoneType, params.stoneSize, ctrl.signal).then((p) => {
@@ -1487,11 +1518,16 @@ export default function OrcamentoClient({
     return () => { ctrl.abort(); };
   }, [params.hasStones, params.stoneType, params.stoneSize]);
 
-  // Anel 2
+  // Anel 2 — mesma lógica do anel 1 (ver comentário acima)
   useEffect(() => {
     if (!params2.hasStones) { setPedraSelecionada2(null); setPedraStatus2("idle"); return; }
     if (!params2.stoneType || !params2.stoneSize) { setPedraStatus2("idle"); return; }
     if (params2.stoneType === "Outro") { setPedraSelecionada2(null); setPedraStatus2("idle"); return; }
+    if (skipPedraLookup2Ref.current) {
+      skipPedraLookup2Ref.current = false;
+      setPedraStatus2("ok");
+      return;
+    }
     setPedraStatus2("buscando");
     const ctrl = new AbortController();
     buscarPedraNoCatalogo(params2.stoneType, params2.stoneSize, ctrl.signal).then((p) => {
@@ -1582,7 +1618,11 @@ export default function OrcamentoClient({
     const comDesc = baseDesconto * (1 - descManual / 100);
     // Arredonda pra multiplo de 10 (mantem preco "redondo")
     const rounded = Math.round(comDesc / 10) * 10;
-    return { weight: rawWeight, price: rounded };
+    // descontoEfetivo: no par, é o MAIOR dos dois descontos (o que realmente
+    // pesa no preço acima). Precisa ser o mesmo valor gravado no save
+    // (descontoPctSalvar/novoSnapshot) — salvar só params.discountPercent no
+    // par escondia o desconto real do anel 2 e calculava comissão errada.
+    return { weight: rawWeight, price: rounded, descontoEfetivo: descManual };
   }, [
     allianceMode,
     pricing.weight, pricing.price, pricing2.weight, pricing2.price,
@@ -1766,7 +1806,7 @@ export default function OrcamentoClient({
       const valorTotal = usaSnapshotNoSave ? savedSnapshot!.valor : valorTotalCalc;
       const pesoTotal = usaSnapshotNoSave ? savedSnapshot!.peso : pricingTotal.weight;
       const markupSalvar = usaSnapshotNoSave ? savedSnapshot!.markup : pricing.mkp;
-      const descontoPctSalvar = usaSnapshotNoSave ? savedSnapshot!.desconto_pct : params.discountPercent;
+      const descontoPctSalvar = usaSnapshotNoSave ? savedSnapshot!.desconto_pct : pricingTotal.descontoEfetivo;
       const cotOuroSalvar = usaSnapshotNoSave ? savedSnapshot!.cotacao_ouro : params.goldPrice;
       const cotDolarSalvar = usaSnapshotNoSave ? savedSnapshot!.cotacao_dolar : cotacaoDolar;
       const valorOuroSalvar = usaSnapshotNoSave ? savedSnapshot!.valor_ouro : valorOuroCalc;
@@ -1778,7 +1818,7 @@ export default function OrcamentoClient({
       const novoSnapshot: OrcamentoSnapshot | null = usaSnapshotNoSave ? null : {
         valor: valorTotalCalc, peso: pricingTotal.weight,
         valor_ouro: valorOuroCalc, valor_pedras: valorPedrasCalc,
-        desconto_pct: params.discountPercent, markup: pricing.mkp,
+        desconto_pct: pricingTotal.descontoEfetivo, markup: pricing.mkp,
         cotacao_ouro: params.goldPrice, cotacao_dolar: cotacaoDolar,
       };
 
