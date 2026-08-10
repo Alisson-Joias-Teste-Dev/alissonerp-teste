@@ -2,6 +2,27 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## Pente-fino do front — limpeza de código morto validada em cópia isolada (v2.84.0 a v2.84.6)
+
+Espelho do pente-fino do banco, executado primeiro numa cópia isolada do projeto e só então
+aplicado aqui. Detalhe completo, números e método: `docs/migracao/PENTE-FINO-FRONT-2026-08-10.md`.
+
+- **v2.84.0 — fix(seguranca):** `switch-to-producao.sh` não carrega mais credenciais no corpo;
+  lê de `.env.production.local` (gitignored). Chaves antigas seguem no histórico → **rotacionar**.
+- **v2.84.1 — feat(migracao):** ~194 arquivos alinhados ao banco refatorado (status/quantidade/
+  observacao/configuracoes_unificado) + achados do teste de telas de 10/08.
+- **v2.84.2 — fase A:** removidos `.aiox-core` (sistema de robôs aposentado), `.gemini`,
+  `.opencode`, `tsl-bridge-setup` (duplicata), 8 arquivos do site na raiz e 70 scripts de uso único.
+- **v2.84.3 — fase B:** 57 arquivos mortos de `src/` (2 Nova Venda antigas, `components/configuracoes/`
+  antiga inteira, KanbanClient, Viewer3D, SearchPalette etc.). Confirmados por knip + contraprova.
+- **v2.84.4 — fase C:** módulos NF-e/fiscal e conciliação bancária removidos (decisão do dono,
+  livro §8) com costura nas telas vivas (vendas, devoluções, financeiro, permissões).
+  "Conciliação MP" (viva) intacta.
+- **v2.84.5 — fase D:** 4 dependências sem uso removidas do `package.json`.
+
+**Validação (na cópia e no repo real):** `tsc --noEmit` zero erros após cada fase; testes sem
+NENHUMA falha nova (13 suítes falhando = as mesmas de antes); `next build` completa sem erros.
+
 ## fix(orcamento): reabrir rascunho com pedra não troca mais o preço sozinho + desconto do par gravado corretamente (v2.83.6)
 
 **Bug 1 — preço da pedra mudava ao reabrir rascunho:** o efeito de auto-busca do preço atual da
