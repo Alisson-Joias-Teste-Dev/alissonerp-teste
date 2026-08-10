@@ -390,6 +390,39 @@ export default function OrcamentoClient({
   const [dirty, setDirty] = useState(false);
   const lockEnabled = config?.snapshot_lock_enabled !== false;
   const isHydratingRef = useRef(false);
+  // Consumida uma vez pelo efeito de auto-busca da pedra (~1478/~1506) — ver
+  // comentário lá. Marcada aqui quando aplicarOrcamento restaura uma pedra
+  // com preço já salvo, pra essa carga não disparar busca no catálogo.
+  const skipPedraLookup1Ref = useRef(false);
+  const skipPedraLookup2Ref = useRef(false);
+
+  // Altura da linha "painel + 3D" da tela de design (aliança), medida ao vivo.
+  // Pedido do Jonathan (08/2026): tudo numa tela só, sem rolagem, pra ver o
+  // desenho 3D mudando enquanto digita. Um número fixo (ex.: calc(100vh-180px))
+  // quebra sempre que o cabeçalho muda de altura (aviso de erro de validação
+  // quebra linha, nome de cliente longo, tela mais estreita, etc.) — por isso
+  // mede o fim real do cabeçalho e calcula o que sobra, ao vivo.
+  // Ref via callback (não useRef): a tela de design é um de vários retornos
+  // condicionais do componente (peça/config/etc. têm outro layout) — o
+  // callback dispara de novo sempre que ESSE cabeçalho especificamente
+  // monta, mesmo trocando de aba antes.
+  const [orcDesignHeaderEl, setOrcDesignHeaderEl] = useState<HTMLDivElement | null>(null);
+  const [orcDesignRowHeight, setOrcDesignRowHeight] = useState<number>(600);
+  useEffect(() => {
+    if (!orcDesignHeaderEl) return;
+    function recalc() {
+      const headerBottom = orcDesignHeaderEl!.getBoundingClientRect().bottom;
+      const BOTTOM_PADDING = 20; // espelha o p-4/md:p-5 do wrapper da tela
+      setOrcDesignRowHeight(Math.max(300, window.innerHeight - headerBottom - BOTTOM_PADDING));
+    }
+    recalc();
+    window.addEventListener("resize", recalc);
+    // ResizeObserver reage sozinho a qualquer mudança de altura do cabeçalho
+    // (erro de validação quebrando linha, nome de cliente comprido, etc.).
+    const ro = new ResizeObserver(recalc);
+    ro.observe(orcDesignHeaderEl);
+    return () => { window.removeEventListener("resize", recalc); ro.disconnect(); };
+  }, [orcDesignHeaderEl]);
   const markDirty = useCallback(() => {
     if (isHydratingRef.current) return;
     setDirty(true);
@@ -572,7 +605,14 @@ export default function OrcamentoClient({
           preco_total_rs: Number(p.preco_total_rs ?? 0),
         }));
       setStoneEntries(toEntries(ft.pedras_detalhadas));
-      if (orc.quantidade === 2 && orc.ficha2) setStoneEntries2(toEntries((orc.ficha2 as Record<string, any>).pedras_detalhadas));
+      // Pedra veio com preço salvo (rascunho de verdade, não peça em branco) →
+      // marca pra não buscar preço atual do catálogo nesta carga.
+      if (Number(ft.pedras_detalhadas?.[0]?.preco_total_rs ?? 0) > 0) skipPedraLookup1Ref.current = true;
+      if (orc.quantidade === 2 && orc.ficha2) {
+        const pedras2 = (orc.ficha2 as Record<string, any>).pedras_detalhadas;
+        setStoneEntries2(toEntries(pedras2));
+        if (Number(pedras2?.[0]?.preco_total_rs ?? 0) > 0) skipPedraLookup2Ref.current = true;
+      }
     } else {
       setOrcamentoTipo("peca");
       if (orc.peso) setPecaPeso(Number(orc.peso));
@@ -1396,8 +1436,12 @@ export default function OrcamentoClient({
   // ⚠️ Gate isHydratingRef: durante carga de rascunho, preserva stoneEntries
   // (pedras_detalhadas) salvas no banco. Sem o gate, esse efeito disparava com
   // derivedStoneCount errado e sobrescrevia a entrada salva.
+  // skipPedraLookup1Ref: mesma marca do efeito de auto-busca (~1478). Enquanto
+  // ela ainda não foi consumida (pedra recém-restaurada, catálogo ainda não
+  // consultado), NÃO reconstrói a entrada — senão reescreve com
+  // pedraSelecionada1 ainda null e perde o preço salvo antes da busca rodar.
   useEffect(() => {
-    if (isHydratingRef.current) return;
+    if (isHydratingRef.current || skipPedraLookup1Ref.current) return;
     if (!params.hasStones) {
       setStoneEntries((prev) => prev.length > 0 ? [] : prev);
       return;
@@ -1414,9 +1458,9 @@ export default function OrcamentoClient({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.hasStones, params.stoneType, params.stoneSize, derivedStoneCount, stonePrices, stoneMarkup, cotacaoDolar, allStoneMarkups, pedraSelecionada1]);
-  // Anel 2 — mesmo gate
+  // Anel 2 — mesmo gate (ver comentário do anel 1)
   useEffect(() => {
-    if (isHydratingRef.current) return;
+    if (isHydratingRef.current || skipPedraLookup2Ref.current) return;
     if (!params2.hasStones) {
       setStoneEntries2((prev) => prev.length > 0 ? [] : prev);
       return;
@@ -1467,11 +1511,26 @@ export default function OrcamentoClient({
   }
 
   // Anel 1
+  // ⚠️ NÃO usar isHydratingRef aqui: a trava de hidratação libera ANTES do
+  // efeito de stoneEntries (~1399) rodar de novo, então a busca assíncrona
+  // ainda dispara com o gate já solto e troca o preço histórico restaurado
+  // de pedras_detalhadas pelo preço ATUAL do catálogo (bug real, confirmado
+  // ao vivo). Em vez de depender de tempo, aplicarOrcamento marca
+  // skipPedraLookup1Ref quando restaura uma pedra com preço salvo — essa
+  // marca (ref, não estado) é consumida UMA vez, na primeira passada em que
+  // hasStones/tipo/tamanho já estão com os valores restaurados, pulando a
+  // busca no catálogo pra essa carga. Qualquer troca de tipo/tamanho feita
+  // pelo vendedor depois disso não tem a marca e busca normalmente.
   useEffect(() => {
     if (!params.hasStones) { setPedraSelecionada1(null); setPedraStatus1("idle"); return; }
     if (!params.stoneType || !params.stoneSize) { setPedraStatus1("idle"); return; }
     // "Outro" não dispara auto-lookup — usuário fica responsável por gerenciar.
     if (params.stoneType === "Outro") { setPedraSelecionada1(null); setPedraStatus1("idle"); return; }
+    if (skipPedraLookup1Ref.current) {
+      skipPedraLookup1Ref.current = false;
+      setPedraStatus1("ok");
+      return;
+    }
     setPedraStatus1("buscando");
     const ctrl = new AbortController();
     buscarPedraNoCatalogo(params.stoneType, params.stoneSize, ctrl.signal).then((p) => {
@@ -1487,11 +1546,16 @@ export default function OrcamentoClient({
     return () => { ctrl.abort(); };
   }, [params.hasStones, params.stoneType, params.stoneSize]);
 
-  // Anel 2
+  // Anel 2 — mesma lógica do anel 1 (ver comentário acima)
   useEffect(() => {
     if (!params2.hasStones) { setPedraSelecionada2(null); setPedraStatus2("idle"); return; }
     if (!params2.stoneType || !params2.stoneSize) { setPedraStatus2("idle"); return; }
     if (params2.stoneType === "Outro") { setPedraSelecionada2(null); setPedraStatus2("idle"); return; }
+    if (skipPedraLookup2Ref.current) {
+      skipPedraLookup2Ref.current = false;
+      setPedraStatus2("ok");
+      return;
+    }
     setPedraStatus2("buscando");
     const ctrl = new AbortController();
     buscarPedraNoCatalogo(params2.stoneType, params2.stoneSize, ctrl.signal).then((p) => {
@@ -1582,7 +1646,11 @@ export default function OrcamentoClient({
     const comDesc = baseDesconto * (1 - descManual / 100);
     // Arredonda pra multiplo de 10 (mantem preco "redondo")
     const rounded = Math.round(comDesc / 10) * 10;
-    return { weight: rawWeight, price: rounded };
+    // descontoEfetivo: no par, é o MAIOR dos dois descontos (o que realmente
+    // pesa no preço acima). Precisa ser o mesmo valor gravado no save
+    // (descontoPctSalvar/novoSnapshot) — salvar só params.discountPercent no
+    // par escondia o desconto real do anel 2 e calculava comissão errada.
+    return { weight: rawWeight, price: rounded, descontoEfetivo: descManual };
   }, [
     allianceMode,
     pricing.weight, pricing.price, pricing2.weight, pricing2.price,
@@ -1766,7 +1834,7 @@ export default function OrcamentoClient({
       const valorTotal = usaSnapshotNoSave ? savedSnapshot!.valor : valorTotalCalc;
       const pesoTotal = usaSnapshotNoSave ? savedSnapshot!.peso : pricingTotal.weight;
       const markupSalvar = usaSnapshotNoSave ? savedSnapshot!.markup : pricing.mkp;
-      const descontoPctSalvar = usaSnapshotNoSave ? savedSnapshot!.desconto_pct : params.discountPercent;
+      const descontoPctSalvar = usaSnapshotNoSave ? savedSnapshot!.desconto_pct : pricingTotal.descontoEfetivo;
       const cotOuroSalvar = usaSnapshotNoSave ? savedSnapshot!.cotacao_ouro : params.goldPrice;
       const cotDolarSalvar = usaSnapshotNoSave ? savedSnapshot!.cotacao_dolar : cotacaoDolar;
       const valorOuroSalvar = usaSnapshotNoSave ? savedSnapshot!.valor_ouro : valorOuroCalc;
@@ -1778,7 +1846,7 @@ export default function OrcamentoClient({
       const novoSnapshot: OrcamentoSnapshot | null = usaSnapshotNoSave ? null : {
         valor: valorTotalCalc, peso: pricingTotal.weight,
         valor_ouro: valorOuroCalc, valor_pedras: valorPedrasCalc,
-        desconto_pct: params.discountPercent, markup: pricing.mkp,
+        desconto_pct: pricingTotal.descontoEfetivo, markup: pricing.mkp,
         cotacao_ouro: params.goldPrice, cotacao_dolar: cotacaoDolar,
       };
 
@@ -3208,7 +3276,7 @@ export default function OrcamentoClient({
     >
 
       {/* ── Topo: Cliente + titulo + acoes ─────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div ref={setOrcDesignHeaderEl} className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <button onClick={() => setOrcamentoTipo(null)} className="text-xs text-gray-400 hover:text-gray-600 shrink-0">← Voltar</button>
           <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: C.esmeralda }}>
@@ -3313,8 +3381,14 @@ export default function OrcamentoClient({
         {saveMsg && <span className={`text-[11px] font-bold ${saveMsg.type === "success" ? "text-emerald-600" : "text-red-500"}`}>{saveMsg.text}</span>}
       </div>
 
-      {/* ── Flex: Controles (esquerda) | 3D (direita) ─────────────────── */}
-      <div style={{ display: "flex", gap: "12px", height: "calc(100vh - 130px)", overflow: "hidden" }}>
+      {/* ── Flex: Controles (esquerda) | 3D (direita) ───────────────────
+          altura medida ao vivo (orcDesignRowHeight) em vez de número fixo —
+          o valor fixo antigo (130px) ficou desatualizado e empurrava a barra
+          de preço pra fora da tela assim que o cabeçalho crescia (aviso de
+          erro, nome de cliente comprido, etc.). Pedido do Jonathan 08/2026:
+          tudo numa tela só, sem rolagem, pra ver o 3D atualizando enquanto
+          digita. ────────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: "12px", height: orcDesignRowHeight, overflow: "hidden" }}>
 
         {/* ── Painel de controles (ESQUERDA — 360px fixo, scroll) ─────── */}
         <div style={{ width: "360px", minWidth: "360px", overflowY: "hidden" }} className="space-y-1">
@@ -3337,11 +3411,11 @@ export default function OrcamentoClient({
           )}
 
           {/* ── Perfil + Medidas + Metal ── */}
-          <div className="bg-white rounded-lg border px-3 py-3 space-y-3" style={{ borderColor: C.cremeBorder }}>
-            {/* Perfil — grid 2 colunas (mais legível, fonte maior) */}
+          <div className="bg-white rounded-lg border px-3 py-2 space-y-2" style={{ borderColor: C.cremeBorder }}>
+            {/* Perfil — grid 3 colunas (compacto, cabe tudo numa tela) */}
             <div>
-              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Perfil</h3>
-              <div className="grid grid-cols-2 gap-1.5">
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Perfil</h3>
+              <div className="grid grid-cols-3 gap-1.5">
                 {PROFILE_OPTIONS.map((p) => (
                   <button
                     key={p.id}
@@ -3366,7 +3440,7 @@ export default function OrcamentoClient({
                       setProf(p.id);
                       setPar((prev) => ({ ...prev, width: 0, height: effectiveMin }));
                     }}
-                    className="py-1.5 px-2 text-[11px] font-semibold rounded-md border transition-all text-center leading-tight"
+                    className="py-1 px-2 text-[10px] font-semibold rounded-md border transition-all text-center leading-tight"
                     style={(activeRing === 1 ? profile : profile2) === p.id
                       ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
                       : { backgroundColor: "#fff", color: "#374151", borderColor: C.cremeBorder }
@@ -3378,7 +3452,7 @@ export default function OrcamentoClient({
 
             {/* Medidas — campos maiores, label com unidade */}
             <div>
-              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Medidas</h3>
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Medidas</h3>
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="text-[10px] text-gray-500 font-medium block mb-1">Aro</label>
@@ -3464,14 +3538,14 @@ export default function OrcamentoClient({
 
             {/* Metal — botões maiores */}
             <div>
-              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Metal</h3>
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Metal</h3>
               <div className="grid grid-cols-3 gap-1.5">
                 {METAL_COLORS.map((mc) => (
                   // goldDensity é recalculada pelo useEffect de teor (linha ~524)
                   // a partir do teorOuro atual + cor escolhida. Não setamos aqui
                   // pra evitar 1 frame com densidade errada.
                   <button key={mc.value} onClick={() => { updateParam("metalColor", mc.value); }}
-                    className="py-1.5 px-2 text-[11px] font-semibold rounded-md border transition-all text-center"
+                    className="py-1 px-2 text-[10px] font-semibold rounded-md border transition-all text-center"
                     style={activeParams.metalColor === mc.value
                       ? { backgroundColor: mc.value, color: mc.value === "#E8E8E8" ? "#333" : "#fff", borderColor: C.esmeralda, boxShadow: `0 0 0 2px ${C.esmeralda}` }
                       : { backgroundColor: "#fff", color: "#374151", borderColor: C.cremeBorder }
@@ -3612,7 +3686,7 @@ export default function OrcamentoClient({
               <span className="text-[11px] text-gray-600">Incluir pedras</span>
             </label>
             {activeParams.hasStones && (
-              <div className="space-y-2 mt-2">
+              <div className="space-y-1.5 mt-1.5">
                 <div>
                   <label className="text-[10px] text-gray-500 font-medium block mb-1">Tamanho (mm)</label>
                   <MedidaStepper
@@ -3667,7 +3741,7 @@ export default function OrcamentoClient({
                           updateParam("stoneRows", 1);
                         }
                       }}
-                        className="flex-1 py-1.5 text-[9px] font-semibold rounded-lg border transition-all text-center"
+                        className="flex-1 py-1 text-[9px] font-semibold rounded-lg border transition-all text-center"
                         style={active
                           ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
                           : { backgroundColor: "#fff", color: "#6b7280", borderColor: C.cremeBorder }
@@ -3686,7 +3760,7 @@ export default function OrcamentoClient({
                 )}
                 <div>
                   <span className="text-[11px] text-gray-500 block mb-1">Tipo de pedra:</span>
-                  <div className="grid grid-cols-3 gap-1">
+                  <div className="grid grid-cols-6 gap-1">
                     {["Diamante", "Zirconia", "Rubi", "Esmeralda", "Safira", "Outro"].map((tipo) => {
                       // Normaliza acentos+case pra comparar "Zircônia" (legado) com "Zirconia" (atual)
                       const norm = (s: string) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -3696,7 +3770,7 @@ export default function OrcamentoClient({
                         key={tipo}
                         type="button"
                         onClick={() => updateParam("stoneType", tipo)}
-                        className="py-1.5 px-1 text-[10px] font-semibold rounded-md border transition-all"
+                        className="py-1 px-0.5 text-[8px] leading-tight font-semibold rounded-md border transition-all"
                         style={isSelected
                           ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
                           : { backgroundColor: "#fff", color: "#374151", borderColor: C.cremeBorder }
@@ -3762,7 +3836,7 @@ export default function OrcamentoClient({
               const extras = activeRing === 1 ? textosExtras : textosExtras2;
               const setExtras = activeRing === 1 ? setTextosExtras : setTextosExtras2;
               return (
-              <div className="space-y-2 mt-2">
+              <div className="space-y-1.5 mt-1.5">
                 {/* Primeiro nome — incluso */}
                 <div>
                   <label className="text-[8px] text-gray-400 block">Nome principal <span className="text-emerald-500">(incluso)</span></label>
@@ -4334,7 +4408,7 @@ function MedidaStepper({
 // ── Card wrapper ─────────────────────────────────────────────────────────────
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-lg border px-2 py-1.5 space-y-1" style={{ borderColor: C.cremeBorder }}>
+    <div className="bg-white rounded-lg border px-2 py-1 space-y-1" style={{ borderColor: C.cremeBorder }}>
       <h3 className="text-[8px] font-bold uppercase tracking-wider text-gray-400">{title}</h3>
       {children}
     </div>

@@ -2,6 +2,37 @@
 
 > 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
 
+## fix(orcamento): reabrir rascunho com pedra não troca mais o preço sozinho + desconto do par gravado corretamente (v2.83.9)
+
+**Bug 1 — preço da pedra mudava ao reabrir rascunho:** o efeito de auto-busca do preço atual da
+pedra no catálogo (`OrcamentoClient.tsx`, anel 1 e anel 2) rodava mesmo ao carregar um rascunho já
+salvo, e como a busca é assíncrona, sobrescrevia a pedra restaurada de `pedras_detalhadas` com o
+preço ATUAL do catálogo — mudando o valor combinado com o cliente sem nenhuma ação da vendedora.
+Uma primeira tentativa usando a trava `isHydratingRef` (igual aos efeitos vizinhos) não resolveu:
+testado ao vivo, a trava libera ANTES da busca assíncrona ter chance de rodar de novo — timing não é
+confiável pra esse caso. Fix real: `aplicarOrcamento` marca uma flag (`skipPedraLookupRef`, uma por
+anel) quando restaura uma pedra com preço já salvo; o efeito de busca consome essa flag (não busca)
+na primeira vez que roda com os dados já carregados, e o efeito que reconstrói a entrada da pedra
+(`stoneEntries`) respeita a mesma flag pra não recalcular com a pedra ainda vazia antes da hora.
+Qualquer troca de tipo/tamanho feita pela vendedora depois disso busca normalmente.
+
+**Bug 2 — desconto do par gravado não batia com o cobrado:** no par de alianças, o valor cobrado
+usa `Math.max(desconto anel 1, desconto anel 2)`, mas o campo `desconto_pct` salvo usava só o
+desconto do anel 1 — escondendo o desconto real e calculando a faixa de comissão da vendedora
+errada (`api/orcamento/[id]/route.ts`, cálculo de comissão por faixa). Fix: `pricingTotal` passou a
+expor `descontoEfetivo` (a mesma fórmula usada no cálculo do valor) e o save (`handleSave`) usa esse
+valor em vez de `params.discountPercent` — elimina a duplicação da fórmula que causou a divergência.
+
+**Não mexe em:** schema, migrations, aparência da tela. Achados via auditoria completa do módulo de
+orçamentos (mais 3 itens pendentes de aprovação: aprovar orçamento rejeitado sem trava no backend,
+funções de pedra manual sem botão na tela, `pecaPricing` com desconto errado/variável não usada).
+
+**Testado:** `tsc --noEmit` zero erros. Bug 1 testado ao vivo (homolog local) num rascunho real de
+par de alianças com pedra (ORC-0000191) — confirmado, via rede, que a busca no catálogo não dispara
+mais ao reabrir, e o valor da pedra continua batendo com o histórico salvo. Bug 2 conferido por
+leitura de código (troca de variável simples, sem parte assíncrona) — não testado clicando na tela
+porque o usuário de teste usado não tem permissão de desconto.
+
 ## fix(inventario): cartao Excesso soma os "fora do inventario" (v2.83.6)
 
 **O que faz:** no detalhe do inventario, o cartao **Excesso** passa a somar TUDO que sobrou —
