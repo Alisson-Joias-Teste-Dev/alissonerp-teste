@@ -4,7 +4,9 @@
 > **Onde foi feito:** numa CÓPIA isolada do projeto (`C:\Users\aliss\ERP.IAlisson-copia-pentefino`),
 > sem `.git` (impossível publicar dali) e sem arquivos de senha. **Produção e o repositório real
 > não foram tocados.** Os 195 arquivos da migração de ontem seguem intactos no repositório real.
-> **Status:** limpeza EXECUTADA e validada na cópia. Aplicar no repositório real depende do "pode" do Alisson.
+> **Status:** limpeza EXECUTADA na cópia, validada, e — com o "pode" do Alisson — APLICADA no
+> repositório real e publicada na `homolog` em 10/08 (commits v2.84.0–v2.84.6). A cópia isolada
+> foi apagada depois disso (as listas de removidos foram preservadas nesta pasta).
 
 ---
 
@@ -48,7 +50,7 @@ arquivos, 239.785 → 217.505 linhas (**−22.280 linhas de código do sistema**
   referenciados por configuração/outros scripts foram mantidos; 4 mencionados só em docs (740 linhas) também.
 
 ### Fase B — código morto dentro de `src/` (57 arquivos, ~14,2 mil linhas)
-Destaques (lista completa: `knip-arquivos-mortos.txt` na cópia):
+Destaques (lista completa: `pente-fino-front-lista-mortos.txt` nesta pasta):
 - **2 telas antigas de "Nova Venda"** — `NovaVendaClient.tsx` (1.837) + `NovaVendaClientLegado.tsx`
   (1.822). Só a V2 é usada. Eram a maior fonte de duplicação do sistema (~2,5 mil linhas clonadas).
 - **Tela de configurações ANTIGA inteira** — `src/components/configuracoes/` (34 componentes,
@@ -116,8 +118,8 @@ gestão-estoque/Dashboard 2.883, ServiceApp 2.758, ProdutoDrawer 2.757.
 
 ## 6. Como aplicar no repositório REAL (aguarda o "pode" do Alisson)
 
-1. Repetir as fases A→D no repositório real (as listas exatas estão na cópia:
-   `knip-arquivos-mortos.txt`, `scripts-lixo-real.txt`) — ou espelhar a cópia validada.
+1. ~~Repetir as fases A→D no repositório real~~ FEITO em 10/08 (commits v2.84.2–v2.84.5). Listas exatas:
+   `pente-fino-front-lista-mortos.txt` e `pente-fino-front-lista-scripts.txt` (nesta pasta).
 2. Commit em blocos separados (um por fase) na `homolog`, depois dos 195 arquivos de ontem
    (ordem: primeiro salvar ontem, depois o pente-fino — são trabalhos distintos).
 3. `tsc` + testes após cada bloco. NADA vai para produção/`main` sem aprovação separada.
