@@ -22,8 +22,6 @@ import PagamentoForm, { type PagamentoEntry, fmt as fmtPagamento } from "@/compo
 import PainelCrediario from "@/components/vendas/PainelCrediario";
 import { calcularCrediPreview, type CrediTipo } from "@/lib/credi-preview";
 import UpgradeItemFields from "@/components/vendas/UpgradeItemFields";
-import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
-import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 // REGRA DE NEGÓCIO: modal de entrega (parcial/total) da venda
 import MarcarEntregaModal from "@/components/entregas/MarcarEntregaModal";
 import { useErrorStore } from "@/stores/errorStore";
@@ -162,8 +160,6 @@ interface Venda {
     valorPedra: number | null;
     pedras: Array<{ tipo: string | null; corte: string | null; tamanho_mm: number | null; qtd: number | null; ct_total: number | null; preco_total_rs: number | null }>;
   }>;
-  empresa_emitente_id?: number | null;
-  nota_fiscal_id?: number | null;
   descontoThreshold?: number | null;
   devolucoes?: Array<{
     id: number;
@@ -663,8 +659,6 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [clienteSyncMsg, setClienteSyncMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
-  const [abrirNfce, setAbrirNfce] = useState(false);
-  const [verNotaId, setVerNotaId] = useState<number | null>(null);
   // REGRA DE NEGÓCIO: controla a abertura do modal de Marcar Entrega — permite
   // registrar entregas parciais ou totais dos itens da venda aprovada.
   const [showMarcarEntrega, setShowMarcarEntrega] = useState(false);
@@ -2266,21 +2260,6 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           </div>
         </div>
         <div className="flex items-center gap-1">
-          {venda && venda.nota_fiscal_id ? (
-            <button onClick={() => setVerNotaId(venda.nota_fiscal_id!)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
-              style={{ borderColor: "#6EE7B7", color: "#065F46" }}
-              title="Ver NFC-e emitida">
-              <FileText size={13} /> NFC-e
-            </button>
-          ) : venda ? (
-            <button onClick={() => setAbrirNfce(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
-              style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
-              title="Emitir NFC-e">
-              <FileText size={13} /> NFC-e
-            </button>
-          ) : null}
           <button onClick={gerarPdf} disabled={gerandoPdf}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 hover:bg-gray-50"
             style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
@@ -4421,16 +4400,6 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
 
       </div>
     </div>
-    {abrirNfce && venda && (
-      <EmitirNfceModal
-        venda={{ id: venda.id, numero_venda: venda.numero_venda, total_venda: venda.total_venda, cliente_id: venda.cliente_id }}
-        onClose={() => setAbrirNfce(false)}
-        onSuccess={() => { load(); }}
-      />
-    )}
-    {verNotaId && (
-      <NotaFiscalDetalheModal notaId={verNotaId} onClose={() => setVerNotaId(null)} />
-    )}
     {solicitarPayload && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
         <div className="w-full max-w-md rounded-xl bg-white shadow-xl border" style={{ borderColor: C.cremeBorder }}>

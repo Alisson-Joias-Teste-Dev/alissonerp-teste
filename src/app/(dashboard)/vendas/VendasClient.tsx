@@ -5,9 +5,8 @@ import { useRouter } from "next/navigation";
 import {
   Search, RefreshCw, Loader2, Plus, TrendingUp,
   ShoppingBag, DollarSign, ChevronRight, Trophy,
-  ChevronLeft, Wallet, Receipt, FileCheck, History,
+  ChevronLeft, Wallet, History,
 } from "lucide-react";
-import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import LegacySaleModal from "@/components/vendas/LegacySaleModal";
 import Link from "next/link";
 import { useErrorStore } from "@/stores/errorStore";
@@ -67,9 +66,6 @@ interface VendaERP {
   bloqueado:          boolean;
   qtd_itens:          number;
   total_pago:         number;
-  nota_fiscal_id:     number | null;
-  nfce_chave_44:      string | null;
-  empresa_emitente_id: number | null;
   entrega_sem_pagamento_aprovada?: boolean;
   saldo_financeiro_aberto?: number;
   entregue_com_pendencia_financeira?: boolean;
@@ -156,7 +152,6 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
   const [totalPaginas, setTotalPaginas] = useState(1);
 
   // NFC-e modal
-  const [vendaNfce, setVendaNfce] = useState<VendaERP | null>(null);
   // Legacy sale modal
   const [showLegacyModal, setShowLegacyModal] = useState(false);
 
@@ -604,20 +599,6 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          {v.nota_fiscal_id ? (
-                            <span title="NFC-e emitida" className="p-1 inline-flex">
-                              <FileCheck size={14} className="text-emerald-600" />
-                            </span>
-                          ) : v.empresa_emitente_id ? (
-                            <button
-                              title="Emitir NFC-e"
-                              onClick={e => { e.stopPropagation(); setVendaNfce(v); }}
-                              className="p-1 rounded hover:bg-stone-100 transition-colors inline-flex"
-                              style={{ color: "#9CA3AF" }}
-                            >
-                              <Receipt size={14} />
-                            </button>
-                          ) : null}
                           <Link
                             href={`/vendas/${v.id}`}
                             className="p-1 rounded hover:bg-gray-100 transition-colors inline-flex"
@@ -672,14 +653,6 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
           </div>
         )}
       </div>
-
-      {vendaNfce && (
-        <EmitirNfceModal
-          venda={vendaNfce}
-          onClose={() => setVendaNfce(null)}
-          onSuccess={() => { fetchVendas(inicio, fim, pagina); }}
-        />
-      )}
 
       {showLegacyModal && (
         <LegacySaleModal
