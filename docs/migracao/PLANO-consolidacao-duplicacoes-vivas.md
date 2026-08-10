@@ -27,7 +27,7 @@
 | **1** | ✅ **FEITO 10/08** — `getComissao()` → `src/lib/comissao.ts`, wrapper local em cada tela chama a versão única | P | baixíssimo | 2 cópias eram byte-a-byte idênticas. `tsc` limpo, testes = baseline exato (613/80/1). |
 | **2** | ✅ **FEITO 10/08** — `SUM(saldo)` → `src/lib/estoque-saldo.ts::buscarSaldoEstoque()`, aplicado em 8 dos 10 call sites (distribuição, PCP, purificação/ligação ×4, relatórios, service ×2) | P/M | baixo | 2 call sites ficaram DE FORA de propósito por serem diferentes de verdade: `purificacao/liga-tipos` (subquery correlacionada por linha) e `service/transferir-insumo` linha 133 (GROUP BY em 2 depósitos numa query só). `tsc` limpo, testes = baseline exato, jscpd caiu de 17.795 para 13.572 linhas duplicadas. |
 | **3** | ✅ **FEITO 10/08** — Modais "Nova Ordem": **3a** extrai a busca de produto compartilhada (Rep.Loja × Serv.Interno) pra `_shared/ProdutoBuscaOrdem.tsx`; **3b** cria `NovaOrdemVendaBaseModal.tsx` (molde novo, não o `NovaOrdemServicoBaseModal` — são famílias diferentes, ver nota abaixo) e migra Fabricação/Rep.Venda pra wrappers finos | M | médio | Ao ler o código de verdade, a suposição original ("já existe base pronta") estava errada — corrigido com o Alisson antes de mexer (ver nota). `tsc` limpo, testes = baseline exato, testado AO VIVO no navegador com dado real (Kenia Costa Lopes/#15926) nos dois tipos. |
-| **4** | **Modais de apontamento** — `ApontamentoDistModal` × `ApontamentoPCPModal` (187 linhas iguais) → base comum | M | médio | Fluxo de ouro, mas só a TELA — as rotinas protegidas do banco (`fn_processar_apontamento_pcp` etc.) não são tocadas. |
+| **4** | ✅ **FEITO 10/08** — Modais de apontamento: `ApontamentoDistModal` × `ApontamentoPCPModal` — extraídos `useValidacaoIABalanca` (hook) + `FotoBalancaCampo` + `InsumoPedraAutocomplete` pra `_shared/` | M | médio | Fluxo de ouro, só a TELA — rotinas protegidas do banco não tocadas. Achado real: o tipo "8 — Outros" significa coisas DIFERENTES nas duas telas (Dist=form simples, PCP=foto+IA completa) — NÃO unificado, ficou como estava. `tsc` limpo, testes = baseline exato, testado AO VIVO no PCP com dado real. 1576→1138 linhas somadas. |
 | **5** | **Purificação** — `LigacaoTab` × `PurificacaoClient` (457 linhas iguais, mesmo módulo) → componentes compartilhados | M | médio | Maior cluster interno de um módulo só. |
 | **6a** | **Reviver os testes de pagamento** (pré-requisito da 6b) | M | — | As 13 suítes que falham hoje são quase todas da área de pagamento (checar-point, criar-pix, webhook-mp, confirmar-pagamento…). Sem essa rede de proteção, NÃO se mexe em código de dinheiro. |
 | **6b** | **Pagamentos** — `CartaoInline` × `MercadoPagoCobranca` (163) + rotas criar-link/criar-pix duplicadas entre PagBank e Mercado Pago (151+123) → núcleo de cobrança único | M/G | **ALTO (dinheiro)** | Só depois da 6a. Teste manual até a beira da cobrança (sem cobrar de verdade); cobrança real só em homolog com valor simbólico se o Alisson autorizar. |
@@ -69,6 +69,19 @@ banco de teste local), percorri as telas de Fabricação (até a Ficha Técnica,
 bloqueou por "Milimetragem obrigatório" — prova que a regra de negócio disparou de verdade) e
 Reposição Venda (as 4 telas até a Revisão, confirmando texto/rota corretos). Nenhuma ordem de teste
 foi de fato criada.
+
+## Nota de verificação — Etapa 4
+
+Mesma lição da etapa 3, num caso menor: os dois modais de apontamento (Distribuição e PCP) pareciam
+duplicados em ~187 linhas, mas ao ler o código de verdade, o número do tipo "8" (Outros) significa
+coisas DIFERENTES em cada tela (Distribuição trata como formulário simples sem foto; PCP trata como
+fluxo completo com foto+validação por IA e um filtro de categoria próprio). Confirmado com diff que
+essa é a única divergência real de negócio; o resto (validação da foto por IA e busca de pedra) era
+byte-a-byte idêntico (só formatação), então só essas duas partes foram extraídas.
+
+Verificação ao vivo: abri o apontamento de uma ordem PCP real (#1668), troquei pro tipo "Entrada de
+Pedra", busquei e selecionei um insumo real ("Diamante 1,3mm/PD1073") e confirmei que o texto
+exclusivo do PCP ("Câmera ou galeria") apareceu certinho no campo de foto.
 
 ## Ritmo e paradas
 
