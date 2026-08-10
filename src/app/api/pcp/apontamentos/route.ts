@@ -4,6 +4,9 @@ import sql from "@/lib/db";
 import { recalcularTotaisPCP } from "@/lib/recalcular-totais-pcp";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+// REGRA DE NEGOCIO: saldo de estoque centralizado em src/lib/estoque-saldo.ts
+// (pente-fino 10/08/2026, etapa 2) — nao reimplementar SUM(saldo) aqui.
+import { buscarSaldoEstoque } from "@/lib/estoque-saldo";
 import { logAudit } from "@/lib/audit";
 import { zodError } from "@/lib/schemas/common";
 
@@ -143,11 +146,7 @@ export async function POST(req: NextRequest) {
         );
       }
     } else {
-      const saldo = await sql`
-        SELECT COALESCE(SUM(saldo), 0) AS saldo FROM alissonerp.vw_saldo_estoque
-        WHERE deposito_id = ${almoxarifadoId} AND insumo_id = ${insumo_id}
-      `;
-      const saldoAtual = Number(saldo[0]?.saldo ?? 0);
+      const saldoAtual = await buscarSaldoEstoque(sql, almoxarifadoId, insumo_id);
       if (saldoAtual < qtd) {
         const unidade = tipo_apontamento_id === 3 ? "UN" : "g";
         const fmt = (v: number) => tipo_apontamento_id === 3 ? Math.round(v).toString() : v.toFixed(2);

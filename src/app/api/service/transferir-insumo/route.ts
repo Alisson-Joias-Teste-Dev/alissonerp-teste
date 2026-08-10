@@ -5,6 +5,9 @@ import { uploadFile } from "@/lib/storage";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+// REGRA DE NEGOCIO: saldo de estoque centralizado em src/lib/estoque-saldo.ts
+// (pente-fino 10/08/2026, etapa 2) — nao reimplementar SUM(saldo) aqui.
+import { buscarSaldoEstoque } from "@/lib/estoque-saldo";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 
@@ -71,12 +74,7 @@ export async function POST(req: NextRequest) {
     if (!insumo) return NextResponse.json({ error: "Insumo não encontrado" }, { status: 404 });
 
     // ── 3. Verificar saldo da origem ──────────────────────────────────────────
-    const saldoRows = await sql`
-      SELECT COALESCE(SUM(saldo), 0) AS saldo
-      FROM alissonerp.vw_saldo_estoque
-      WHERE deposito_id = ${origemId} AND insumo_id = ${insumoId}
-    `;
-    const saldoAtual = parseFloat(String(saldoRows[0]?.saldo ?? 0));
+    const saldoAtual = await buscarSaldoEstoque(sql, origemId, insumoId);
     if (saldoAtual < quantidade) {
       return NextResponse.json(
         { error: `Saldo insuficiente. Disponível: ${saldoAtual.toFixed(4)}, solicitado: ${quantidade.toFixed(4)}` },

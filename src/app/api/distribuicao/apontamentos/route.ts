@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+// REGRA DE NEGOCIO: saldo de estoque centralizado em src/lib/estoque-saldo.ts
+// (pente-fino 10/08/2026, etapa 2) — nao reimplementar SUM(saldo) aqui.
+import { buscarSaldoEstoque } from "@/lib/estoque-saldo";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { zodError } from "@/lib/schemas/common";
@@ -42,11 +45,7 @@ export async function POST(req: NextRequest) {
   // Validação de estoque no Almoxarifado Central para tipos que saem do almox
   // Tipos 1 (Aditivo), 2 (Entrada Metal), 3 (Entrada Pedra): saem do Almoxarifado
   if ((tipo_apontamento_id === 1 || tipo_apontamento_id === 2 || tipo_apontamento_id === 3) && insumo_id) {
-    const saldo = await sql`
-      SELECT COALESCE(SUM(saldo), 0) AS saldo FROM alissonerp.vw_saldo_estoque
-      WHERE deposito_id = ${almoxarifadoId} AND insumo_id = ${insumo_id}
-    `;
-    const saldoAtual = Number(saldo[0]?.saldo ?? 0);
+    const saldoAtual = await buscarSaldoEstoque(sql, almoxarifadoId, insumo_id);
     if (saldoAtual < qtd) {
       const ehPedra = tipo_apontamento_id === 3;
       const unidade = ehPedra ? "UN" : "g";

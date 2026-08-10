@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
+// REGRA DE NEGOCIO: saldo de estoque centralizado em src/lib/estoque-saldo.ts
+// (pente-fino 10/08/2026, etapa 2) — nao reimplementar SUM(saldo) aqui.
+import { buscarSaldoEstoque } from "@/lib/estoque-saldo";
 
 // ─── GET /api/relatorios?tipo=producao|comercial|financeiro|estoque&inicio=&fim=
 export async function GET(req: NextRequest) {
@@ -138,12 +141,8 @@ export async function GET(req: NextRequest) {
     case "estoque": {
       const almoxarifadoId = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
       const ouro18kId      = await getParametroNumber(PARAM.OURO_18K_INSUMO_ID);
-      const [saldo_ouro, alertas, movimentacoes] = await Promise.all([
-        sql`
-          SELECT COALESCE(SUM(saldo), 0) AS total_ouro
-          FROM alissonerp.vw_saldo_estoque
-          WHERE deposito_id = ${almoxarifadoId} AND insumo_id = ${ouro18kId}
-        `,
+      const [ouroPote, alertas, movimentacoes] = await Promise.all([
+        buscarSaldoEstoque(sql, almoxarifadoId, ouro18kId),
         sql`
           SELECT status_alerta, COUNT(*) AS qtd
           FROM alissonerp.vw_estoque_comercial_com_alerta
@@ -163,7 +162,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         tipo: "estoque",
         periodo: { inicio, fim },
-        ouro_pote: Number(saldo_ouro[0].total_ouro),
+        ouro_pote: ouroPote,
         alertas_comercial: alertas.map((a) => ({ ...a, qtd: Number(a.qtd) })),
         movimentacoes_mensal: movimentacoes.map((m) => ({ ...m, total_movimentacoes: Number(m.total_movimentacoes), entradas: Number(m.entradas), saidas: Number(m.saidas) })),
       });

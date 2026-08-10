@@ -4,6 +4,9 @@ import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
+// REGRA DE NEGOCIO: saldo de estoque centralizado em src/lib/estoque-saldo.ts
+// (pente-fino 10/08/2026, etapa 2) — nao reimplementar SUM(saldo) aqui.
+import { buscarSaldoEstoque } from "@/lib/estoque-saldo";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 
@@ -92,13 +95,7 @@ export async function POST(
     }
 
     // ── 2. Verificar saldo do insumo ──────────────────────────────────────────
-    const saldoRows = await sql`
-      SELECT COALESCE(SUM(saldo), 0) AS saldo
-      FROM alissonerp.vw_saldo_estoque
-      WHERE deposito_id = ${operadorId}
-        AND insumo_id   = ${insumoId}
-    `;
-    const saldoAtual = parseFloat(String(saldoRows[0]?.saldo ?? 0));
+    const saldoAtual = await buscarSaldoEstoque(sql, operadorId, insumoId);
     if (saldoAtual < quantidade) {
       return NextResponse.json(
         { error: `Saldo insuficiente. Disponível: ${saldoAtual.toFixed(4)}, solicitado: ${quantidade.toFixed(4)}` },
@@ -168,13 +165,7 @@ export async function POST(
     });
 
     // ── 6. Saldo atualizado ───────────────────────────────────────────────────
-    const novoSaldoRows = await sql`
-      SELECT COALESCE(SUM(saldo), 0) AS saldo
-      FROM alissonerp.vw_saldo_estoque
-      WHERE deposito_id = ${operadorId}
-        AND insumo_id   = ${insumoId}
-    `;
-    const novoSaldo = parseFloat(parseFloat(String(novoSaldoRows[0]?.saldo ?? 0)).toFixed(4));
+    const novoSaldo = parseFloat((await buscarSaldoEstoque(sql, operadorId, insumoId)).toFixed(4));
 
     return NextResponse.json({
       success:        true,
