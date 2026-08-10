@@ -96,7 +96,7 @@ export async function GET(
         t.id, t.quantidade, t.status,
         t.local_origem_id, lo.nome AS local_origem_nome,
         t.local_destino_id, ld.nome AS local_destino_nome,
-        t.ordem_solicitacao, t.obs, t.created_at,
+        t.ordem_solicitacao, t.observacao AS obs, t.created_at,
         ue.email AS enviado_por_email,
         ur.email AS recebido_por_email,
         t.recebido_em

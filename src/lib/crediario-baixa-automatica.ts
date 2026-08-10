@@ -55,11 +55,11 @@ export async function fecharContaReceberAposPagamentoMp(
   // Conta a receber pendente da venda (categoria 'venda'). FOR UPDATE evita
   // corrida com outra confirmação/baixa concorrente.
   const [conta] = await tx`
-    SELECT id, valor, situacao
+    SELECT id, valor, status AS situacao
     FROM alissonerp.contas_receber
     WHERE venda_erp_id = ${params.vendaId}
       AND categoria = 'venda'
-      AND situacao = 'pendente'
+      AND status = 'pendente'
     ORDER BY id
     LIMIT 1
     FOR UPDATE
@@ -69,7 +69,7 @@ export async function fecharContaReceberAposPagamentoMp(
   // 1. Baixa a conta
   await tx`
     UPDATE alissonerp.contas_receber
-    SET situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
+    SET status = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
     WHERE id = ${conta.id}
   `;
 

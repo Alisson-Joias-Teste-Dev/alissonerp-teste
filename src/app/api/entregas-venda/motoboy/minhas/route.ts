@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
 
   // Filtro por situacao
   const whereSituacao = situacao
-    ? sql`AND ev.situacao = ${situacao}`
+    ? sql`AND ev.status = ${situacao}`
     : sql``;
 
   // Filtro por período
@@ -94,7 +94,7 @@ export async function GET(req: NextRequest) {
   const [items, countResult, cards] = await Promise.all([
     sql`
       SELECT
-        ev.id, ev.venda_id, ev.codigo_entrega, ev.tipo, ev.situacao,
+        ev.id, ev.venda_id, ev.codigo_entrega, ev.tipo, ev.status AS situacao,
         ev.forma_entrega, ev.regiao, ev.frete_motoboy, ev.data_saida,
         ev.data_entrega_realizada, ev.created_at,
         ev.is_avulso, ev.descricao_avulso,
@@ -109,7 +109,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
       LEFT JOIN public.contatos ca ON ca.id_contato = ev.contato_id
       WHERE ev.motoboy_id = ${motoboyUserId}::uuid
-        AND ev.situacao <> 'cancelada'
+        AND ev.status <> 'cancelada'
         ${whereSituacao}
         ${whereDataInicio}
         ${whereDataFim}
@@ -120,28 +120,28 @@ export async function GET(req: NextRequest) {
       SELECT COUNT(*)::integer AS total
       FROM alissonerp.entregas_venda ev
       WHERE ev.motoboy_id = ${motoboyUserId}::uuid
-        AND ev.situacao <> 'cancelada'
+        AND ev.status <> 'cancelada'
         ${whereSituacao}
         ${whereDataInicio}
         ${whereDataFim}
     `,
     sql`
       SELECT
-        COUNT(*) FILTER (WHERE ev.situacao = 'pendente')::integer AS pendentes,
-        COUNT(*) FILTER (WHERE ev.situacao = 'em_rota')::integer AS em_rota,
-        COUNT(*) FILTER (WHERE ev.situacao = 'confirmada')::integer AS entregues,
-        COALESCE(SUM(ev.frete_motoboy) FILTER (WHERE ev.situacao = 'confirmada'), 0)::numeric AS total_mes,
+        COUNT(*) FILTER (WHERE ev.status = 'pendente')::integer AS pendentes,
+        COUNT(*) FILTER (WHERE ev.status = 'em_rota')::integer AS em_rota,
+        COUNT(*) FILTER (WHERE ev.status = 'confirmada')::integer AS entregues,
+        COALESCE(SUM(ev.frete_motoboy) FILTER (WHERE ev.status = 'confirmada'), 0)::numeric AS total_mes,
         COALESCE(SUM(ev.frete_motoboy) FILTER (
-          WHERE ev.situacao = 'confirmada'
+          WHERE ev.status = 'confirmada'
             AND NOT EXISTS (SELECT 1 FROM alissonerp.pagamentos_motoboy_itens pmi WHERE pmi.entrega_id = ev.id)
         ), 0)::numeric AS a_receber,
         COALESCE(SUM(ev.frete_motoboy) FILTER (
-          WHERE ev.situacao = 'confirmada'
+          WHERE ev.status = 'confirmada'
             AND EXISTS (SELECT 1 FROM alissonerp.pagamentos_motoboy_itens pmi WHERE pmi.entrega_id = ev.id)
         ), 0)::numeric AS ja_recebido
       FROM alissonerp.entregas_venda ev
       WHERE ev.motoboy_id = ${motoboyUserId}::uuid
-        AND ev.situacao <> 'cancelada'
+        AND ev.status <> 'cancelada'
         ${dataInicio
           ? sql`AND ev.created_at >= ${dataInicio}::date`
           : sql`AND ev.created_at >= date_trunc('month', now())`}

@@ -28,7 +28,7 @@ export async function POST(
   const vendaId = Number(id);
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const [venda] = await sql`SELECT id, situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
+  const [venda] = await sql`SELECT id, status AS situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.situacao === "cancelado" || venda.situacao === "rascunho") {
     return NextResponse.json({ error: "Venda precisa estar aprovada." }, { status: 409 });

@@ -18,7 +18,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
   const compraId = parseInt(id);
 
   const [compra] = await sql`
-    SELECT bloqueado, situacao FROM alissonerp.compras WHERE id = ${compraId} LIMIT 1
+    SELECT bloqueado, status AS situacao FROM alissonerp.compras WHERE id = ${compraId} LIMIT 1
   `;
   if (!compra) return NextResponse.json({ error: "Compra não encontrada" }, { status: 404 });
   if (compra.bloqueado) return NextResponse.json({ error: "Compra já bloqueada" }, { status: 409 });
@@ -34,7 +34,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
   }
 
   try {
-    await sql`UPDATE alissonerp.compras SET situacao = 'concluido' WHERE id = ${compraId}`;
+    await sql`UPDATE alissonerp.compras SET status = 'concluido' WHERE id = ${compraId}`;
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     const error = err as { message?: string; code?: string };

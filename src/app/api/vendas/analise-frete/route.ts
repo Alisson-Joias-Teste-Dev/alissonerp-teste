@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     FROM alissonerp.vendas_erp
     WHERE data_venda >= ${inicio}::date
       AND data_venda <= ${fim}::date
-      AND situacao NOT IN ('rascunho', 'cancelado')
+      AND status NOT IN ('rascunho', 'cancelado')
   `;
 
   // Vendas com frete
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
       v.total_venda,
       v.total_frete,
       v.forma_frete,
-      v.situacao,
+      v.status AS situacao,
       c.nome  AS cliente_nome,
       vd.nome AS vendedor_nome
     FROM alissonerp.vendas_erp v
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN public.vendedores vd ON vd.id_vendedor = v.vendedor_id
     WHERE v.data_venda >= ${inicio}::date
       AND v.data_venda <= ${fim}::date
-      AND v.situacao NOT IN ('rascunho', 'cancelado')
+      AND v.status NOT IN ('rascunho', 'cancelado')
       AND v.total_frete > 0
     ORDER BY v.data_venda DESC
     LIMIT 200
@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
       v.data_entrega,
       v.total_venda,
       v.total_frete,
-      v.situacao,
+      v.status AS situacao,
       c.nome  AS cliente_nome,
       vd.nome AS vendedor_nome
     FROM alissonerp.vendas_erp v
@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN public.vendedores vd ON vd.id_vendedor = v.vendedor_id
     WHERE v.data_venda >= ${inicio}::date
       AND v.data_venda <= ${fim}::date
-      AND v.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
+      AND v.status = ANY(${SITUACOES_VENDA_ATIVAS})
     ORDER BY v.data_entrega ASC NULLS LAST, v.data_venda DESC
     LIMIT 200
   `;

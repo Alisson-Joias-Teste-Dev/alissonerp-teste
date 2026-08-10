@@ -3,7 +3,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
 
 // GET /api/financeiro/cofre-ouro
 // Lê da view alissonerp.vw_cofre_ouro (posição agregada de pagamentos em ouro)

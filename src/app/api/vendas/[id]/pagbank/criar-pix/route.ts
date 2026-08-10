@@ -60,7 +60,7 @@ export async function POST(
   // Carrega venda + cliente + itens
   const [venda] = await sql`
     SELECT
-      v.id, v.numero_venda, v.situacao, v.bloqueado,
+      v.id, v.numero_venda, v.status AS situacao, v.bloqueado,
       v.total_venda, v.total_produtos, v.total_desconto, v.total_frete,
       v.cliente_id, v.vendedor_id,
       c.nome AS cliente_nome, c.cpf_cnpj AS cliente_cpf_cnpj, c.email AS cliente_email

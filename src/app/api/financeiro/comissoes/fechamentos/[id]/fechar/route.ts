@@ -12,7 +12,7 @@ import { logAudit } from "@/lib/audit";
 // Por que: impede edição de valores depois de aprovado.
 // Impacto se alterado: risco de comissão ser recalculada depois de aprovada.
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
 
 export async function POST(
   req: NextRequest,

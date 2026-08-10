@@ -29,7 +29,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
 
   // Verificar existência e estado
   const [compra] = await sql`
-    SELECT bloqueado, situacao FROM alissonerp.compras WHERE id = ${compraId} LIMIT 1
+    SELECT bloqueado, status AS situacao FROM alissonerp.compras WHERE id = ${compraId} LIMIT 1
   `;
   if (!compra) {
     return NextResponse.json({ error: "Compra não encontrada" }, { status: 404 });
@@ -47,7 +47,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
   const [updated] = await sql`
     UPDATE alissonerp.compras
     SET
-      situacao         = 'recebida',
+      status            = 'recebida',
       data_recebimento = COALESCE(${data_recebimento ?? null}, CURRENT_DATE),
       recebido_por     = ${recebido_por ?? null}::uuid
     WHERE id = ${compraId}

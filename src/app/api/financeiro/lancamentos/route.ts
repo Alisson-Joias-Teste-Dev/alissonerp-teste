@@ -9,7 +9,7 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
-  const PODE = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+  const PODE = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
   if (!usuario || (!PODE.includes(usuario.role) && !isFullAccess(usuario.role))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }

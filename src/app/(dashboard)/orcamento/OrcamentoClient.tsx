@@ -395,6 +395,34 @@ export default function OrcamentoClient({
   // com preço já salvo, pra essa carga não disparar busca no catálogo.
   const skipPedraLookup1Ref = useRef(false);
   const skipPedraLookup2Ref = useRef(false);
+
+  // Altura da linha "painel + 3D" da tela de design (aliança), medida ao vivo.
+  // Pedido do Jonathan (08/2026): tudo numa tela só, sem rolagem, pra ver o
+  // desenho 3D mudando enquanto digita. Um número fixo (ex.: calc(100vh-180px))
+  // quebra sempre que o cabeçalho muda de altura (aviso de erro de validação
+  // quebra linha, nome de cliente longo, tela mais estreita, etc.) — por isso
+  // mede o fim real do cabeçalho e calcula o que sobra, ao vivo.
+  // Ref via callback (não useRef): a tela de design é um de vários retornos
+  // condicionais do componente (peça/config/etc. têm outro layout) — o
+  // callback dispara de novo sempre que ESSE cabeçalho especificamente
+  // monta, mesmo trocando de aba antes.
+  const [orcDesignHeaderEl, setOrcDesignHeaderEl] = useState<HTMLDivElement | null>(null);
+  const [orcDesignRowHeight, setOrcDesignRowHeight] = useState<number>(600);
+  useEffect(() => {
+    if (!orcDesignHeaderEl) return;
+    function recalc() {
+      const headerBottom = orcDesignHeaderEl!.getBoundingClientRect().bottom;
+      const BOTTOM_PADDING = 20; // espelha o p-4/md:p-5 do wrapper da tela
+      setOrcDesignRowHeight(Math.max(300, window.innerHeight - headerBottom - BOTTOM_PADDING));
+    }
+    recalc();
+    window.addEventListener("resize", recalc);
+    // ResizeObserver reage sozinho a qualquer mudança de altura do cabeçalho
+    // (erro de validação quebrando linha, nome de cliente comprido, etc.).
+    const ro = new ResizeObserver(recalc);
+    ro.observe(orcDesignHeaderEl);
+    return () => { window.removeEventListener("resize", recalc); ro.disconnect(); };
+  }, [orcDesignHeaderEl]);
   const markDirty = useCallback(() => {
     if (isHydratingRef.current) return;
     setDirty(true);
@@ -3248,7 +3276,7 @@ export default function OrcamentoClient({
     >
 
       {/* ── Topo: Cliente + titulo + acoes ─────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div ref={setOrcDesignHeaderEl} className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <button onClick={() => setOrcamentoTipo(null)} className="text-xs text-gray-400 hover:text-gray-600 shrink-0">← Voltar</button>
           <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: C.esmeralda }}>
@@ -3353,8 +3381,14 @@ export default function OrcamentoClient({
         {saveMsg && <span className={`text-[11px] font-bold ${saveMsg.type === "success" ? "text-emerald-600" : "text-red-500"}`}>{saveMsg.text}</span>}
       </div>
 
-      {/* ── Flex: Controles (esquerda) | 3D (direita) ─────────────────── */}
-      <div style={{ display: "flex", gap: "12px", height: "calc(100vh - 130px)", overflow: "hidden" }}>
+      {/* ── Flex: Controles (esquerda) | 3D (direita) ───────────────────
+          altura medida ao vivo (orcDesignRowHeight) em vez de número fixo —
+          o valor fixo antigo (130px) ficou desatualizado e empurrava a barra
+          de preço pra fora da tela assim que o cabeçalho crescia (aviso de
+          erro, nome de cliente comprido, etc.). Pedido do Jonathan 08/2026:
+          tudo numa tela só, sem rolagem, pra ver o 3D atualizando enquanto
+          digita. ────────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: "12px", height: orcDesignRowHeight, overflow: "hidden" }}>
 
         {/* ── Painel de controles (ESQUERDA — 360px fixo, scroll) ─────── */}
         <div style={{ width: "360px", minWidth: "360px", overflowY: "hidden" }} className="space-y-1">
@@ -3377,11 +3411,11 @@ export default function OrcamentoClient({
           )}
 
           {/* ── Perfil + Medidas + Metal ── */}
-          <div className="bg-white rounded-lg border px-3 py-3 space-y-3" style={{ borderColor: C.cremeBorder }}>
-            {/* Perfil — grid 2 colunas (mais legível, fonte maior) */}
+          <div className="bg-white rounded-lg border px-3 py-2 space-y-2" style={{ borderColor: C.cremeBorder }}>
+            {/* Perfil — grid 3 colunas (compacto, cabe tudo numa tela) */}
             <div>
-              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Perfil</h3>
-              <div className="grid grid-cols-2 gap-1.5">
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Perfil</h3>
+              <div className="grid grid-cols-3 gap-1.5">
                 {PROFILE_OPTIONS.map((p) => (
                   <button
                     key={p.id}
@@ -3406,7 +3440,7 @@ export default function OrcamentoClient({
                       setProf(p.id);
                       setPar((prev) => ({ ...prev, width: 0, height: effectiveMin }));
                     }}
-                    className="py-1.5 px-2 text-[11px] font-semibold rounded-md border transition-all text-center leading-tight"
+                    className="py-1 px-2 text-[10px] font-semibold rounded-md border transition-all text-center leading-tight"
                     style={(activeRing === 1 ? profile : profile2) === p.id
                       ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
                       : { backgroundColor: "#fff", color: "#374151", borderColor: C.cremeBorder }
@@ -3418,7 +3452,7 @@ export default function OrcamentoClient({
 
             {/* Medidas — campos maiores, label com unidade */}
             <div>
-              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Medidas</h3>
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Medidas</h3>
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="text-[10px] text-gray-500 font-medium block mb-1">Aro</label>
@@ -3504,14 +3538,14 @@ export default function OrcamentoClient({
 
             {/* Metal — botões maiores */}
             <div>
-              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Metal</h3>
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Metal</h3>
               <div className="grid grid-cols-3 gap-1.5">
                 {METAL_COLORS.map((mc) => (
                   // goldDensity é recalculada pelo useEffect de teor (linha ~524)
                   // a partir do teorOuro atual + cor escolhida. Não setamos aqui
                   // pra evitar 1 frame com densidade errada.
                   <button key={mc.value} onClick={() => { updateParam("metalColor", mc.value); }}
-                    className="py-1.5 px-2 text-[11px] font-semibold rounded-md border transition-all text-center"
+                    className="py-1 px-2 text-[10px] font-semibold rounded-md border transition-all text-center"
                     style={activeParams.metalColor === mc.value
                       ? { backgroundColor: mc.value, color: mc.value === "#E8E8E8" ? "#333" : "#fff", borderColor: C.esmeralda, boxShadow: `0 0 0 2px ${C.esmeralda}` }
                       : { backgroundColor: "#fff", color: "#374151", borderColor: C.cremeBorder }
@@ -3652,7 +3686,7 @@ export default function OrcamentoClient({
               <span className="text-[11px] text-gray-600">Incluir pedras</span>
             </label>
             {activeParams.hasStones && (
-              <div className="space-y-2 mt-2">
+              <div className="space-y-1.5 mt-1.5">
                 <div>
                   <label className="text-[10px] text-gray-500 font-medium block mb-1">Tamanho (mm)</label>
                   <MedidaStepper
@@ -3707,7 +3741,7 @@ export default function OrcamentoClient({
                           updateParam("stoneRows", 1);
                         }
                       }}
-                        className="flex-1 py-1.5 text-[9px] font-semibold rounded-lg border transition-all text-center"
+                        className="flex-1 py-1 text-[9px] font-semibold rounded-lg border transition-all text-center"
                         style={active
                           ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
                           : { backgroundColor: "#fff", color: "#6b7280", borderColor: C.cremeBorder }
@@ -3726,7 +3760,7 @@ export default function OrcamentoClient({
                 )}
                 <div>
                   <span className="text-[11px] text-gray-500 block mb-1">Tipo de pedra:</span>
-                  <div className="grid grid-cols-3 gap-1">
+                  <div className="grid grid-cols-6 gap-1">
                     {["Diamante", "Zirconia", "Rubi", "Esmeralda", "Safira", "Outro"].map((tipo) => {
                       // Normaliza acentos+case pra comparar "Zircônia" (legado) com "Zirconia" (atual)
                       const norm = (s: string) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -3736,7 +3770,7 @@ export default function OrcamentoClient({
                         key={tipo}
                         type="button"
                         onClick={() => updateParam("stoneType", tipo)}
-                        className="py-1.5 px-1 text-[10px] font-semibold rounded-md border transition-all"
+                        className="py-1 px-0.5 text-[8px] leading-tight font-semibold rounded-md border transition-all"
                         style={isSelected
                           ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
                           : { backgroundColor: "#fff", color: "#374151", borderColor: C.cremeBorder }
@@ -3802,7 +3836,7 @@ export default function OrcamentoClient({
               const extras = activeRing === 1 ? textosExtras : textosExtras2;
               const setExtras = activeRing === 1 ? setTextosExtras : setTextosExtras2;
               return (
-              <div className="space-y-2 mt-2">
+              <div className="space-y-1.5 mt-1.5">
                 {/* Primeiro nome — incluso */}
                 <div>
                   <label className="text-[8px] text-gray-400 block">Nome principal <span className="text-emerald-500">(incluso)</span></label>
@@ -4374,7 +4408,7 @@ function MedidaStepper({
 // ── Card wrapper ─────────────────────────────────────────────────────────────
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-lg border px-2 py-1.5 space-y-1" style={{ borderColor: C.cremeBorder }}>
+    <div className="bg-white rounded-lg border px-2 py-1 space-y-1" style={{ borderColor: C.cremeBorder }}>
       <h3 className="text-[8px] font-bold uppercase tracking-wider text-gray-400">{title}</h3>
       {children}
     </div>

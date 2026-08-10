@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
   const [entrega] = await sql`
     SELECT
       ev.id,
-      ev.situacao,
+      ev.status AS situacao,
       ev.forma_entrega,
       ev.codigo_entrega,
       ev.codigo_cliente,

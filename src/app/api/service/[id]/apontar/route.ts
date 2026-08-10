@@ -132,7 +132,7 @@ export async function POST(
       // Saída Avulsa do estoque do operador
       const [mov] = await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, obs, data_hora)
+          (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, observacao, data_hora)
         VALUES (
           ${insumoId},
           ${operadorId},
@@ -149,7 +149,7 @@ export async function POST(
       // Registro do apontamento
       const [aponto] = await tx`
         INSERT INTO alissonerp.apontamentos_servico
-          (servico_id, operador_id, operador_nome, insumo_id, insumo_nome, quantidade, movimentacao_id, foto_url, obs)
+          (servico_id, operador_id, operador_nome, insumo_id, insumo_nome, quantidade, movimentacao_id, foto_url, observacao)
         VALUES (
           ${servicoId},
           ${operadorId},

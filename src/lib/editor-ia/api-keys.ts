@@ -1,6 +1,6 @@
 /**
  * Helper server-side para obter as chaves de API do Editor IA.
- * Precedência: banco (configuracoes_sistema) > variável de ambiente.
+ * Precedência: banco (configuracoes_unificado) > variável de ambiente.
  * NUNCA expor este módulo no client.
  */
 import sql from "@/lib/db";
@@ -17,7 +17,7 @@ export interface ApiKeys {
 
 export async function getApiKeys(): Promise<ApiKeys> {
   const rows = await sql<Array<{ chave: string; valor: string | null }>>`
-    SELECT chave, valor FROM alissonerp.configuracoes_sistema
+    SELECT chave, valor FROM alissonerp.configuracoes_unificado
      WHERE chave IN (${DB_KEYS.gemini}, ${DB_KEYS.openai})
   `.catch(() => [] as Array<{ chave: string; valor: string | null }>);
 

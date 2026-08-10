@@ -26,13 +26,13 @@ export async function GET(
       v.numero_venda,
       v.data_venda,
       v.total_venda,
-      v.situacao,
+      v.status AS situacao,
       STRING_AGG(i.nome_produto, ', ' ORDER BY i.id) AS itens_resumo
     FROM alissonerp.vendas_erp v
     LEFT JOIN alissonerp.itens_venda_erp i ON i.venda_id = v.id
     WHERE v.cliente_id = ${clienteId}
-      AND v.situacao IN ('aprovado', 'em_rota', 'entregue', 'concluido', 'virou_credito')
-    GROUP BY v.id, v.numero_venda, v.data_venda, v.total_venda, v.situacao
+      AND v.status IN ('aprovado', 'em_rota', 'entregue', 'concluido', 'virou_credito')
+    GROUP BY v.id, v.numero_venda, v.data_venda, v.total_venda, v.status
     ORDER BY v.data_venda DESC
     LIMIT 20
   `;

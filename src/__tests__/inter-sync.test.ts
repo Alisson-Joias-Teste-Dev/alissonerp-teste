@@ -244,7 +244,7 @@ describe("POST /api/financeiro/inter/sync", () => {
 
     expect(sqlText).toMatch(/FROM\s+alissonerp\.contas_pagar/i);
     expect(sqlText).toMatch(/inter_pagamento_id\s+IS\s+NOT\s+NULL/i);
-    expect(sqlText).toMatch(/situacao\s*=\s*'pendente'/i);
+    expect(sqlText).toMatch(/status\s*=\s*'pendente'/i);
     expect(sqlText).toMatch(/inter_status\s+IS\s+NULL\s+OR\s+inter_status\s+NOT\s+IN/i);
     expect(sqlText).toMatch(/'PAGO'/);
     expect(sqlText).toMatch(/'EXECUTADO'/);
@@ -308,7 +308,7 @@ describe("POST /api/financeiro/inter/sync", () => {
     const updateCall = sqlMock.mock.calls[1];
     const sqlText = (updateCall[0] as string[]).join(" ");
     const values = updateCall.slice(1) as unknown[];
-    expect(sqlText).toMatch(/situacao\s*=\s*'pago'/i);
+    expect(sqlText).toMatch(/status\s*=\s*'pago'/i);
     expect(sqlText).toMatch(/data_pagamento/i);
     expect(values).toContain("2026-04-20");
     expect(values).toContain("PAGO");
@@ -353,7 +353,7 @@ describe("POST /api/financeiro/inter/sync", () => {
 
     const updateCall = sqlMock.mock.calls[1];
     const sqlText = (updateCall[0] as string[]).join(" ");
-    expect(sqlText).toMatch(/situacao\s*=\s*'pago'/i);
+    expect(sqlText).toMatch(/status\s*=\s*'pago'/i);
   });
 
   // ── Loop: status mudou mas NÃO é pago ────────────────────────────────────

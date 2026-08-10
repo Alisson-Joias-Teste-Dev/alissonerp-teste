@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import sql from "@/lib/db";
+import sql, { normalizeRow } from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 const FULL_ROLES = ["desenvolvedor", "admin"];
@@ -27,5 +27,10 @@ export async function GET(req: NextRequest) {
     LIMIT 100
   `;
 
-  return NextResponse.json(rows);
+  // BLINDAGEM: preco_lista/pct_desconto_solicitado/preco_solicitado sao NUMERIC
+  // no banco — o driver postgres.js devolve como string. Sem normalizar, a tela
+  // de Autorizacoes (AutorizacoesClient) exibe o valor cru em vez de "R$ X,XX".
+  return NextResponse.json(
+    rows.map((r) => normalizeRow(r, ["preco_lista", "pct_desconto_solicitado", "preco_solicitado"]))
+  );
 }

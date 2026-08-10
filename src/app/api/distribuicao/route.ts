@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import sql from "@/lib/db";
+import sql, { normalizeRow } from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { zodError } from "@/lib/schemas/common";
+
+// Fase 3.6: colunas real → numeric — driver devolve como string, front usa .toFixed()/aritmética
+const DIST_NUMERIC_FIELDS = ["total_metal", "retorno_metal", "pmc", "quebra", "porcentagem_de_quebra", "peso_final"];
 
 const DistribuicaoPostSchema = z.object({
   deposito_id: z.coerce.number().int().positive(),
@@ -82,7 +85,7 @@ export async function GET(req: NextRequest) {
         LIMIT 100
       `;
 
-  return NextResponse.json(rows);
+  return NextResponse.json(rows.map((r) => normalizeRow(r, DIST_NUMERIC_FIELDS)));
 }
 
 // POST /api/distribuicao — criar distribuição com ordens

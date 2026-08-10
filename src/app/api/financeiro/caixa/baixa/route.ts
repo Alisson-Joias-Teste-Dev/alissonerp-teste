@@ -29,7 +29,7 @@ export async function GET(_req: NextRequest) {
     sql`
       SELECT
         b.id, b.total, b.qtd_pagamentos,
-        b.realizado_nome, b.obs,
+        b.realizado_nome, b.observacao AS obs,
         b.created_at::text AS created_at
       FROM alissonerp.fin_caixa_baixas b
       ORDER BY b.id DESC
@@ -96,9 +96,9 @@ export async function POST(req: NextRequest) {
 
   const baixa = await sql.begin(async (tx: any) => {
     const [nova] = await tx`
-      INSERT INTO alissonerp.fin_caixa_baixas (total, qtd_pagamentos, realizado_por, realizado_nome, obs)
+      INSERT INTO alissonerp.fin_caixa_baixas (total, qtd_pagamentos, realizado_por, realizado_nome, observacao)
       VALUES (${total}, ${pendentes.length}, ${user.id}::uuid, ${usuario.nome ?? user.email}, ${obs ?? null})
-      RETURNING id, total, qtd_pagamentos, realizado_nome, obs, created_at::text AS created_at
+      RETURNING id, total, qtd_pagamentos, realizado_nome, observacao, created_at::text AS created_at
     `;
 
     await tx`

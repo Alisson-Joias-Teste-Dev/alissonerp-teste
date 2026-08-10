@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
       me.entrada,
       me.saida,
       me.marcador,
-      me.obs,
+      me.observacao AS obs,
       me.insumo_id,
       i.nome          AS insumo_nome,
       me.deposito_id,

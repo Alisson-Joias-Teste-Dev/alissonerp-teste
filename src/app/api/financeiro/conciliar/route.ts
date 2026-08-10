@@ -43,7 +43,7 @@ export async function GET() {
     ? await sql`
         SELECT id, fornecedor_nome, valor, data_vencimento, descricao
         FROM alissonerp.contas_pagar
-        WHERE situacao = 'pendente'
+        WHERE status = 'pendente'
           AND valor = ANY(${valoresDebito}::numeric[])
       `
     : [];
@@ -53,7 +53,7 @@ export async function GET() {
     ? await sql`
         SELECT id, cliente_nome, valor, data_vencimento, descricao
         FROM alissonerp.contas_receber
-        WHERE situacao = 'pendente'
+        WHERE status = 'pendente'
           AND valor = ANY(${valoresCredito}::numeric[])
       `
     : [];
@@ -163,14 +163,14 @@ export async function POST(req: NextRequest) {
     if (body.conta_pagar_id) {
       await tx`
         UPDATE alissonerp.contas_pagar
-        SET situacao = 'pago', data_pagamento = COALESCE(data_pagamento, CURRENT_DATE), updated_at = NOW()
+        SET status = 'pago', data_pagamento = COALESCE(data_pagamento, CURRENT_DATE), updated_at = NOW()
         WHERE id = ${body.conta_pagar_id}
       `;
     }
     if (body.conta_receber_id) {
       await tx`
         UPDATE alissonerp.contas_receber
-        SET situacao = 'recebido', data_recebimento = COALESCE(data_recebimento, CURRENT_DATE), updated_at = NOW()
+        SET status = 'recebido', data_recebimento = COALESCE(data_recebimento, CURRENT_DATE), updated_at = NOW()
         WHERE id = ${body.conta_receber_id}
       `;
     }

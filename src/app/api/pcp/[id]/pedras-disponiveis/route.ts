@@ -24,8 +24,8 @@ export async function GET(
     WITH apontamentos AS (
       SELECT
         a.insumo_id,
-        SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END)::integer  AS qtd_entrada,
-        SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END)::integer  AS qtd_retorno,
+        SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.quantidade ELSE 0 END)::integer  AS qtd_entrada,
+        SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.quantidade ELSE 0 END)::integer  AS qtd_retorno,
         -- Sprint 3: saldo em ct
         SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN COALESCE(a.peso_ct, 0) ELSE 0 END) AS ct_entrada,
         SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN COALESCE(a.peso_ct, 0) ELSE 0 END) AS ct_retorno

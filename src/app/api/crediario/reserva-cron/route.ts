@@ -12,7 +12,7 @@ import { gerarValeCredito } from "@/lib/vale-troca";
  * Substitui o motor antigo do "sinal" para vendas NOVAS (criadas após o corte).
  *
  * REGRA (ver docs/regras-negocio/crediario.md §③):
- *  - Vale só para vendas criadas A PARTIR do corte (configuracoes_sistema
+ *  - Vale só para vendas criadas A PARTIR do corte (configuracoes_unificado
  *    'crediario_reserva_corte') — vendas antigas seguem o sinal-cron (legado).
  *  - Decisão VC × cobrança = SE A PEÇA SAIU DA LOJA:
  *      • peça ENTREGUE devendo → cobrança (aging-cron), NUNCA cai aqui.
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
   if (!autenticado) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
 
   // Sem corte configurado = não processa nada (segurança: não converter venda antiga).
-  const [corte] = await sql`SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'crediario_reserva_corte' LIMIT 1`;
+  const [corte] = await sql`SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'crediario_reserva_corte' LIMIT 1`;
   if (!corte?.valor) return NextResponse.json({ ok: true, skipped: "sem corte configurado" });
 
   // Vendas RESERVADAS (não entregues) com "A Receber" pendente, criadas após o corte,
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
         ), v.data_entrega::date)
       )) AS dias_passados,
       COALESCE((SELECT SUM(cr.valor) FROM alissonerp.contas_receber cr
-                WHERE cr.venda_erp_id = v.id AND cr.categoria = 'venda' AND cr.situacao = 'pendente'), 0) AS saldo,
+                WHERE cr.venda_erp_id = v.id AND cr.categoria = 'venda' AND cr.status = 'pendente'), 0) AS saldo,
       COALESCE((SELECT SUM(p.valor) FROM alissonerp.pagamentos_venda p
                 WHERE p.venda_id = v.id AND p.status = 'confirmado'), 0) AS valor_pago,
       EXISTS (SELECT 1 FROM alissonerp.notificacoes n
@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
               WHERE n.venda_id = v.id AND n.tipo = 'crediario_reserva' AND n.created_at::date = CURRENT_DATE) AS avisou_hoje
     FROM alissonerp.vendas_erp v
     WHERE v.created_at::date >= ${corte.valor}::date
-      AND v.situacao = 'aprovado'
+      AND v.status = 'aprovado'
       AND v.data_entrega IS NOT NULL
       AND v.data_entrega::date < CURRENT_DATE
       -- tem "A Receber" pendente (e NÃO é sinal legado — esses ficam no sinal-cron)
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
                     AND (p.credi_tipo IS DISTINCT FROM 'sinal'))
       -- tem conta a receber pendente
       AND EXISTS (SELECT 1 FROM alissonerp.contas_receber cr
-                  WHERE cr.venda_erp_id = v.id AND cr.categoria = 'venda' AND cr.situacao = 'pendente')
+                  WHERE cr.venda_erp_id = v.id AND cr.categoria = 'venda' AND cr.status = 'pendente')
       -- NÃO tem ordem de produção aberta (se tiver, espera fechar)
       AND NOT EXISTS (SELECT 1 FROM alissonerp.ordens o
                       WHERE o.venda_id = v.id
@@ -138,8 +138,8 @@ export async function POST(req: NextRequest) {
           // (reserva ativa); pagamento fica 'confirmado' (comissão preservada).
           const transicao = await tx`
             UPDATE alissonerp.vendas_erp
-            SET situacao = 'virou_credito', bloqueado = true
-            WHERE id = ${r.venda_id} AND situacao = 'aprovado'
+            SET status = 'virou_credito', bloqueado = true
+            WHERE id = ${r.venda_id} AND status = 'aprovado'
             RETURNING id
           `;
           if (transicao.length === 0) {
@@ -155,8 +155,8 @@ export async function POST(req: NextRequest) {
           // enquanto reservada, a reserva manda — o parcelamento só valeria se a peça saísse.
           const canceladas = await tx`
             UPDATE alissonerp.contas_receber
-            SET situacao = 'cancelado', updated_at = NOW()
-            WHERE venda_erp_id = ${r.venda_id} AND categoria = 'venda' AND situacao = 'pendente'
+            SET status = 'cancelado', updated_at = NOW()
+            WHERE venda_erp_id = ${r.venda_id} AND categoria = 'venda' AND status = 'pendente'
             RETURNING id
           `;
           // Registra no histórico do crediário (usa uma das contas como âncora).

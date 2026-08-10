@@ -26,7 +26,7 @@ export async function GET(_req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   // Sem corte configurado = nenhuma venda nova entra na regra (segurança).
-  const [corte] = await sql`SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'crediario_reserva_corte' LIMIT 1`;
+  const [corte] = await sql`SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'crediario_reserva_corte' LIMIT 1`;
   if (!corte?.valor) return NextResponse.json({ total: 0, itens: [] });
 
   const rows = await sql`
@@ -41,18 +41,18 @@ export async function GET(_req: NextRequest) {
         ), v.data_entrega::date)
       )) AS dias_passados,
       COALESCE((SELECT SUM(cr.valor) FROM alissonerp.contas_receber cr
-                WHERE cr.venda_erp_id = v.id AND cr.categoria = 'venda' AND cr.situacao = 'pendente'), 0) AS valor_pendente
+                WHERE cr.venda_erp_id = v.id AND cr.categoria = 'venda' AND cr.status = 'pendente'), 0) AS valor_pendente
     FROM alissonerp.vendas_erp v
     WHERE v.created_at::date >= ${corte.valor}::date
       AND v.created_by = ${user.id}::uuid
-      AND v.situacao = 'aprovado'
+      AND v.status = 'aprovado'
       AND v.data_entrega IS NOT NULL
       AND v.data_entrega::date < CURRENT_DATE
       AND EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
                   WHERE p.venda_id = v.id AND p.forma = 'A Receber' AND p.status = 'pendente'
                     AND (p.credi_tipo IS DISTINCT FROM 'sinal'))
       AND EXISTS (SELECT 1 FROM alissonerp.contas_receber cr
-                  WHERE cr.venda_erp_id = v.id AND cr.categoria = 'venda' AND cr.situacao = 'pendente')
+                  WHERE cr.venda_erp_id = v.id AND cr.categoria = 'venda' AND cr.status = 'pendente')
       AND NOT EXISTS (SELECT 1 FROM alissonerp.ordens o
                       WHERE o.venda_id = v.id
                         AND o.tipo_ordem::text <> ALL(${TIPOS_ORDEM_NAO_BLOQUEIA})

@@ -38,7 +38,7 @@ export async function POST(
   // Aprovadores configurados em Config › Aprovadores (chave MULTI, UUIDs por vírgula).
   // Se a lista existir, ela é a AUTORIDADE: só os selecionados (+ acesso pleno como
   // salvaguarda anti-deadlock). Se estiver vazia, cai no fallback por cargo de estoque.
-  const [cfg] = await sql`SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadores_devolver_peca'`;
+  const [cfg] = await sql`SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'aprovadores_devolver_peca'`;
   const listaConfig = String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const autorizado = listaConfig.length > 0
     ? (listaConfig.includes(user.id) || isFullAccess(u.role as string))

@@ -23,15 +23,15 @@ export async function GET(
       ta.id        AS tipo_id,
       ta.descricao AS tipo_nome,
       COUNT(*)::int AS total_apontamentos,
-      SUM(a.qtd)   AS total_qtd,
+      SUM(a.quantidade)   AS total_qtd,
       -- Metal: qtd já é gramas
-      SUM(CASE WHEN i.categoria_id = ${metalCategoriaId} THEN a.qtd ELSE 0 END) AS peso_metal,
+      SUM(CASE WHEN i.categoria_id = ${metalCategoriaId} THEN a.quantidade ELSE 0 END) AS peso_metal,
       -- Pedras: qtd (unidades) × peso_pedra do insumo
       SUM(CASE WHEN i.categoria_id = ${pedraCategoriaId}
-               THEN a.qtd * COALESCE(i.peso_pedra, 0)
+               THEN a.quantidade * COALESCE(i.peso_pedra, 0)
                ELSE 0 END)                                      AS peso_pedras,
       -- Qtd de pedras (unidades)
-      SUM(CASE WHEN i.categoria_id = ${pedraCategoriaId} THEN a.qtd ELSE 0 END) AS qtd_pedras,
+      SUM(CASE WHEN i.categoria_id = ${pedraCategoriaId} THEN a.quantidade ELSE 0 END) AS qtd_pedras,
       -- Sprint 3: peso em quilates (ct)
       SUM(CASE WHEN i.categoria_id = ${pedraCategoriaId} THEN COALESCE(a.peso_ct, 0) ELSE 0 END) AS pedras_ct,
       COALESCE(MIN(i.categoria_id), 0)::int                    AS categoria_id

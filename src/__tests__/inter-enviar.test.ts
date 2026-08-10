@@ -3,7 +3,7 @@
  *
  * A rota:
  *   - Exige autenticação (401)
- *   - Exige role financeiro: desenvolvedor, admin, diretor, gerente_loja, gerente_fabrica
+ *   - Exige role financeiro: desenvolvedor, admin, diretor, administrativo, financeiro, gerente_loja
  *     (admin/desenvolvedor/diretor também passam via isFullAccess)
  *   - Valida ID numérico (400)
  *   - Valida body: tipo (pix|boleto|ted) e dados (400)
@@ -181,8 +181,9 @@ describe("POST /api/financeiro/inter/enviar/[id]", () => {
     "desenvolvedor",
     "admin",
     "diretor",
+    "administrativo",
+    "financeiro",
     "gerente_loja",
-    "gerente_fabrica",
   ])("aceita role %s", async (role) => {
     mockHappyPathPrefix({ role });
     sqlMock.mockResolvedValueOnce([]); // UPDATE

@@ -120,12 +120,12 @@ export async function POST(req: NextRequest) {
     await (sql as unknown as { begin: (fn: (tx: typeof sql) => Promise<void>) => Promise<void> }).begin(async (tx) => {
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, obs, data_hora)
+          (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, observacao, data_hora)
         VALUES (${insumoId}, ${origemId}, ${localOrigem}, 0, ${quantidade}, 'SA', ${obs}, NOW())
       `;
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, obs, data_hora)
+          (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, observacao, data_hora)
         VALUES (${insumoId}, ${destId}, ${localDest}, ${quantidade}, 0, 'EA', ${obs}, NOW())
       `;
     });

@@ -112,7 +112,7 @@ async function _handler(req: NextRequest) {
     //    setor_id = NULL para bloquear trigger 019 (fn_processar_transferencia)
     const [transf] = await tx`
       INSERT INTO alissonerp.transferencias_ordem
-        (pcp_id, ordem_id, deposito_id, setor_id, obs, created_by,
+        (pcp_id, ordem_id, deposito_id, setor_id, observacao, created_by,
          tipo_transferencia, deposito_origem_id)
       VALUES
         (${pcp_id}::integer, ${ordemId}::integer, ${deposito_destino_id}::integer,
@@ -126,7 +126,7 @@ async function _handler(req: NextRequest) {
     if (ouroSaldo > 0) {
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, entrada, marcador, obs, ordem_id, created_by, local_estoque_id)
+          (insumo_id, deposito_id, saida, entrada, marcador, observacao, ordem_id, created_by, local_estoque_id)
         VALUES
           (1, ${origemDepositoId}::integer, ${ouroSaldo}::real, 0,
            'TED'::alissonerp.enum_marcador_estoque,
@@ -135,7 +135,7 @@ async function _handler(req: NextRequest) {
       `;
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, entrada, marcador, obs, ordem_id, created_by, local_estoque_id)
+          (insumo_id, deposito_id, saida, entrada, marcador, observacao, ordem_id, created_by, local_estoque_id)
         VALUES
           (1, ${deposito_destino_id}::integer, 0, ${ouroSaldo}::real,
            'TED'::alissonerp.enum_marcador_estoque,

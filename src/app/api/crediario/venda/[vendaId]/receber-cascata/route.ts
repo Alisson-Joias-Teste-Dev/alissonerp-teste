@@ -99,7 +99,7 @@ export async function POST(
   const contas = await sql<ContaPendente[]>`
     SELECT id, valor, descricao
     FROM alissonerp.contas_receber
-    WHERE venda_erp_id = ${vendaId} AND categoria = 'venda' AND situacao = 'pendente'
+    WHERE venda_erp_id = ${vendaId} AND categoria = 'venda' AND status = 'pendente'
     ORDER BY data_vencimento ASC, id ASC
   `;
   if (contas.length === 0) {
@@ -186,7 +186,7 @@ export async function POST(
       if (ap.quitada) {
         await tx`
           UPDATE alissonerp.contas_receber
-          SET situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
+          SET status = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
           WHERE id = ${ap.contaId}
         `;
       } else {
@@ -195,13 +195,13 @@ export async function POST(
         const restanteConta = Math.round((ap.valorConta - ap.aplicado) * 100) / 100;
         await tx`
           UPDATE alissonerp.contas_receber
-          SET valor = ${ap.aplicado}, situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
+          SET valor = ${ap.aplicado}, status = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
           WHERE id = ${ap.contaId}
         `;
         await tx`
           INSERT INTO alissonerp.contas_receber
             (descricao, cliente_id, cliente_nome, venda_erp_id, valor,
-             data_vencimento, situacao, categoria, obs, created_by)
+             data_vencimento, status, categoria, observacao, created_by)
           SELECT
             ${`Saldo restante — ${ap.descricao}`},
             cr.cliente_id, cr.cliente_nome, cr.venda_erp_id,

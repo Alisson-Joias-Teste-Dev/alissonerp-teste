@@ -7,7 +7,7 @@ import * as inter from "@/lib/inter";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 
-const ROLES_ENVIAR = ["desenvolvedor", "admin", "diretor", "gerente_loja", "gerente_fabrica"];
+const ROLES_ENVIAR = ["desenvolvedor", "admin", "diretor", "administrativo", "financeiro", "gerente_loja"];
 
 type DadosPix = { chave?: string; qrcode?: string; descricao?: string };
 type DadosBoleto = { codigoBarras: string };
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const body = parsed.data as Body;
 
   const [conta] = await sql`
-    SELECT id, descricao, valor, situacao, data_vencimento, inter_pagamento_id
+    SELECT id, descricao, valor, status AS situacao, data_vencimento, inter_pagamento_id
     FROM alissonerp.contas_pagar
     WHERE id = ${contaId}
     LIMIT 1

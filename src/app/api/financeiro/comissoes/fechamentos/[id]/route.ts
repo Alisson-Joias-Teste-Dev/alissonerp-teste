@@ -11,7 +11,7 @@ import { internalError } from "@/lib/api-error";
 // Por que: permite auditoria completa de cada comissão paga.
 // Impacto se alterado: perde rastreabilidade de comissão.
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
 
 export async function GET(
   req: NextRequest,

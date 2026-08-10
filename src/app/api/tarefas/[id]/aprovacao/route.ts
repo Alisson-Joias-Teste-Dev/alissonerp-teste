@@ -47,7 +47,7 @@ async function processarAprovacaoCompraComercial(
   // - Por que: pagamento operacional ocorre via contas a pagar e só após aprovação formal.
   // - Impacto se alterado/removido: compra pode ficar aprovada sem reflexo em estoque/financeiro.
   const [compra] = await sql`
-    SELECT id, fornecedor_id, local_estoque_id, qtd_parcelas, primeiro_vencimento, created_by, situacao, bloqueado, tarefa_aprovacao_id
+    SELECT id, fornecedor_id, local_estoque_id, qtd_parcelas, primeiro_vencimento, created_by, status AS situacao, bloqueado, tarefa_aprovacao_id
     FROM alissonerp.compras_comercial
     WHERE tarefa_aprovacao_id = ${tarefaId}
     LIMIT 1
@@ -59,7 +59,7 @@ async function processarAprovacaoCompraComercial(
     await sql`
       UPDATE alissonerp.compras_comercial
       SET
-        situacao = 'rejeitado',
+        status = 'rejeitado',
         bloqueado = false,
         aprovado_por = ${aprovadorId}::uuid,
         data_decisao = NOW(),
@@ -70,7 +70,7 @@ async function processarAprovacaoCompraComercial(
   }
 
   const itens = await sql`
-    SELECT produto_id, qtd, valor_total
+    SELECT produto_id, quantidade AS qtd, valor_total
     FROM alissonerp.itens_compra_comercial
     WHERE compra_comercial_id = ${compra.id}
     ORDER BY id
@@ -134,7 +134,7 @@ async function processarAprovacaoCompraComercial(
       const valorParcela = i === parcelas ? Math.round((base + diff) * 100) / 100 : base;
       await tx`
         INSERT INTO alissonerp.contas_pagar
-          (descricao, fornecedor_id, fornecedor_nome, compra_comercial_id, valor, data_vencimento, situacao, categoria, created_by, obs)
+          (descricao, fornecedor_id, fornecedor_nome, compra_comercial_id, valor, data_vencimento, status, categoria, created_by, observacao)
         VALUES
           (
             ${`Compra Comercial #${compra.id} - Parcela ${i}/${parcelas}`},
@@ -154,7 +154,7 @@ async function processarAprovacaoCompraComercial(
     await tx`
       UPDATE alissonerp.compras_comercial
       SET
-        situacao = 'aprovado',
+        status = 'aprovado',
         bloqueado = true,
         total = ${totalCompra},
         aprovado_por = ${aprovadorId}::uuid,
@@ -350,7 +350,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const [tarefaInfo] = await sql`
     SELECT t.venda_id, t.tags, t.tipo,
            ve.aprovacao_credito_tipo,
-           ve.situacao AS venda_situacao
+           ve.status AS venda_situacao
     FROM alissonerp.tarefas t
     LEFT JOIN alissonerp.vendas_erp ve ON ve.id = t.venda_id
     WHERE t.id = ${Number(id)}

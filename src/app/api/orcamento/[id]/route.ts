@@ -341,7 +341,7 @@ export async function PATCH(
       const [venda] = await tx`
         INSERT INTO alissonerp.vendas_erp (
           numero_venda, cliente_id, vendedor_id, data_venda, data_entrega,
-          situacao, observacoes, orcamento_id, created_by
+          status, observacoes, orcamento_id, created_by
         ) VALUES (
           nextval('alissonerp.venda_numero_seq')::text,
           ${clienteId}, ${vendedorId},

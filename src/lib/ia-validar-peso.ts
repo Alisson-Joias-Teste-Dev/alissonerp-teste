@@ -79,7 +79,7 @@ export async function validarPesoBalanca(
 
   try {
     const rows = await sql<{ chave: string; valor: string }[]>`
-      SELECT chave, valor FROM alissonerp.configuracoes_sistema
+      SELECT chave, valor FROM alissonerp.configuracoes_unificado
       WHERE chave IN ('ia_ativa', 'ia_provedor', 'ia_modelo_claude', 'ia_modelo_openai', 'ia_modelo_gemini', 'ia_margem_pedra_pct')
     `;
     for (const r of rows) config[r.chave] = r.valor;

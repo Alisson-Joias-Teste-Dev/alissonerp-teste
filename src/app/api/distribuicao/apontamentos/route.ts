@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   const rows = await sql`
     INSERT INTO alissonerp.apontamentos_distribuicao
       (distribuicao_id, tipo_apontamento_id, deposito_id, setor_id,
-       insumo_id, qtd, foto_balanca, created_by)
+       insumo_id, quantidade, foto_balanca, created_by)
     VALUES
       (${distribuicao_id}, ${tipo_apontamento_id}, ${deposito_id}, ${setor_id ?? null},
        ${insumo_id ?? null}, ${qtd}, ${foto_balanca ?? null}, ${user_id ?? null})

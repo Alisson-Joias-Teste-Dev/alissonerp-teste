@@ -19,7 +19,7 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
   const compraId = parseInt(id);
 
   const [row] = await sql`
-    SELECT c.*, ct.nome AS fornecedor_nome, le.nome AS local_nome, u.nome AS recebido_por_nome
+    SELECT c.*, c.status AS situacao, c.observacao AS obs, ct.nome AS fornecedor_nome, le.nome AS local_nome, u.nome AS recebido_por_nome
     FROM alissonerp.compras_comercial c
     LEFT JOIN public.contatos ct ON ct.id_contato = c.fornecedor_id
     LEFT JOIN alissonerp.locais_estoque le ON le.id = c.local_estoque_id

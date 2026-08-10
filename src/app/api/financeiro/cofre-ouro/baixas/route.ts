@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
       id, gramas, destino, status,
       protocolo_id,
       realizado_nome, transportador_nome, recebedor_nome,
-      confirmado_em, foto_comprovacao, obs,
+      confirmado_em, foto_comprovacao, observacao AS obs,
       created_at, updated_at
     FROM alissonerp.cofre_ouro_baixas
     WHERE 1=1
@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
     const [nova] = await tx`
       INSERT INTO alissonerp.cofre_ouro_baixas
         (gramas, destino, status, realizado_por, realizado_nome,
-         transportador_id, transportador_nome, obs,
+         transportador_id, transportador_nome, observacao,
          confirmado_em)
       VALUES
         (${body.gramas}, ${body.destino}, ${statusInicial},

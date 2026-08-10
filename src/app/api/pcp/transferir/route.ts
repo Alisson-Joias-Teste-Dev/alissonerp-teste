@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
     await sql`
       INSERT INTO alissonerp.movimentacoes_estoque
         (insumo_id, deposito_id, setor_id, ordem_id, saida, entrada,
-         marcador, obs, data_hora, valor_total, preco_compra, created_by, local_estoque_id)
+         marcador, observacao, data_hora, valor_total, preco_compra, created_by, local_estoque_id)
       VALUES
         (${insumo.insumo_id}, ${origemDepositoId}, ${null}, ${ordemId ?? null},
          ${insumo.quantidade}, ${0},
@@ -139,7 +139,7 @@ export async function POST(req: NextRequest) {
     await sql`
       INSERT INTO alissonerp.movimentacoes_estoque
         (insumo_id, deposito_id, setor_id, ordem_id, saida, entrada,
-         marcador, obs, data_hora, valor_total, preco_compra, created_by, local_estoque_id)
+         marcador, observacao, data_hora, valor_total, preco_compra, created_by, local_estoque_id)
       VALUES
         (${insumo.insumo_id}, ${destino_deposito_id}, ${setor_id ?? null}, ${ordemId ?? null},
          ${0}, ${insumo.quantidade},
@@ -176,7 +176,7 @@ export async function POST(req: NextRequest) {
       if (quebraTransf > 0) {
         await sql`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, saida, marcador, ordem_id, obs, created_at, local_estoque_id)
+            (insumo_id, deposito_id, saida, marcador, ordem_id, observacao, created_at, local_estoque_id)
           VALUES
             (1, ${origemDepositoId}, ${quebraTransf}::real,
              'QUEBRA_PCP'::alissonerp.enum_marcador_estoque,
@@ -200,7 +200,7 @@ export async function POST(req: NextRequest) {
 
   await sql`
     INSERT INTO alissonerp.transferencias_ordem
-      (pcp_id, ordem_id, deposito_id, setor_id, obs, created_by)
+      (pcp_id, ordem_id, deposito_id, setor_id, observacao, created_by)
     VALUES
       (${pcp_id}, ${ordemId ?? null}, ${destino_deposito_id}, ${null},
        ${obsComFoto}, ${user?.id ?? null}::uuid)
@@ -253,11 +253,11 @@ async function calcularSaldoAutomatico(
     SELECT
       COALESCE(p.dist_ouro_real, 0)
       + COALESCE(SUM(CASE
-          WHEN a.tipo_apontamento_id = 1                                    THEN a.qtd
-          WHEN a.tipo_apontamento_id = 2 AND ${distOuroReal}::float8 = 0   THEN a.qtd
+          WHEN a.tipo_apontamento_id = 1                                    THEN a.quantidade
+          WHEN a.tipo_apontamento_id = 2 AND ${distOuroReal}::float8 = 0   THEN a.quantidade
           ELSE 0
         END), 0)
-      - COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 5 THEN a.qtd ELSE 0 END), 0)
+      - COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 5 THEN a.quantidade ELSE 0 END), 0)
       AS saldo
     FROM alissonerp.pcp p
     LEFT JOIN alissonerp.apontamentos_pcp a ON a.pcp_id = p.id AND a.insumo_id = ${ouro18kId}
@@ -271,8 +271,8 @@ async function calcularSaldoAutomatico(
   const pedrasSaldos = await sql`
     SELECT
       a.insumo_id,
-      COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END), 0)
-      - COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END), 0)
+      COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.quantidade ELSE 0 END), 0)
+      - COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.quantidade ELSE 0 END), 0)
       AS saldo
     FROM alissonerp.apontamentos_pcp a
     JOIN alissonerp.insumos i ON i.id = a.insumo_id
@@ -281,8 +281,8 @@ async function calcularSaldoAutomatico(
       AND a.insumo_id IS NOT NULL
     GROUP BY a.insumo_id
     HAVING
-      COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END), 0)
-      - COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END), 0)
+      COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.quantidade ELSE 0 END), 0)
+      - COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.quantidade ELSE 0 END), 0)
       > 0
   `;
   for (const row of pedrasSaldos) {

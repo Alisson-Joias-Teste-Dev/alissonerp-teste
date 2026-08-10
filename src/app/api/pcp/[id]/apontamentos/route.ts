@@ -10,7 +10,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const rows = await sql`
     SELECT
-      a.id, a.qtd, a.created_at, a.foto_balanca,
+      a.id, a.quantidade AS qtd, a.created_at, a.foto_balanca,
       a.tipo_apontamento_id,
       d.nome AS deposito_nome,
       s.nome  AS setor_nome,

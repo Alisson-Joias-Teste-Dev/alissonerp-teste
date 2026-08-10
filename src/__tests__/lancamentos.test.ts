@@ -49,7 +49,7 @@ describe("GET /api/financeiro/lancamentos", () => {
     expect(res.status).toBe(403);
   });
 
-  it.each(["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"])(
+  it.each(["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"])(
     "aceita role %s",
     async (role) => {
       sqlMock

@@ -602,7 +602,7 @@ export async function approveVenda(
 ): Promise<{ ok: true; ordem_criada?: string; ja_aprovada?: boolean; tiny_erro?: string }> {
   const approveVendaThreshold = await getDescontoThreshold(vendaId);
   const [venda] = await sql`
-    SELECT v.id, v.situacao, v.bloqueado, v.tiny_pedido_id,
+    SELECT v.id, v.status AS situacao, v.bloqueado, v.tiny_pedido_id,
            v.desconto_aprovado_por,
            EXISTS(
              SELECT 1 FROM alissonerp.itens_venda_erp
@@ -677,8 +677,8 @@ export async function approveVenda(
   // 2. Atualiza situação para aprovado
   await sql`
     UPDATE alissonerp.vendas_erp
-    SET situacao = 'aprovado', updated_at = NOW()
-    WHERE id = ${vendaId} AND situacao NOT IN ('aprovado', 'concluido', 'confirmado', 'cancelado')
+    SET status = 'aprovado', updated_at = NOW()
+    WHERE id = ${vendaId} AND status NOT IN ('aprovado', 'concluido', 'confirmado', 'cancelado')
   `;
 
   // 3. Criar ordem (orçamento ou serviço) — best-effort
@@ -816,7 +816,7 @@ export async function estornarVenda(
     // 1. Bloqueia pagamento + venda para evitar race entre dois estornos simultâneos.
     // Captura a situacao para decidir se o estorno pode reverter o status (fluxo novo).
     const [vendaLock] = await tx`
-      SELECT id, situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE
+      SELECT id, status AS situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE
     `;
     const situacaoAtual = vendaLock?.situacao as string | undefined;
     // Entregue/concluido = ponto final (trava de status, migration 297): o estorno
@@ -882,8 +882,8 @@ export async function estornarVenda(
       // pra vendedora recobrar o valor estornado (ou cancelar manualmente)
       await tx`
         UPDATE alissonerp.vendas_erp
-        SET situacao = 'rascunho', updated_at = NOW()
-        WHERE id = ${vendaId} AND situacao NOT IN ('cancelado')
+        SET status = 'rascunho', updated_at = NOW()
+        WHERE id = ${vendaId} AND status NOT IN ('cancelado')
       `;
       acao = "revertida_rascunho";
     } else {
@@ -892,8 +892,8 @@ export async function estornarVenda(
       // estoque comercial automaticamente em BEFORE UPDATE.
       await tx`
         UPDATE alissonerp.vendas_erp
-        SET situacao = 'cancelado', updated_at = NOW()
-        WHERE id = ${vendaId} AND situacao NOT IN ('cancelado')
+        SET status = 'cancelado', updated_at = NOW()
+        WHERE id = ${vendaId} AND status NOT IN ('cancelado')
       `;
       acao = "cancelada";
     }
@@ -904,9 +904,9 @@ export async function estornarVenda(
     // fazemos UPDATE manual abrangendo 'pendente' + 'pago'.
     const crResult = await tx`
       UPDATE alissonerp.contas_receber
-      SET situacao = 'cancelado', updated_at = NOW()
+      SET status = 'cancelado', updated_at = NOW()
       WHERE venda_erp_id = ${vendaId}
-        AND situacao IN ('pago', 'pendente')
+        AND status IN ('pago', 'pendente')
       RETURNING id
     `;
 

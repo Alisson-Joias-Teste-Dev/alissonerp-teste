@@ -28,7 +28,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
   const { data_recebimento } = parsed.data;
 
   const [compra] = await sql`
-    SELECT bloqueado, situacao FROM alissonerp.compras_comercial WHERE id = ${compraId} LIMIT 1
+    SELECT bloqueado, status AS situacao FROM alissonerp.compras_comercial WHERE id = ${compraId} LIMIT 1
   `;
   if (!compra) return NextResponse.json({ error: "Compra não encontrada" }, { status: 404 });
   if (compra.bloqueado) return NextResponse.json({ error: "Compra bloqueada — não permite alteração" }, { status: 409 });
@@ -42,7 +42,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
   const [updated] = await sql`
     UPDATE alissonerp.compras_comercial
     SET
-      situacao = 'recebida',
+      status = 'recebida',
       data_recebimento = COALESCE(${data_recebimento ?? null}, CURRENT_DATE),
       recebido_por = ${user.id}::uuid
     WHERE id = ${compraId}

@@ -337,7 +337,7 @@ export async function POST(req: NextRequest) {
       // para insumos diferentes caso o parâmetro mude.
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at, local_estoque_id)
+          (insumo_id, deposito_id, saida, marcador, observacao, created_by, created_at, local_estoque_id)
         VALUES (
           ${ouro24kLigaId}, 1,
           ${peso_24k}::real,
@@ -351,7 +351,7 @@ export async function POST(req: NextRequest) {
       // CE saída liga do pote
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at, local_estoque_id)
+          (insumo_id, deposito_id, saida, marcador, observacao, created_by, created_at, local_estoque_id)
         VALUES (
           ${liga_insumo_id}, 1,
           ${peso_liga_calculado}::real,

@@ -32,14 +32,14 @@ export async function processarAprovacaoQuebraLimpeza(params: Params): Promise<R
   const { baixaId, decisao, userId, motivo, tarefaId } = params;
 
   const [config] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovador_limpeza'
+    SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'aprovador_limpeza'
   `;
   const aprovadorId = String(config?.valor ?? "").trim();
   if (!aprovadorId) return { ok: false, status: 409, error: "Aprovador de limpeza não configurado" };
   if (userId !== aprovadorId) return { ok: false, status: 403, error: "Apenas o aprovador configurado pode aprovar/reprovar limpeza" };
 
   const [baixa] = await sql`
-    SELECT id, status, gramas, destino, obs FROM alissonerp.cofre_ouro_baixas WHERE id = ${baixaId}
+    SELECT id, status, gramas, destino, observacao AS obs FROM alissonerp.cofre_ouro_baixas WHERE id = ${baixaId}
   `;
   if (!baixa) return { ok: false, status: 404, error: "Baixa não encontrada" };
 
@@ -87,7 +87,7 @@ export async function processarAprovacaoQuebraLimpeza(params: Params): Promise<R
     const [atualizada] = await sql`
       UPDATE alissonerp.cofre_ouro_baixas
       SET status = ${STATUS_BAIXA_OURO.EM_LIMPEZA},
-          obs = COALESCE(obs, '') || ' | REPROVADO por ' || ${nome} || ': ' || ${motivo ?? 'sem motivo'} || ' em ' || ${new Date().toISOString()},
+          observacao = COALESCE(observacao, '') || ' | REPROVADO por ' || ${nome} || ': ' || ${motivo ?? 'sem motivo'} || ' em ' || ${new Date().toISOString()},
           updated_at = now()
       WHERE id = ${baixaId}
       RETURNING id, status
@@ -147,7 +147,7 @@ export async function processarAprovacaoQuebraLimpeza(params: Params): Promise<R
   const [atualizada] = await sql`
     UPDATE alissonerp.cofre_ouro_baixas
     SET status = ${STATUS_BAIXA_OURO.CONCLUIDO},
-        obs = COALESCE(obs, '') || ' | APROVADO por ' || ${nome} || ' em ' || ${new Date().toISOString()},
+        observacao = COALESCE(observacao, '') || ' | APROVADO por ' || ${nome} || ' em ' || ${new Date().toISOString()},
         updated_at = now()
     WHERE id = ${baixaId}
     RETURNING id, status
@@ -175,7 +175,7 @@ export async function processarAprovacaoQuebraLimpeza(params: Params): Promise<R
 
   await sql`
     INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
+      (insumo_id, deposito_id, entrada, marcador, observacao, created_by, created_at, local_estoque_id)
     VALUES
       (
         ${Number((insumo18k as any).id)},

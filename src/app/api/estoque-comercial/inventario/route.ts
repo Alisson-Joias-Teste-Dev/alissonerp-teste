@@ -22,7 +22,7 @@ export async function GET(_req: NextRequest) {
   const rows = await sql`
     SELECT
       i.id, i.local_estoque_id, le.nome AS local_nome,
-      i.status, i.obs, i.data_abertura, i.data_conclusao,
+      i.status, i.observacao AS obs, i.data_abertura, i.data_conclusao,
       i.created_at, i.categoria,
       uc.email AS criado_por_email,
       uf.email AS concluido_por_email,
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
   // Criar inventário
   const [inv] = await sql`
     INSERT INTO alissonerp.inventarios_comercial
-      (local_estoque_id, obs, categoria, created_by)
+      (local_estoque_id, observacao, categoria, created_by)
     VALUES
       (${local_estoque_id}, ${obs ?? null}, ${cat}, ${user.id})
     RETURNING id, created_at

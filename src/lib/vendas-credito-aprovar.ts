@@ -105,7 +105,7 @@ export async function submeterVendaParaAprovacaoCredito(
   let aprovadorId = "";
   if (tipo === "gerente") {
     const [config] = await sql`
-      SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovadora_credito_gerente'
+      SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'aprovadora_credito_gerente'
     `;
     if (config?.valor) {
       const [gerenteConfig] = await sql`
@@ -125,7 +125,7 @@ export async function submeterVendaParaAprovacaoCredito(
   } else {
     // Buscar da config primeiro; fallback diretor→admin→dev
     const [config] = await sql`
-      SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovador_credito_diretor'
+      SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'aprovador_credito_diretor'
     `;
     if (config?.valor) {
       const [diretorConfig] = await sql`
@@ -259,7 +259,7 @@ export async function processarAprovacaoCredito(
   // 1. Buscar tarefa e venda vinculada
   const [tarefa] = await sql`
     SELECT t.id, t.venda_id, t.tipo AS tipo_tarefa, t.criado_por,
-           v.id AS vid, v.numero_venda, v.situacao, v.aprovacao_credito_tipo,
+           v.id AS vid, v.numero_venda, v.status AS situacao, v.aprovacao_credito_tipo,
            v.total_comissao
     FROM alissonerp.tarefas t
     JOIN alissonerp.vendas_erp v ON v.id = t.venda_id

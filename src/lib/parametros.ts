@@ -11,7 +11,7 @@ let cacheLoadedAt: number | null = null;
 
 async function loadParametros(): Promise<void> {
   const rows = await sql<{ chave: string; valor: string; tipo: string }[]>`
-    SELECT chave, valor, tipo FROM alissonerp.parametros_sistema
+    SELECT chave, valor, tipo FROM alissonerp.configuracoes_unificado
   `;
   cache.clear();
   for (const row of rows) {
@@ -30,7 +30,7 @@ async function ensureLoaded(): Promise<void> {
 export async function getParametro(chave: string): Promise<string> {
   await ensureLoaded();
   const entry = cache.get(chave);
-  if (!entry) throw new Error(`Parâmetro '${chave}' não encontrado em alissonerp.parametros_sistema`);
+  if (!entry) throw new Error(`Parâmetro '${chave}' não encontrado em alissonerp.configuracoes_unificado`);
   return entry.valor;
 }
 

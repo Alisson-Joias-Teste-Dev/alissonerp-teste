@@ -19,10 +19,10 @@ export async function POST() {
 
   // Busca todas as vendas com erro e sem tiny_pedido_id (não foram enviadas)
   const vendas = await sql`
-    SELECT id, numero_venda, situacao FROM alissonerp.vendas_erp
+    SELECT id, numero_venda, status AS situacao FROM alissonerp.vendas_erp
     WHERE tiny_sync_status = 'erro'
       AND tiny_pedido_id IS NULL
-      AND situacao NOT IN ('cancelado')
+      AND status NOT IN ('cancelado')
     ORDER BY id DESC
     LIMIT 100
   `;

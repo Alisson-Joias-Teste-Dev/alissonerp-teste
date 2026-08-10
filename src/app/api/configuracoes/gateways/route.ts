@@ -14,7 +14,7 @@ const GatewayPostSchema = z.object({
 
 export async function GET() {
   const gateways = await sql`
-    SELECT id, nome, tipo, ativo, cor, obs, created_at::text AS created_at
+    SELECT id, nome, tipo, ativo, cor, observacao AS obs, created_at::text AS created_at
     FROM alissonerp.fin_gateways
     ORDER BY id ASC
   `;
@@ -37,9 +37,9 @@ export async function POST(req: NextRequest) {
   const { nome, tipo, cor, obs } = parsed.data;
 
   const [gateway] = await sql`
-    INSERT INTO alissonerp.fin_gateways (nome, tipo, cor, obs)
+    INSERT INTO alissonerp.fin_gateways (nome, tipo, cor, observacao)
     VALUES (${nome.trim()}, ${tipo}, ${cor || "#6B7280"}, ${obs || null})
-    RETURNING id, nome, tipo, ativo, cor, obs, created_at::text AS created_at
+    RETURNING id, nome, tipo, ativo, cor, observacao AS obs, created_at::text AS created_at
   `;
   return NextResponse.json(gateway, { status: 201 });
 }

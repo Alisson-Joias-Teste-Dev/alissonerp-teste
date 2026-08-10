@@ -13,7 +13,7 @@ import { logAudit } from "@/lib/audit";
 // Por que: preserva o histórico de cancelamento sem apagar dados.
 // Impacto se alterado: pagamentos podem ficar presos ou sem rastreio.
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
 
 export async function POST(
   req: NextRequest,

@@ -12,7 +12,7 @@ export async function getFinanceiroData() {
         id, descricao, valor,
         data_vencimento::text AS data_vencimento,
         data_pagamento::text  AS data_pagamento,
-        situacao, categoria, obs,
+        status AS situacao, categoria, observacao AS obs,
         created_at::text AS created_at
       FROM alissonerp.contas_pagar
       ORDER BY data_vencimento ASC NULLS LAST, id DESC
@@ -23,7 +23,7 @@ export async function getFinanceiroData() {
         cr.id, cr.descricao, cr.valor,
         cr.data_vencimento::text  AS data_vencimento,
         cr.data_recebimento::text AS data_recebimento,
-        cr.situacao, cr.categoria, cr.obs,
+        cr.status AS situacao, cr.categoria, cr.observacao AS obs,
         cr.created_at::text AS created_at,
         cr.venda_erp_id,
         v.created_at::text  AS venda_created_at,
@@ -93,7 +93,7 @@ export async function getFinanceiroData() {
     sql`
       SELECT
         id, total, qtd_pagamentos,
-        realizado_nome, obs,
+        realizado_nome, observacao AS obs,
         created_at::text AS created_at
       FROM alissonerp.fin_caixa_baixas
       ORDER BY id DESC

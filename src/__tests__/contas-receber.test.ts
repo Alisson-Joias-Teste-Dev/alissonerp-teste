@@ -114,7 +114,8 @@ describe("GET /api/financeiro/contas-receber", () => {
   it.each([
     ["admin"],
     ["desenvolvedor"],
-    ["gerente_fabrica"],
+    ["administrativo"],
+    ["financeiro"],
     ["gerente_loja"],
     ["diretor"], // via isFullAccess
   ])("aceita role autorizada: %s", async (role) => {
@@ -311,7 +312,8 @@ describe("POST /api/financeiro/contas-receber", () => {
   it.each([
     ["admin"],
     ["desenvolvedor"],
-    ["gerente_fabrica"],
+    ["administrativo"],
+    ["financeiro"],
     ["gerente_loja"],
   ])("aceita role autorizada: %s", async (role) => {
     sqlMock

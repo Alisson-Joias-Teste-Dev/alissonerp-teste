@@ -191,7 +191,7 @@ export async function PATCH(
     // Guard: campos restritos a rascunho.
     if (CAMPOS_RESTRITOS_RASCUNHO.has(campo)) {
       const [vAtual] = await sql<{ situacao: string }[]>`
-        SELECT situacao FROM alissonerp.vendas_erp WHERE id = ${sol.venda_id}
+        SELECT status AS situacao FROM alissonerp.vendas_erp WHERE id = ${sol.venda_id}
       `;
       if (vAtual && vAtual.situacao !== "rascunho") {
         // Auto-rejeita dentro de transação.
@@ -346,7 +346,7 @@ async function posCommitPagamento(
       // (status só muda na entrega). Mantém apenas o auto-aprovar de
       // rascunho com crédito.
       const [pvenda] = await sql`
-        SELECT v.situacao, v.aprovacao_credito_tipo
+        SELECT v.status AS situacao, v.aprovacao_credito_tipo
         FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
       `;
 
@@ -389,7 +389,7 @@ async function aplicarCampoVendaTx(
       // Somente transições simples chegam aqui (rascunho, cancelado, entregue).
       // 'aprovado' é roteado antes pelo helper com tx própria; 'concluido' e
       // 'enviado' foram aposentados (bloqueados antes — fluxo novo 06/2026).
-      await tx`UPDATE alissonerp.vendas_erp SET situacao = ${v}, updated_at = NOW() WHERE id = ${vendaId}`;
+      await tx`UPDATE alissonerp.vendas_erp SET status = ${v}, updated_at = NOW() WHERE id = ${vendaId}`;
       return;
     }
     case "cliente_id": {

@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     SELECT id, inter_pagamento_id, inter_tipo, inter_status, valor
     FROM alissonerp.contas_pagar
     WHERE inter_pagamento_id IS NOT NULL
-      AND situacao = 'pendente'
+      AND status = 'pendente'
       AND (inter_status IS NULL OR inter_status NOT IN ('PAGO','EXECUTADO','CANCELADO','REJEITADO','ERRO'))
     ORDER BY inter_atualizado_em ASC NULLS FIRST
     LIMIT 200
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
         const dataPag = consulta.dataPagamento ?? new Date().toISOString().slice(0, 10);
         await sql`
           UPDATE alissonerp.contas_pagar
-          SET situacao            = 'pago',
+          SET status              = 'pago',
               data_pagamento      = ${dataPag}::date,
               inter_status        = ${novoStatus},
               inter_atualizado_em = now()

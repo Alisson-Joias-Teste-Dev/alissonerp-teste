@@ -2,7 +2,7 @@
 // API de Configuração de Aprovadores
 //
 // REGRA DE NEGÓCIO: cada tipo de aprovação tem um responsável configurável
-// via tabela configuracoes_sistema. Só admin/desenvolvedor pode alterar.
+// via tabela configuracoes_unificado. Só admin/desenvolvedor pode alterar.
 // GET  → retorna config atual + lista de usuários elegíveis por role
 // PUT  → atualiza os responsáveis
 //
@@ -44,7 +44,7 @@ export async function GET() {
   try {
     // Ler valores atuais — busca TODAS as chaves, incluindo a já existente
     const configs = await sql`
-      SELECT chave, valor FROM alissonerp.configuracoes_sistema
+      SELECT chave, valor FROM alissonerp.configuracoes_unificado
       WHERE chave = ANY(${CHAVES})
     `;
     const configMap = new Map(configs.map((r: any) => [r.chave, r.valor]));
@@ -171,7 +171,7 @@ export async function PUT(req: NextRequest) {
     }
     /**
      * REGRA DE NEGÓCIO: aprovador da limpeza de metal (sangria) precisa ser
-     * persistido em configuracoes_sistema para liberar o fluxo
+     * persistido em configuracoes_unificado para liberar o fluxo
      * recebido -> em_limpeza -> aguardando_aprovacao -> concluido.
      *
      * O QUE: grava a chave `aprovador_limpeza` quando enviada pelo front.
@@ -216,7 +216,7 @@ export async function PUT(req: NextRequest) {
 
     for (const u of updates) {
       await sql`
-        INSERT INTO alissonerp.configuracoes_sistema (chave, valor)
+        INSERT INTO alissonerp.configuracoes_unificado (chave, valor)
         VALUES (${u.chave}, ${u.valor})
         ON CONFLICT (chave) DO UPDATE SET valor = ${u.valor}
       `;

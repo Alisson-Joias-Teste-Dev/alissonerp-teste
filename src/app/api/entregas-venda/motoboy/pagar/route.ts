@@ -69,11 +69,11 @@ export async function POST(req: NextRequest) {
 
   // Validação: as entregas pertencem ao motoboy, estão confirmadas e não pagas
   const entregasRows: Record<string, unknown>[] = await sql`
-    SELECT ev.id, ev.frete_motoboy, ev.codigo_entrega, ev.situacao
+    SELECT ev.id, ev.frete_motoboy, ev.codigo_entrega, ev.status AS situacao
     FROM alissonerp.entregas_venda ev
     WHERE ev.id = ANY(${entrega_ids})
       AND ev.motoboy_id = ${motoboy_id}::uuid
-      AND ev.situacao = 'confirmada'
+      AND ev.status = 'confirmada'
       AND NOT EXISTS (
         SELECT 1 FROM alissonerp.pagamentos_motoboy_itens pmi
         WHERE pmi.entrega_id = ev.id
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
       const codigosStr = entregas.map((e) => (e as Record<string, unknown>).codigo_entrega).join(", ");
       await tx`
         INSERT INTO alissonerp.contas_pagar
-          (descricao, valor, data_vencimento, situacao, categoria, obs, created_by)
+          (descricao, valor, data_vencimento, status, categoria, observacao, created_by)
         VALUES
           (
             ${`Pagamento ${motoboyNome} — ${entregas.length} entregas`},

@@ -35,7 +35,7 @@ export default async function PrecificacaoPage() {
     `,
     sql<{ chave: string; valor: string }[]>`
       SELECT chave, valor
-      FROM alissonerp.configuracoes_sistema
+      FROM alissonerp.configuracoes_unificado
       WHERE chave IN ('preco_limiar_subir', 'preco_limiar_descer', 'preco_arredondamento')
     `,
     sql`

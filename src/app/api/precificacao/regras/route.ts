@@ -1,6 +1,6 @@
 /**
  * GET   /api/precificacao/regras — ler regras de atualização de preço
- * PATCH /api/precificacao/regras — salvar regras em configuracoes_sistema
+ * PATCH /api/precificacao/regras — salvar regras em configuracoes_unificado
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   try {
     const rows = await sql<{ chave: string; valor: string }[]>`
       SELECT chave, valor
-      FROM alissonerp.configuracoes_sistema
+      FROM alissonerp.configuracoes_unificado
       WHERE chave IN ('preco_limiar_subir', 'preco_limiar_descer', 'preco_arredondamento')
     `;
 
@@ -68,9 +68,9 @@ export async function PATCH(req: NextRequest) {
     const val = Math.max(0, Math.min(50, Number(body.preco_limiar_subir)));
     if (isNaN(val)) return NextResponse.json({ error: "preco_limiar_subir inválido" }, { status: 400 });
     await sql`
-      INSERT INTO alissonerp.configuracoes_sistema (chave, valor, descricao)
+      INSERT INTO alissonerp.configuracoes_unificado (chave, valor, descricao)
       VALUES ('preco_limiar_subir', ${String(val)}, 'Percentual mínimo de alta para disparar atualização de preço de venda (%)')
-      ON CONFLICT (chave) DO UPDATE SET valor = ${String(val)}, updated_at = NOW(), updated_by = ${user.id}::uuid
+      ON CONFLICT (chave) DO UPDATE SET valor = ${String(val)}, atualizado_em = NOW(), atualizado_por = ${user.id}::uuid
     `;
   }
 
@@ -78,9 +78,9 @@ export async function PATCH(req: NextRequest) {
     const val = Math.max(0, Math.min(50, Number(body.preco_limiar_descer)));
     if (isNaN(val)) return NextResponse.json({ error: "preco_limiar_descer inválido" }, { status: 400 });
     await sql`
-      INSERT INTO alissonerp.configuracoes_sistema (chave, valor, descricao)
+      INSERT INTO alissonerp.configuracoes_unificado (chave, valor, descricao)
       VALUES ('preco_limiar_descer', ${String(val)}, 'Percentual mínimo de queda para disparar atualização de preço de venda (%)')
-      ON CONFLICT (chave) DO UPDATE SET valor = ${String(val)}, updated_at = NOW(), updated_by = ${user.id}::uuid
+      ON CONFLICT (chave) DO UPDATE SET valor = ${String(val)}, atualizado_em = NOW(), atualizado_por = ${user.id}::uuid
     `;
   }
 
@@ -89,9 +89,9 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Arredondamento inválido" }, { status: 400 });
     }
     await sql`
-      INSERT INTO alissonerp.configuracoes_sistema (chave, valor, descricao)
+      INSERT INTO alissonerp.configuracoes_unificado (chave, valor, descricao)
       VALUES ('preco_arredondamento', ${body.preco_arredondamento}, 'Tipo de arredondamento: dezena | unidade | centena')
-      ON CONFLICT (chave) DO UPDATE SET valor = ${body.preco_arredondamento}, updated_at = NOW(), updated_by = ${user.id}::uuid
+      ON CONFLICT (chave) DO UPDATE SET valor = ${body.preco_arredondamento}, atualizado_em = NOW(), atualizado_por = ${user.id}::uuid
     `;
   }
 

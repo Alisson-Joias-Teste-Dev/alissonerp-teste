@@ -110,8 +110,8 @@ export async function POST(req: NextRequest) {
     const dispRows = await sql`
       SELECT
         a.insumo_id,
-        (SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END) -
-         SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END))::integer AS disponivel,
+        (SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.quantidade ELSE 0 END) -
+         SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.quantidade ELSE 0 END))::integer AS disponivel,
         -- Sprint 3: saldo em ct
         SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN COALESCE(a.peso_ct, 0) ELSE 0 END) -
         SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN COALESCE(a.peso_ct, 0) ELSE 0 END) AS disponivel_ct
@@ -121,8 +121,8 @@ export async function POST(req: NextRequest) {
         AND i.categoria_id = ${pedraCategoriaId}
       GROUP BY a.insumo_id
       HAVING (
-        SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END) -
-        SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END)
+        SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.quantidade ELSE 0 END) -
+        SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.quantidade ELSE 0 END)
       ) > 0
     `;
     const dispMap    = new Map<number, number>(
@@ -205,8 +205,8 @@ export async function POST(req: NextRequest) {
   //   Calculado ao vivo de apontamentos_pcp — NÃO usa pcp.total_metal (campo stored pode estar errado)
   const [metalCalc] = await sql`
     SELECT
-      COALESCE(SUM(CASE WHEN a.tipo_apontamento_id IN (1, 2) THEN a.qtd ELSE 0 END), 0)::float8 AS entrada,
-      COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 5        THEN a.qtd ELSE 0 END), 0)::float8 AS retorno
+      COALESCE(SUM(CASE WHEN a.tipo_apontamento_id IN (1, 2) THEN a.quantidade ELSE 0 END), 0)::float8 AS entrada,
+      COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 5        THEN a.quantidade ELSE 0 END), 0)::float8 AS retorno
     FROM alissonerp.apontamentos_pcp a
     JOIN alissonerp.insumos i ON i.id = a.insumo_id
     WHERE a.pcp_id = ${pcp_id}
@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
   // 4. Inserir saida_ordem com peso=0 para SUPRIMIR o trigger
   //    (trigger guard: IF NEW.peso IS NULL OR NEW.peso <= 0 → RETURN NEW)
   const [saida] = await sql`
-    INSERT INTO alissonerp.saidas_ordem (ordem_id, deposito_id, peso, metal_externo, obs, created_by)
+    INSERT INTO alissonerp.saidas_ordem (ordem_id, deposito_id, peso, metal_externo, observacao, created_by)
     VALUES (${ordemId}, ${depositoId}, 0, ${metal_externo}, 'Saída via PCP — gerenciado pelo ERP', ${user.id}::uuid)
     RETURNING id
   `;
@@ -268,7 +268,7 @@ export async function POST(req: NextRequest) {
   if (temOuro && peso_ouro_real > 0) {
     await sql`
       INSERT INTO alissonerp.movimentacoes_estoque
-        (insumo_id, deposito_id, saida, marcador, ordem_id, obs, created_at, local_estoque_id)
+        (insumo_id, deposito_id, saida, marcador, ordem_id, observacao, created_at, local_estoque_id)
       VALUES
         (1, ${depositoId}, ${peso_ouro_real}::real,
          'SM'::alissonerp.enum_marcador_estoque,
@@ -339,8 +339,8 @@ export async function POST(req: NextRequest) {
   const dispRows2 = await sql`
     SELECT
       a.insumo_id,
-      (SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END) -
-       SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END))::integer AS disponivel,
+      (SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.quantidade ELSE 0 END) -
+       SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.quantidade ELSE 0 END))::integer AS disponivel,
       SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN COALESCE(a.peso_ct, 0) ELSE 0 END) -
       SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN COALESCE(a.peso_ct, 0) ELSE 0 END) AS disponivel_ct
     FROM alissonerp.apontamentos_pcp a
@@ -349,8 +349,8 @@ export async function POST(req: NextRequest) {
       AND i.categoria_id = ${pedraCategoriaId}
     GROUP BY a.insumo_id
     HAVING (
-      SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END) -
-      SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.qtd ELSE 0 END)
+      SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.quantidade ELSE 0 END) -
+      SUM(CASE WHEN a.tipo_apontamento_id = 6 THEN a.quantidade ELSE 0 END)
     ) > 0
   `;
 
@@ -389,7 +389,7 @@ export async function POST(req: NextRequest) {
     if (qtdUtilizada > 0) {
       await sql`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, entrada, marcador, ordem_id, obs, local_estoque_id)
+          (insumo_id, deposito_id, saida, entrada, marcador, ordem_id, observacao, local_estoque_id)
         VALUES
           (${insumoId}, ${depositoId}, ${qtdUtilizada}::real, 0,
            'SP'::alissonerp.enum_marcador_estoque,
@@ -402,7 +402,7 @@ export async function POST(req: NextRequest) {
     if (quebraPedra > 0) {
       await sql`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, entrada, marcador, ordem_id, obs, local_estoque_id)
+          (insumo_id, deposito_id, saida, entrada, marcador, ordem_id, observacao, local_estoque_id)
         VALUES
           (${insumoId}, ${depositoId}, ${quebraPedra}::real, 0,
            'QBP'::alissonerp.enum_marcador_estoque,
@@ -432,13 +432,13 @@ export async function POST(req: NextRequest) {
     SELECT 1 FROM alissonerp.auditorias
     WHERE ordem_id = ${ordemId}
       AND tipo_auditoria = 'fabrica'
-      AND situacao != 'reprovado'
+      AND status != 'reprovado'
     LIMIT 1
   `;
   if (jaExisteAuditoria.length === 0) {
     await sql`
       INSERT INTO alissonerp.auditorias (
-        situacao, tipo_auditoria, rota_processo, ordem_id,
+        status, tipo_auditoria, rota_processo, ordem_id,
         peso_negociado, peso_final, pmc,
         quebra, quebra_percentual,
         total_metal, retorno_metal, metal_externo,

@@ -79,7 +79,7 @@ export default async function ProtocoloPage() {
         ac.etapas::text,
         ac.ordem_id,
         ac.consultora_id,
-        ac.obs,
+        ac.observacao AS obs,
         ac.created_at,
         o.numero_ordem,
         v.nome AS consultora_nome

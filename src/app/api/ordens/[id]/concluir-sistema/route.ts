@@ -131,12 +131,12 @@ export async function PATCH(
     if (concluir("auditoria_loja")) {
       auditoriaLojaRows = await tx`
         UPDATE alissonerp.auditorias
-        SET situacao = 'aprovado',
+        SET status = 'aprovado',
             parecer = COALESCE(NULLIF(parecer, ''), ${parecerConclusao}),
             data_conclusao = COALESCE(data_conclusao, now())
         WHERE ordem_id = ${ordemId}
           AND tipo_auditoria = 'loja'
-          AND situacao IN ('pendente', 'em_analise', 'pendenciado')
+          AND status IN ('pendente', 'em_analise', 'pendenciado')
         RETURNING id
       `;
     }
@@ -175,12 +175,12 @@ export async function PATCH(
     if (concluir("auditoria_fabrica")) {
       auditoriaFabRows = await tx`
         UPDATE alissonerp.auditorias
-        SET situacao = 'aprovado',
+        SET status = 'aprovado',
             parecer = COALESCE(NULLIF(parecer, ''), ${parecerConclusao}),
             data_conclusao = COALESCE(data_conclusao, now())
         WHERE ordem_id = ${ordemId}
           AND tipo_auditoria = 'fabrica'
-          AND situacao IN ('pendente', 'em_analise', 'pendenciado')
+          AND status IN ('pendente', 'em_analise', 'pendenciado')
         RETURNING id
       `;
     }

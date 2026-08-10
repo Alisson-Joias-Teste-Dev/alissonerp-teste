@@ -84,9 +84,9 @@ export default async function CrediarioPage() {
             -- Saldo GERAL (regra v2.78.0): limite − todo o A Receber pendente,
             -- derivado ao vivo (não o contador 'saldo_gerente_atual', que dava drift).
             -- Pode ser NEGATIVO quando o total a receber passa do limite.
-            (SELECT valor::numeric FROM alissonerp.configuracoes_sistema WHERE chave='saldo_gerente_limite' LIMIT 1)
+            (SELECT valor::numeric FROM alissonerp.configuracoes_unificado WHERE chave='saldo_gerente_limite' LIMIT 1)
               - COALESCE((SELECT SUM(valor) FROM alissonerp.vw_crediario WHERE situacao='pendente'), 0) AS saldo_atual,
-            (SELECT valor::numeric FROM alissonerp.configuracoes_sistema WHERE chave='saldo_gerente_limite' LIMIT 1) AS saldo_limite
+            (SELECT valor::numeric FROM alissonerp.configuracoes_unificado WHERE chave='saldo_gerente_limite' LIMIT 1) AS saldo_limite
         `,
   ]);
 

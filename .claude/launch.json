@@ -7,6 +7,13 @@
       "runtimeArgs": ["next", "dev", "--hostname", "0.0.0.0"],
       "port": 3000,
       "autoPort": false
+    },
+    {
+      "name": "alissonerp-teste",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev", "--hostname", "0.0.0.0", "--port", "3010"],
+      "port": 3010,
+      "autoPort": false
     }
   ]
 }

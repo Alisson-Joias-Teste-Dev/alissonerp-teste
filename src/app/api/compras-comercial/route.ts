@@ -29,6 +29,8 @@ export async function GET(req: NextRequest) {
 
   const rows = await sql`
     SELECT c.*,
+      c.status AS situacao,
+      c.observacao AS obs,
       ct.nome AS fornecedor_nome,
       le.nome AS local_nome,
       COUNT(ic.id)::int AS total_itens,
@@ -38,7 +40,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN alissonerp.locais_estoque le ON le.id = c.local_estoque_id
     LEFT JOIN alissonerp.itens_compra_comercial ic ON ic.compra_comercial_id = c.id
     LEFT JOIN alissonerp.usuarios u ON u.id = c.recebido_por
-    WHERE (${situacaoFilter}::text IS NULL OR c.situacao = ${situacaoFilter})
+    WHERE (${situacaoFilter}::text IS NULL OR c.status = ${situacaoFilter})
       AND (${localIdFilter}::int IS NULL OR c.local_estoque_id = ${localIdFilter ? parseInt(localIdFilter) : null})
     GROUP BY c.id, ct.nome, le.nome, u.nome
     ORDER BY c.id DESC
@@ -74,7 +76,7 @@ export async function POST(req: NextRequest) {
 
   const [row] = await sql`
     INSERT INTO alissonerp.compras_comercial
-      (fornecedor_id, obs, situacao, local_estoque_id, numero_nf, data_compra, qtd_parcelas, primeiro_vencimento, created_by)
+      (fornecedor_id, observacao, status, local_estoque_id, numero_nf, data_compra, qtd_parcelas, primeiro_vencimento, created_by)
     VALUES (
       ${fornecedor_id ?? null},
       ${obs ?? null},

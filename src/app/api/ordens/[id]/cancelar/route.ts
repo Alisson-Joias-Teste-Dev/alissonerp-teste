@@ -58,7 +58,7 @@ export async function PATCH(
         SELECT 1 FROM alissonerp.apontamentos_pcp ap2
         JOIN alissonerp.pcp p2 ON p2.id = ap2.pcp_id
         JOIN alissonerp.insumos i ON i.id = ap2.insumo_id
-        WHERE p2.ordem_id = ${ordemId} AND i.categoria_id = 1 AND ap2.qtd > 0
+        WHERE p2.ordem_id = ${ordemId} AND i.categoria_id = 1 AND ap2.quantidade > 0
       ) AS ouro_saiu
     FROM alissonerp.apontamentos_pcp ap
     JOIN alissonerp.pcp p ON p.id = ap.pcp_id

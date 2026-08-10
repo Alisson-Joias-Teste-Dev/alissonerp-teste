@@ -17,7 +17,7 @@ import { logAudit } from "@/lib/audit";
 // a duplicidade sem precisar de filtro manual.
 // Impacto se alterado: pode pagar comissão em dobro para vendas antigas.
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase();
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
         vd.nome
       FROM alissonerp.pagamentos_venda pv
       JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
-        AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
+        AND ve.status = ANY(${SITUACOES_VENDA_ATIVAS})
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = ve.vendedor_id
       WHERE pv.status = 'confirmado'
         AND pv.forma NOT IN ('Vale-Troca', 'A Receber')
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
             c.nome AS cliente_nome
           FROM alissonerp.pagamentos_venda pv
           JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
-            AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
+            AND ve.status = ANY(${SITUACOES_VENDA_ATIVAS})
           LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
           WHERE pv.status = 'confirmado'
             AND pv.forma NOT IN ('Vale-Troca', 'A Receber')

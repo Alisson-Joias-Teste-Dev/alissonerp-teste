@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import sql from "@/lib/db";
+import sql, { normalizeRow } from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { zodError } from "@/lib/schemas/common";
 
@@ -28,7 +28,9 @@ export async function GET(
   `;
   if (!row) return NextResponse.json({ error: "Não encontrada" }, { status: 404 });
 
-  return NextResponse.json(row);
+  // BLINDAGEM: pct_desconto_solicitado/preco_solicitado sao NUMERIC — normaliza
+  // pra number (ver mesmo ajuste em GET /api/vendas/solicitacoes-desconto).
+  return NextResponse.json(normalizeRow(row, ["pct_desconto_solicitado", "preco_solicitado"]));
 }
 
 // PATCH — somente direção (admin/desenvolvedor) pode aprovar ou rejeitar

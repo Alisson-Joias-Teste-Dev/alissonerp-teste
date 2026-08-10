@@ -131,7 +131,7 @@ export async function POST() {
         try {
           const contas = await sql<{ id: number }[]>`
             SELECT id FROM alissonerp.contas_receber
-            WHERE venda_erp_id = ${vendaId} AND situacao = 'pago'
+            WHERE venda_erp_id = ${vendaId} AND status = 'pago'
             ORDER BY updated_at DESC LIMIT 1
           `;
           for (const c of contas) {

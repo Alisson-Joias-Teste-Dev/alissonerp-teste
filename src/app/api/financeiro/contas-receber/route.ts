@@ -6,7 +6,7 @@ import { isFullAccess } from "@/lib/roles";
 import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 import { zodError, IdSchema, MoneySchema, DateSchema } from "@/lib/schemas/common";
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
 
 const ContasReceberSchema = z.object({
   descricao: z.string().min(1, "descricao obrigatoria").max(LIMITS.TITULO_MAX),
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
         ) AS valor_liquido_total
       FROM alissonerp.contas_receber cr
       WHERE 1=1
-        ${situacao ? sql`AND cr.situacao = ${situacao}` : sql``}
+        ${situacao ? sql`AND cr.status = ${situacao}` : sql``}
     `;
     return NextResponse.json({
       total: resumo.total,
@@ -63,11 +63,13 @@ export async function GET(req: NextRequest) {
 
   const contas = await sql`
     SELECT cr.*,
+      cr.status AS situacao,
+      cr.observacao AS obs,
       c.nome AS cliente_nome_ref
     FROM alissonerp.contas_receber cr
     LEFT JOIN public.contatos c ON c.id_contato = cr.cliente_id
     WHERE 1=1
-      ${situacao ? sql`AND cr.situacao = ${situacao}` : sql``}
+      ${situacao ? sql`AND cr.status = ${situacao}` : sql``}
     ORDER BY cr.data_vencimento ASC NULLS LAST, cr.created_at DESC
     LIMIT 200
   `;
@@ -114,7 +116,7 @@ export async function POST(req: NextRequest) {
 
   const [conta] = await sql`
     INSERT INTO alissonerp.contas_receber
-      (descricao, cliente_id, cliente_nome, valor, data_vencimento, categoria, obs, venda_erp_id, created_by)
+      (descricao, cliente_id, cliente_nome, valor, data_vencimento, categoria, observacao, venda_erp_id, created_by)
     VALUES (
       ${body.descricao.trim()}, ${body.cliente_id ?? null}, ${cliente_nome},
       ${body.valor}, ${body.data_vencimento ?? null}, ${body.categoria ?? null},

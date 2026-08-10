@@ -13,7 +13,7 @@ import { logAudit } from "@/lib/audit";
 // Por que: permite corrigir erro de cálculo ou estornar comissão.
 // Impacto se alterado: ajuste sem rastreio ou sem contrapartida.
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase();

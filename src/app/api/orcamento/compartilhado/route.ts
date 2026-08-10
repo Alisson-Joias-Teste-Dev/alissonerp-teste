@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
       vd.nome AS vendedor_nome,
       v.data_venda, v.data_entrega, v.created_at,
       v.total_produtos, v.total_desconto, v.total_frete, v.total_venda,
-      v.situacao, v.forma_envio, v.forma_frete, v.observacoes,
+      v.status AS situacao, v.forma_envio, v.forma_frete, v.observacoes,
       v.endereco_entrega, v.endereco_entrega_numero, v.endereco_entrega_complemento,
       v.endereco_entrega_bairro, v.endereco_entrega_cidade,
       v.endereco_entrega_cep, v.endereco_entrega_uf,
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
     LEFT JOIN public.vendedores vd ON vd.id_vendedor = v.vendedor_id
     WHERE v.token_compartilhamento = ${token}::uuid
-      AND v.situacao != 'cancelado'
+      AND v.status != 'cancelado'
   `;
 
   if (!venda) return NextResponse.json({ error: "Pedido não encontrado" }, { status: 404 });

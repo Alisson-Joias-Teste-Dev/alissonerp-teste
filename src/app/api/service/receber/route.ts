@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
         AND o.tipo_ordem::text NOT IN (
           SELECT jsonb_array_elements_text(
             COALESCE(
-              (SELECT valor::jsonb FROM alissonerp.configuracoes_sistema WHERE chave = 'service_tipos_ordem'),
+              (SELECT valor::jsonb FROM alissonerp.configuracoes_unificado WHERE chave = 'service_tipos_ordem'),
               '["servico_venda","garantia","servico_interno"]'::jsonb
             )
           )

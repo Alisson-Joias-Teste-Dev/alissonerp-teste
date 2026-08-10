@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
   // Validação server-side para evitar bypass via API direta
   // IMPACTO SE REMOVIDO: permitiria devolver vendas que ainda não foram entregues ao cliente
   const [venda] = await sql`
-    SELECT situacao FROM alissonerp.vendas_erp WHERE id = ${body.venda_id}
+    SELECT status AS situacao FROM alissonerp.vendas_erp WHERE id = ${body.venda_id}
   `;
   if (!venda) {
     return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });

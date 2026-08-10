@@ -449,7 +449,7 @@ describe("POST /api/financeiro/conciliar", () => {
     // UPDATE contas_pagar (5ª chamada)
     const updPagSql = (sqlMock.mock.calls[4][0] as string[]).join(" ");
     expect(updPagSql).toMatch(/UPDATE.*contas_pagar/i);
-    expect(updPagSql).toMatch(/situacao\s*=\s*'pago'/i);
+    expect(updPagSql).toMatch(/status\s*=\s*'pago'/i);
   });
 
   it("sucesso conta_receber: UPDATE em contas_receber com situacao='recebido'", async () => {
@@ -464,7 +464,7 @@ describe("POST /api/financeiro/conciliar", () => {
 
     const updRecSql = (sqlMock.mock.calls[4][0] as string[]).join(" ");
     expect(updRecSql).toMatch(/UPDATE.*contas_receber/i);
-    expect(updRecSql).toMatch(/situacao\s*=\s*'recebido'/i);
+    expect(updRecSql).toMatch(/status\s*=\s*'recebido'/i);
   });
 
   it("INSERT em fin_conciliacoes usa tipo='manual'", async () => {

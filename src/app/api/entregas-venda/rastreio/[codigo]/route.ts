@@ -53,11 +53,11 @@ export async function GET(
   const [entrega] = await sql`
     SELECT
       ev.codigo_entrega,
-      ev.situacao,
+      ev.status AS situacao,
       ev.created_at,
       ev.forma_entrega,
       ve.numero_venda,
-      ve.situacao AS venda_situacao,
+      ve.status AS venda_situacao,
       (SELECT COUNT(*) FROM alissonerp.entregas_venda_itens WHERE entrega_id = ev.id)::integer AS itens_count
     FROM alissonerp.entregas_venda ev
     LEFT JOIN alissonerp.vendas_erp ve ON ve.id = ev.venda_id

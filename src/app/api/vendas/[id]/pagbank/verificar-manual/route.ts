@@ -89,7 +89,7 @@ export async function POST(
 
   // Carrega venda
   const [venda] = await sql`
-    SELECT id, numero_venda, situacao, credito_gerente_usado, created_by
+    SELECT id, numero_venda, status AS situacao, credito_gerente_usado, created_by
     FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });

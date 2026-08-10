@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   }
 
   const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
-  const PODE_UPLOAD = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+  const PODE_UPLOAD = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
   if (!usuario || (!PODE_UPLOAD.includes(usuario.role) && !isFullAccess(usuario.role))) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }

@@ -285,7 +285,7 @@ export async function solicitarAprovacaoDevolucao(
     : "aprovador_devolucao_fora_prazo";
   let aprovadorId: string | undefined;
   const [config] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_sistema
+    SELECT valor FROM alissonerp.configuracoes_unificado
     WHERE chave = ${chaveAprovador}
   `;
   if (config?.valor) {
@@ -476,7 +476,7 @@ export async function solicitarAprovacaoEstoqueDevolucao(
   // Aprovador do estoque: config -> fallback por cargo de fabrica/estoque.
   let aprovadorId: string | undefined;
   const [cfg] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovador_devolucao_estoque'
+    SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'aprovador_devolucao_estoque'
   `;
   if (cfg?.valor) {
     const [g] = await sql`

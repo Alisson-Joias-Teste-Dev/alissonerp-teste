@@ -5,7 +5,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
 
 const ContaPagarPatchSchema = z.object({
   situacao: z.string().optional(),
@@ -50,7 +50,7 @@ export async function PATCH(
   // Carrega estado atual da conta — usado pra validar regras de negócio
   // antes do UPDATE (Inter ativo + auto-fill de data_pagamento).
   const [contaAtual] = await sql`
-    SELECT id, situacao, inter_status
+    SELECT id, status AS situacao, inter_status
     FROM alissonerp.contas_pagar WHERE id = ${contaId}
   `;
   if (!contaAtual) {
@@ -74,11 +74,11 @@ export async function PATCH(
 
   const result = await sql`
     UPDATE alissonerp.contas_pagar SET
-      situacao        = COALESCE(${body.situacao ?? null},        situacao),
+      status          = COALESCE(${body.situacao ?? null},        status),
       valor           = COALESCE(${body.valor ?? null},           valor),
       data_vencimento = COALESCE(${body.data_vencimento ?? null}::date, data_vencimento),
       data_pagamento  = COALESCE(${dataPagamentoFinal}::date,           data_pagamento),
-      obs             = COALESCE(${body.obs ?? null},             obs),
+      observacao      = COALESCE(${body.obs ?? null},             observacao),
       updated_at      = now()
     WHERE id = ${contaId}
     RETURNING id

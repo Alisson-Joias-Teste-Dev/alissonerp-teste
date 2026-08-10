@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
             COALESCE(SUM(total_desconto), 0) AS total_desconto
           FROM alissonerp.vendas_erp
           WHERE data_venda >= ${inicio}::date AND data_venda <= ${fim}::date
-            AND situacao != 'cancelado'
+            AND status != 'cancelado'
         `,
         sql`
           SELECT
@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
           FROM alissonerp.vendas_erp ve
           JOIN public.vendedores v ON v.id_vendedor = ve.vendedor_id
           WHERE ve.data_venda >= ${inicio}::date AND ve.data_venda <= ${fim}::date
-            AND ve.situacao != 'cancelado'
+            AND ve.status != 'cancelado'
           GROUP BY v.nome ORDER BY valor_total DESC LIMIT 10
         `,
         sql`
@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
             COUNT(*) AS qtd, COALESCE(SUM(total_venda), 0) AS valor
           FROM alissonerp.vendas_erp
           WHERE data_venda >= ${inicio}::date AND data_venda <= ${fim}::date
-            AND situacao != 'cancelado'
+            AND status != 'cancelado'
           GROUP BY mes ORDER BY mes
         `,
       ]);
@@ -108,21 +108,21 @@ export async function GET(req: NextRequest) {
       const [pagar, receber] = await Promise.all([
         sql`
           SELECT
-            COUNT(*) FILTER (WHERE situacao = 'pendente') AS pendentes,
-            COALESCE(SUM(valor) FILTER (WHERE situacao = 'pendente'), 0) AS total_pendente,
-            COUNT(*) FILTER (WHERE situacao = 'pago') AS pagos,
-            COALESCE(SUM(valor) FILTER (WHERE situacao = 'pago'), 0) AS total_pago,
-            COUNT(*) FILTER (WHERE situacao = 'pendente' AND data_vencimento < CURRENT_DATE) AS vencidos
+            COUNT(*) FILTER (WHERE status = 'pendente') AS pendentes,
+            COALESCE(SUM(valor) FILTER (WHERE status = 'pendente'), 0) AS total_pendente,
+            COUNT(*) FILTER (WHERE status = 'pago') AS pagos,
+            COALESCE(SUM(valor) FILTER (WHERE status = 'pago'), 0) AS total_pago,
+            COUNT(*) FILTER (WHERE status = 'pendente' AND data_vencimento < CURRENT_DATE) AS vencidos
           FROM alissonerp.contas_pagar
           WHERE created_at >= ${inicio}::date AND created_at <= ${fim}::date + interval '1 day'
         `,
         sql`
           SELECT
-            COUNT(*) FILTER (WHERE situacao = 'pendente') AS pendentes,
-            COALESCE(SUM(valor) FILTER (WHERE situacao = 'pendente'), 0) AS total_pendente,
-            COUNT(*) FILTER (WHERE situacao = 'recebido') AS recebidos,
-            COALESCE(SUM(valor) FILTER (WHERE situacao = 'recebido'), 0) AS total_recebido,
-            COUNT(*) FILTER (WHERE situacao = 'pendente' AND data_vencimento < CURRENT_DATE) AS vencidos
+            COUNT(*) FILTER (WHERE status = 'pendente') AS pendentes,
+            COALESCE(SUM(valor) FILTER (WHERE status = 'pendente'), 0) AS total_pendente,
+            COUNT(*) FILTER (WHERE status = 'recebido') AS recebidos,
+            COALESCE(SUM(valor) FILTER (WHERE status = 'recebido'), 0) AS total_recebido,
+            COUNT(*) FILTER (WHERE status = 'pendente' AND data_vencimento < CURRENT_DATE) AS vencidos
           FROM alissonerp.contas_receber
           WHERE created_at >= ${inicio}::date AND created_at <= ${fim}::date + interval '1 day'
         `,

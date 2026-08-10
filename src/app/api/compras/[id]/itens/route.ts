@@ -84,7 +84,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
 
   // Verificar se compra está bloqueada antes de inserir
   const [compra] = await sql`
-    SELECT bloqueado, situacao FROM alissonerp.compras WHERE id = ${compraId} LIMIT 1
+    SELECT bloqueado, status AS situacao FROM alissonerp.compras WHERE id = ${compraId} LIMIT 1
   `;
   if (!compra) return NextResponse.json({ error: "Compra não encontrada" }, { status: 404 });
   if (compra.bloqueado) return NextResponse.json({ error: "Compra bloqueada — não permite edição" }, { status: 409 });
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
 
     const [row] = await sql`
       INSERT INTO alissonerp.itens_compra
-        (compra_id, insumo_id, deposito_id, qtd, valor_unitario, unidade,
+        (compra_id, insumo_id, deposito_id, quantidade, valor_unitario, unidade,
          peso_ct, qtd_pecas, custo_por_ct, lote_referencia, observacao)
       VALUES (
         ${compraId},
@@ -140,7 +140,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
 
     const [row] = await sql`
       INSERT INTO alissonerp.itens_compra
-        (compra_id, insumo_id, deposito_id, qtd, valor_unitario, unidade,
+        (compra_id, insumo_id, deposito_id, quantidade, valor_unitario, unidade,
          observacao)
       VALUES (
         ${compraId},

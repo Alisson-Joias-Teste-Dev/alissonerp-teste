@@ -55,7 +55,7 @@ export async function POST(
   // Validar venda em rascunho
   const descontoThreshold = await getDescontoThreshold(vendaId);
   const [venda] = await sql`
-    SELECT v.id, v.situacao, v.bloqueado,
+    SELECT v.id, v.status AS situacao, v.bloqueado,
            v.aprovacao_credito_tarefa_id,
            v.aprovacao_desconto_tarefa_id,
            v.aprovacao_cartao_desconto_tarefa_id,

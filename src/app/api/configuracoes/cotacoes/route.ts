@@ -27,7 +27,7 @@ export async function GET() {
   const config = { auto_ativo: false, provedor: "openexchangerates", ultimo_update: null as string | null, api_key_configured: false };
   try {
     const rows = await sql`
-      SELECT chave, valor FROM alissonerp.configuracoes_sistema
+      SELECT chave, valor FROM alissonerp.configuracoes_unificado
       WHERE chave IN ('cotacao_auto_ativo', 'cotacao_provedor', 'cotacao_ultimo_update')
     `;
     for (const r of rows) {
@@ -131,9 +131,9 @@ export async function POST(_req: NextRequest) {
     // Registrar timestamp
     const agora = new Date().toISOString();
     await sql`
-      INSERT INTO alissonerp.configuracoes_sistema (chave, valor, descricao, updated_at, updated_by)
+      INSERT INTO alissonerp.configuracoes_unificado (chave, valor, descricao, atualizado_em, atualizado_por)
       VALUES ('cotacao_ultimo_update', ${JSON.stringify(agora)}, 'Última atualização automática de cotações', now(), ${user.id}::uuid)
-      ON CONFLICT (chave) DO UPDATE SET valor = ${JSON.stringify(agora)}, updated_at = now(), updated_by = ${user.id}::uuid
+      ON CONFLICT (chave) DO UPDATE SET valor = ${JSON.stringify(agora)}, atualizado_em = now(), atualizado_por = ${user.id}::uuid
     `;
 
     return NextResponse.json({
@@ -179,17 +179,17 @@ export async function PATCH(req: NextRequest) {
 
   if (body.auto_ativo !== undefined) {
     await sql`
-      INSERT INTO alissonerp.configuracoes_sistema (chave, valor, descricao, updated_at, updated_by)
+      INSERT INTO alissonerp.configuracoes_unificado (chave, valor, descricao, atualizado_em, atualizado_por)
       VALUES ('cotacao_auto_ativo', ${JSON.stringify(body.auto_ativo)}, 'Atualização automática de cotações', now(), ${user.id}::uuid)
-      ON CONFLICT (chave) DO UPDATE SET valor = ${JSON.stringify(body.auto_ativo)}, updated_at = now(), updated_by = ${user.id}::uuid
+      ON CONFLICT (chave) DO UPDATE SET valor = ${JSON.stringify(body.auto_ativo)}, atualizado_em = now(), atualizado_por = ${user.id}::uuid
     `;
   }
 
   if (body.provedor !== undefined) {
     await sql`
-      INSERT INTO alissonerp.configuracoes_sistema (chave, valor, descricao, updated_at, updated_by)
+      INSERT INTO alissonerp.configuracoes_unificado (chave, valor, descricao, atualizado_em, atualizado_por)
       VALUES ('cotacao_provedor', ${JSON.stringify(body.provedor)}, 'Provedor de cotações', now(), ${user.id}::uuid)
-      ON CONFLICT (chave) DO UPDATE SET valor = ${JSON.stringify(body.provedor)}, updated_at = now(), updated_by = ${user.id}::uuid
+      ON CONFLICT (chave) DO UPDATE SET valor = ${JSON.stringify(body.provedor)}, atualizado_em = now(), atualizado_por = ${user.id}::uuid
     `;
   }
 

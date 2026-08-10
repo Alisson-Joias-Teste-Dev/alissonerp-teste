@@ -189,7 +189,7 @@ async function _handler(
     if (usou_solda && consumoSolda > 0) {
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, entrada, marcador, obs, ordem_id, created_by, local_estoque_id)
+          (insumo_id, deposito_id, saida, entrada, marcador, observacao, ordem_id, created_by, local_estoque_id)
         VALUES
           (${ouro18kId}, ${operadorId}::integer, ${consumoSolda}::real, 0,
            'SM'::alissonerp.enum_marcador_estoque,
@@ -203,7 +203,7 @@ async function _handler(
     if (ouroDevolver > 0) {
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, entrada, marcador, obs, ordem_id, created_by, local_estoque_id)
+          (insumo_id, deposito_id, saida, entrada, marcador, observacao, ordem_id, created_by, local_estoque_id)
         VALUES
           (${ouro18kId}, ${operadorId}::integer, ${ouroDevolver}::real, 0,
            'TED'::alissonerp.enum_marcador_estoque,
@@ -212,7 +212,7 @@ async function _handler(
       `;
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, entrada, marcador, obs, ordem_id, created_by, local_estoque_id)
+          (insumo_id, deposito_id, saida, entrada, marcador, observacao, ordem_id, created_by, local_estoque_id)
         VALUES
           (${ouro18kId}, ${almoxarifadoId}, 0, ${ouroDevolver}::real,
            'TED'::alissonerp.enum_marcador_estoque,
@@ -244,7 +244,7 @@ async function _handler(
       if (quebraService > 0) {
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, saida, marcador, ordem_id, obs, created_at, local_estoque_id)
+            (insumo_id, deposito_id, saida, marcador, ordem_id, observacao, created_at, local_estoque_id)
           VALUES
             (1, ${operadorId}::integer, ${quebraService}::real,
              'QUEBRA_PCP'::alissonerp.enum_marcador_estoque,
@@ -275,7 +275,7 @@ async function _handler(
     // 6e. Atualizar transferencia com info de devolução
     await tx`
       UPDATE alissonerp.transferencias_ordem
-      SET obs = COALESCE(obs, '') || ' | Devolvido ao pote em ' || NOW()::date
+      SET observacao = COALESCE(observacao, '') || ' | Devolvido ao pote em ' || NOW()::date
       WHERE id = ${transfId}::integer
     `;
 

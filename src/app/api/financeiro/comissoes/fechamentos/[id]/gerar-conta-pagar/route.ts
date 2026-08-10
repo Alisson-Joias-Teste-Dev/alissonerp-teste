@@ -12,7 +12,7 @@ import { logAudit } from "@/lib/audit";
 // Por que: integra com o fluxo financeiro existente (A Pagar).
 // Impacto se alterado: comissão aprovada sem gerar pagamento.
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
 
 export async function POST(
   req: NextRequest,

@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const configs = await sql<{ chave: string; valor: string }[]>`
-      SELECT chave, valor FROM alissonerp.configuracoes_sistema
+      SELECT chave, valor FROM alissonerp.configuracoes_unificado
       WHERE chave LIKE 'ia_%'
       ORDER BY chave
     `;
@@ -92,16 +92,16 @@ export async function PATCH(req: NextRequest) {
 
     if (body.provedor !== undefined) {
       await sql`
-        UPDATE alissonerp.configuracoes_sistema
-        SET valor = ${body.provedor}, updated_at = NOW()
+        UPDATE alissonerp.configuracoes_unificado
+        SET valor = ${body.provedor}, atualizado_em = NOW()
         WHERE chave = 'ia_provedor'
       `;
     }
 
     if (body.ativa !== undefined) {
       await sql`
-        UPDATE alissonerp.configuracoes_sistema
-        SET valor = ${body.ativa ? "true" : "false"}, updated_at = NOW()
+        UPDATE alissonerp.configuracoes_unificado
+        SET valor = ${body.ativa ? "true" : "false"}, atualizado_em = NOW()
         WHERE chave = 'ia_ativa'
       `;
     }
@@ -109,9 +109,9 @@ export async function PATCH(req: NextRequest) {
     if (body.margem_pedra_pct !== undefined) {
       const val = Math.max(0, Math.min(50, Number(body.margem_pedra_pct)));
       await sql`
-        INSERT INTO alissonerp.configuracoes_sistema (chave, valor, descricao)
+        INSERT INTO alissonerp.configuracoes_unificado (chave, valor, descricao)
         VALUES ('ia_margem_pedra_pct', ${String(val)}, 'Margem de erro (%) da balança para pedras')
-        ON CONFLICT (chave) DO UPDATE SET valor = ${String(val)}, updated_at = NOW()
+        ON CONFLICT (chave) DO UPDATE SET valor = ${String(val)}, atualizado_em = NOW()
       `;
     }
 

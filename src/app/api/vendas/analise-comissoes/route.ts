@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     FROM alissonerp.vendas_erp v
     WHERE v.data_venda >= ${inicio}::date
       AND v.data_venda <= ${fim}::date
-      AND v.situacao NOT IN ('rascunho', 'cancelado', 'virou_credito')
+      AND v.status NOT IN ('rascunho', 'cancelado', 'virou_credito')
   `;
 
   // ── Por vendedora (com total desejado = total_produtos antes do desconto) ─
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
       ON  v.vendedor_id = vend.id_vendedor
       AND v.data_venda >= ${inicio}::date
       AND v.data_venda <= ${fim}::date
-      AND v.situacao NOT IN ('rascunho', 'cancelado', 'virou_credito')
+      AND v.status NOT IN ('rascunho', 'cancelado', 'virou_credito')
     GROUP BY vend.id_vendedor, vend.nome
     ORDER BY comissao_total DESC
   `;
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
     JOIN alissonerp.vendas_erp v ON v.id = i.venda_id
       AND v.data_venda >= ${inicio}::date
       AND v.data_venda <= ${fim}::date
-      AND v.situacao NOT IN ('rascunho', 'cancelado', 'virou_credito')
+      AND v.status NOT IN ('rascunho', 'cancelado', 'virou_credito')
     GROUP BY v.vendedor_id
   `;
   const perdidaMap = new Map(comissaoPerdida.map(r => [Number(r.vendedor_id), Number(r.comissao_perdida)]));
@@ -102,7 +102,7 @@ export async function GET(req: NextRequest) {
       ON v.id = i.venda_id
       AND v.data_venda >= ${inicio}::date
       AND v.data_venda <= ${fim}::date
-      AND v.situacao NOT IN ('rascunho', 'cancelado', 'virou_credito')
+      AND v.status NOT IN ('rascunho', 'cancelado', 'virou_credito')
     JOIN public.vendedores vend ON vend.id_vendedor = v.vendedor_id
     ORDER BY v.data_venda DESC, v.id DESC, i.id
   `;

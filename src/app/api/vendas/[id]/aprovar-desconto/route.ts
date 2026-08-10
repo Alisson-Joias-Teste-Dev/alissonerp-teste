@@ -25,7 +25,7 @@ export async function POST(
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const [venda] = await sql`SELECT id, situacao, aprovacao_credito_tarefa_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
+  const [venda] = await sql`SELECT id, status AS situacao, aprovacao_credito_tarefa_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.situacao !== "rascunho") return NextResponse.json({ error: "Venda não está em rascunho" }, { status: 409 });
 

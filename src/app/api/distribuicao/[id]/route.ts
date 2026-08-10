@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import sql from "@/lib/db";
+import sql, { normalizeRow } from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+
+// Fase 3.6: colunas real → numeric — driver devolve como string, front usa .toFixed()/aritmética
+const DIST_NUMERIC_FIELDS = ["total_metal", "retorno_metal", "pmc", "quebra", "porcentagem_de_quebra", "peso_final"];
 
 // GET /api/distribuicao/[id] — detalhe com lista de ordens
 export async function GET(
@@ -45,6 +48,8 @@ export async function GET(
   if (!dist) {
     return NextResponse.json({ error: "Distribuição não encontrada" }, { status: 404 });
   }
+
+  const distNormalizada = normalizeRow(dist, DIST_NUMERIC_FIELDS);
 
   const ordens = await sql`
     SELECT
@@ -104,5 +109,5 @@ export async function GET(
     LIMIT 1
   `;
 
-  return NextResponse.json({ dist, ordens, lote_estorno: loteEstorno ?? null });
+  return NextResponse.json({ dist: distNormalizada, ordens, lote_estorno: loteEstorno ?? null });
 }

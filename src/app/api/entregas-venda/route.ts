@@ -116,8 +116,8 @@ export async function GET(req: NextRequest) {
   // sem código). Só reaparecem se o filtro pedir explicitamente situacao=cancelada.
   // IMPACTO SE REMOVIDO: lixo operacional polui a lista de entregas ativas.
   const whereSituacao = situacao
-    ? sql`AND ev.situacao = ${situacao}`
-    : sql`AND ev.situacao <> 'cancelada'`;
+    ? sql`AND ev.status = ${situacao}`
+    : sql`AND ev.status <> 'cancelada'`;
 
   const whereMotoboy = motoboyId
     ? sql`AND ev.motoboy_id = ${Number(motoboyId)}`
@@ -142,7 +142,7 @@ export async function GET(req: NextRequest) {
         ev.codigo_motoboy,
         ev.tipo,
         ev.forma_entrega,
-        ev.situacao,
+        ev.status AS situacao,
         ev.regiao,
         ev.motoboy_id,
         ev.frete_cobrado,
@@ -158,7 +158,7 @@ export async function GET(req: NextRequest) {
         ev.created_at,
         ve.numero_venda,
         ve.total_venda,
-        ve.situacao AS venda_situacao,
+        ve.status AS venda_situacao,
         COALESCE(c.nome, ca.nome) AS cliente_nome,
         mb.nome AS motoboy_nome,
         ev.is_avulso,

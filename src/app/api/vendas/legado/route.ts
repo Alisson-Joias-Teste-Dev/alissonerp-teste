@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
           cliente_id, vendedor_id,
           data_venda,
           observacoes,
-          situacao,
+          status,
           is_legacy,
           total_produtos, total_desconto, total_frete, total_venda, total_comissao,
           created_by
@@ -209,7 +209,7 @@ export async function POST(req: NextRequest) {
 
       // 5. Concluir venda (apos itens inseridos para bypassar trigger de bloqueio)
       await tx`
-        UPDATE alissonerp.vendas_erp SET situacao = 'concluido' WHERE id = ${venda.id}
+        UPDATE alissonerp.vendas_erp SET status = 'concluido' WHERE id = ${venda.id}
       `;
 
       // 5. Audit log

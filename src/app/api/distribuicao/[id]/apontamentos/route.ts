@@ -18,7 +18,7 @@ export async function GET(
   const rows = await sql`
     SELECT
       a.id,
-      a.qtd,
+      a.quantidade AS qtd,
       a.created_at,
       a.foto_balanca,
       a.tipo_apontamento_id,

@@ -42,9 +42,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       tipo  = COALESCE(${tipo  ?? null}, tipo),
       ativo = COALESCE(${ativo ?? null}, ativo),
       cor   = COALESCE(${cor   ?? null}, cor),
-      obs   = COALESCE(${obs   ?? null}, obs)
+      observacao = COALESCE(${obs   ?? null}, observacao)
     WHERE id = ${gid}
-    RETURNING id, nome, tipo, ativo, cor, obs, created_at::text AS created_at
+    RETURNING id, nome, tipo, ativo, cor, observacao AS obs, created_at::text AS created_at
   `;
   if (!updated) return NextResponse.json({ error: "Gateway não encontrado" }, { status: 404 });
   return NextResponse.json(updated);

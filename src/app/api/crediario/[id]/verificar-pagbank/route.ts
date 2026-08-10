@@ -66,7 +66,7 @@ export async function POST(
 
   // Carregar conta a receber
   const [conta] = await sql`
-    SELECT id, situacao, valor, venda_erp_id, descricao
+    SELECT id, status AS situacao, valor, venda_erp_id, descricao
     FROM alissonerp.contas_receber
     WHERE id = ${contaId} AND categoria = 'venda'
   `;
@@ -141,7 +141,7 @@ export async function POST(
     // 1. Marcar conta a receber como paga
     await tx`
       UPDATE alissonerp.contas_receber
-      SET situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
+      SET status = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
       WHERE id = ${contaId}
     `;
 
