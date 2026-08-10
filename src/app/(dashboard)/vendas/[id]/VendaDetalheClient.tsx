@@ -28,6 +28,9 @@ import { useErrorStore } from "@/stores/errorStore";
 import { getPublicUrl } from "@/lib/storage-url";
 // REGRA DE NEGOCIO: helpers de rodio (Frente A — 30/05/2026)
 import { isServicoRodioProduto, calcularPreviewRodioPorSkuBase, getPctRodio, round2, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
+// REGRA DE NEGOCIO: comissao por faixa de desconto centralizada em src/lib/comissao.ts
+// (pente-fino 10/08/2026, etapa 1) — nao duplicar getComissao() nos frontends.
+import { getComissao as getComissaoBase, type FaixaComissao } from "@/lib/comissao";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -53,7 +56,6 @@ interface Produto {
    *  NULL = usa PCT_RODIO_DEFAULT. Frente C do Plano de Acao (30/05/2026). */
   pct_calculo_servico?: number | null;
 }
-interface FaixaComissao { desconto_pct: number; comissao_pct: number; }
 interface ItemVenda {
   id?: number; _key: string; produto_id: number | null; nome_produto: string; sku: string;
   quantidade: number; preco_lista: number; pct_desconto: number;
@@ -912,10 +914,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
   // ── Commission lookup ───────────────────────────────────────────────────────
   function getComissao(pct: number): number {
-    if (pct > 30) return 0.5;
-    const faixa = faixas.find(f => f.desconto_pct === Math.round(pct));
-    if (!faixa) return 0;
-    return faixa.comissao_pct;
+    return getComissaoBase(pct, faixas);
   }
 
   function calcItem(produto: Produto, q: number, pct: number) {
