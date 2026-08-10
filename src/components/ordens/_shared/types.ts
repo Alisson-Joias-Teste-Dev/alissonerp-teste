@@ -24,3 +24,12 @@ export interface ItemVenda {
   preco_unitario:  number;
   total_item:      number;
 }
+
+/** Produto retornado por /api/ordens/produtos-busca (ordens que partem de um produto, nao de uma venda). */
+export interface ProdutoBusca {
+  id_produto:       number;
+  nome:             string;
+  sku:              string;
+  peso_precificado: number | null;
+  tipo_metal?:      string | null;
+}
