@@ -383,6 +383,16 @@ Conferido contra o banco em 2026-05-22. Apenas estes existem e estao ativos:
 - admin@alisson.com — apagado
 - motoboy@alisson.com — apagado
 
+**SO no banco de teste LOCAL (`erp_teste`, localhost:5433 — NUNCA em producao/homolog), criados 10/08/2026:**
+| Email | Senha | Role | Observacao |
+|-------|-------|------|------------|
+| admin.teste@alisson.local | Teste@123 | admin | 29 modulos liberados (todos). Serve pra testar qualquer tela sem depender do usuario Robson. |
+| consultora.teste@alisson.local | Teste@123 | consultora | 10 modulos — persona padrao de Nova Venda (maxDesconto=15%, sem vendedor_id vinculado de proposito). |
+| gerente-loja.teste@alisson.local | Teste@123 | gerente_loja | 20 modulos — gestao do lado loja/comercial (maxDesconto=50%), distinto do Robson (fabrica). |
+
+Todos criados via `auth.users`+`auth.identities` (mesmo formato bcrypt do GoTrue) — o perfil em
+`alissonerp.usuarios` nasce sozinho pelo trigger `alissonerp.fn_handle_new_user()`.
+
 ---
 
 ## 18. BUGS CONHECIDOS
