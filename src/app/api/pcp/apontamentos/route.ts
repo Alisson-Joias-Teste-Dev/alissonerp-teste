@@ -6,7 +6,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { logAudit } from "@/lib/audit";
 import { zodError } from "@/lib/schemas/common";
-import { saldoGramasParaCt } from "@/lib/compras-pedras";
+import { saldoGramasParaCt } from "@/lib/pedra-unidade-estoque";
 
 /**
  * Schema de entrada do apontamento de PCP.
@@ -146,7 +146,10 @@ export async function POST(req: NextRequest) {
    *
    * 🔴 O PORQUÊ da unidade — ESTA TRAVA JÁ ESTEVE ERRADA, não mexer sem ler:
    * a vw_saldo_estoque devolve a soma crua das movimentações e, para pedra, essa
-   * coluna está em GRAMAS. Quem mais lê o mesmo número lê como grama:
+   * coluna está em GRAMAS. A prova de negócio, dita pelo Jonathan em 11/08/2026:
+   * a pedra só entra no estoque pela tela de Lançamento Avulso > Entrada Avulsa
+   * (NÃO por compra), e essa tela grava o peso em GRAMAS. Quem lê o mesmo número
+   * também o trata como grama:
    *   - migration 122 (a mais nova a definir a view): ROUND((entrada - saida) / 0.2, 4) AS saldo_ct
    *   - EstoqueClient.tsx:394: formatPesoCt(Number(s.total_entrada) / 0.2)
    * Portanto, para comparar contra peso_ct_final (que está em ct), o saldo tem que

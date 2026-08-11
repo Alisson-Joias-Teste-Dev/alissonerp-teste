@@ -5,7 +5,7 @@ import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { zodError } from "@/lib/schemas/common";
-import { saldoGramasParaCt } from "@/lib/compras-pedras";
+import { saldoGramasParaCt } from "@/lib/pedra-unidade-estoque";
 
 /**
  * Schema de entrada do apontamento de Distribuição.
