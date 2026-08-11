@@ -57,7 +57,7 @@ export interface LigaTipo {
 }
 
 export interface Usuario {
-  id: number;
+  id: string;
   email: string;
   nome: string;
   role: string;
@@ -74,7 +74,7 @@ export interface Usuario {
 }
 
 export interface UsuarioEdit {
-  id: number;
+  id: string;
   email: string;
   nome: string;
   role: string;

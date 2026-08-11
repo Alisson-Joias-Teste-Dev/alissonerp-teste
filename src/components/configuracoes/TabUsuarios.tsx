@@ -14,6 +14,7 @@ import { InputField } from "@/components/ui/InputField";
 import { Select } from "@/components/ui/Select";
 import { Table, TableHeader, TableBody, TableRow, TableCell } from "@/components/ui/Table";
 import UserAvatar from "@/components/UserAvatar";
+import UserEditDrawer, { type UsuarioEdit as UsuarioEditSalvo } from "@/components/UserEditDrawer";
 
 const ITENS_POR_PAGINA = 10;
 
@@ -21,10 +22,11 @@ export default function TabUsuarios({ usuarios: usuariosInit, depositos, initial
   usuarios: Usuario[]; depositos: DepositoEdit[]; initialUserId?: string | null;
 }) {
   const router = useRouter();
-  const { role: roleLogado } = useAuth();
+  const { role: roleLogado, user: userLogado } = useAuth();
   const [usuarios, setUsuarios] = useState<Usuario[]>(usuariosInit);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [usuarioEditando, setUsuarioEditando] = useState<Usuario | null>(null);
   const [rolesDisponiveis, setRolesDisponiveis] = useState([
     { value: "admin", label: "Admin" }, { value: "gerente_fabrica", label: "Gerente Fábrica" },
     { value: "gerente_loja", label: "Gerente Loja" }, { value: "ourives", label: "Ourives" },
@@ -45,6 +47,14 @@ export default function TabUsuarios({ usuarios: usuariosInit, depositos, initial
 
   useEffect(() => { setPage(1); }, [search]);
 
+  // Abre o painel de edição direto quando chega por link (?tab=usuarios&user=<id>)
+  useEffect(() => {
+    if (!initialUserId) return;
+    const alvo = usuarios.find(u => u.id === initialUserId);
+    if (alvo) setUsuarioEditando(alvo);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialUserId]);
+
   useEffect(() => {
     fetch("/api/configuracoes/roles")
       .then(r => r.ok ? r.json() : null)
@@ -58,7 +68,7 @@ export default function TabUsuarios({ usuarios: usuariosInit, depositos, initial
 
   function buildEditObj(u: Usuario): UsuarioEdit { return { id: u.id, email: u.email, nome: u.nome, role: u.role, ativo: u.ativo, avatar_url: u.avatar_url ?? null, deposito_id: u.deposito_id ?? null, vendedor_id: u.vendedor_id ?? null, tipos_ordem_permitidos: u.tipos_ordem_permitidos ?? [], tipos_protocolo_permitidos: u.tipos_protocolo_permitidos ?? [], is_operador_service: u.is_operador_service ?? false, is_transportador: u.is_transportador ?? false, mx_desconto_permitido: u.mx_desconto_permitido ?? null }; }
 
-  function handleSaved(updated: UsuarioEdit) {
+  function handleSaved(updated: UsuarioEditSalvo) {
     setUsuarios(prev => prev.map(u => u.id === updated.id ? { ...u, nome: updated.nome, role: updated.role, ativo: updated.ativo, avatar_url: updated.avatar_url ?? u.avatar_url, deposito_id: updated.deposito_id ?? u.deposito_id, vendedor_id: updated.vendedor_id ?? u.vendedor_id, tipos_ordem_permitidos: updated.tipos_ordem_permitidos ?? u.tipos_ordem_permitidos, tipos_protocolo_permitidos: updated.tipos_protocolo_permitidos ?? u.tipos_protocolo_permitidos, is_operador_service: updated.is_operador_service ?? u.is_operador_service, is_transportador: updated.is_transportador ?? u.is_transportador, mx_desconto_permitido: updated.mx_desconto_permitido !== undefined ? updated.mx_desconto_permitido : u.mx_desconto_permitido } : u));
     toast.success("Usuário atualizado com sucesso");
   }
@@ -113,7 +123,7 @@ export default function TabUsuarios({ usuarios: usuariosInit, depositos, initial
               <div className="flex flex-col items-center gap-2 text-gray-400"><Users size={32} className="text-gray-300" /><span>{search ? "Nenhum usuário encontrado" : "Nenhum usuário cadastrado"}</span></div>
             </TableCell></TableRow>
           ) : paginados.map(u => (
-            <TableRow key={u.id} className="cursor-pointer" onClick={() => router.push(`/perfil?userId=${u.id}`)}>
+            <TableRow key={u.id} className="cursor-pointer" onClick={() => setUsuarioEditando(u)}>
               <TableCell onClick={e => e.stopPropagation()}>
                 <UserAvatar nome={u.nome} fotoUrl={u.avatar_url ?? null} size={36} userId={String(u.id)} clickable={false} />
               </TableCell>
@@ -171,6 +181,14 @@ export default function TabUsuarios({ usuarios: usuariosInit, depositos, initial
           </div>
         </div>
       </Modal>
+
+      <UserEditDrawer
+        usuario={usuarioEditando ? buildEditObj(usuarioEditando) : null}
+        depositos={depositos}
+        onClose={() => setUsuarioEditando(null)}
+        onSaved={updated => { handleSaved(updated); setUsuarioEditando(null); }}
+        userLogadoId={userLogado?.id}
+      />
     </div>
   );
 }
