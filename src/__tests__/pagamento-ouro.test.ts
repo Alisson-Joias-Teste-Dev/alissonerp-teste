@@ -277,8 +277,7 @@ describe("POST /api/vendas/[id]/pagamentos — forma Ouro", () => {
         desconto_aprovado_por: null, tem_desconto_alto: false,
       }])
       // checkOwnership (Onda 1D)
-      .mockResolvedValueOnce([{ role: "admin" }])                               // SELECT role
-      .mockResolvedValueOnce([{ vendedor_id: 1 }])                              // requireVendaOwnership (admin)
+      .mockResolvedValueOnce([{ role: "admin" }])                               // SELECT role (requireVendaOwnership é mockada — não toca o sql)
       .mockResolvedValueOnce([{ total_venda: 1000, soma_confirmados: 0 }])      // SELECT totais
       // sql`now()` é um fragmento de template — consome 1 slot antes do INSERT real
       .mockResolvedValueOnce([])
@@ -301,8 +300,7 @@ describe("POST /api/vendas/[id]/pagamentos — forma Ouro", () => {
         desconto_aprovado_por: null, tem_desconto_alto: false,
       }])
       // checkOwnership (Onda 1D)
-      .mockResolvedValueOnce([{ role: "admin" }])                               // SELECT role
-      .mockResolvedValueOnce([{ vendedor_id: 1 }])                              // requireVendaOwnership (admin)
+      .mockResolvedValueOnce([{ role: "admin" }])                               // SELECT role (requireVendaOwnership é mockada — não toca o sql)
       .mockResolvedValueOnce([{ total_venda: 1000, soma_confirmados: 0 }])      // SELECT totais
       .mockResolvedValueOnce([{ id: 22 }]); // INSERT
 

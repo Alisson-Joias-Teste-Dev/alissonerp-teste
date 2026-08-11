@@ -70,12 +70,15 @@ const CONTA_ID = 10;
 const VENDA_ID = 55;
 const PAGAMENTO_ID = 88;
 
+// forma_recebimento é obrigatório desde 06/07/2026 (migration 341) — default
+// "Dinheiro" pra não quebrar todo teste que não testa essa validação em si.
+// Passe { forma_recebimento: undefined } explicitamente pra testar a ausência.
 function makeRequest(body?: Record<string, unknown>) {
   const req = new NextRequest(
     `http://localhost/api/crediario/${CONTA_ID}/registrar-pagamento`,
     {
       method: "POST",
-      body: body ? JSON.stringify(body) : undefined,
+      body: JSON.stringify({ forma_recebimento: "Dinheiro", ...body }),
     },
   );
   return req;

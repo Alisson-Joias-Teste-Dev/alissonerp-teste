@@ -291,7 +291,10 @@ describe("POST /api/financeiro/inter/enviar/[id]", () => {
     );
     expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.error).toMatch(/tipo/i);
+    // zodError devolve mensagem genérica + detalhe em `issues`.
+    expect(data.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: "tipo" })]),
+    );
   });
 
   it("retorna 400 quando body sem 'dados' (e tipo válido)", async () => {
@@ -553,7 +556,8 @@ describe("POST /api/financeiro/inter/enviar/[id]", () => {
 
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toMatch(/chave inválida/i);
+    // A resposta usa mensagem genérica (internalError); a real vai pro inter_erro.
+    expect(data.error).toBe("Falha ao enviar para o Inter");
 
     // 3ª chamada do sql é o UPDATE de erro
     const updateCall = sqlMock.mock.calls[2];
@@ -576,7 +580,7 @@ describe("POST /api/financeiro/inter/enviar/[id]", () => {
 
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe("falha-bruta");
+    expect(data.error).toBe("Falha ao enviar para o Inter");
 
     const values = sqlMock.mock.calls[2].slice(1) as unknown[];
     expect(values).toContain("falha-bruta");
@@ -594,7 +598,7 @@ describe("POST /api/financeiro/inter/enviar/[id]", () => {
 
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toMatch(/conta inexistente/i);
+    expect(data.error).toBe("Falha ao enviar para o Inter");
   });
 
   // ── 15. Sucesso: payload de retorno ────────────────────────────────────────

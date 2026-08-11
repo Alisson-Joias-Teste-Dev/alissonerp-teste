@@ -27,6 +27,7 @@ import { NextRequest } from "next/server";
 
 const sqlMock = Object.assign(vi.fn(), {
   array: (arr: unknown[]) => arr,
+  begin: (fn: (tx: unknown) => Promise<unknown>) => fn(sqlMock),
 });
 vi.mock("@/lib/db", () => ({ default: sqlMock }));
 
@@ -86,10 +87,13 @@ type MpData = {
  *  1. SELECT usuarios     → role permitido
  *  2. SELECT duplicata    → []
  *  3. SELECT venda        → venda válida
- *  4. SELECT soma_confirmados → 0
- *  5. INSERT/UPDATE       → retorna id (no INSERT) ou nada (UPDATE)
- *  6. SELECT nova_soma    → soma final
+ *  4. requireVendaOwnership: SELECT vendas_erp (sempre roda, mesmo full-access)
+ *  5. requireVendaOwnership: getUserVendedorId (só se role NÃO for full-access)
+ *  6. SELECT soma_confirmados → 0
+ *  7. INSERT/UPDATE       → retorna id (no INSERT) ou nada (UPDATE)
+ *  8. SELECT nova_soma    → soma final
  */
+const ROLES_FULL_ACCESS_TESTE = ["admin", "desenvolvedor", "diretor", "gerente_loja", "gerente_fabrica"];
 function setupHappyPath(opts: {
   role?: string;
   vendaSituacao?: "rascunho" | "aprovado";
@@ -121,18 +125,24 @@ function setupHappyPath(opts: {
       bloqueado: vendaBloqueado,
       total_venda: totalVenda,
     }])
-    .mockResolvedValueOnce([{ soma_confirmados: somaConfirmados }]);
+    .mockResolvedValueOnce([{ vendedor_id: 1 }]); // requireVendaOwnership: SELECT vendas_erp
+  if (!ROLES_FULL_ACCESS_TESTE.includes(role)) {
+    sqlMock.mockResolvedValueOnce([{ vendedor_id: 1 }]); // requireVendaOwnership: getUserVendedorId
+  }
+  sqlMock.mockResolvedValueOnce([{ soma_confirmados: somaConfirmados }]);
 
   if (isUpdate) {
-    // UPDATE agora tem RETURNING id — precisa retornar o id atualizado pra
-    // não cair no 404 que detecta pagamento de outra venda.
-    sqlMock.mockResolvedValueOnce([{ id: pagamentoId }]);
+    // Revalida com FOR UPDATE dentro da tx antes do UPDATE (sem RETURNING —
+    // o id já é conhecido, é o próprio pagamentoIdExistente).
+    sqlMock.mockResolvedValueOnce([{ id: pagamentoId }]); // FOR UPDATE lock-check
+    sqlMock.mockResolvedValueOnce([]);                     // UPDATE (sem retorno usado)
   } else {
     sqlMock.mockResolvedValueOnce([{ id: pagamentoId }]); // INSERT RETURNING id
   }
 
   sqlMock.mockResolvedValueOnce([{
     nova_soma: novaSoma ?? somaConfirmados + totalVenda,
+    total_venda_tx: totalVenda,
   }]);
 }
 
@@ -208,13 +218,21 @@ describe("POST /api/vendas/[id]/mercado-pago/verificar-manual", () => {
     const res = await POST(makeRequest({}), makeParams());
     expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.error).toMatch(/pagamento/i);
+    // zodError devolve mensagem genérica + detalhe em `issues` (não mais o
+    // texto do campo embutido em `error`).
+    expect(data.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: "payment_id" })]),
+    );
   });
 
-  it("retorna 400 quando payment_id é string vazia", async () => {
-    sqlMock.mockResolvedValueOnce([{ role: "consultora", vendedor_id: 1 }]);
+  // NOTA: o schema valida só o comprimento da string ("   " tem 3 chars, passa
+  // no min(1)) — o trim() só acontece depois, dentro do handler. Uma string só
+  // de espaço não é barrada em 400; segue o fluxo normal e cai em 422 quando o
+  // fetchPayment (mockado, sem resultado configurado) não retorna aprovação.
+  it("retorna 422 quando payment_id é string só de espaço (passa no schema, MP não aprova vazio)", async () => {
+    setupHappyPath();
     const res = await POST(makeRequest({ payment_id: "   " }), makeParams());
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   // ── Conflito por duplicata ─────────────────────────────────────────────────
@@ -261,7 +279,8 @@ describe("POST /api/vendas/[id]/mercado-pago/verificar-manual", () => {
       .mockResolvedValueOnce([{
         id: VENDA_ID, numero_venda: "V01", situacao: "concluida",
         bloqueado: false, total_venda: 1000,
-      }]);
+      }])
+      .mockResolvedValueOnce([{ vendedor_id: null }]); // requireVendaOwnership (admin é full-access)
     const res = await POST(makeRequest({ payment_id: "MP1" }), makeParams());
     expect(res.status).toBe(409);
     const data = await res.json();
@@ -275,7 +294,8 @@ describe("POST /api/vendas/[id]/mercado-pago/verificar-manual", () => {
       .mockResolvedValueOnce([{
         id: VENDA_ID, numero_venda: "V01", situacao: "cancelada",
         bloqueado: false, total_venda: 1000,
-      }]);
+      }])
+      .mockResolvedValueOnce([{ vendedor_id: null }]); // requireVendaOwnership (admin é full-access)
     const res = await POST(makeRequest({ payment_id: "MP1" }), makeParams());
     expect(res.status).toBe(409);
   });
@@ -289,13 +309,15 @@ describe("POST /api/vendas/[id]/mercado-pago/verificar-manual", () => {
       .mockResolvedValueOnce([{
         id: VENDA_ID, numero_venda: "V01", situacao: "rascunho",
         bloqueado: false, total_venda: 1000,
-      }]);
+      }])
+      .mockResolvedValueOnce([{ vendedor_id: null }]); // requireVendaOwnership (admin é full-access)
     mockFetchPayment.mockRejectedValueOnce(new Error("MP indisponível"));
 
     const res = await POST(makeRequest({ payment_id: "MP1" }), makeParams());
     expect(res.status).toBe(502);
     const data = await res.json();
-    expect(data.error).toMatch(/MP indisponível/);
+    // internalError nao vaza a mensagem real do erro pro cliente (fallback generico).
+    expect(data.error).toBe("Erro ao consultar MP");
   });
 
   it("retorna 422 quando MP status não é 'approved'", async () => {
@@ -305,7 +327,8 @@ describe("POST /api/vendas/[id]/mercado-pago/verificar-manual", () => {
       .mockResolvedValueOnce([{
         id: VENDA_ID, numero_venda: "V01", situacao: "rascunho",
         bloqueado: false, total_venda: 1000,
-      }]);
+      }])
+      .mockResolvedValueOnce([{ vendedor_id: null }]); // requireVendaOwnership (admin é full-access)
     mockFetchPayment.mockResolvedValueOnce(defaultMpApproved({ status: "rejected" }));
 
     const res = await POST(makeRequest({ payment_id: "MP1" }), makeParams());
@@ -321,7 +344,8 @@ describe("POST /api/vendas/[id]/mercado-pago/verificar-manual", () => {
       .mockResolvedValueOnce([{
         id: VENDA_ID, numero_venda: "V01", situacao: "rascunho",
         bloqueado: false, total_venda: 1000,
-      }]);
+      }])
+      .mockResolvedValueOnce([{ vendedor_id: null }]); // requireVendaOwnership (admin é full-access)
     mockFetchPayment.mockResolvedValueOnce(null);
 
     const res = await POST(makeRequest({ payment_id: "MP1" }), makeParams());
@@ -335,7 +359,8 @@ describe("POST /api/vendas/[id]/mercado-pago/verificar-manual", () => {
       .mockResolvedValueOnce([{
         id: VENDA_ID, numero_venda: "V01", situacao: "rascunho",
         bloqueado: false, total_venda: 1000,
-      }]);
+      }])
+      .mockResolvedValueOnce([{ vendedor_id: null }]); // requireVendaOwnership (admin é full-access)
     mockFetchPayment.mockResolvedValueOnce(defaultMpApproved({ transaction_amount: 0 }));
 
     const res = await POST(makeRequest({ payment_id: "MP1" }), makeParams());
@@ -354,6 +379,7 @@ describe("POST /api/vendas/[id]/mercado-pago/verificar-manual", () => {
         id: VENDA_ID, numero_venda: "V01", situacao: "rascunho",
         bloqueado: false, total_venda: 1000,
       }])
+      .mockResolvedValueOnce([{ vendedor_id: null }]) // requireVendaOwnership (admin é full-access)
       .mockResolvedValueOnce([{ soma_confirmados: 1000 }]); // já pago
     mockFetchPayment.mockResolvedValueOnce(defaultMpApproved({ transaction_amount: 500 }));
 
@@ -487,9 +513,11 @@ describe("POST /api/vendas/[id]/mercado-pago/verificar-manual", () => {
     expect(values).toContain(777);                   // WHERE id
   });
 
-  // ── Conclusão da venda ────────────────────────────────────────────────────
+  // ── pagamento_quitado ──────────────────────────────────────────────────────
+  // Fluxo novo 06/2026: essa rota NÃO chama mais concluirVenda — só informa se
+  // o pagamento fechou o total da venda (a conclusão de fato é só na entrega).
 
-  it("conclui venda quando totalmente paga e situação='aprovado'", async () => {
+  it("pagamento_quitado=true quando a soma cobre o total da venda", async () => {
     setupHappyPath({
       vendaSituacao: "aprovado",
       totalVenda: 1000,
@@ -500,35 +528,15 @@ describe("POST /api/vendas/[id]/mercado-pago/verificar-manual", () => {
       payment_type_id: "pix",
       transaction_amount: 1000,
     }));
-    mockConcluirVenda.mockResolvedValueOnce(undefined);
 
     const res = await POST(makeRequest({ payment_id: "MP-CONC" }), makeParams());
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.venda_concluida).toBe(true);
-    expect(mockConcluirVenda).toHaveBeenCalledWith(VENDA_ID, USER_ID, { tinyBestEffort: true });
-  });
-
-  it("não conclui venda em rascunho mesmo se totalmente paga", async () => {
-    setupHappyPath({
-      vendaSituacao: "rascunho",
-      totalVenda: 1000,
-      somaConfirmados: 0,
-      novaSoma: 1000,
-    });
-    mockFetchPayment.mockResolvedValueOnce(defaultMpApproved({
-      payment_type_id: "pix",
-      transaction_amount: 1000,
-    }));
-
-    const res = await POST(makeRequest({ payment_id: "MP-RASC" }), makeParams());
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.venda_concluida).toBe(false);
+    expect(data.pagamento_quitado).toBe(true);
     expect(mockConcluirVenda).not.toHaveBeenCalled();
   });
 
-  it("não conclui venda parcialmente paga em 'aprovado'", async () => {
+  it("pagamento_quitado=false quando só paga parte do total", async () => {
     setupHappyPath({
       vendaSituacao: "aprovado",
       totalVenda: 1000,
@@ -543,32 +551,7 @@ describe("POST /api/vendas/[id]/mercado-pago/verificar-manual", () => {
     const res = await POST(makeRequest({ payment_id: "MP-PART" }), makeParams());
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.venda_concluida).toBe(false);
+    expect(data.pagamento_quitado).toBe(false);
     expect(mockConcluirVenda).not.toHaveBeenCalled();
-  });
-
-  it("retorna venda_concluida=false quando concluirVenda falha (best-effort)", async () => {
-    setupHappyPath({
-      vendaSituacao: "aprovado",
-      totalVenda: 1000,
-      somaConfirmados: 0,
-      novaSoma: 1000,
-    });
-    mockFetchPayment.mockResolvedValueOnce(defaultMpApproved({
-      payment_type_id: "pix",
-      transaction_amount: 1000,
-    }));
-    mockConcluirVenda.mockRejectedValueOnce(new Error("falhou"));
-
-    // Suprime console.error
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const res = await POST(makeRequest({ payment_id: "MP-FAIL" }), makeParams());
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.ok).toBe(true);
-    expect(data.venda_concluida).toBe(false);
-
-    errSpy.mockRestore();
   });
 });

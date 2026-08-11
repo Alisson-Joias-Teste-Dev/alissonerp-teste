@@ -7,12 +7,18 @@
  *  3. Pagamento não encontrado (404)
  *  4. Pagamento já confirmado (ok + ja_confirmado:true)
  *  5. Pagamento em status inválido (409)
- *  6. UPDATE status='confirmado', data_confirmacao=NOW
- *  7. Pagamento "A Receber" + crédito gerente: chama creditarSaldo
+ *  6. "A Receber" é redirecionado pro Crediário (409 + usar_crediario) — porta
+ *     única de baixa (redesenho 19/06/2026), a rota nem entra na transação.
+ *  7. UPDATE status='confirmado', data_confirmacao=NOW
  *  8. Atualiza contas_receber
  *  9. Auto-aprovação: rascunho + aprovacao_credito_tipo + outros confirmados → approveVenda
- * 10. Auto-conclusão: aprovado + todos pagos → concluirVenda
- * 11. Flags da resposta
+ * 10. Flags da resposta
+ *
+ * NOTA: não há mais teste de "auto-conclusão" (concluirVenda) nem de
+ * creditarSaldo bem-sucedido — Fluxo novo 06/2026 removeu a conclusão
+ * automática da venda por aqui (só muda na entrega), e a devolução de
+ * crédito do gerente por "A Receber" ficou inalcançável nesta rota desde
+ * que "A Receber" passou a ser bloqueado antes da transação.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -21,6 +27,9 @@ import { NextRequest } from "next/server";
 
 const sqlMock = Object.assign(vi.fn(), {
   array: (arr: unknown[]) => arr,
+  // A rota usa sql.begin(tx => ...) — o callback recebe o próprio sqlMock,
+  // então dentro e fora da transação consomem a MESMA fila de mocks.
+  begin: (fn: (tx: unknown) => Promise<unknown>) => fn(sqlMock),
 });
 vi.mock("@/lib/db", () => ({ default: sqlMock }));
 
@@ -37,10 +46,8 @@ vi.mock("@/lib/saldo-credito", () => ({
 }));
 
 const mockApproveVenda = vi.fn();
-const mockConcluirVenda = vi.fn();
 vi.mock("@/lib/vendas-aprovar", () => ({
   approveVenda: (...args: unknown[]) => mockApproveVenda(...args),
-  concluirVenda: (...args: unknown[]) => mockConcluirVenda(...args),
 }));
 
 // ── Import DEPOIS dos mocks ───────────────────────────────────────────────────
@@ -66,18 +73,24 @@ function makeParams(id: number = VENDA_ID, pagId: number = PAG_ID) {
 }
 
 /**
- * Sequência de queries (em ordem) na rota:
- *   Q1: SELECT role FROM usuarios
- *   Q2: SELECT pagamento
- *   Q3: UPDATE pagamentos_venda SET status='confirmado'        (só se pagamento pendente)
- *   Q4: SELECT credito_gerente_usado, situacao FROM vendas_erp (só se pagamento pendente)
- *   Q5: UPDATE vendas_erp credito_gerente_usado                (só se devolveu saldo)
- *   Q6: UPDATE contas_receber                                  (sempre após Q4) — tem .catch()
- *   Q7: SELECT COUNT pendentes
- *   Q8: SELECT aprovacao_credito_tipo                          (só se !todosPagos && rascunho)
- *   Q9: SELECT COUNT outros pendentes (forma != A Receber)     (só se Q8 retornou tipo)
+ * Sequência de queries na rota (sql e tx caem na mesma fila — ver mock acima):
+ *   Q1  SELECT role
+ *   Q2  SELECT pagamento (pré-checagem, fora da tx)
+ *   -- forma "A Receber" → 409 aqui, sem entrar na tx --
+ *   -- status != "pendente" → retorno cedo aqui, sem entrar na tx --
+ *   Q3  SELECT pagamento FOR UPDATE (dentro da tx, mesma linha de Q2)
+ *   Q4  UPDATE pagamentos_venda (confirma)              — valor não importa
+ *   Q5  SELECT credito_gerente_usado + situacao FOR UPDATE
+ *   Q6  UPDATE contas_receber (pagamento total)          — valor não importa
+ *   Q7  INSERT audit_log (logAudit, tem try/catch próprio) — valor não importa
+ *   -- fim da tx --
+ *   Q8  SELECT COUNT pendentes
+ *   Q9  SELECT aprovacao_credito_tipo            (só se situacao === "rascunho")
+ *   Q10 SELECT COUNT outros pendentes            (só se Q9 retornou tipo)
+ *   Q11 SELECT desconto_revalidacao/aprovado_por (só se Q10.cnt === 0)
+ *   Q12 getDescontoThreshold (query própria, não mockada aqui — usa default [])
+ *   Q13 SELECT EXISTS temAltoDesc                (mesma condição de Q11)
  */
-
 interface SetupOptions {
   role?: string;
   pagamentoStatus?: string;
@@ -108,48 +121,52 @@ function setupQueries(opts: SetupOptions = {}) {
   // Q1: SELECT role
   sqlMock.mockResolvedValueOnce([{ role }]);
 
-  // Q2: SELECT pagamento
+  // Q2: SELECT pagamento (pré-checagem)
   if (!pagamentoEncontrado) {
     sqlMock.mockResolvedValueOnce([]);
     return;
   }
-  sqlMock.mockResolvedValueOnce([{
-    id: PAG_ID,
-    venda_id: VENDA_ID,
-    forma: pagamentoForma,
-    valor: pagamentoValor,
-    status: pagamentoStatus,
-  }]);
+  const pagamentoRow = {
+    id: PAG_ID, venda_id: VENDA_ID, forma: pagamentoForma,
+    valor: pagamentoValor, status: pagamentoStatus,
+  };
+  sqlMock.mockResolvedValueOnce([pagamentoRow]);
 
-  // Se já confirmado ou status inválido → não chega aqui
+  // "A Receber" é redirecionado pro Crediário ANTES da tx (porta única).
+  if (pagamentoForma === "A Receber") return;
+  // Confirmado/cancelado retornam cedo, sem entrar na tx.
   if (pagamentoStatus !== "pendente") return;
 
-  // Q3: UPDATE status='confirmado'
+  // Q3: SELECT pagamento FOR UPDATE (dentro da tx)
+  sqlMock.mockResolvedValueOnce([pagamentoRow]);
+  // Q4: UPDATE pagamentos_venda
   sqlMock.mockResolvedValueOnce([]);
-
-  // Q4: SELECT credito_gerente_usado, situacao
+  // Q5: SELECT credito_gerente_usado + situacao FOR UPDATE
   sqlMock.mockResolvedValueOnce([{
     credito_gerente_usado: String(creditoGerente),
     situacao,
   }]);
-
-  // Q5: UPDATE credito_gerente_usado (só se houve devolução)
-  if (creditoGerente > 0 && pagamentoForma === "A Receber") {
-    sqlMock.mockResolvedValueOnce([]);
-  }
-
   // Q6: UPDATE contas_receber
   sqlMock.mockResolvedValueOnce([]);
+  // Q7: INSERT audit_log (logAudit)
+  sqlMock.mockResolvedValueOnce([]);
 
-  // Q7: SELECT COUNT pendentes
+  // Q8: SELECT COUNT pendentes
   sqlMock.mockResolvedValueOnce([{ cnt: pendentesAposUpdate }]);
 
-  // Q8 e Q9: só rodam se !todosPagos && situacao === "rascunho"
-  const todosPagos = Number(pendentesAposUpdate) === 0;
-  if (!todosPagos && situacao === "rascunho") {
+  // Q9/Q10/Q11/Q13: só rodam se situacao === "rascunho"
+  if (situacao === "rascunho") {
     sqlMock.mockResolvedValueOnce([{ aprovacao_credito_tipo: aprovacaoCreditoTipo }]);
     if (aprovacaoCreditoTipo) {
       sqlMock.mockResolvedValueOnce([{ cnt: outrosPendentes }]);
+      if (outrosPendentes === 0) {
+        sqlMock.mockResolvedValueOnce([{
+          desconto_revalidacao_necessaria: false,
+          desconto_aprovado_por: "someone",
+        }]);
+        // Q12 getDescontoThreshold usa o default (mockResolvedValue([]))
+        sqlMock.mockResolvedValueOnce([{ tem: false }]);
+      }
     }
   }
 }
@@ -164,7 +181,6 @@ describe("POST /api/vendas/[id]/pagamentos/[pagId]/confirmar", () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: USER_ID } } });
     mockCreditarSaldo.mockResolvedValue(undefined);
     mockApproveVenda.mockResolvedValue(undefined);
-    mockConcluirVenda.mockResolvedValue(undefined);
   });
 
   // ── 1. Auth ─────────────────────────────────────────────────────────────────
@@ -252,10 +268,21 @@ describe("POST /api/vendas/[id]/pagamentos/[pagId]/confirmar", () => {
     expect(res.status).toBe(400);
   });
 
-  // ── 7. Confirmação básica: UPDATE ───────────────────────────────────────────
+  // ── 7. "A Receber" — porta única no Crediário ───────────────────────────────
+
+  it("redireciona pro Crediário quando forma é 'A Receber' (não entra na transação)", async () => {
+    setupQueries({ pagamentoForma: "A Receber" });
+    const res = await POST(makeRequest(), makeParams());
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.usar_crediario).toBe(true);
+    expect(mockCreditarSaldo).not.toHaveBeenCalled();
+  });
+
+  // ── 8. Confirmação básica: UPDATE ───────────────────────────────────────────
 
   it("executa UPDATE status='confirmado' e data_confirmacao=NOW()", async () => {
-    setupQueries({ pendentesAposUpdate: 1 }); // não totalmente paga (sem auto-conclusão)
+    setupQueries({ pendentesAposUpdate: 1 }); // não totalmente paga (sem auto-aprovação)
     const res = await POST(makeRequest(), makeParams());
     expect(res.status).toBe(200);
 
@@ -274,38 +301,6 @@ describe("POST /api/vendas/[id]/pagamentos/[pagId]/confirmar", () => {
     expect(sqlText).toMatch(/data_confirmacao/);
   });
 
-  // ── 8. Crédito gerente devolvido ────────────────────────────────────────────
-
-  it("chama creditarSaldo quando pagamento 'A Receber' e há crédito gerente usado", async () => {
-    setupQueries({
-      pagamentoForma: "A Receber",
-      pagamentoValor: "300",
-      creditoGerente: 500,
-      pendentesAposUpdate: 1,
-    });
-
-    const res = await POST(makeRequest(), makeParams());
-    const data = await res.json();
-
-    expect(mockCreditarSaldo).toHaveBeenCalledTimes(1);
-    // valorDevolver = min(valor=300, credito=500) = 300
-    expect(mockCreditarSaldo).toHaveBeenCalledWith(300, VENDA_ID, PAG_ID, USER_ID);
-    expect(data.saldo_devolvido).toBe(true);
-  });
-
-  it("limita devolução ao crédito quando pagamento > crédito", async () => {
-    setupQueries({
-      pagamentoForma: "A Receber",
-      pagamentoValor: "1000",
-      creditoGerente: 200,
-      pendentesAposUpdate: 1,
-    });
-
-    await POST(makeRequest(), makeParams());
-
-    expect(mockCreditarSaldo).toHaveBeenCalledWith(200, VENDA_ID, PAG_ID, USER_ID);
-  });
-
   it("NÃO chama creditarSaldo quando forma != 'A Receber'", async () => {
     setupQueries({
       pagamentoForma: "Dinheiro",
@@ -321,51 +316,6 @@ describe("POST /api/vendas/[id]/pagamentos/[pagId]/confirmar", () => {
     expect(data.saldo_devolvido).toBe(false);
   });
 
-  it("NÃO chama creditarSaldo quando crédito gerente = 0", async () => {
-    setupQueries({
-      pagamentoForma: "A Receber",
-      pagamentoValor: "300",
-      creditoGerente: 0,
-      pendentesAposUpdate: 1,
-    });
-
-    const res = await POST(makeRequest(), makeParams());
-    const data = await res.json();
-
-    expect(mockCreditarSaldo).not.toHaveBeenCalled();
-    expect(data.saldo_devolvido).toBe(false);
-  });
-
-  it("retorna saldo_devolvido=false quando creditarSaldo lança erro", async () => {
-    // Setup manual: Q5 (UPDATE credito_gerente_usado) NÃO roda quando creditarSaldo rejeita
-    // Q1 role
-    sqlMock.mockResolvedValueOnce([{ role: "admin" }]);
-    // Q2 pagamento
-    sqlMock.mockResolvedValueOnce([{
-      id: PAG_ID, venda_id: VENDA_ID, forma: "A Receber",
-      valor: "300", status: "pendente",
-    }]);
-    // Q3 UPDATE pagamento
-    sqlMock.mockResolvedValueOnce([]);
-    // Q4 SELECT credito + situacao
-    sqlMock.mockResolvedValueOnce([{ credito_gerente_usado: "500", situacao: "rascunho" }]);
-    // Q5 NÃO roda (creditarSaldo rejeitou)
-    // Q6 UPDATE contas_receber
-    sqlMock.mockResolvedValueOnce([]);
-    // Q7 COUNT pendentes
-    sqlMock.mockResolvedValueOnce([{ cnt: 1 }]);
-    // Q8 SELECT tipo (não tem aprovacao)
-    sqlMock.mockResolvedValueOnce([{ aprovacao_credito_tipo: null }]);
-
-    mockCreditarSaldo.mockRejectedValueOnce(new Error("saldo error"));
-
-    const res = await POST(makeRequest(), makeParams());
-    const data = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(data.saldo_devolvido).toBe(false);
-  });
-
   // ── 9. contas_receber atualizada ────────────────────────────────────────────
 
   it("atualiza contas_receber: situacao='pago' e data_recebimento", async () => {
@@ -378,7 +328,7 @@ describe("POST /api/vendas/[id]/pagamentos/[pagId]/confirmar", () => {
     });
     expect(updateCall).toBeDefined();
     const sqlText = (updateCall![0] as string[]).join(" ");
-    expect(sqlText).toMatch(/situacao/);
+    expect(sqlText).toMatch(/status/);
     expect(sqlText).toMatch(/pago/);
     expect(sqlText).toMatch(/data_recebimento/);
   });
@@ -387,7 +337,6 @@ describe("POST /api/vendas/[id]/pagamentos/[pagId]/confirmar", () => {
 
   it("auto-aprova venda em rascunho quando há aprovacao_credito_tipo + outros pagamentos confirmados", async () => {
     setupQueries({
-      pagamentoForma: "A Receber",
       situacao: "rascunho",
       pendentesAposUpdate: 1, // ainda há pendente (o A Receber dos próximos meses)
       aprovacaoCreditoTipo: "diretor",
@@ -461,66 +410,9 @@ describe("POST /api/vendas/[id]/pagamentos/[pagId]/confirmar", () => {
     expect(data.venda_aprovada).toBe(false);
   });
 
-  // ── 11. Auto-conclusão ──────────────────────────────────────────────────────
+  // ── 11. Flags da resposta ───────────────────────────────────────────────────
 
-  it("auto-conclui venda em situação 'aprovado' quando todos os pagamentos estão confirmados", async () => {
-    setupQueries({
-      situacao: "aprovado",
-      pendentesAposUpdate: 0, // todosPagos
-    });
-
-    const res = await POST(makeRequest(), makeParams());
-    const data = await res.json();
-
-    expect(mockConcluirVenda).toHaveBeenCalledTimes(1);
-    expect(mockConcluirVenda).toHaveBeenCalledWith(
-      VENDA_ID,
-      USER_ID,
-      { tinyBestEffort: true },
-    );
-    expect(data.venda_concluida).toBe(true);
-    expect(data.todos_pagos).toBe(true);
-  });
-
-  it("NÃO auto-conclui quando situacao != 'aprovado'", async () => {
-    setupQueries({
-      situacao: "rascunho",
-      pendentesAposUpdate: 0,
-    });
-
-    await POST(makeRequest(), makeParams());
-
-    expect(mockConcluirVenda).not.toHaveBeenCalled();
-  });
-
-  it("NÃO auto-conclui quando ainda há pagamentos pendentes", async () => {
-    setupQueries({
-      situacao: "aprovado",
-      pendentesAposUpdate: 1,
-    });
-
-    await POST(makeRequest(), makeParams());
-
-    expect(mockConcluirVenda).not.toHaveBeenCalled();
-  });
-
-  it("retorna venda_concluida=false quando concluirVenda lança erro", async () => {
-    setupQueries({
-      situacao: "aprovado",
-      pendentesAposUpdate: 0,
-    });
-    mockConcluirVenda.mockRejectedValueOnce(new Error("concluir fail"));
-
-    const res = await POST(makeRequest(), makeParams());
-    const data = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(data.venda_concluida).toBe(false);
-  });
-
-  // ── 12. Flags da resposta ───────────────────────────────────────────────────
-
-  it("resposta inclui todas as flags: ok, saldo_devolvido, venda_aprovada, venda_concluida, todos_pagos", async () => {
+  it("resposta inclui as flags: ok, saldo_devolvido, venda_aprovada, todos_pagos", async () => {
     setupQueries({ pendentesAposUpdate: 1 });
     const res = await POST(makeRequest(), makeParams());
     const data = await res.json();
@@ -528,7 +420,6 @@ describe("POST /api/vendas/[id]/pagamentos/[pagId]/confirmar", () => {
     expect(data).toHaveProperty("ok", true);
     expect(data).toHaveProperty("saldo_devolvido");
     expect(data).toHaveProperty("venda_aprovada");
-    expect(data).toHaveProperty("venda_concluida");
     expect(data).toHaveProperty("todos_pagos");
   });
 

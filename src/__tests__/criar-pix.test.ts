@@ -280,7 +280,14 @@ describe("POST /api/vendas/[id]/mercado-pago/criar-pix", () => {
     const res = await POST(makeRequest({}), makeParams(VENDA_ID));
     expect(res.status).toBe(502);
     const data = await res.json();
-    expect(data.error).toMatch(/MP API timeout/);
+    // A rota nao vaza a mensagem interna do erro pra fora (internalError sempre
+    // devolve o fallback generico) - o erro real vai pro log + gateway_payload.
+    expect(data.error).toBe("Erro ao criar Pix MP");
+    const updateCall = sqlMock.mock.calls.find(c => {
+      const tpl = (c[0] as string[]).join(" ");
+      return /UPDATE.*pagamentos_venda/i.test(tpl) && /SET\s+gateway/i.test(tpl);
+    });
+    expect(String(updateCall?.[1])).toContain("MP API timeout");
   });
 
   // ── Sucesso ─────────────────────────────────────────────────────────────────

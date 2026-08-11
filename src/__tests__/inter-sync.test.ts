@@ -446,12 +446,14 @@ describe("POST /api/financeiro/inter/sync", () => {
     const data = await res.json();
     expect(data.processados).toBe(2);
     expect(data.atualizados).toBe(1);
+    // A resposta usa mensagem genérica (o erro real vai só pro console.error,
+    // "ver log do servidor" — não tem coluna própria pra guardar por conta).
     expect(data.erros).toHaveLength(1);
-    expect(data.erros[0]).toEqual({ id: 1, erro: "Inter offline" });
+    expect(data.erros[0]).toEqual({ id: 1, erro: "Falha ao sincronizar (ver log do servidor)" });
     expect(mockGetPagamento).toHaveBeenCalledTimes(2);
   });
 
-  it("erro não-Error (string): converte com String(e)", async () => {
+  it("erro não-Error (string lançada): não derruba a rota, cai no mesmo catch genérico", async () => {
     const conta: ContaPendente = { ...contaBase };
     sqlMock.mockResolvedValueOnce([conta]);
 
@@ -459,9 +461,10 @@ describe("POST /api/financeiro/inter/sync", () => {
 
     const res = await POST(makeRequest({ "x-cron-secret": CRON_SECRET_DB }));
 
+    expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.erros).toHaveLength(1);
-    expect(data.erros[0]).toEqual({ id: conta.id, erro: "falha-string" });
+    expect(data.erros[0]).toEqual({ id: conta.id, erro: "Falha ao sincronizar (ver log do servidor)" });
   });
 
   // ── Múltiplas contas mistas ──────────────────────────────────────────────

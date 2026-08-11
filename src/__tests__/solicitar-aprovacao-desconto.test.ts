@@ -33,6 +33,20 @@ vi.mock("@/lib/roles", () => ({
   hasRole: vi.fn(() => false),
 }));
 
+// avaliarRegras/criarTarefaAprovacao são o motor de aprovação (Fase 3g.3) —
+// cada uma faz suas próprias queries + resolverAprovadores por baixo. Mocka
+// direto pra não ter que simular essa cadeia inteira na fila do sqlMock.
+const mockGetDescontoThreshold = vi.fn();
+const mockAvaliarRegras = vi.fn();
+const mockCriarTarefaAprovacao = vi.fn();
+const mockBuscarLimiteDescontoCartao = vi.fn();
+vi.mock("@/lib/aprovacao-regras", () => ({
+  getDescontoThreshold: (...args: unknown[]) => mockGetDescontoThreshold(...args),
+  avaliarRegras: (...args: unknown[]) => mockAvaliarRegras(...args),
+  criarTarefaAprovacao: (...args: unknown[]) => mockCriarTarefaAprovacao(...args),
+  buscarLimiteDescontoCartao: (...args: unknown[]) => mockBuscarLimiteDescontoCartao(...args),
+}));
+
 // ── Import da rota DEPOIS dos mocks ──────────────────────────────────────────
 const { POST } = await import(
   "@/app/api/vendas/[id]/solicitar-aprovacao/route"
@@ -52,30 +66,42 @@ function makeParams(id: string) {
   return { params: Promise.resolve({ id }) };
 }
 
-// Sequência padrão de respostas SQL para fluxo tipo="desconto" com sucesso
-function setupSqlDesconto(overrides: { adminResult?: unknown[]; tarefaResult?: unknown[] } = {}) {
+// Sequência de queries reais na rota pro fluxo tipo="desconto" (getDescontoThreshold,
+// avaliarRegras e criarTarefaAprovacao são mocadas à parte — ver topo do arquivo):
+//   Q1  SELECT role
+//   Q2  SELECT venda (situacao/bloqueado/aprovacao_desconto_tarefa_id/tem_desconto_alto)
+//   -- se aprovacao_desconto_tarefa_id já setado: retorna cedo aqui --
+//   Q3  requireVendaOwnership: SELECT vendas_erp
+//   Q4  requireVendaOwnership: getUserVendedorId
+//   Q5  SELECT itens (maior desconto)
+//   Q6  SELECT venda info (numero_venda, total_venda)
+//   Q7  SELECT itens detalhe (pra montar a descrição da tarefa)
+//   Q8  UPDATE vendas_erp (grava aprovacao_desconto_tarefa_id)
+function setupSqlDesconto(overrides: { tarefaId?: number } = {}) {
+  mockGetDescontoThreshold.mockResolvedValue(30);
+  mockAvaliarRegras.mockResolvedValue([{ id: 1, nome: "Desconto acima do limite", descricao: null, tipo_evento: "desconto_acima", condicao_json: {}, aprovador_role: null, aprovador_id: null, template_id: null, prioridade_regra: 1 }]);
+  mockCriarTarefaAprovacao.mockResolvedValue(overrides.tarefaId ?? 99);
+
   sqlMock
-    .mockResolvedValueOnce([{ role: "consultora" }])                          // 1. SELECT role FROM usuarios
-    .mockResolvedValueOnce([{ threshold: 30 }])                               // 2. getDescontoThreshold
-    .mockResolvedValueOnce([{                                                  // 3. SELECT venda
-      id: 1, situacao: "rascunho", bloqueado: false, aprovacao_credito_tarefa_id: null,
+    .mockResolvedValueOnce([{ role: "consultora" }])                          // Q1
+    .mockResolvedValueOnce([{                                                  // Q2
+      id: 1, situacao: "rascunho", bloqueado: false,
+      aprovacao_credito_tarefa_id: null, aprovacao_desconto_tarefa_id: null,
+      tem_desconto_alto: true, desconto_aprovado_por: null,
     }])
-    .mockResolvedValueOnce([{ vendedor_id: 1 }])                              // 4. requireVendaOwnership: SELECT vendas_erp
-    .mockResolvedValueOnce([{ vendedor_id: 1 }])                              // 5. requireVendaOwnership: getUserVendedorId
-    .mockResolvedValueOnce(overrides.adminResult ?? [{ id: "admin-uuid-456" }]) // 6. SELECT admin
-    .mockResolvedValueOnce([{ numero_venda: "V-001", total_venda: "500.00" }])  // 7. SELECT venda info
-    .mockResolvedValueOnce([{ sku: "SKU-001", nome_produto: "Anel", preco_lista: "200.00", pct_desconto: "35", preco_unitario: "130.00", quantidade: 1 }]) // 8. SELECT itens desconto
-    .mockResolvedValueOnce(overrides.tarefaResult ?? [{ id: 99 }])              // 9. INSERT tarefa
-    .mockResolvedValueOnce([{ id: 1 }])                                         // 10. INSERT aprovacoes_tarefa
-    .mockResolvedValueOnce([])                                                  // 11. UPDATE vendas_erp
-    .mockResolvedValueOnce([]);                                                 // 12. INSERT notificacoes
+    .mockResolvedValueOnce([{ vendedor_id: 1 }])                              // Q3
+    .mockResolvedValueOnce([{ vendedor_id: 1 }])                              // Q4
+    .mockResolvedValueOnce([{ sku: "SKU-001", nome_produto: "Anel", preco_lista: "200.00", pct_desconto: "35", preco_unitario: "130.00", quantidade: 1 }]) // Q5
+    .mockResolvedValueOnce([{ numero_venda: "V-001", total_venda: "500.00" }])  // Q6
+    .mockResolvedValueOnce([{ sku: "SKU-001", nome_produto: "Anel", preco_lista: "200.00", pct_desconto: "35", preco_unitario: "130.00", quantidade: 1 }]) // Q7
+    .mockResolvedValueOnce([]);                                                // Q8
 }
 
 // ── Testes ───────────────────────────────────────────────────────────────────
 
 describe("POST solicitar-aprovacao — tipo='desconto'", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockGetUser.mockResolvedValue({ data: { user: { id: "user-test-uuid" } } });
   });
 
@@ -104,20 +130,20 @@ describe("POST solicitar-aprovacao — tipo='desconto'", () => {
   });
 
   it("retorna 409 quando venda não está em rascunho", async () => {
+    mockGetDescontoThreshold.mockResolvedValue(30);
     sqlMock
       .mockResolvedValueOnce([{ role: "consultora" }])
-      .mockResolvedValueOnce([{ threshold: 30 }])
-      .mockResolvedValueOnce([{ id: 1, situacao: "aprovado", bloqueado: false, aprovacao_credito_tarefa_id: null }]);
+      .mockResolvedValueOnce([{ id: 1, situacao: "aprovado", bloqueado: false, aprovacao_desconto_tarefa_id: null, tem_desconto_alto: false }]);
 
     const res = await POST(makeRequest("1", { tipo: "desconto" }), makeParams("1"));
     expect(res.status).toBe(409);
   });
 
-  it("retorna early quando já existe aprovação pendente (aprovacao_credito_tarefa_id set)", async () => {
+  it("retorna early quando já existe aprovação pendente (aprovacao_desconto_tarefa_id set)", async () => {
+    mockGetDescontoThreshold.mockResolvedValue(30);
     sqlMock
       .mockResolvedValueOnce([{ role: "consultora" }])
-      .mockResolvedValueOnce([{ threshold: 30 }])
-      .mockResolvedValueOnce([{ id: 1, situacao: "rascunho", bloqueado: false, aprovacao_credito_tarefa_id: 77 }])
+      .mockResolvedValueOnce([{ id: 1, situacao: "rascunho", bloqueado: false, aprovacao_desconto_tarefa_id: 77, tem_desconto_alto: true }])
       .mockResolvedValueOnce([{ vendedor_id: 1 }])
       .mockResolvedValueOnce([{ vendedor_id: 1 }]);
 
@@ -127,18 +153,27 @@ describe("POST solicitar-aprovacao — tipo='desconto'", () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.aguardando_aprovacao_desconto).toBe(true);
-    expect(sqlMock).toHaveBeenCalledTimes(5);
+    expect(sqlMock).toHaveBeenCalledTimes(4);
   });
 
-  it("retorna 500 quando nenhum admin ativo é encontrado", async () => {
+  it("retorna 409 quando aprovador de desconto não está configurado", async () => {
+    mockGetDescontoThreshold.mockResolvedValue(30);
+    mockAvaliarRegras.mockResolvedValue([{ id: 1, nome: "Desconto acima do limite", descricao: null, tipo_evento: "desconto_acima", condicao_json: {}, aprovador_role: null, aprovador_id: null, template_id: null, prioridade_regra: 1 }]);
+    const { HttpError } = await import("@/lib/devolucoes");
+    mockCriarTarefaAprovacao.mockRejectedValue(new HttpError(409, "Aprovador de desconto não configurado. Defina em Configurações › Aprovadores."));
     sqlMock
       .mockResolvedValueOnce([{ role: "consultora" }])
-      .mockResolvedValueOnce([{ threshold: 30 }])
-      .mockResolvedValueOnce([{ id: 1, situacao: "rascunho", bloqueado: false, aprovacao_credito_tarefa_id: null }])
-      .mockResolvedValueOnce([]); // nenhum admin
+      .mockResolvedValueOnce([{ id: 1, situacao: "rascunho", bloqueado: false, aprovacao_desconto_tarefa_id: null, tem_desconto_alto: true }])
+      .mockResolvedValueOnce([{ vendedor_id: 1 }])
+      .mockResolvedValueOnce([{ vendedor_id: 1 }])
+      .mockResolvedValueOnce([{ sku: "SKU-001", nome_produto: "Anel", preco_lista: "200.00", pct_desconto: "35", preco_unitario: "130.00", quantidade: 1 }])
+      .mockResolvedValueOnce([{ numero_venda: "V-001", total_venda: "500.00" }])
+      .mockResolvedValueOnce([{ sku: "SKU-001", nome_produto: "Anel", preco_lista: "200.00", pct_desconto: "35", preco_unitario: "130.00", quantidade: 1 }]);
 
     const res = await POST(makeRequest("1", { tipo: "desconto" }), makeParams("1"));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error).toMatch(/aprovador de desconto/i);
   });
 
   // TODO: teste pré-existente quebrou após mudança no fluxo de aReceber.

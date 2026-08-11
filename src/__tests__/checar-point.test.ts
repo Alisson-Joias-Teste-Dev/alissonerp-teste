@@ -44,6 +44,14 @@ function makeRequest(pagamentoId?: number) {
 }
 const makeParams = (id: string | number) => ({ params: Promise.resolve({ id: String(id) }) });
 
+// A rota faz a checagem de ownership (Onda 1D) antes de tudo: 1 SELECT pro role
+// do usuario + 1 SELECT pra requireVendaOwnership (venda_erp). Role admin =
+// acesso total, sem query extra de vendedor_id. Enfileira as duas primeiro.
+function mockOwnershipOk() {
+  sqlMock.mockResolvedValueOnce([{ role: "admin" }]);
+  sqlMock.mockResolvedValueOnce([{ vendedor_id: null }]);
+}
+
 describe("GET /api/vendas/[id]/mercado-pago/checar-point", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -69,12 +77,14 @@ describe("GET /api/vendas/[id]/mercado-pago/checar-point", () => {
   });
 
   it("404 quando pagamento Point não existe", async () => {
+    mockOwnershipOk();
     sqlMock.mockResolvedValueOnce([]);
     const res = await GET(makeRequest(PAGAMENTO_ID), makeParams(VENDA_ID));
     expect(res.status).toBe(404);
   });
 
   it("retorna ja_confirmado=true quando pagamento já confirmado", async () => {
+    mockOwnershipOk();
     sqlMock.mockResolvedValueOnce([{
       id: PAGAMENTO_ID, venda_id: VENDA_ID, status: "confirmado",
       valor: 1000, gateway_payload: {},
@@ -87,6 +97,7 @@ describe("GET /api/vendas/[id]/mercado-pago/checar-point", () => {
   });
 
   it("retorna status=cancelado quando pagamento cancelado", async () => {
+    mockOwnershipOk();
     sqlMock.mockResolvedValueOnce([{
       id: PAGAMENTO_ID, venda_id: VENDA_ID, status: "cancelado",
       valor: 1000, gateway_payload: {},
@@ -98,6 +109,7 @@ describe("GET /api/vendas/[id]/mercado-pago/checar-point", () => {
   });
 
   it("502 quando getAccessToken falha", async () => {
+    mockOwnershipOk();
     sqlMock.mockResolvedValueOnce([{
       id: PAGAMENTO_ID, venda_id: VENDA_ID, status: "pendente",
       valor: 1000, gateway_payload: {},
@@ -108,6 +120,7 @@ describe("GET /api/vendas/[id]/mercado-pago/checar-point", () => {
   });
 
   it("retorna mp_pending=true quando search MP falha (não-200)", async () => {
+    mockOwnershipOk();
     sqlMock.mockResolvedValueOnce([{
       id: PAGAMENTO_ID, venda_id: VENDA_ID, status: "pendente",
       valor: 1000, gateway_payload: {},
@@ -123,6 +136,7 @@ describe("GET /api/vendas/[id]/mercado-pago/checar-point", () => {
   });
 
   it("retorna pendente quando MP search não acha pagamento approved", async () => {
+    mockOwnershipOk();
     sqlMock.mockResolvedValueOnce([{
       id: PAGAMENTO_ID, venda_id: VENDA_ID, status: "pendente",
       valor: 1000, gateway_payload: {},
@@ -137,6 +151,7 @@ describe("GET /api/vendas/[id]/mercado-pago/checar-point", () => {
   });
 
   it("retorna pendente quando search retorna lista vazia", async () => {
+    mockOwnershipOk();
     sqlMock.mockResolvedValueOnce([{
       id: PAGAMENTO_ID, venda_id: VENDA_ID, status: "pendente",
       valor: 1000, gateway_payload: {},
@@ -152,6 +167,7 @@ describe("GET /api/vendas/[id]/mercado-pago/checar-point", () => {
   });
 
   it("sucesso: pagamento approved + soma cobre venda → confirma e conclui", async () => {
+    mockOwnershipOk();
     sqlMock
       .mockResolvedValueOnce([{
         id: PAGAMENTO_ID, venda_id: VENDA_ID, status: "pendente",
@@ -172,18 +188,19 @@ describe("GET /api/vendas/[id]/mercado-pago/checar-point", () => {
     // Dentro de sql.begin
     sqlMock.mockResolvedValueOnce([]); // UPDATE pagamento
     sqlMock.mockResolvedValueOnce([{ soma_confirmados: 1000, total_venda: 1000 }]); // soma
-    sqlMock.mockResolvedValueOnce([{ valor: "uuid-system" }]); // mp_system_user_id
-    mockConcluirVenda.mockResolvedValueOnce(undefined);
     const res = await GET(makeRequest(PAGAMENTO_ID), makeParams(VENDA_ID));
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe("confirmado");
     expect(data.payment_id).toBe("999");
-    expect(data.venda_concluida).toBe(true);
-    expect(mockConcluirVenda).toHaveBeenCalled();
+    // Fluxo novo 06/2026: pagamento quitado NÃO conclui mais a venda sozinho
+    // (isso só acontece na entrega) — a rota só informa que quitou.
+    expect(data.pagamento_quitado).toBe(true);
+    expect(mockConcluirVenda).not.toHaveBeenCalled();
   });
 
   it("approved + soma parcial: confirma mas NÃO conclui (quitada=false)", async () => {
+    mockOwnershipOk();
     sqlMock
       .mockResolvedValueOnce([{
         id: PAGAMENTO_ID, venda_id: VENDA_ID, status: "pendente",
@@ -205,11 +222,12 @@ describe("GET /api/vendas/[id]/mercado-pago/checar-point", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe("confirmado");
-    expect(data.venda_concluida).toBe(false);
+    expect(data.pagamento_quitado).toBe(false);
     expect(mockConcluirVenda).not.toHaveBeenCalled();
   });
 
   it("calcula taxas_mp = transaction_amount - net_received_amount", async () => {
+    mockOwnershipOk();
     sqlMock
       .mockResolvedValueOnce([{
         id: PAGAMENTO_ID, venda_id: VENDA_ID, status: "pendente",
@@ -238,30 +256,8 @@ describe("GET /api/vendas/[id]/mercado-pago/checar-point", () => {
     expect(values).toContain(130);
   });
 
-  it("usa created_by como fallback quando mp_system_user_id ausente", async () => {
-    sqlMock
-      .mockResolvedValueOnce([{
-        id: PAGAMENTO_ID, venda_id: VENDA_ID, status: "pendente",
-        valor: 1000, gateway_payload: {},
-      }]);
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        results: [{ id: 999, status: "approved", transaction_amount: 1000 }],
-      }),
-    } as Response);
-    sqlMock.mockResolvedValueOnce([]);
-    sqlMock.mockResolvedValueOnce([{ soma_confirmados: 1000, total_venda: 1000 }]);
-    sqlMock.mockResolvedValueOnce([]); // mp_system_user_id ausente
-    sqlMock.mockResolvedValueOnce([{ created_by: "creator-uuid" }]); // fallback
-    mockConcluirVenda.mockResolvedValueOnce(undefined);
-    const res = await GET(makeRequest(PAGAMENTO_ID), makeParams(VENDA_ID));
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.venda_concluida).toBe(true);
-  });
-
   it("erro do concluirVenda não falha a rota (best-effort)", async () => {
+    mockOwnershipOk();
     sqlMock
       .mockResolvedValueOnce([{
         id: PAGAMENTO_ID, venda_id: VENDA_ID, status: "pendente",
@@ -283,6 +279,7 @@ describe("GET /api/vendas/[id]/mercado-pago/checar-point", () => {
   });
 
   it("query MP usa external_reference correto", async () => {
+    mockOwnershipOk();
     sqlMock
       .mockResolvedValueOnce([{
         id: PAGAMENTO_ID, venda_id: VENDA_ID, status: "pendente",
