@@ -9,20 +9,36 @@
  * O QUE: recebe motoboy_id + lista de entrega_ids, valida que são entregas
  * confirmadas daquele motoboy e ainda não pagas, cria o pagamento.
  *
+ * REGRA DE NEGÓCIO (21/07/2026 — reforma "relatórios persistidos" da aba
+ * Pagamento do motoboy, ver docs/regras-negocio/entregas.md §12.8): o INSERT
+ * de fato (cabeçalho + itens + conta a pagar) foi extraído para
+ * `src/lib/pagamento-motoboy.ts` (`criarPagamentoMotoboyTx`) para ser
+ * REUSADO por `motoboy/relatorio-pagamento/[id]/confirmar` (confirmar
+ * pagamento a partir de um relatório salvo) sem duplicar a lógica. Esta rota
+ * continua com o MESMO contrato (request/response) de antes — só passou a
+ * chamar a função compartilhada.
+ *
  * IMPACTO SE ALTERADO: remover validação de unicidade permite pagamento
  * duplicado. Remover validação de motoboy_id permite pagar entrega de
- * outro motoboy.
+ * outro motoboy. Mudar a assinatura de `criarPagamentoMotoboyTx` afeta
+ * também a confirmação via relatório.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { zodError } from "@/lib/schemas/common";
+import {
+  ROLES_PAGAMENTO_MOTOBOY,
+  buscarEntregasValidasParaPagar,
+  criarPagamentoMotoboyTx,
+  vencimentoPadrao,
+} from "@/lib/pagamento-motoboy";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DbTx = any;
 
-const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_loja"];
+const ROLES_PERMITIDOS = ROLES_PAGAMENTO_MOTOBOY;
 
 const PagarMotoboySchema = z.object({
   motoboy_id: z.string().min(1, "Motoboy é obrigatório"),
@@ -62,77 +78,36 @@ export async function POST(req: NextRequest) {
   const motoboyNome = (motoboy as { nome: string } | null)?.nome ?? "Motoboy";
 
   // Data de vencimento: padrão hoje + 7 dias se não informada
-  const vencimento = data_vencimento ?? (() => {
-    const d = new Date(); d.setDate(d.getDate() + 7);
-    return d.toISOString().slice(0, 10);
-  })();
+  const vencimento = data_vencimento ?? vencimentoPadrao();
 
   // Validação: as entregas pertencem ao motoboy, estão confirmadas e não pagas
-  const entregasRows: Record<string, unknown>[] = await sql`
-    SELECT ev.id, ev.frete_motoboy, ev.codigo_entrega, ev.status AS situacao
-    FROM alissonerp.entregas_venda ev
-    WHERE ev.id = ANY(${entrega_ids})
-      AND ev.motoboy_id = ${motoboy_id}::uuid
-      AND ev.status = 'confirmada'
-      AND NOT EXISTS (
-        SELECT 1 FROM alissonerp.pagamentos_motoboy_itens pmi
-        WHERE pmi.entrega_id = ev.id
-      )
-  `;
+  // (função compartilhada — mesma condição usada na confirmação via relatório).
+  let entregas: Awaited<ReturnType<typeof buscarEntregasValidasParaPagar>> = [];
 
-  if (entregasRows.length === 0) {
-    return NextResponse.json(
-      { error: "Nenhuma entrega válida encontrada. Verifique se as entregas são confirmadas, pertencem ao motoboy e ainda não foram pagas." },
-      { status: 400 },
-    );
-  }
-
-  const entregas = entregasRows.map((r) => ({
-    id: Number(r.id),
-    frete_motoboy: Number(r.frete_motoboy ?? 0),
-  }));
-
-  const valorTotal = entregas.reduce((sum, e) => sum + e.frete_motoboy, 0);
-
-  // Transação: criar pagamento + itens + conta a pagar
   try {
     await sql.begin(async (tx: DbTx) => {
-      const [pagamento] = await tx`
-        INSERT INTO alissonerp.pagamentos_motoboy
-          (motoboy_id, valor_total, observacoes, created_by)
-        VALUES
-          (${motoboy_id}::uuid, ${valorTotal}, ${observacoes ?? null}, ${user.id}::uuid)
-        RETURNING id
-      `;
+      entregas = await buscarEntregasValidasParaPagar(tx, motoboy_id, entrega_ids);
 
-      for (const e of entregas) {
-        await tx`
-          INSERT INTO alissonerp.pagamentos_motoboy_itens
-            (pagamento_id, entrega_id, frete_motoboy)
-          VALUES
-            (${Number(pagamento.id)}, ${e.id}, ${e.frete_motoboy})
-        `;
+      if (entregas.length === 0) {
+        // REGRA DE NEGÓCIO: lançar dentro da tx para abortar o begin() sem
+        // gravar nada — o catch abaixo trata como erro de validação (400),
+        // não como falha de banco.
+        throw new Error("NENHUMA_ENTREGA_VALIDA");
       }
 
-      // REGRA DE NEGÓCIO: ao pagar motoboy, criar conta a pagar no financeiro.
-      // Isso faz o pagamento aparecer em Contas a Pagar e no fluxo de caixa.
-      // Categoria 'motoboy' permite filtrar/fechar por tipo de despesa.
-      const codigosStr = entregas.map((e) => (e as Record<string, unknown>).codigo_entrega).join(", ");
-      await tx`
-        INSERT INTO alissonerp.contas_pagar
-          (descricao, valor, data_vencimento, status, categoria, observacao, created_by)
-        VALUES
-          (
-            ${`Pagamento ${motoboyNome} — ${entregas.length} entregas`},
-            ${valorTotal},
-            ${vencimento}::date,
-            'pendente',
-            'motoboy',
-            ${`Entregas: ${codigosStr}. ${observacoes ?? ""}`},
-            ${user.id}::uuid
-          )
-      `;
+      // Transação: criar pagamento + itens + conta a pagar (lógica
+      // compartilhada com a confirmação via relatório salvo).
+      await criarPagamentoMotoboyTx(tx, {
+        motoboyId: motoboy_id,
+        motoboyNome,
+        entregas,
+        observacoes,
+        dataVencimento: vencimento,
+        userId: user.id,
+      });
     });
+
+    const valorTotal = entregas.reduce((sum, e) => sum + e.frete_motoboy, 0);
 
     return NextResponse.json({
       ok: true,
@@ -141,6 +116,12 @@ export async function POST(req: NextRequest) {
       message: `${entregas.length} entrega(s) paga(s). Total: R$ ${valorTotal.toFixed(2)}`,
     });
   } catch (err) {
+    if (err instanceof Error && err.message === "NENHUMA_ENTREGA_VALIDA") {
+      return NextResponse.json(
+        { error: "Nenhuma entrega válida encontrada. Verifique se as entregas são confirmadas, pertencem ao motoboy e ainda não foram pagas." },
+        { status: 400 },
+      );
+    }
     const message = err instanceof Error ? err.message : "Erro ao registrar pagamento";
     console.error("[motoboy/pagar] Erro:", err);
     // Trata violação de UNIQUE (pagamento duplicado)

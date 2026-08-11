@@ -10,15 +10,37 @@ import { buscarSaldoEstoque } from "@/lib/estoque-saldo";
 import { logAudit } from "@/lib/audit";
 import { zodError } from "@/lib/schemas/common";
 
+/**
+ * Schema de entrada do apontamento de PCP.
+ *
+ * O QUE FAZ: valida o corpo do POST antes de qualquer regra de negócio.
+ *
+ * O PORQUÊ do `qtd` ser opcional: existem DOIS jeitos de apontar.
+ *   - Insumo comum (metal, outros): a tela manda `qtd` (a quantidade/peso apontado).
+ *   - Pedra (tipos 3 e 6): desde a v2.14.0 a tela manda o PESO EM GRAMAS
+ *     (`peso_g_pedra`) e NÃO manda `qtd` — o servidor é quem converte para
+ *     quilates (ct) e decide o que gravar na coluna `qtd`.
+ *   Exigir `qtd` aqui derrubava TODO apontamento de pedra com "Dados invalidos",
+ *   antes mesmo de chegar nas travas abaixo — que são as que de fato sabem a regra
+ *   ("pedra precisa de peso_g_pedra OU qtd" / "não-pedra precisa de qtd").
+ *
+ * IMPACTO se tirar o `.default(0)`: `qtd` viraria `undefined` e as travas
+ * `if (!ehPedra && !qtd)` deixariam de barrar apontamento comum sem quantidade,
+ * e o cálculo de saldo compararia contra `undefined`.
+ */
 const ApontPcpPostSchema = z.object({
   tipo_apontamento_id: z.coerce.number().int().positive(),
   deposito_id: z.coerce.number().int().positive(),
   setor_id: z.coerce.number().int().nullable().optional(),
   insumo_id: z.coerce.number().int().nullable().optional(),
   pcp_id: z.coerce.number().int().positive(),
-  qtd: z.coerce.number(),
+  qtd: z.coerce.number().optional().default(0),
   foto_balanca: z.string().nullable().optional(),
   peso_g_pedra: z.coerce.number().nullable().optional(),
+  // Enviado pela tela por conveniência, mas NÃO é usado: o peso em ct gravado é
+  // sempre o recalculado no servidor (peso_ct_final), para o front não conseguir
+  // forjar um valor de estoque.
+  peso_ct: z.coerce.number().nullable().optional(),
   created_by: z.string().nullable().optional(),
 }).passthrough();
 
@@ -120,41 +142,37 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Validação de estoque para tipos 1, 2, 3 e 8 (todos saem do Almoxarifado Central)
+  /**
+   * O QUE FAZ: barra o apontamento quando o Almoxarifado Central não tem o
+   * insumo em estoque. Vale para os tipos que SAEM do almoxarifado (1, 2, 3, 8).
+   *
+   * O PORQUÊ da unidade: a vw_saldo_estoque soma as movimentações como elas
+   * foram gravadas. Para pedra, o gatilho fn_processar_apontamento_pcp grava a
+   * movimentação JÁ EM QUILATES (fn_criar_par_movimentacao(insumo, peso_ct),
+   * migration 098) — então o saldo da view já está em ct e a comparação certa é
+   * contra peso_ct_final, não contra o peso em gramas nem contra contagem de peças.
+   *
+   * IMPACTO se comparar com `qtd` aqui: para pedra, `qtd` é o peso em GRAMAS —
+   * 5x menor que o ct correspondente. A trava deixaria passar apontamento sem
+   * lastro e o saldo de pedra do almoxarifado ficaria negativo.
+   *
+   * NÃO consultar movimentacoes_estoque.peso_ct: essa coluna NÃO EXISTE (nenhuma
+   * migration cria). Uma versão anterior desta trava fazia isso e derrubava a
+   * rota com erro de SQL.
+   */
   if ((tipo_apontamento_id === 1 || tipo_apontamento_id === 2 || tipo_apontamento_id === 3 || tipo_apontamento_id === 8) && insumo_id) {
-    if (tipo_apontamento_id === 3 && peso_ct_final != null) {
-      // Pedras: validar saldo em CT
-      const saldoRows = await sql`
-        SELECT COALESCE(SUM(entrada_ct), 0) - COALESCE(SUM(saida_ct), 0) AS saldo_ct
-        FROM (
-          SELECT
-            CASE WHEN entrada > 0 THEN COALESCE(peso_ct, entrada * (
-              SELECT COALESCE(peso_pedra_ct, 0) FROM alissonerp.insumos WHERE id = ${insumo_id} LIMIT 1
-            )) ELSE 0 END AS entrada_ct,
-            CASE WHEN saida > 0 THEN COALESCE(peso_ct, saida * (
-              SELECT COALESCE(peso_pedra_ct, 0) FROM alissonerp.insumos WHERE id = ${insumo_id} LIMIT 1
-            )) ELSE 0 END AS saida_ct
-          FROM alissonerp.movimentacoes_estoque
-          WHERE insumo_id = ${insumo_id} AND deposito_id = ${almoxarifadoId}
-        ) t
-      `;
-      const saldoCt = Number(saldoRows[0]?.saldo_ct ?? 0);
-      if (saldoCt < peso_ct_final) {
-        return NextResponse.json(
-          { error: `Saldo insuficiente no Almoxarifado Central. Disponível: ${saldoCt.toFixed(4)}ct, solicitado: ${peso_ct_final.toFixed(4)}ct.` },
-          { status: 422 }
-        );
-      }
-    } else {
-      const saldoAtual = await buscarSaldoEstoque(sql, almoxarifadoId, insumo_id);
-      if (saldoAtual < qtd) {
-        const unidade = tipo_apontamento_id === 3 ? "UN" : "g";
-        const fmt = (v: number) => tipo_apontamento_id === 3 ? Math.round(v).toString() : v.toFixed(2);
-        return NextResponse.json(
-          { error: `Saldo insuficiente no Almoxarifado Central. Disponível: ${fmt(saldoAtual)}${unidade}, solicitado: ${fmt(qtd)}${unidade}.` },
-          { status: 422 }
-        );
-      }
+    const saldoAtual = await buscarSaldoEstoque(sql, almoxarifadoId, insumo_id);
+    const ehPedraCt = tipo_apontamento_id === 3 && peso_ct_final != null;
+    const solicitado = ehPedraCt ? peso_ct_final! : qtd;
+    if (saldoAtual < solicitado) {
+      // ct para pedra pesada; "UN" no caminho antigo (pedra apontada por peça); g no resto.
+      const unidade = ehPedraCt ? "ct" : tipo_apontamento_id === 3 ? "UN" : "g";
+      const fmt = (v: number) =>
+        ehPedraCt ? v.toFixed(4) : tipo_apontamento_id === 3 ? Math.round(v).toString() : v.toFixed(2);
+      return NextResponse.json(
+        { error: `Saldo insuficiente no Almoxarifado Central. Disponível: ${fmt(saldoAtual)}${unidade}, solicitado: ${fmt(solicitado)}${unidade}.` },
+        { status: 422 }
+      );
     }
   }
 

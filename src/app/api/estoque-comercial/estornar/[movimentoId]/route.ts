@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { isMasterAdmin } from "@/lib/master-admin";
+import { MOTIVO_PERDA } from "@/lib/perda-extravio";
 import { zodError } from "@/lib/schemas/common";
 
 interface Params { params: Promise<{ movimentoId: string }> }
 
-const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
+// BLINDAGEM (v2.81.2): estorno cria movimento reverso (mexe no saldo) —
+// baixa/ajuste manual é exclusivo do administrador (casos excepcionais).
+const ROLES_PERMITIDOS = ["desenvolvedor", "admin"];
 
 const EstornarPostSchema = z.object({
   observacao: z.string().optional(),
@@ -46,6 +50,18 @@ export async function POST(
   }
   if (original.estornado_por_id) {
     return NextResponse.json({ error: "Movimento já possui estorno" }, { status: 409 });
+  }
+
+  // BLINDAGEM: estorno de PERDA/EXTRAVIO devolve a peça ao estoque — é a mesma
+  // decisão da baixa, ao contrário. Se ficasse liberado para admin/desenvolvedor
+  // (como os demais estornos), qualquer um dos 7 admins desfaria a baixa do dono
+  // e a trava de "só o master registra perda" vazaria pelo outro lado.
+  // IMPACTO SE REMOVIDO: perda vira reversível por quem não pode registrá-la.
+  if (original.motivo === MOTIVO_PERDA && !(await isMasterAdmin(user.id))) {
+    return NextResponse.json(
+      { error: "Somente o administrador master pode estornar uma perda/extravio" },
+      { status: 403 },
+    );
   }
 
   // Tipo reverso: entrada vira saida, saida vira entrada

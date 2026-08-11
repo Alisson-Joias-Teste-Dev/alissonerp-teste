@@ -1,6 +1,7 @@
 import sql from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { STATUS_BAIXA_OURO } from "@/lib/cofre-ouro-status";
+import { resolverAprovadores } from "@/lib/aprovacoes";
 
 type Decisao = "aprovar" | "reprovar";
 
@@ -31,12 +32,18 @@ interface Resultado {
 export async function processarAprovacaoQuebraLimpeza(params: Params): Promise<Resultado> {
   const { baixaId, decisao, userId, motivo, tarefaId } = params;
 
-  const [config] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'aprovador_limpeza'
-  `;
-  const aprovadorId = String(config?.valor ?? "").trim();
-  if (!aprovadorId) return { ok: false, status: 409, error: "Aprovador de limpeza não configurado" };
-  if (userId !== aprovadorId) return { ok: false, status: 403, error: "Apenas o aprovador configurado pode aprovar/reprovar limpeza" };
+  // REGRA DE NEGÓCIO: só quem estiver em `aprovador_limpeza` decide — política
+  // config-first (docs/regras-negocio/aprovacoes-refatoracao/03b-config-first-estrito.md),
+  // agora via a camada central (fonte única de "quem aprova"). Antes era 1 UUID exato;
+  // agora aceita a lista configurada (configMulti) — 1 UUID = comportamento idêntico.
+  // Sem ctx.solicitanteId: limpeza não exclui ninguém.
+  const resol = await resolverAprovadores("limpeza_ouro");
+  if (resol.status === "nao_configurado") {
+    return { ok: false, status: 409, error: "Aprovador de limpeza não configurado" };
+  }
+  if (!resol.aprovadores.includes(userId)) {
+    return { ok: false, status: 403, error: "Apenas o aprovador configurado pode aprovar/reprovar limpeza" };
+  }
 
   const [baixa] = await sql`
     SELECT id, status, gramas, destino, observacao AS obs FROM alissonerp.cofre_ouro_baixas WHERE id = ${baixaId}

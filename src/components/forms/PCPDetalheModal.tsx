@@ -7,7 +7,7 @@ import {
   Package, ArrowLeftRight, CheckSquare, RefreshCw,
 } from "lucide-react";
 import UserAvatar from "@/components/UserAvatar";
-import { formatPeso, formatPesoCt } from "@/lib/formatters";
+import { formatPeso } from "@/lib/formatters";
 import ApontamentoPCPModal from "@/components/forms/ApontamentoPCPModal";
 import TransferenciaPCPModal from "@/components/forms/TransferenciaPCPModal";
 import SaidaOrdemModal from "@/components/forms/SaidaOrdemModal";
@@ -189,16 +189,26 @@ export default function PCPDetalheModal({ pcp, onClose, onSuccess }: Props) {
     });
   }
 
+  /**
+   * O QUE FAZ: formata a quantidade da linha do evento.
+   *
+   * O PORQUÊ da GRAMA na pedra: a ordem é medida em grama — é dela que sai o
+   * peso real da joia, que diz quanto foi ouro e quanto foi pedra. O quilate é
+   * a unidade do ESTOQUE e não aparece nesta tela.
+   *
+   * Os dois fluxos de pedra:
+   *   - por peso (peso_ct preenchido): `qtd` JÁ É a grama da balança.
+   *   - antigo (peso_ct vazio): `qtd` é quantidade de peças → grama = qtd × peso da pedra.
+   *
+   * IMPACTO se usar `qtd × peso_pedra` sempre: no fluxo por peso a conta vira
+   * grama × grama. Foi o que fez um apontamento de 2,4 g aparecer como 14,4 ct.
+   */
   function fmtQtd(e: EventoHistorico) {
     if (e.qtd === undefined) return null;
     if (e.categoria_id === 2) {
-      // Show in CT if peso_pedra available, else UN
-      if (e.peso_pedra) {
-        const totalG = e.qtd * e.peso_pedra;
-        const ctVal = parseFloat((totalG / 0.2).toFixed(4));
-        return `${formatPesoCt(ctVal)}`;
-      }
-      return `${Math.round(e.qtd)} UN`;
+      const gramas = e.peso_ct ? e.qtd : (e.peso_pedra ? e.qtd * e.peso_pedra : null);
+      if (gramas === null) return `${Math.round(e.qtd)} UN`;
+      return `${formatPeso(gramas)}g`;
     }
     return `${formatPeso(e.qtd)}g`;
   }
@@ -382,9 +392,11 @@ export default function PCPDetalheModal({ pcp, onClose, onSuccess }: Props) {
                         {(totais.pedras_entrada_qtd > 0 || totais.pedras_retorno_qtd > 0) && (
                           <div className="flex justify-between text-sm font-semibold">
                             <span style={{ color: "#374151" }}>Total Pedras</span>
+                            {/* Total de pedra da ordem em GRAMA — o quilate é do estoque,
+                                não desta tela. pedras_peso já vem em grama do resumo. */}
                             <span className="font-mono" style={{ color: "#7C3AED" }}>
-                              {totais.pedras_ct != null
-                                ? formatPesoCt(totais.pedras_ct)
+                              {totais.pedras_peso != null
+                                ? `${formatPeso(totais.pedras_peso)}g`
                                 : `${Math.round(totais.pedras_qtd)} UN`}
                               {totais.pedras_retorno_qtd > 0 && (
                                 <span className="text-[10px] font-normal ml-1" style={{ color: "#9CA3AF" }}>

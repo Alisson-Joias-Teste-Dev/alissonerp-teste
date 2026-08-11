@@ -1,4 +1,4 @@
-export { Badge } from "./Badge";
+export { Badge, StatusBadge } from "./Badge";
 export { default as BadgePromo } from "./BadgePromo";
 export { Button } from "./Button";
 export { Card } from "./Card";

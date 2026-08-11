@@ -4,10 +4,12 @@ import { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft, ArrowUpCircle, ArrowDownCircle,
   Settings2, Loader2, Save, AlertTriangle, CheckCircle,
-  RotateCcw, ArrowRightLeft, Bookmark, X, TrendingDown, RefreshCw,
+  RotateCcw, ArrowRightLeft, Bookmark, X, TrendingDown, RefreshCw, MapPin,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { BotaoImprimirEtiqueta } from "@/components/rfid/BotaoImprimirEtiqueta";
+import { MOTIVO_PERDA, CONFIRMACAO_PERDA } from "@/lib/perda-extravio";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Consolidado {
@@ -59,7 +61,7 @@ interface Reserva {
   ordem_id:     number | null;
   numero_ordem: string | null;
   tipo_ordem:   string | null;
-  tipo_reserva: "venda" | "conversao_sku" | "conversao_estoque" | "ordem" | "indefinida";
+  tipo_reserva: "venda" | "conversao_sku" | "conversao_estoque" | "ordem" | "protocolo" | "indefinida";
   origem_label: string;
   created_at:   string;
 }
@@ -89,8 +91,18 @@ interface RfidItem {
   preco_venda:       number | null;
 }
 
+// Falta apurada em inventario: a "prova" que o dono ve antes de baixar por perda.
+interface FaltaInventario {
+  inventario_id: number;
+  data:          string;
+  local_nome:    string | null;
+  faltou:        number;
+  desfecho:      string | null;
+}
+
 interface DetalheData {
   consolidado:    Consolidado | null;
+  localizacao:    string | null;
   saldoPorLocal:  SaldoLocal[];
   movimentos:     Movimento[];
   reservas:       Reserva[];
@@ -118,6 +130,8 @@ const MOTIVO_LABEL: Record<string, string> = {
   estorno:              "Estorno",
   transferencia_saida:  "Transferencia (saida)",
   transferencia_entrada:"Transferencia (entrada)",
+  // Baixa por peca sumida/quebrada — unica baixa manual do ERP, so o dono faz.
+  [MOTIVO_PERDA]:       "Perda / extravio",
 };
 
 type TabId = "movimentos" | "reservas" | "transferencias" | "rfid";
@@ -130,6 +144,10 @@ const RESERVA_TIPO_VISUAL: Record<Reserva["tipo_reserva"], { label: string; bg: 
   conversao_sku: { label: "Conversao SKU", bg: "#F3E8FF", color: "#7E22CE" },
   conversao_estoque: { label: "Conversao Estoque", bg: "#DCFCE7", color: "#166534" },
   ordem: { label: "Ordem", bg: "#FEF3C7", color: "#92400E" },
+  // Reserva de protocolo de transferencia: a peca esta segurada na origem
+  // enquanto ninguem coleta. Nao e bloqueio comercial nem de producao — e
+  // transporte esperando acontecer.
+  protocolo: { label: "Aguardando coleta", bg: "#EEF2FF", color: "#4338CA" },
   indefinida: { label: "Indefinida", bg: "#F3F4F6", color: "#4B5563" },
 };
 
@@ -286,6 +304,200 @@ function TransferirModal({
   );
 }
 
+// ─── PerdaModal ───────────────────────────────────────────────────────────────
+/**
+ * Modal de baixa por PERDA / EXTRAVIO.
+ *
+ * REGRA DE NEGOCIO: peca que sumiu precisa sair do estoque, senao o saldo mente
+ * para sempre. E a unica baixa manual do ERP e so o master admin (o dono) faz —
+ * quem controla isso e o backend; aqui a tela so nao mostra o botao pros demais.
+ *
+ * Dois freios de mao antes de gravar:
+ *   1) historico de faltas em inventario (a prova de que a peca sumiu mesmo);
+ *   2) a palavra PERDA digitada — impede baixa por clique acidental.
+ *
+ * O motivo escrito e OPCIONAL (decisao do Jonathan, 21/07/2026): quem/quando/
+ * quanto ja fica gravado no movimento e no audit_log.
+ *
+ * IMPACTO SE REMOVIDO O FREIO DA PALAVRA: baixa de joia vira um clique.
+ */
+function PerdaModal({
+  produtoId, saldoPorLocal, faltas, onClose, onDone,
+}: {
+  produtoId: number;
+  saldoPorLocal: SaldoLocal[];
+  faltas: FaltaInventario[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  // So faz sentido oferecer local onde exista saldo disponivel para baixar.
+  const locaisComSaldo = saldoPorLocal.filter(sl => sl.disponivel > 0);
+
+  const [localId,     setLocalId]     = useState(locaisComSaldo[0]?.local_estoque_id ?? 0);
+  const [quantidade,  setQuantidade]  = useState("1");
+  const [motivo,      setMotivo]      = useState("");
+  const [confirmacao, setConfirmacao] = useState("");
+  const [saving,      setSaving]      = useState(false);
+  const [err,         setErr]         = useState("");
+
+  const localSel  = locaisComSaldo.find(l => l.local_estoque_id === localId);
+  const podeGravar =
+    localId > 0 &&
+    Number(quantidade) > 0 &&
+    confirmacao.trim().toUpperCase() === CONFIRMACAO_PERDA;
+
+  async function handleGravar() {
+    setSaving(true); setErr("");
+    try {
+      const r = await fetch("/api/estoque-comercial/perda", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          produto_id: produtoId,
+          local_estoque_id: localId,
+          quantidade: Number(quantidade),
+          motivo: motivo.trim(),
+          confirmacao: confirmacao.trim().toUpperCase(),
+        }),
+      });
+      if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? "Erro");
+      onDone();
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="font-bold text-lg" style={{ color: "#991B1B" }}>Registrar perda / extravio</h2>
+          <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">
+          Isso baixa o estoque de verdade. So o administrador master consegue fazer e desfazer.
+        </p>
+
+        {/* Prova: em quais inventarios a peca deu falta */}
+        {faltas.length > 0 && (
+          <div className="rounded-xl p-3 mb-4" style={{ background: "#FAFAF7", border: "1px solid #E8DCC8" }}>
+            <p className="text-xs font-semibold mb-2" style={{ color: "#184036" }}>
+              Deu falta em {faltas.length} inventario{faltas.length > 1 ? "s" : ""}
+            </p>
+            {faltas.map(f => (
+              <div
+                key={f.inventario_id}
+                className="flex items-center justify-between gap-2 py-1 border-t"
+                style={{ borderColor: "#E8DCC8" }}
+              >
+                <span className="text-xs text-gray-500">
+                  {fmtDate(f.data)} {f.local_nome ? `· ${f.local_nome}` : ""}
+                </span>
+                <span className="text-xs font-semibold" style={{ color: "#DC2626" }}>-{f.faltou}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {faltas.length === 0 && (
+          <div className="rounded-xl p-3 mb-4" style={{ background: "#FEF3C7", border: "1px solid #FDE68A" }}>
+            <p className="text-xs" style={{ color: "#92400E" }}>
+              Esta peca nunca deu falta em inventario. Confira antes de baixar.
+            </p>
+          </div>
+        )}
+
+        {locaisComSaldo.length === 0 ? (
+          <p className="text-sm text-gray-500 mb-4">
+            Nao ha saldo disponivel em nenhum local para baixar.
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-3 mb-3">
+              <div className="col-span-2">
+                <label className="block text-xs font-semibold mb-1 text-gray-500">Local</label>
+                <select
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none bg-white"
+                  style={{ borderColor: "#E8DCC8" }}
+                  value={localId}
+                  onChange={e => setLocalId(Number(e.target.value))}
+                >
+                  {locaisComSaldo.map(l => (
+                    <option key={l.local_estoque_id} value={l.local_estoque_id}>
+                      {l.local_nome} — disponivel: {l.disponivel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-gray-500">Qtd</label>
+                <input
+                  type="number" min={1} max={localSel?.disponivel ?? 1}
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                  style={{ borderColor: "#E8DCC8" }}
+                  value={quantidade}
+                  onChange={e => setQuantidade(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="mb-3">
+              <label className="block text-xs font-semibold mb-1 text-gray-500">
+                O que aconteceu <span className="font-normal text-gray-400">(opcional)</span>
+              </label>
+              <textarea
+                rows={2}
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                style={{ borderColor: "#E8DCC8" }}
+                placeholder="Ex: nao localizada em 3 inventarios seguidos, busca em todas as gavetas"
+                value={motivo}
+                onChange={e => setMotivo(e.target.value)}
+              />
+            </div>
+
+            <div className="rounded-xl p-3 mb-3" style={{ background: "#FEE2E2", border: "1px solid #FECACA" }}>
+              <p className="text-xs flex items-start gap-1.5" style={{ color: "#991B1B" }}>
+                <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                Digite <strong>{CONFIRMACAO_PERDA}</strong> para confirmar a baixa.
+              </p>
+            </div>
+            <input
+              className="w-full border rounded-lg px-3 py-2 text-sm outline-none mb-3 font-mono"
+              style={{ borderColor: "#E8DCC8" }}
+              placeholder={CONFIRMACAO_PERDA}
+              value={confirmacao}
+              onChange={e => setConfirmacao(e.target.value)}
+            />
+
+            {err && <p className="text-xs text-red-500 mb-3">{err}</p>}
+
+            <div className="flex gap-2">
+              <button
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium border"
+                style={{ color: "#6B7280", borderColor: "#E5E7EB" }}
+                onClick={onClose}
+              >
+                Cancelar
+              </button>
+              <button
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-40"
+                style={{ background: "#991B1B", color: "#fff" }}
+                onClick={handleGravar}
+                disabled={saving || !podeGravar}
+              >
+                {saving ? <Loader2 size={14} className="animate-spin" /> : <TrendingDown size={14} />}
+                Confirmar baixa
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId: number }) {
   const router  = useRouter();
@@ -298,8 +510,17 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
   const [estornando, setEstornando] = useState<number | null>(null);
   const [transferindo, setTransferindo] = useState(false);
 
+  // Perda / extravio — quem pode e o historico de faltas vem do backend.
+  // O gate real e no servidor (master admin); aqui so escondemos o botao.
+  const [podePerda,   setPodePerda]   = useState(false);
+  const [faltas,      setFaltas]      = useState<FaltaInventario[]>([]);
+  const [perdaAberta, setPerdaAberta] = useState(false);
+
   // Ajuste manual (entrada ou saída)
-  const [ajusteTipo,    setAjusteTipo]    = useState<"entrada" | "saida" | null>(null);
+  // Ajuste manual e SO DE ENTRADA. A saida manual foi removida da tela: a API
+  // devolve 403 para qualquer saida desde a v2.81.3 (o botao era morto) e a unica
+  // baixa que existe hoje e a de perda/extravio, exclusiva do master admin.
+  const [ajusteAberto, setAjusteAberto] = useState(false);
   const [ajusteQtd,     setAjusteQtd]     = useState("1");
   const [ajusteDesc,    setAjusteDesc]    = useState("");
   const [ajusteErr,     setAjusteErr]     = useState("");
@@ -311,6 +532,11 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
   const [savingCfg,  setSavingCfg]  = useState(false);
   const [cfgMsg,     setCfgMsg]     = useState("");
 
+  // Localizacao (edicao manual — o ERP e o dono do dado apos a carga inicial)
+  const [locEdit,   setLocEdit]   = useState("");
+  const [savingLoc, setSavingLoc] = useState(false);
+  const [locMsg,    setLocMsg]    = useState("");
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -318,6 +544,7 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
       if (r.ok) {
         const d = await r.json() as DetalheData;
         setData(d);
+        setLocEdit(d.localizacao ?? "");
         if (d.consolidado) {
           setEditMin(d.consolidado.estoque_minimo);
           setEditAtivo(d.consolidado.ativo);
@@ -329,6 +556,43 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
   }, [produtoId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Carrega, em paralelo ao detalhe, se este usuario pode baixar por perda e o
+  // historico de faltas da peca em inventarios. Falha aqui nao quebra a tela:
+  // sem resposta, o botao simplesmente nao aparece.
+  const fetchPerda = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/estoque-comercial/perda?produto_id=${produtoId}`);
+      if (!r.ok) return;
+      const d = await r.json() as { podeRegistrar: boolean; faltas: FaltaInventario[] };
+      setPodePerda(d.podeRegistrar);
+      setFaltas(d.faltas ?? []);
+    } catch {
+      setPodePerda(false);
+    }
+  }, [produtoId]);
+
+  useEffect(() => { fetchPerda(); }, [fetchPerda]);
+
+  // Grava a localizacao editada a mao (o ERP e o dono do dado). String vazia limpa.
+  async function saveLocalizacao() {
+    setSavingLoc(true); setLocMsg("");
+    try {
+      const r = await fetch(`/api/estoque-comercial/${produtoId}/localizacao`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ localizacao: locEdit }),
+      });
+      if (!r.ok) throw new Error((await r.json() as { error?: string }).error ?? "Erro");
+      setLocMsg("Salvo!");
+      await fetchData();
+    } catch (e) {
+      setLocMsg(e instanceof Error ? e.message : "Erro");
+    } finally {
+      setSavingLoc(false);
+      setTimeout(() => setLocMsg(""), 3000);
+    }
+  }
 
   async function saveConfig() {
     setSavingCfg(true); setCfgMsg("");
@@ -369,15 +633,14 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
     }
   }
 
-  function abrirAjuste(tipo: "entrada" | "saida") {
-    setAjusteTipo(tipo);
+  function abrirAjuste() {
+    setAjusteAberto(true);
     setAjusteQtd("1");
     setAjusteDesc("");
     setAjusteErr("");
   }
 
   async function handleAjusteManual() {
-    if (!ajusteTipo) return;
     const qtd = parseInt(ajusteQtd, 10);
     if (!qtd || qtd < 1) { setAjusteErr("Quantidade inválida"); return; }
     if (!ajusteDesc.trim()) { setAjusteErr("Descrição obrigatória"); return; }
@@ -388,15 +651,15 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           produto_id: produtoId,
-          tipo: ajusteTipo,
-          motivo: ajusteTipo === "entrada" ? "ajuste_entrada" : "ajuste_saida",
+          tipo: "entrada",
+          motivo: "ajuste_entrada",
           quantidade: qtd,
           observacao: ajusteDesc.trim(),
           local_estoque_id: 2,
         }),
       });
       if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? "Erro");
-      setAjusteTipo(null);
+      setAjusteAberto(false);
       await fetchData();
     } catch (e) {
       setAjusteErr(e instanceof Error ? e.message : "Erro");
@@ -464,30 +727,77 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
                 )}
               </div>
             )}
+
+            {/* Localizacao fisica da peca: importada da fonte externa e editavel aqui
+                (o ERP e o dono do dado apos a carga inicial). */}
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              <span className="flex items-center gap-1 text-xs text-gray-500">
+                <MapPin size={13} /> Localização
+              </span>
+              {podeAdminDev ? (
+                <>
+                  <input
+                    value={locEdit}
+                    onChange={e => setLocEdit(e.target.value)}
+                    placeholder="ex: LJ-ET04"
+                    className="border rounded-lg px-2 py-1 text-sm font-mono outline-none"
+                    style={{ borderColor: "#E8DCC8", minWidth: 140 }}
+                  />
+                  <button
+                    onClick={saveLocalizacao}
+                    disabled={savingLoc || locEdit.trim() === (data?.localizacao ?? "")}
+                    className="flex items-center gap-1 px-3 py-1 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
+                    style={{ background: "#184036", color: "#fff" }}
+                  >
+                    {savingLoc ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                    Salvar
+                  </button>
+                  {locMsg && (
+                    <span className="text-xs" style={{ color: locMsg === "Salvo!" ? "#059669" : "#DC2626" }}>{locMsg}</span>
+                  )}
+                </>
+              ) : (
+                <span className="text-sm font-mono px-2 py-0.5 rounded" style={{ background: "#F3F4F6", color: "#374151" }}>
+                  {data?.localizacao || "—"}
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
+            {/* REGRA DE NEGOCIO: so ENTRADA manual. O botao "Baixa Manual" foi
+                removido em 21/07/2026 — a API recusa qualquer saida manual desde
+                a v2.81.3 (403 para todos), entao ele so servia para dar erro. A
+                unica baixa que existe e a de perda/extravio, logo abaixo, e e
+                exclusiva do master admin.
+                IMPACTO SE VOLTAR: botao que nunca funciona e induz a operacao a
+                achar que da para "acertar" o estoque na mao. */}
             {podeAdminDev && (
-              <>
-                <button
-                  onClick={() => abrirAjuste("entrada")}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-                  style={{ background: "#D1FAE5", color: "#065F46", border: "1px solid #6EE7B7" }}
-                  title="Registrar entrada manual no estoque"
-                >
-                  <ArrowUpCircle size={15} />
-                  Entrada Manual
-                </button>
-                <button
-                  onClick={() => abrirAjuste("saida")}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-                  style={{ background: "#FEE2E2", color: "#991B1B", border: "1px solid #FECACA" }}
-                  title="Registrar baixa manual no estoque"
-                >
-                  <TrendingDown size={15} />
-                  Baixa Manual
-                </button>
-              </>
+              <button
+                onClick={abrirAjuste}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                style={{ background: "#D1FAE5", color: "#065F46", border: "1px solid #6EE7B7" }}
+                title="Registrar entrada manual no estoque"
+              >
+                <ArrowUpCircle size={15} />
+                Entrada Manual
+              </button>
             )}
+            {/* REGRA DE NEGOCIO: baixa por peca sumida. Botao SO existe para o
+                master admin (o dono) — nem admin, nem desenvolvedor, nem gerente.
+                A permissao de verdade e checada no backend; isto so esconde. */}
+            {podePerda && (
+              <button
+                onClick={() => setPerdaAberta(true)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                style={{ background: "#FEE2E2", color: "#991B1B", border: "1px solid #FECACA" }}
+                title="Baixar peca perdida ou extraviada"
+              >
+                <AlertTriangle size={15} />
+                Perda / extravio
+              </button>
+            )}
+            {/* REGRA DE NEGOCIO: botao de etiqueta RFID (imprimir + gravar chip) do produto desta tela */}
+            <BotaoImprimirEtiqueta produtoId={produtoId} variant="compact" />
             <button
               onClick={() => setTransferindo(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
@@ -648,9 +958,21 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
                       >
                         {m.tipo === "entrada" ? "+" : "-"}{m.quantidade}
                       </span>
-                      <span className="text-sm text-gray-600">
-                        {MOTIVO_LABEL[m.motivo] ?? m.motivo}
-                      </span>
+                      {/* REGRA DE NEGOCIO: perda/extravio ganha destaque vermelho no
+                          extrato. E a linha que responde "cade a peca?" numa auditoria
+                          — precisa saltar aos olhos no meio de venda/producao. */}
+                      {m.motivo === MOTIVO_PERDA ? (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded font-semibold"
+                          style={{ background: "#FEE2E2", color: "#991B1B" }}
+                        >
+                          {MOTIVO_LABEL[MOTIVO_PERDA]}
+                        </span>
+                      ) : (
+                        <span className="text-sm text-gray-600">
+                          {MOTIVO_LABEL[m.motivo] ?? m.motivo}
+                        </span>
+                      )}
                       {m.local_nome && (
                         <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">
                           {m.local_nome}
@@ -820,20 +1142,29 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
         />
       )}
 
-      {/* Ajuste Manual Modal (entrada ou saída) */}
-      {ajusteTipo && (
+      {/* Perda / extravio Modal — so o master admin chega aqui */}
+      {perdaAberta && (
+        <PerdaModal
+          produtoId={produtoId}
+          saldoPorLocal={data?.saldoPorLocal ?? []}
+          faltas={faltas}
+          onClose={() => setPerdaAberta(false)}
+          onDone={() => { fetchData(); fetchPerda(); }}
+        />
+      )}
+
+      {/* Ajuste Manual Modal — SO ENTRADA (ver comentario no botao) */}
+      {ajusteAberto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                {ajusteTipo === "entrada"
-                  ? <ArrowUpCircle size={18} style={{ color: "#059669" }} />
-                  : <TrendingDown size={18} style={{ color: "#DC2626" }} />}
+                <ArrowUpCircle size={18} style={{ color: "#059669" }} />
                 <h2 className="font-bold text-lg" style={{ color: "#184036" }}>
-                  {ajusteTipo === "entrada" ? "Entrada Manual" : "Baixa Manual"}
+                  Entrada Manual
                 </h2>
               </div>
-              <button onClick={() => setAjusteTipo(null)}><X size={18} className="text-gray-400" /></button>
+              <button onClick={() => setAjusteAberto(false)}><X size={18} className="text-gray-400" /></button>
             </div>
 
             <p className="text-sm text-gray-500 mb-4">{c?.nome_produto}</p>
@@ -858,7 +1189,7 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
                   rows={3}
                   className="w-full border rounded-lg px-3 py-2 text-sm outline-none resize-none"
                   style={{ borderColor: "#E8DCC8" }}
-                  placeholder={ajusteTipo === "entrada" ? "Motivo da entrada manual..." : "Motivo da baixa manual..."}
+                  placeholder="Motivo da entrada manual..."
                   value={ajusteDesc}
                   onChange={e => setAjusteDesc(e.target.value)}
                 />
@@ -875,26 +1206,21 @@ export default function EstoqueComercialDetalheClient({ produtoId }: { produtoId
               <button
                 className="flex-1 py-2.5 rounded-xl text-sm font-medium border"
                 style={{ color: "#6B7280", borderColor: "#E5E7EB" }}
-                onClick={() => setAjusteTipo(null)}
+                onClick={() => setAjusteAberto(false)}
                 disabled={ajusteLoading}
               >
                 Cancelar
               </button>
               <button
                 className="flex-1 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
-                style={{
-                  background: ajusteTipo === "entrada" ? "#059669" : "#DC2626",
-                  color: "#fff",
-                }}
+                style={{ background: "#059669", color: "#fff" }}
                 onClick={handleAjusteManual}
                 disabled={ajusteLoading}
               >
                 {ajusteLoading
                   ? <Loader2 size={14} className="animate-spin" />
-                  : ajusteTipo === "entrada"
-                    ? <ArrowUpCircle size={14} />
-                    : <TrendingDown size={14} />}
-                {ajusteTipo === "entrada" ? "Confirmar Entrada" : "Confirmar Baixa"}
+                  : <ArrowUpCircle size={14} />}
+                Confirmar Entrada
               </button>
             </div>
           </div>

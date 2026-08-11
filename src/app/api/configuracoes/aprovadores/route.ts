@@ -11,6 +11,9 @@
 //   - aprovacao-regras.ts (aprovador_desconto, aprovador_cartao_desconto)
 //   - solicitar-aprovacao/route.ts
 //   - entrega-sem-pagamento.ts (Automacao de Estoque 2.0)
+//   - src/lib/aprovacoes/catalogo.ts (camada config-first, Fase 3 — metal já usa
+//     metal_aprovador_id; conversão/conversão-SKU usam aprovador_conversao;
+//     alteração de venda usa aprovador_alteracao_venda, Fase 3g.1)
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from "next/server";
@@ -36,16 +39,95 @@ const CHAVES = [
   // MULTI (vários UUIDs separados por vírgula): quem aprova a devolução da peça
   // quando a reserva do crediário vira vale-crédito (endpoint reserva/.../devolver-peca).
   "aprovadores_devolver_peca",
+  // Fase 3b (centralização de aprovações, 12/07): aprova conversão de estoque em peso
+  // E conversão de SKU — mesmo aprovador pros dois sub-fluxos (decisão do Jonathan).
+  "aprovador_conversao",
+  // Fase 3c (centralização de aprovações, 12/07): aprova alteração de markup (preço).
+  "aprovador_precificacao",
+  // Fase 3e (centralização de aprovações, 12/07): aprova a devolução (etapa 1) — 1
+  // aprovador só, decisão do Jonathan (não depende mais de dentro/fora do prazo).
+  "aprovador_devolucao",
+  // Fase 3g.1 (centralização de aprovações, 15/07): aprova solicitação de alteração
+  // de venda (campo restrito/pagamento após fechar) — antes era ROLES_FINANCEIRO fixo.
+  "aprovador_alteracao_venda",
+  // MULTI (vários UUIDs separados por vírgula): quem aprova a Conversão Reversa (ouro
+  // do cofre vira peça de estoque) — endpoint conversao-reversa/aprovar|recusar.
+  // Plugada na camada config-first nesta mesma sessão (15/07) — config vazia ->
+  // nao_configurado (ninguém decide, nem admin), sem fallback de cargo.
+  "aprovadores_conversao_reversa",
+  // MULTI: quem aprova abrir garantia DEPOIS dos 7 dias úteis da entrega, para
+  // serviços não vitalícios (regra do Jonathan, 17/07 — docs/regras-negocio/ordens.md).
+  // NÃO cobre venda não entregue: essa trava é seca, sem saída por aprovação.
+  "aprovadores_garantia_fora_prazo",
+  // MULTI (vários UUIDs separados por vírgula): pool de quem pode liberar/recusar
+  // uma solicitação de frete avulso feita pela consultora (migration 353, modelo
+  // TAREFA/POOL, camada config-first — evento "frete_avulso" em
+  // src/lib/aprovacoes/catalogo.ts). Substitui a antiga tabela
+  // frete_avulso_liberadores — qualquer um da lista decide a MESMA tarefa de
+  // aprovação (ver módulo Tarefas, tipo 'frete_avulso'). Espelha exatamente o
+  // padrão de aprovadores_devolver_peca.
+  "aprovadores_frete_avulso",
+  // MULTI (migration 359, 21/07 — regra "quem paga"): lista SEPARADA de quem
+  // autoriza o CUSTO quando o frete avulso solicitado é pago pela LOJA (não
+  // pelo cliente) — evento 'frete_avulso_loja' em
+  // src/lib/aprovacoes/catalogo.ts. Espelha exatamente o padrão de
+  // aprovadores_frete_avulso (mesma tarefa, chave diferente conforme quem paga).
+  "aprovadores_frete_avulso_loja",
+  // SINGLE (UUID único — não é MULTI): gerente dona do saldo de frete grátis
+  // (verba de 0,1% do faturamento mensal). Antes escolhida arbitrariamente
+  // por `WHERE role='gerente_loja' AND ativo=true ORDER BY created_at LIMIT
+  // 1` em 2 lugares (bug latente com múltiplas gerentes ativas) — agora
+  // configurável aqui. Fonte única de leitura: resolverGerenteFreteGratisId
+  // (src/lib/entrega-venda.ts), com fallback ao comportamento antigo quando
+  // vazia (zero impacto até o Jonathan configurar).
+  "gerente_frete_gratis",
+  // MULTI (BLOCO 4, 21/07): quem aprova o fechamento mensal do dia 01 quando o
+  // saldo de frete grátis da gerente fecha NEGATIVO (evento
+  // 'fechamento_frete_negativo' em src/lib/aprovacoes/catalogo.ts). Aprovar gera
+  // a conta a pagar da gerente; recusar não lança nada (motivo obrigatório).
+  // Segregação: esta lista decide, a gerente (gerente_frete_gratis) só recebe —
+  // se ela também estiver aqui, é excluída da decisão da PRÓPRIA tarefa.
+  "aprovadores_fechamento_frete",
+] as const;
+
+// Chaves NUMÉRICAS (%) — não são UUID de aprovador, são o limiar que decide
+// SE precisa de aprovação (Fase 5, 15/07). Ficaram só no banco no pacote
+// original ("UI fica pra depois") — Jonathan pediu a tela em 16/07.
+const CHAVES_NUMERICAS = [
+  // Sem cadastro de mx_desconto_permitido, este é o teto (fallback do fallback:
+  // FALLBACK_TETO_DESCONTO_PCT=0 em precificar-item.ts se a chave nem existir).
+  "desconto_fallback_sem_cadastro_pct",
+  // Acima deste %, pagamento em Cartão de Crédito exige aprovação (era hardcoded
+  // 20 em 4 lugares — ver LIMITE_DESCONTO_CARTAO_PADRAO em precificar-item.ts).
+  "limite_desconto_cartao_pct",
 ] as const;
 
 // GET /api/configuracoes/aprovadores
 // Retorna a config atual + lista de usuários elegíveis por role
+//
+// REGRA DE NEGÓCIO (fecha buraco de autorização, 21/07): esta rota NÃO tinha
+// NENHUMA checagem de auth (nem sessão) — qualquer requisição, autenticada ou
+// não, lia todas as chaves de aprovadores configurados E o roster completo de
+// usuários (nome, UUID, role) via os SELECTs de "usuários elegíveis" abaixo.
+// O QUE: exige sessão válida (requireAuth) + mesma trava do PUT (isFullAccess:
+// admin/desenvolvedor/diretor) — espelha o gate que o PUT já usava (linha
+// ~224), único consumidor real é TabAprovadores.tsx, que só é alcançável pela
+// página /configuracoes (já redireciona quem não é isFullAccess em page.tsx).
+// POR QUE: config de aprovador é dado de governança (quem decide o quê) +
+// roster de usuários — nada disso deveria vazar pra role sem alçada nenhuma.
+// IMPACTO SE REMOVIDO: volta a vazar as chaves de aprovadores e o roster de
+// usuários (nome/UUID/role) pra qualquer requisição, autenticada ou não.
 export async function GET() {
   try {
+    const user = await requireAuth();
+    if (!isFullAccess(user.role)) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
+
     // Ler valores atuais — busca TODAS as chaves, incluindo a já existente
     const configs = await sql`
       SELECT chave, valor FROM alissonerp.configuracoes_unificado
-      WHERE chave = ANY(${CHAVES})
+      WHERE chave = ANY(${[...CHAVES, ...CHAVES_NUMERICAS]})
     `;
     const configMap = new Map(configs.map((r: any) => [r.chave, r.valor]));
 
@@ -111,6 +193,22 @@ export async function GET() {
       WHERE ativo = true ORDER BY nome
     `;
 
+    // Fase 3e: elegíveis pra aprovar devolução (etapa 1) — mesmo conjunto de cargos
+    // do antigo fallback de src/lib/devolucoes.ts (gerente_loja→diretor→admin→dev),
+    // agora só como lista de escolha na tela (não mais fallback automático).
+    const aprovadoresDevolucao = await sql`
+      SELECT id, nome, role FROM alissonerp.usuarios
+      WHERE role IN ('gerente_loja', 'diretor', 'admin', 'desenvolvedor') AND ativo = true
+      ORDER BY
+        CASE role
+          WHEN 'gerente_loja' THEN 1
+          WHEN 'diretor' THEN 2
+          WHEN 'admin' THEN 3
+          ELSE 4
+        END,
+        nome
+    `;
+
     return NextResponse.json({
       aprovador_credito_diretor: configMap.get("aprovador_credito_diretor") ?? "",
       aprovador_desconto_padrao: configMap.get("aprovador_desconto_padrao") ?? "",
@@ -125,6 +223,23 @@ export async function GET() {
       aprovador_vale_troca_excecao: configMap.get("aprovador_vale_troca_excecao") ?? "",
       // MULTI: lista de UUIDs separados por vírgula.
       aprovadores_devolver_peca: configMap.get("aprovadores_devolver_peca") ?? "",
+      aprovador_conversao: configMap.get("aprovador_conversao") ?? "",
+      aprovador_precificacao: configMap.get("aprovador_precificacao") ?? "",
+      aprovador_devolucao: configMap.get("aprovador_devolucao") ?? "",
+      aprovador_alteracao_venda: configMap.get("aprovador_alteracao_venda") ?? "",
+      aprovadores_conversao_reversa: configMap.get("aprovadores_conversao_reversa") ?? "",
+      aprovadores_garantia_fora_prazo: configMap.get("aprovadores_garantia_fora_prazo") ?? "",
+      // MULTI: pool de liberadores do frete avulso solicitado (migration 353).
+      aprovadores_frete_avulso: configMap.get("aprovadores_frete_avulso") ?? "",
+      // MULTI (migration 359): pool de quem autoriza o CUSTO quando pagante='loja'.
+      aprovadores_frete_avulso_loja: configMap.get("aprovadores_frete_avulso_loja") ?? "",
+      // SINGLE: gerente dona do saldo de frete grátis (verba mensal 0,1% do faturamento).
+      gerente_frete_gratis: configMap.get("gerente_frete_gratis") ?? "",
+      // MULTI (BLOCO 4): pool de quem aprova o fechamento mensal com saldo negativo.
+      aprovadores_fechamento_frete: configMap.get("aprovadores_fechamento_frete") ?? "",
+      // Fase 5 (15/07): limites numéricos (%), não são UUID de aprovador — ver CHAVES_NUMERICAS.
+      desconto_fallback_sem_cadastro_pct: configMap.get("desconto_fallback_sem_cadastro_pct") ?? "0",
+      limite_desconto_cartao_pct: configMap.get("limite_desconto_cartao_pct") ?? "20",
       usuarios: {
         gerentes,
         diretores_admins: diretoresAdmins,
@@ -133,9 +248,16 @@ export async function GET() {
         aprovadores_limpeza: aprovadoresLimpeza,
         aprovadores_entrega_sem_pagamento: aprovadoresEntregaSemPagamento,
         todos_usuarios: todosUsuarios,
+        // Conversão (estoque + SKU) hoje é aprovada por admin/desenvolvedor — mesma
+        // lista já usada por desconto/cartão/compra comercial (admins_devs).
+        conversao_aprovadores: adminsDevs,
+        // Precificação hoje é isFullAccess (admin/dev/diretor) — reusa diretores_admins.
+        precificacao_aprovadores: diretoresAdmins,
+        devolucao_aprovadores: aprovadoresDevolucao,
       },
     });
-  } catch {
+  } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
 }
@@ -212,6 +334,79 @@ export async function PUT(req: NextRequest) {
         String(body.aprovadores_devolver_peca).split(",").map((s) => s.trim()).filter(Boolean)
       )).join(",");
       updates.push({ chave: "aprovadores_devolver_peca", valor: lista });
+    }
+    // Fase 3b: aprovador de conversão (estoque + SKU — mesma chave pros dois).
+    if (body.aprovador_conversao !== undefined) {
+      updates.push({ chave: "aprovador_conversao", valor: body.aprovador_conversao });
+    }
+    // Fase 3c: aprovador de precificação (alteração de markup).
+    if (body.aprovador_precificacao !== undefined) {
+      updates.push({ chave: "aprovador_precificacao", valor: body.aprovador_precificacao });
+    }
+    // Fase 3e: aprovador da devolução (etapa 1) — 1 aprovador só, sem distinção de prazo.
+    if (body.aprovador_devolucao !== undefined) {
+      updates.push({ chave: "aprovador_devolucao", valor: body.aprovador_devolucao });
+    }
+    // Fase 3g.1: aprovador de alteração de venda (antes ROLES_FINANCEIRO fixo).
+    if (body.aprovador_alteracao_venda !== undefined) {
+      updates.push({ chave: "aprovador_alteracao_venda", valor: body.aprovador_alteracao_venda });
+    }
+    // MULTI: aprovadores da conversão reversa. Vários UUIDs separados por vírgula.
+    if (body.aprovadores_conversao_reversa !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_conversao_reversa).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_conversao_reversa", valor: lista });
+    }
+    // MULTI (17/07): aprovadores de garantia fora do prazo de 7 dias úteis.
+    // Vários UUIDs separados por vírgula. Ver docs/regras-negocio/ordens.md §3.
+    if (body.aprovadores_garantia_fora_prazo !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_garantia_fora_prazo).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_garantia_fora_prazo", valor: lista });
+    }
+    // MULTI: pool de liberadores do frete avulso (migration 353, modelo TAREFA/POOL).
+    // Normaliza igual ao bloco de aprovadores_devolver_peca acima.
+    if (body.aprovadores_frete_avulso !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_frete_avulso).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_frete_avulso", valor: lista });
+    }
+    // MULTI (migration 359, regra "quem paga"): pool separado de quem autoriza
+    // o custo do frete avulso quando pagante='loja'. Normaliza igual ao bloco acima.
+    if (body.aprovadores_frete_avulso_loja !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_frete_avulso_loja).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_frete_avulso_loja", valor: lista });
+    }
+    // SINGLE (BLOCO 1, 21/07): gerente do saldo de frete grátis — 1 UUID só,
+    // sem normalização de lista (não é MULTI). Vazio = fallback antigo
+    // (ORDER BY created_at) em resolverGerenteFreteGratisId.
+    if (body.gerente_frete_gratis !== undefined) {
+      updates.push({ chave: "gerente_frete_gratis", valor: body.gerente_frete_gratis });
+    }
+    // MULTI (BLOCO 4, 21/07): aprovadores do fechamento mensal com saldo negativo.
+    // Normaliza igual aos demais blocos MULTI acima.
+    if (body.aprovadores_fechamento_frete !== undefined) {
+      const lista = Array.from(new Set(
+        String(body.aprovadores_fechamento_frete).split(",").map((s) => s.trim()).filter(Boolean)
+      )).join(",");
+      updates.push({ chave: "aprovadores_fechamento_frete", valor: lista });
+    }
+    // Fase 5 (15/07, tela adicionada 16/07): limites em % — valida 0-100, número.
+    // Sem isso gravado errado, o fallback do código (0 / 20) nunca é sobrescrito
+    // e o comportamento muda silenciosamente sem avisar ninguém.
+    for (const chaveNum of CHAVES_NUMERICAS) {
+      const bodyRec = body as unknown as Record<string, string>;
+      if (bodyRec[chaveNum] === undefined) continue;
+      const n = Number(bodyRec[chaveNum]);
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        return NextResponse.json({ error: `${chaveNum}: precisa ser um número entre 0 e 100` }, { status: 400 });
+      }
+      updates.push({ chave: chaveNum, valor: String(n) });
     }
 
     for (const u of updates) {

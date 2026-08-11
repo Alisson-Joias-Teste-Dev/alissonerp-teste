@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   }
 
   const tipos = FULL_ACCESS.includes(usuario.role as any)
-    ? ["fabrica", "service"]
+    ? ["fabrica"]
     : (Array.isArray(usuario.tipos_protocolo_permitidos)
       ? usuario.tipos_protocolo_permitidos
       : []);

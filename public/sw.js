@@ -1,4 +1,4 @@
-const CACHE_NAME = 'alisson-erp-v2.4.0';
+const CACHE_NAME = 'alisson-erp-v2.4.1';
 
 const STATIC_ASSETS = [
   '/offline.html',
@@ -38,6 +38,15 @@ self.addEventListener('fetch', (event) => {
 
   // Ignorar chamadas de API, Supabase, e schemes não-http
   const url = event.request.url;
+
+  // Só intercepta requisições da MESMA origem (o cache é de assets locais).
+  // Cross-origin passa DIRETO — senão o SW quebra a chamada com CORS/503.
+  // Caso real: o Browser Print da impressora RFID roda em https://127.0.0.1:9101;
+  // se o SW interceptar, o botão de etiqueta fica "impressora não conectada".
+  let mesmaOrigem = false;
+  try { mesmaOrigem = new URL(url).origin === self.location.origin; } catch {}
+  if (!mesmaOrigem) return;
+
   if (
     !url.startsWith('http') ||
     url.includes('/api/') ||

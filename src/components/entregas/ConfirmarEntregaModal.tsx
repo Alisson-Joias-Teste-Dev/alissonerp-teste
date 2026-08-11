@@ -19,11 +19,27 @@
  * IMPACTO SE ALTERADO: a confirmação de entrega dispara a baixa de estoque
  * (baixa_estoque_realizada = true). Alterar este fluxo pode causar estoque
  * inconsistente ou dupla baixa.
+ *
+ * REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — reverte a opcionalidade
+ * das fotos SÓ para o motoboy confirmando a entrega ao cliente): quando
+ * `exigirLocalizacaoEFoto` vem true (EntregaDetalheDrawer só manda isso para
+ * `userRole==='entregador'` E o botão específico "Confirmar Entrega ao
+ * Cliente", nunca para "Confirmar Retirada" nem para o código B), localização
+ * + pelo menos 1 foto passam a ser obrigatórias para habilitar "Confirmar".
+ * Fora disso (admin/gerente confirmando pelo escritório, ou código B/retirada
+ * na loja), continua tudo opcional como sempre foi.
  */
 
 import { useState, useRef, useEffect } from "react";
-import { X, Loader2, CheckCircle, Shield, AlertTriangle, Camera } from "lucide-react";
+import { X, Loader2, CheckCircle, Shield, AlertTriangle, Camera, MapPin } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
+import { lerArquivosComoBase64 } from "@/lib/fotos-base64";
+import { useLocalizacaoMotoboy } from "@/hooks/useLocalizacaoMotoboy";
+
+// REGRA DE NEGÓCIO (migration 357): limite de fotos por confirmação — mesmo
+// valor usado no backend (MAX_FOTOS_ENTREGA, src/lib/entrega-venda.ts) e no
+// padrão já existente do projeto (solicitação de peça, migration 349).
+const MAX_FOTOS = 5;
 
 // ── Paleta ──────────────────────────────────────────────────────────────────────
 const C = {
@@ -52,6 +68,9 @@ interface ConfirmarEntregaModalProps {
   onClose: () => void;
   /** Callback chamado após confirmação bem-sucedida */
   onSuccess: () => void;
+  /** Ver REGRA DE NEGÓCIO no topo do arquivo — true só quando o motoboy
+   *  confirma a entrega ao cliente no próprio app. */
+  exigirLocalizacaoEFoto?: boolean;
 }
 
 // ── Resposta da API ─────────────────────────────────────────────────────────────
@@ -70,14 +89,19 @@ export default function ConfirmarEntregaModal({
   isOpen,
   onClose,
   onSuccess,
+  exigirLocalizacaoEFoto = false,
 }: ConfirmarEntregaModalProps) {
   const [codigo, setCodigo] = useState("");
   const [submetendo, setSubmetendo] = useState(false);
   const [erro, setErro] = useState("");
   const [sucesso, setSucesso] = useState<ConfirmacaoResponse | null>(null);
-  const [fotoBase64, setFotoBase64] = useState("");
+  // MULTIFOTO (migration 357): várias fotos opcionais, até MAX_FOTOS.
+  const [fotosBase64, setFotosBase64] = useState<string[]>([]);
+  const [fotoErro, setFotoErro] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const fotoInputRef = useRef<HTMLInputElement>(null);
+  const { coords, buscando: buscandoLocalizacao, erro: erroLocalizacao, tentarNovamente: tentarLocalizacaoNovamente } =
+    useLocalizacaoMotoboy(isOpen && exigirLocalizacaoEFoto);
 
   // Foco automático no input ao abrir
   useEffect(() => {
@@ -85,7 +109,8 @@ export default function ConfirmarEntregaModal({
       setCodigo("");
       setErro("");
       setSucesso(null);
-      setFotoBase64("");
+      setFotosBase64([]);
+      setFotoErro("");
       // Pequeno timeout para garantir que o modal está renderizado
       setTimeout(() => inputRef.current?.focus(), 100);
     }
@@ -124,8 +149,13 @@ export default function ConfirmarEntregaModal({
     setErro("");
 
     try {
-      const body: Record<string, string> = { codigo: code };
-      if (fotoBase64) body.foto_base64 = fotoBase64;
+      // REGRA DE NEGÓCIO (alerta Jonathan): fotos NUNCA condicionam nem
+      // antecipam a validação do código — o backend valida `codigo` primeiro,
+      // sempre; `fotos_base64` só é processado depois de aprovado (best-effort,
+      // opcional). Este front só empacota o que foi digitado/anexado.
+      const body: Record<string, unknown> = { codigo: code };
+      if (fotosBase64.length > 0) body.fotos_base64 = fotosBase64;
+      if (coords) { body.latitude = coords.latitude; body.longitude = coords.longitude; }
 
       const result = await apiFetch<ConfirmacaoResponse>(
         `/api/entregas-venda/${entregaId}/confirmar`,
@@ -166,13 +196,43 @@ export default function ConfirmarEntregaModal({
     }
   }
 
-  /** Lê arquivo de foto como base64 para envio ao backend. */
-  function handleFotoSelecionada(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => setFotoBase64(reader.result as string);
-    reader.readAsDataURL(file);
+  /**
+   * Lê os arquivos selecionados (1 ou vários) como base64 para envio.
+   * REGRA DE NEGÓCIO: soma com as fotos já anexadas, até MAX_FOTOS — o
+   * excedente é descartado com um aviso (não trava a tela, só informa).
+   */
+  async function handleFotoSelecionada(e: React.ChangeEvent<HTMLInputElement>) {
+    // REGRA DE NEGÓCIO (04/08/2026 — bug real achado em teste, mesmo de
+    // FinalizarAvulsoModal): `e.target.files` é uma REFERÊNCIA ao FileList —
+    // `e.target.value = ""` logo abaixo (necessário pra permitir escolher o
+    // mesmo arquivo de novo) esvazia essa MESMA referência em alguns
+    // navegadores, fazendo o array virar vazio antes de processar.
+    // `Array.from(...)` copia os File objects, imune a isso.
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = ""; // permite re-selecionar o mesmo arquivo depois
+    if (files.length === 0) return;
+
+    const vagas = MAX_FOTOS - fotosBase64.length;
+    if (vagas <= 0) {
+      setFotoErro(`Máximo de ${MAX_FOTOS} fotos.`);
+      return;
+    }
+    const excedente = files.length > vagas;
+    // REGRA DE NEGÓCIO (04/08/2026 — mesmo bug de FinalizarAvulsoModal):
+    // sem try/catch, falha no FileReader (ex.: arquivo de pasta sincronizada
+    // na nuvem ainda não baixado) rejeitava a Promise em silêncio — nenhum
+    // aviso na tela. Agora mostra o erro.
+    try {
+      const novas = await lerArquivosComoBase64(files, vagas);
+      setFotosBase64((prev) => [...prev, ...novas]);
+      setFotoErro(excedente ? `Só cabiam mais ${vagas} foto(s) — o restante foi ignorado.` : "");
+    } catch (err) {
+      setFotoErro(err instanceof Error ? `Não consegui ler o arquivo: ${err.message}` : "Não consegui ler o arquivo selecionado. Tente outra foto.");
+    }
+  }
+
+  function removerFoto(idx: number) {
+    setFotosBase64((prev) => prev.filter((_, i) => i !== idx));
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -350,67 +410,135 @@ export default function ConfirmarEntregaModal({
                 </div>
               )}
 
-              {/* ── Foto de comprovação ────────────────────────────── */}
-              {/* REGRA DE NEGÓCIO: foto opcional como comprovante
-                  visual da retirada/entrega. */}
+              {/* ── Localização (obrigatória só quando exigirLocalizacaoEFoto) ── */}
+              {exigirLocalizacaoEFoto && (
+                <div style={{
+                  marginBottom: 16, padding: "10px 14px", borderRadius: 8,
+                  background: coords ? C.verdeLt : erroLocalizacao ? C.vermelhoLt : C.cremeBorder + "40",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  fontSize: 12, fontWeight: 600,
+                  color: coords ? C.verde : erroLocalizacao ? C.vermelho : C.cinza,
+                }}>
+                  {buscandoLocalizacao ? (
+                    <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Obtendo localização...</>
+                  ) : coords ? (
+                    <><MapPin size={14} /> Localização confirmada</>
+                  ) : (
+                    <><AlertTriangle size={14} /> {erroLocalizacao || "Localização não obtida"}</>
+                  )}
+                  {!buscandoLocalizacao && !coords && (
+                    <button
+                      type="button"
+                      onClick={tentarLocalizacaoNovamente}
+                      style={{
+                        marginLeft: 4, padding: "3px 8px", borderRadius: 6,
+                        border: `1px solid ${C.vermelho}`, background: "#fff",
+                        color: C.vermelho, fontSize: 11, fontWeight: 700, cursor: "pointer",
+                      }}
+                    >
+                      Tentar de novo
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* ── Fotos de comprovação (opcional, migration 357 — exceto
+                  quando exigirLocalizacaoEFoto, ver REGRA DE NEGÓCIO no topo
+                  do arquivo) ──── */}
+              {/* REGRA DE NEGÓCIO: até MAX_FOTOS fotos. Nunca antecipa/substitui
+                  a validação do código (acima) — só se soma a ela quando o
+                  código já é válido. */}
               <div style={{ marginBottom: 16, textAlign: "center" }}>
                 <input
                   ref={fotoInputRef}
                   type="file"
                   accept="image/*"
-                  capture="environment"
+                  // REGRA DE NEGÓCIO (04/08/2026 — mesmo bug de FinalizarAvulsoModal):
+                  // `capture="environment"` + `multiple` juntos têm
+                  // comportamento inconsistente em várias versões do Chrome —
+                  // a lista de arquivos chega vazia, sem erro. Removido; o
+                  // seletor nativo do celular ainda oferece "Câmera" como
+                  // opção, só não força mais direto pra ela.
+                  multiple
                   onChange={handleFotoSelecionada}
                   style={{ display: "none" }}
                 />
                 <button
                   onClick={() => fotoInputRef.current?.click()}
-                  disabled={submetendo}
+                  disabled={submetendo || fotosBase64.length >= MAX_FOTOS}
                   style={{
                     display: "inline-flex", alignItems: "center", gap: 6,
                     padding: "6px 12px", borderRadius: 6,
                     border: `1px solid ${C.cremeBorder}`,
-                    background: fotoBase64 ? C.verdeLt : "#fff",
-                    color: fotoBase64 ? C.verde : C.cinza,
-                    fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    background: fotosBase64.length > 0 ? C.verdeLt : "#fff",
+                    color: fotosBase64.length > 0 ? C.verde : C.cinza,
+                    fontSize: 12, fontWeight: 600,
+                    cursor: submetendo || fotosBase64.length >= MAX_FOTOS ? "not-allowed" : "pointer",
                   }}
                 >
                   <Camera size={14} />
-                  {fotoBase64 ? "Foto anexada" : "Anexar foto da entrega"}
+                  {fotosBase64.length > 0
+                    ? `${fotosBase64.length} foto(s) anexada(s)${exigirLocalizacaoEFoto ? "" : " (opcional)"}`
+                    : exigirLocalizacaoEFoto ? "Anexar foto da entrega (obrigatório)" : "Anexar fotos da entrega (opcional)"}
                 </button>
-                {fotoBase64 && (
-                  <div style={{ marginTop: 8 }}>
-                    <img
-                      src={fotoBase64}
-                      alt="Foto da entrega"
-                      style={{
-                        width: "100%", maxWidth: 200, borderRadius: 8,
-                        border: `1px solid ${C.cremeBorder}`, margin: "0 auto",
-                      }}
-                    />
+                {fotoErro && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: C.ambar }}>{fotoErro}</div>
+                )}
+                {fotosBase64.length > 0 && (
+                  <div style={{
+                    marginTop: 8, display: "flex", flexWrap: "wrap",
+                    gap: 8, justifyContent: "center",
+                  }}>
+                    {fotosBase64.map((foto, idx) => (
+                      <div key={idx} style={{ position: "relative" }}>
+                        <img
+                          src={foto}
+                          alt={`Foto ${idx + 1} da entrega`}
+                          style={{
+                            width: 72, height: 72, objectFit: "cover", borderRadius: 8,
+                            border: `1px solid ${C.cremeBorder}`,
+                          }}
+                        />
+                        <button
+                          onClick={() => removerFoto(idx)}
+                          disabled={submetendo}
+                          aria-label={`Remover foto ${idx + 1}`}
+                          style={{
+                            position: "absolute", top: -6, right: -6,
+                            width: 18, height: 18, borderRadius: "50%",
+                            background: C.vermelho, color: "#fff", border: "none",
+                            fontSize: 11, lineHeight: "18px", cursor: "pointer", padding: 0,
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
 
-              {/* Botão Confirmar */}
+              {/* Botão Confirmar — com exigirLocalizacaoEFoto, também trava até
+                  foto + localização baterem (código continua sendo a ÚNICA
+                  coisa validada no servidor antes de qualquer outra coisa —
+                  isto aqui é só o gate de UX do botão). */}
+              {(() => {
+                const faltaExigencia = exigirLocalizacaoEFoto && (fotosBase64.length === 0 || !coords);
+                const desabilitado = submetendo || codigo.trim().length < 6 || faltaExigencia;
+                return (
               <button
                 onClick={handleConfirmar}
-                disabled={submetendo || codigo.trim().length < 6}
+                disabled={desabilitado}
                 style={{
                   width: "100%",
                   padding: "12px",
-                  background:
-                    submetendo || codigo.trim().length < 6
-                      ? "#9CA3AF"
-                      : corTema,
+                  background: desabilitado ? "#9CA3AF" : corTema,
                   color: "#fff",
                   border: "none",
                   borderRadius: 8,
                   fontSize: 14,
                   fontWeight: 700,
-                  cursor:
-                    submetendo || codigo.trim().length < 6
-                      ? "not-allowed"
-                      : "pointer",
+                  cursor: desabilitado ? "not-allowed" : "pointer",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -432,6 +560,8 @@ export default function ConfirmarEntregaModal({
                   </>
                 )}
               </button>
+                );
+              })()}
             </>
           )}
         </div>

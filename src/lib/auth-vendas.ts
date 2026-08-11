@@ -89,6 +89,32 @@ export async function requireVendaOwnership(
 }
 
 /**
+ * REGRA DE NEGÓCIO (devolução — acesso da consultora):
+ * O QUE: garante que `user` pode operar sobre a devolução `devolucaoId`.
+ *   - Roles full (admin/dev/diretor/gerentes) passam direto.
+ *   - Consultora: somente se for dona da VENDA de origem da devolução (vendedor_id dela) —
+ *     reusa requireVendaOwnership pra não duplicar a regra de ownership.
+ * POR QUE: a consultora só abre/vê/solicita devolução das PRÓPRIAS vendas — nunca de colega.
+ * IMPACTO SE REMOVIDO: reabre IDOR (consultora leria/mexeria em devolução alheia via id na URL).
+ */
+export async function requireDevolucaoOwnership(
+  user: AuthUser,
+  devolucaoId: number,
+): Promise<{ venda_id: number }> {
+  const [row] = await sql<{ venda_id: number }[]>`
+    SELECT venda_id
+      FROM alissonerp.devolucoes_venda
+     WHERE id = ${devolucaoId}
+     LIMIT 1
+  `;
+  if (!row) throw new NotFoundError("Devolucao nao encontrada");
+  if (isVendasFullAccess(user.role)) return row;
+  // Consultora: precisa ser dona da venda de origem da devolução.
+  await requireVendaOwnership(user, Number(row.venda_id));
+  return row;
+}
+
+/**
  * REGRA DE NEGÓCIO (acesso a entregas de venda — Blindagem 2026-06):
  * O QUE: garante que `user` pode operar sobre a entrega `entregaId`.
  *   - Roles full (admin/dev/diretor/gerentes) passam direto.
@@ -114,10 +140,13 @@ export async function requireEntregaVendaAccess(
   if (!row) throw new NotFoundError("Entrega nao encontrada");
   if (isVendasFullAccess(user.role)) return row;
 
-  // Motoboy designado pode confirmar a própria entrega (código do cliente no app)
-  if (opts.permitirMotoboy && user.role === "motoboy") {
+  // Motoboy designado pode confirmar a própria entrega (código do cliente no app).
+  // REGRA: role 'entregador' é o motoboy do app; 'motoboy' é protocolista
+  // (mesma convenção de confirmar-avulso/route.ts). Ambos operam SÓ a entrega
+  // designada a eles (motoboy_id == user.id) — não abre acesso às dos outros.
+  if (opts.permitirMotoboy && (user.role === "entregador" || user.role === "motoboy")) {
     if (row.motoboy_id && row.motoboy_id === user.id) return row;
-    throw new ForbiddenError("Motoboy só opera entregas designadas a ele");
+    throw new ForbiddenError("Entregador só opera entregas designadas a ele");
   }
 
   // Consultora: precisa ser dona da venda

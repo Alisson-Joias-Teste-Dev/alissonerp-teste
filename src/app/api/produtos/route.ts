@@ -55,6 +55,7 @@ const ProdutosPostSchema = z.object({
   categoria_geral: z.string().max(200).nullable().optional(),
   tem_pedra_preciosa: z.boolean().optional(),
   fornecedor: z.string().max(200).nullable().optional(),
+  localizacao: z.string().max(200).nullable().optional(),
   medidas: z.record(z.string(), z.unknown()).optional(),
   ficha_tecnica_ia: z.record(z.string(), z.unknown()).nullable().optional(),
   composicao: z.array(z.record(z.string(), z.unknown())).max(200).optional(),
@@ -271,7 +272,11 @@ export async function GET(req: NextRequest) {
           p.nome,
           p.sku,
           p.tipo_metal,
-          p.peso_precificado,
+          -- Peso da FONTE (alissonerp.erp_produtos) — mesma origem usada no calculo
+          -- do preco (vw_produtos_geral_preco). O espelho public.produtos so replica
+          -- INSERT, nao UPDATE, entao ao editar o peso o public ficava com o valor
+          -- antigo e a tela exibia peso diferente do preco. Fallback p.* so se nao houver erp.
+          COALESCE(ep.peso_precificado, p.peso_precificado) AS peso_precificado,
           -- Pedras: peso fiel em ct vem de produto_pedra_extras (peso_precificado
           -- é arredondado pelo trigger arredondar_peso_para_cima).
           (SELECT peso_ct FROM alissonerp.produto_pedra_extras
@@ -321,8 +326,11 @@ export async function GET(req: NextRequest) {
           --   preco_curva usa a view unificada vw_produtos_geral_preco.
           --   Joias → curva dinâmica (ouro + BOM).
           --   Pedras/Insumos → regras de precificação (vw_pedras_preco).
+          --     Exceção (fix 2026-06-30): pedra avulsa SEM regra casada cai no
+          --     preco_tiny DENTRO da própria vw_pedras_preco (fonte única) —
+          --     NÃO aqui no código. Ver docs/seguranca/fix-pedra-avulsa-preco-proprio-2026-06-30.sql
           --   Serviço (tipo_item='servico') → preço fixo via preco_servico.
-          --   NÃO adicionar fallback para preco_tiny ou preco_sync.
+          --   NÃO adicionar fallback para preco_tiny ou preco_sync NESTE código (a view resolve).
           --   Produto sem peso → sem preço calculado (intencional).
           -- ═══════════════════════════════════════════════════════════════════
           pp.preco_venda::int AS preco_curva,
@@ -554,7 +562,7 @@ export async function POST(req: NextRequest) {
   const body = parsedBody.data as any;
 
   const { nome, tipo_metal, cor_metal, peso_precificado, markup, fator,
-          categoria_precificacao, categoria_geral, tem_pedra_preciosa, fornecedor,
+          categoria_precificacao, categoria_geral, tem_pedra_preciosa, fornecedor, localizacao,
           medidas, ficha_tecnica_ia, composicao, variacoes, quantidades, foto_base64 } = body;
 
   try {
@@ -609,47 +617,48 @@ export async function POST(req: NextRequest) {
       const [seqPai] = await tx<{ id: string }[]>`SELECT nextval('alissonerp.seq_produto_id') AS id`;
       const paiId = Number(seqPai.id);
 
-      // INSERT pai em alissonerp.erp_produtos
-      const [prodPai] = await tx<{ id_produto: number; sku: string; nome: string; preco_sync: string | null }[]>`
-        INSERT INTO alissonerp.erp_produtos
-          (produto_id, sku, nome, tipo_metal, situacao,
-           peso_precificado, markup, fator,
-           categoria_precificacao, categoria, tem_pedra_preciosa)
-        VALUES
-          (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
-           ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
-           ${categoria_precificacao ?? null}, ${categoria_geral ?? null}, ${tem_pedra_preciosa ?? false})
-        RETURNING produto_id AS id_produto, sku, nome, preco_sync
-      `;
-
-      // INSERT pai em erp_produtos — fornecedor só entra se a coluna existir
-      // (migration 159 pendente = não entra, silencioso).
+      // INSERT pai em alissonerp.erp_produtos (todos os campos em 1 row)
+      // NOTA: tabela tem UNIQUE(produto_id) e UNIQUE(sku) — NÃO podem existir 2 rows com mesmo produto_id.
       const temColFornecedor = await colunaExiste("alissonerp", "erp_produtos", "fornecedor", tx);
       const [erpPai] = temColFornecedor
-        ? await tx<{ id: number; produto_id: number; sku: string }[]>`
+        ? await tx<{ id: number; id_produto: number; sku: string; nome: string; preco_sync: string | null }[]>`
             INSERT INTO alissonerp.erp_produtos
-              (produto_id, sku, nome, eh_pai, eh_variacao,
-               cor_metal, largura_aro, altura_aro, base, fornecedor)
+              (produto_id, sku, nome, tipo_metal, situacao,
+               peso_precificado, markup, fator,
+               categoria_precificacao, categoria, tem_pedra_preciosa,
+               eh_pai, eh_variacao,
+               cor_metal, largura_aro, altura_aro, base, fornecedor, localizacao)
             VALUES
-              (${paiId}, ${sku}, ${nome.trim()}, ${temVariacoes}, false,
+              (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
+               ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
+               ${categoria_precificacao ?? null}, ${categoria_geral ?? null}, ${tem_pedra_preciosa ?? false},
+               ${temVariacoes}, false,
                ${cor_metal ?? null},
                ${medidas?.largura_aro ?? null},
                ${medidas?.altura_aro  ?? null},
                ${medidas?.base        ?? null},
-               ${fornecedor ?? null})
-            RETURNING id, produto_id, sku
+               ${fornecedor ?? null},
+               ${localizacao ?? null})
+            RETURNING id, produto_id AS id_produto, sku, nome, preco_sync
           `
-        : await tx<{ id: number; produto_id: number; sku: string }[]>`
+        : await tx<{ id: number; id_produto: number; sku: string; nome: string; preco_sync: string | null }[]>`
             INSERT INTO alissonerp.erp_produtos
-              (produto_id, sku, nome, eh_pai, eh_variacao,
-               cor_metal, largura_aro, altura_aro, base)
+              (produto_id, sku, nome, tipo_metal, situacao,
+               peso_precificado, markup, fator,
+               categoria_precificacao, categoria, tem_pedra_preciosa,
+               eh_pai, eh_variacao,
+               cor_metal, largura_aro, altura_aro, base, localizacao)
             VALUES
-              (${paiId}, ${sku}, ${nome.trim()}, ${temVariacoes}, false,
+              (${paiId}, ${sku}, ${nome.trim()}, ${tipo_metal ?? null}, 'A',
+               ${Number(peso_precificado)}, ${Number(markup)}, ${Number(fator ?? 1)},
+               ${categoria_precificacao ?? null}, ${categoria_geral ?? null}, ${tem_pedra_preciosa ?? false},
+               ${temVariacoes}, false,
                ${cor_metal ?? null},
                ${medidas?.largura_aro ?? null},
                ${medidas?.altura_aro  ?? null},
-               ${medidas?.base        ?? null})
-            RETURNING id, produto_id, sku
+               ${medidas?.base        ?? null},
+               ${localizacao ?? null})
+            RETURNING id, produto_id AS id_produto, sku, nome, preco_sync
           `;
 
       // Mestre de fornecedores: só UPSERT se a tabela existir.
@@ -729,6 +738,7 @@ export async function POST(req: NextRequest) {
         const skuVar = `${sku}-${contador}`;
 
         const pesoVar = Math.max(parseFloat(pesoVariacao(combo).toFixed(2)), 0.01);
+        const pesoPrec = Number(peso_precificado);
 
         const sufixos: string[] = [];
         if (combo.numeracao != null) sufixos.push(`nº ${combo.numeracao}`);
@@ -736,30 +746,23 @@ export async function POST(req: NextRequest) {
         if (combo.comprimento != null) sufixos.push(`${combo.comprimento}cm`);
         const nomeVar = sufixos.length > 0 ? `${nome.trim()} ${sufixos.join(" ")}` : `${nome.trim()} ${contador}`;
 
-        // INSERT variação em alissonerp.erp_produtos
-        await tx`
-          INSERT INTO alissonerp.erp_produtos
-            (produto_id, sku, nome, tipo_metal, situacao,
-             peso_precificado, markup, fator,
-             categoria_precificacao, tem_pedra_preciosa)
-          VALUES
-            (${varId}, ${skuVar}, ${nomeVar},
-             ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
-             ${pesoVar}, ${Number(markup)}, ${Number(fator ?? 1)},
-             ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false})
-        `;
-
-        // INSERT variação em erp_produtos (fornecedor opcional)
+        // INSERT variação em alissonerp.erp_produtos (todos os campos em 1 row)
+        // UNIQUE(produto_id) e UNIQUE(sku) impedem 2 rows por variação.
         if (temColFornecedor) {
           await tx`
             INSERT INTO alissonerp.erp_produtos
-              (produto_id, sku, nome,
+              (produto_id, sku, nome, tipo_metal, situacao,
+               peso_precificado, markup, fator,
+               categoria_precificacao, tem_pedra_preciosa,
                parent_sku, parent_id,
                eh_variacao, eh_pai,
                sufixo_variacao, numeracao, cor_metal, comprimento,
-               largura_aro, altura_aro, base, fornecedor)
+               largura_aro, altura_aro, base, fornecedor, localizacao)
             VALUES
               (${varId}, ${skuVar}, ${nomeVar},
+               ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
+               ${pesoPrec}, ${Number(markup)}, ${Number(fator ?? 1)},
+               ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false},
                ${sku}, ${erpPai.id},
                true, false,
                ${String(contador)},
@@ -769,18 +772,24 @@ export async function POST(req: NextRequest) {
                ${medidas?.largura_aro ?? null},
                ${medidas?.altura_aro  ?? null},
                ${medidas?.base        ?? null},
-               ${fornecedor ?? null})
+               ${fornecedor ?? null},
+               ${localizacao ?? null})
           `;
         } else {
           await tx`
             INSERT INTO alissonerp.erp_produtos
-              (produto_id, sku, nome,
+              (produto_id, sku, nome, tipo_metal, situacao,
+               peso_precificado, markup, fator,
+               categoria_precificacao, tem_pedra_preciosa,
                parent_sku, parent_id,
                eh_variacao, eh_pai,
                sufixo_variacao, numeracao, cor_metal, comprimento,
-               largura_aro, altura_aro, base)
+               largura_aro, altura_aro, base, localizacao)
             VALUES
               (${varId}, ${skuVar}, ${nomeVar},
+               ${combo.cor_metal ?? tipo_metal ?? null}, 'A',
+               ${pesoPrec}, ${Number(markup)}, ${Number(fator ?? 1)},
+               ${categoria_precificacao ?? null}, ${tem_pedra_preciosa ?? false},
                ${sku}, ${erpPai.id},
                true, false,
                ${String(contador)},
@@ -789,7 +798,8 @@ export async function POST(req: NextRequest) {
                ${combo.comprimento ?? null},
                ${medidas?.largura_aro ?? null},
                ${medidas?.altura_aro  ?? null},
-               ${medidas?.base        ?? null})
+               ${medidas?.base        ?? null},
+               ${localizacao ?? null})
           `;
         }
 
@@ -840,7 +850,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      return { pai: prodPai, erp: erpPai, variacoes: variacoesCriadas };
+      return { pai: erpPai, erp: erpPai, variacoes: variacoesCriadas };
     });
 
     // ── Recalcular preço de pedras (fora da transação) ───────────────────────
@@ -861,9 +871,6 @@ export async function POST(req: NextRequest) {
     // Nao bloqueia a resposta — se falhar, registra no log e segue.
     try {
       await aplicarCurvaProduto(result.pai.id_produto);
-      for (const v of result.variacoes) {
-        await aplicarCurvaProduto(v.produto_id);
-      }
     } catch (err) {
       console.warn("[POST /api/produtos] falha ao aplicar curva:", err);
     }

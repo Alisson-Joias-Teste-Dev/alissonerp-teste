@@ -134,10 +134,21 @@ function setupQueries(opts: SetupOptions = {}) {
   } = opts;
 
   const valorEfetivo = valorPago ?? Number(contaValor);
+  // Pagou menos que a PARCELA → split da conta a receber (Passo 1b).
   const ehPagamentoParcial = valorEfetivo < Number(contaValor);
+  // Sobra "A Receber" depois do recebimento → split do pagamento (Passo 2b).
+  // São perguntas DIFERENTES: num crediário parcelado a parcela pode ser paga
+  // por inteiro e ainda sobrar crediário. Espelha `precisaSplit` da rota.
+  const precisaSplitPagamento =
+    pagamentoEncontrado && Number(pagamentoValor) > valorEfetivo + 0.005;
 
   // Q1: SELECT role
   sqlMock.mockResolvedValueOnce([{ role }]);
+
+  // Q1b: requireCrediarioOwnership → SELECT vendedor_id FROM vw_crediario.
+  // Papel full sai daqui direto; a consultora ainda consulta o vendedor_id dela
+  // (ver os testes de ownership no fim do arquivo).
+  sqlMock.mockResolvedValueOnce([{ vendedor_id: 2 }]);
 
   // Q2: SELECT conta
   if (!contaEncontrada) {
@@ -188,12 +199,13 @@ function setupQueries(opts: SetupOptions = {}) {
     sqlMock.mockResolvedValueOnce([{ id: CONTA_ID + 100 }]);
   }
 
-  // Passo 2 (tx): UPDATE pagamentos_venda (total) OU Passo 2b (tx): UPDATE pagamentos_venda (parcial)
+  // Passo 2 (tx): UPDATE pagamentos_venda (quitou o A Receber inteiro)
+  // OU Passo 2b (tx): UPDATE pagamentos_venda (ainda sobra A Receber)
   if (pagamentoEncontrado) {
     sqlMock.mockResolvedValueOnce([]);
 
-    // Passo 2b (tx): INSERT novo pagamento_venda (se parcial)
-    if (ehPagamentoParcial) {
+    // Passo 2b (tx): INSERT novo pagamento_venda 'A Receber' com o restante
+    if (precisaSplitPagamento) {
       sqlMock.mockResolvedValueOnce([]);
     }
   }
@@ -250,7 +262,9 @@ describe("POST /api/crediario/[id]/registrar-pagamento", () => {
   });
 
   it("retorna 403 quando role não está na lista permitida", async () => {
-    sqlMock.mockResolvedValueOnce([{ role: "consultora" }]);
+    // 'consultora' saiu daqui em 06/08/2026 — ela PODE baixar (a venda dela).
+    // Ver os testes de ownership no fim do arquivo.
+    sqlMock.mockResolvedValueOnce([{ role: "ourives" }]);
     const res = await POST(makeRequest(), makeParams());
     expect(res.status).toBe(403);
   });
@@ -574,5 +588,173 @@ describe("POST /api/crediario/[id]/registrar-pagamento", () => {
     // venda_concluida saiu da resposta — fluxo novo 06/2026 (pagamento não muda status)
     expect(data).not.toHaveProperty("venda_concluida");
     expect(data).toHaveProperty("valor_pago");
+  });
+
+  // ═══ CONSULTORA: pode baixar, mas SÓ a venda DELA ═══════════════════════════
+  //
+  // REGRA (Jonathan, 06/08/2026). A trava é o `requireCrediarioOwnership`, não a
+  // lista de papéis: se alguém tirar o ownership daqui, a consultora passa a
+  // baixar venda de colega (recebimento fantasma + comissão no nome errado).
+  //
+  // Sequência de queries no caminho da consultora:
+  //   1) SELECT role            2) vw_crediario.vendedor_id (dono da conta)
+  //   3) usuarios.vendedor_id (quem está logado)   4) conta  5) pagamento ...
+
+  it("aceita a consultora quando a conta é de uma venda DELA", async () => {
+    sqlMock.mockResolvedValueOnce([{ role: "consultora" }]);
+    sqlMock.mockResolvedValueOnce([{ vendedor_id: 7 }]);   // dono da conta
+    sqlMock.mockResolvedValueOnce([{ vendedor_id: 7 }]);   // vendedor_id do logado
+    sqlMock.mockResolvedValueOnce([{                       // conta
+      id: CONTA_ID, situacao: "pendente", valor: "1500",
+      venda_erp_id: VENDA_ID, descricao: "Venda #123",
+    }]);
+    sqlMock.mockResolvedValueOnce([{ id: PAGAMENTO_ID, valor: "1500", forma: "A Receber" }]);
+    setupBegin();
+
+    const res = await POST(makeRequest({ forma_recebimento: "Dinheiro" }), makeParams());
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+  });
+
+  it("BLOQUEIA (403) a consultora na conta de uma venda de OUTRA consultora", async () => {
+    sqlMock.mockResolvedValueOnce([{ role: "consultora" }]);
+    sqlMock.mockResolvedValueOnce([{ vendedor_id: 9 }]);   // conta é da colega
+    sqlMock.mockResolvedValueOnce([{ vendedor_id: 7 }]);   // vendedor_id do logado
+
+    const res = await POST(makeRequest({ forma_recebimento: "Dinheiro" }), makeParams());
+
+    expect(res.status).toBe(403);
+  });
+
+  it("retorna 404 quando a conta não existe na vw_crediario (ownership)", async () => {
+    sqlMock.mockResolvedValueOnce([{ role: "consultora" }]);
+    sqlMock.mockResolvedValueOnce([]); // vw_crediario sem a conta
+
+    const res = await POST(makeRequest({ forma_recebimento: "Dinheiro" }), makeParams());
+
+    expect(res.status).toBe(404);
+  });
+
+  // ═══ CREDIÁRIO PARCELADO — a baixa de UMA parcela não confirma o todo ═══════
+  //
+  // Caso real que originou estes testes: venda 15678 (Germana, 30/06/2026) —
+  // R$ 45.000, Pix R$ 9.000 + "A Receber" R$ 36.000 em 4×. Baixar a parcela
+  // 1/4 (R$ 9.000) confirmava o "A Receber" INTEIRO: a venda ficava 100% paga
+  // com 3 parcelas em aberto e a comissão saía sobre a venda toda
+  // (R$ 279,00 em vez de R$ 111,60). Corrigido no dado em prod 04/08/2026
+  // (log 399) e no código aqui. NÃO REMOVER: é a rede de proteção da comissão.
+  //
+  // Helpers de leitura das chamadas SQL montadas por template string.
+  const sqlTexto = (call: unknown[]) =>
+    Array.isArray(call[0]) ? call[0].join(" ") : String(call[0] ?? "");
+
+  it("parcelado: baixar 1 parcela DIVIDE o A Receber em vez de confirmar tudo", async () => {
+    // A Receber de R$ 36.000 (4×), parcela de R$ 9.000 paga por inteiro.
+    setupQueries({ contaValor: "9000", pagamentoValor: "36000" });
+
+    await POST(makeRequest({ forma_recebimento: "Dinheiro" }), makeParams());
+
+    const updatePag = sqlMock.mock.calls.find((c) => {
+      const t = sqlTexto(c);
+      return t.includes("UPDATE") && t.includes("pagamentos_venda") && t.includes("valor");
+    });
+    const insertPag = sqlMock.mock.calls.find((c) => {
+      const t = sqlTexto(c);
+      return t.includes("INSERT") && t.includes("pagamentos_venda") && t.includes("A Receber");
+    });
+
+    // Reduziu o pagamento para os R$ 9.000 recebidos...
+    expect(updatePag).toBeDefined();
+    expect(updatePag).toContain(9000);
+    // ...e deixou os R$ 27.000 restantes pendentes.
+    expect(insertPag).toBeDefined();
+    expect(insertPag).toContain(27000);
+  });
+
+  it("parcelado: reduz o confirmado ANTES de inserir o pendente (trava mig 333)", async () => {
+    // Ordem invertida = soma passaria do total_venda e o trigger
+    // fn_pagamento_nao_exceder_total derruba com 500 PAGAMENTO_EXCEDE_TOTAL.
+    setupQueries({ contaValor: "9000", pagamentoValor: "36000" });
+
+    await POST(makeRequest({ forma_recebimento: "Dinheiro" }), makeParams());
+
+    const idxUpdate = sqlMock.mock.calls.findIndex((c) => {
+      const t = sqlTexto(c);
+      return t.includes("UPDATE") && t.includes("pagamentos_venda") && t.includes("valor");
+    });
+    const idxInsert = sqlMock.mock.calls.findIndex((c) => {
+      const t = sqlTexto(c);
+      return t.includes("INSERT") && t.includes("pagamentos_venda") && t.includes("A Receber");
+    });
+
+    expect(idxUpdate).toBeGreaterThanOrEqual(0);
+    expect(idxInsert).toBeGreaterThan(idxUpdate);
+  });
+
+  it("parcelado: o restante é medido no A Receber, não na parcela", async () => {
+    // Parcial DE UMA PARCELA num crediário parcelado: A Receber R$ 36.000,
+    // parcela R$ 9.000, cliente paga R$ 5.000.
+    //   conta a receber → nova conta de R$ 4.000 (resto da PARCELA)
+    //   pagamento venda → novo A Receber de R$ 31.000 (resto do CREDIÁRIO)
+    // Antes do fix o pagamento pendente nascia com R$ 4.000 e sumiam
+    // R$ 27.000 da soma da venda.
+    setupQueries({ contaValor: "9000", pagamentoValor: "36000", valorPago: 5000 });
+
+    const res = await POST(
+      makeRequest({ forma_recebimento: "Dinheiro", valor_pago: 5000 }),
+      makeParams(),
+    );
+    const data = await res.json();
+
+    const insertPag = sqlMock.mock.calls.find((c) => {
+      const t = sqlTexto(c);
+      return t.includes("INSERT") && t.includes("pagamentos_venda") && t.includes("A Receber");
+    });
+    expect(insertPag).toBeDefined();
+    expect(insertPag).toContain(31000);
+
+    // A resposta continua falando da PARCELA (é o que o drawer mostra).
+    expect(data.pagamento_parcial).toBe(true);
+    expect(data.valor_restante).toBe(4000);
+  });
+
+  it("parcelado: a ÚLTIMA parcela confirma o A Receber e não abre pendente", async () => {
+    // Sobrou só uma parcela: A Receber R$ 9.000 = parcela R$ 9.000.
+    setupQueries({ contaValor: "9000", pagamentoValor: "9000" });
+
+    const res = await POST(makeRequest({ forma_recebimento: "Dinheiro" }), makeParams());
+    const data = await res.json();
+
+    const insertPag = sqlMock.mock.calls.find((c) => {
+      const t = sqlTexto(c);
+      return t.includes("INSERT") && t.includes("pagamentos_venda") && t.includes("A Receber");
+    });
+    expect(insertPag).toBeUndefined();
+    expect(data.ok).toBe(true);
+    expect(data.pagamento_parcial).toBeUndefined();
+  });
+
+  it("1 parcela (a maioria das vendas): comportamento idêntico ao de antes", async () => {
+    // 584 das 608 vendas com crediário dos últimos 4 meses são de 1 parcela:
+    // pagamento.valor == valor da conta → confirma inteiro, sem split.
+    setupQueries({ contaValor: "2500", pagamentoValor: "2500" });
+
+    const res = await POST(makeRequest({ forma_recebimento: "Pix" }), makeParams());
+    const data = await res.json();
+
+    const updatePagSemValor = sqlMock.mock.calls.find((c) => {
+      const t = sqlTexto(c);
+      return t.includes("UPDATE") && t.includes("pagamentos_venda") && t.includes("confirmado");
+    });
+    const insertPag = sqlMock.mock.calls.find((c) => {
+      const t = sqlTexto(c);
+      return t.includes("INSERT") && t.includes("pagamentos_venda") && t.includes("A Receber");
+    });
+
+    expect(updatePagSemValor).toBeDefined();
+    expect(insertPag).toBeUndefined();
+    expect(data.ok).toBe(true);
   });
 });

@@ -5,15 +5,20 @@
  * Rota principal de baixa do crediário — usada pelo drawer de detalhe
  * (CrediarioClient.tsx) para registrar o recebimento de um crédito
  * "A Receber" em qualquer forma de pagamento: Dinheiro, Cartão, Pix,
- * Ouro, Vale-Troca.
+ * Ouro, Vale-Troca, Permuta, Ajuste Consultora.
+ *
+ * forma_recebimento é OBRIGATÓRIO (desde 06/07/2026, migration 341) —
+ * define tanto `forma`/`gateway` quanto `comissionavel` em pagamentos_venda.
+ * Vale-Troca/Permuta/Ajuste Consultora não são dinheiro novo → comissionavel=false.
  *
  * ⚠️  BLINDAGEM: Esta rota implementa as 7 regras de ouro do módulo
  * crediário documentadas em AGENTS.md. NÃO ALTERE sem ler aquele doc.
  *
  * Fluxo completo (tudo dentro de transação SQL):
  *   1. Atualiza contas_receber: ajusta valor e marca como 'pago'
- *   1b. Se pagamento parcial: cria NOVA conta_receber com o restante
- *   2. Confirma pagamento_venda (se total) ou faz split (se parcial)
+ *   1b. Se pagou menos que a PARCELA: cria NOVA conta_receber com o restante
+ *   2. Confirma o pagamento_venda "A Receber" se ele foi quitado por inteiro;
+ *      se ainda sobra crediário (parcelado), faz split — ver `precisaSplit`
  *   3. Registra em comunicacoes_crediario com a forma usada
  *   4. Fora da tx: devolve saldo ao gerente (evita lock)
  *   5. Fora da tx: conclui venda se todos pagamentos confirmados
@@ -28,22 +33,40 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { creditarSaldo } from "@/lib/saldo-credito";
 import { logAudit } from "@/lib/audit";
 import { zodError } from "@/lib/schemas/common";
+import { requireCrediarioOwnership, NotFoundError } from "@/lib/auth-vendas";
+import { ForbiddenError } from "@/lib/auth-server";
 
 // Quem pode dar baixa manual (emergência ou formas não-MP).
 // ATENÇÃO: Esta rota NÃO verifica Mercado Pago — é confiança pura.
 // Use verificar-mp para baixas com ID do Mercado Pago.
-const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor"];
+//
+// REGRA DE NEGÓCIO (Jonathan, 06/08/2026): a CONSULTORA pode dar baixa, mas
+// SÓ na venda DELA — quem garante isso é o requireCrediarioOwnership abaixo,
+// nunca a lista de papéis. Antes dessa data a lista não tinha 'consultora' e
+// a tela mostrava o painel de baixa pra ela assim mesmo: ela escolhia
+// Dinheiro/Pix e tomava 403, mas conseguia baixar por "Manual (MP)"
+// (verificar-mp já aceitava consultora). Ou seja, o caminho aberto era
+// justamente o que exige menos prova de ninguém.
+const PODE_BAIXAR = ["desenvolvedor", "admin", "gerente_loja", "diretor", "consultora"];
+
+// REGRA DE NEGÓCIO (06/07/2026): formas que NÃO são dinheiro novo — nunca
+// geram comissão. Ver comercial.md §2 e migration 341. Antes disso,
+// forma_recebimento era opcional e uma baixa sem forma escolhida ficava
+// para sempre com forma='A Receber', indistinguível de dinheiro real —
+// 3 pagamentos assim (Vale-Troca, permuta, desconto da consultora)
+// geraram comissão indevida no fechamento de jun/2026.
+const FORMAS_NAO_COMISSIONAVEIS = ["Vale-Troca", "Permuta", "Ajuste Consultora"];
 
 const RegistrarPagamentoSchema = z.object({
   obs: z.string().max(5000).optional(),
-  forma_recebimento: z.string().max(50).optional(),
+  forma_recebimento: z.string().min(1, "obrigatório — informe como o cliente pagou").max(50),
   // Pagamento parcial: valor efetivamente pago (default = total da conta)
   valor_pago: z.number().positive().optional(),
   // Campos específicos de Ouro — validados no handler, obrigatórios quando forma === "Ouro"
   ouro_peso: z.number().positive().optional(),
   ouro_valor_grama: z.number().positive().optional(),
   ouro_foto_path: z.string().max(500).optional(),
-}).partial();
+});
 
 export async function POST(
   req: NextRequest,
@@ -62,6 +85,21 @@ export async function POST(
   `;
   if (!usuario || !PODE_BAIXAR.includes(usuario.role as string)) {
     return NextResponse.json({ error: "Sem permissão para registrar baixa" }, { status: 403 });
+  }
+
+  // Trava de dono: papéis full (gerente/admin/dev/diretor) passam direto; a
+  // consultora só segue se a conta for de uma venda DELA. Fecha o vetor de
+  // baixar venda de colega — recebimento fantasma e comissão no nome errado.
+  // Mesma trava que o verificar-mp já usa. NÃO REMOVER.
+  try {
+    await requireCrediarioOwnership(
+      { id: user.id, role: usuario.role as string, email: user.email ?? "" },
+      contaId,
+    );
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
   }
 
   const [conta] = await sql`
@@ -93,7 +131,11 @@ export async function POST(
   const parsed = RegistrarPagamentoSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const obs = (parsed.data.obs ?? "").trim() || null;
-  const formaRecebimento = parsed.data.forma_recebimento?.trim() || null;
+  const formaRecebimento = parsed.data.forma_recebimento.trim();
+  if (!formaRecebimento) {
+    return NextResponse.json({ error: "Informe como o cliente pagou" }, { status: 400 });
+  }
+  const comissionavel = !FORMAS_NAO_COMISSIONAVEIS.includes(formaRecebimento);
   const valorPago = parsed.data.valor_pago ?? null;
   const ouroPeso = parsed.data.ouro_peso ?? null;
   const ouroValorGrama = parsed.data.ouro_valor_grama ?? null;
@@ -101,12 +143,55 @@ export async function POST(
 
   // O valor pago default é o total da conta. Se o front enviar valor_pago
   // menor que o total, será pagamento parcial → split de crédito.
-  const valorEfetivo = valorPago ?? Number(conta.valor);
+  // Arredonda a 2 casas: ouro (peso × grama) e dinheiro podem trazer fração de
+  // centavo. Tolerância de 1 centavo no teto — se o valor passar do saldo por
+  // até 1 centavo (arredondamento do ouro), trata como quitação total do saldo.
+  // Espelha a folga do trigger da soma de pagamentos (mig 333).
+  const contaValor = Number(conta.valor);
+  let valorEfetivo = Math.round((valorPago ?? contaValor) * 100) / 100;
   if (valorEfetivo <= 0) return NextResponse.json({ error: "Valor pago inválido" }, { status: 400 });
-  if (valorEfetivo > Number(conta.valor)) return NextResponse.json({ error: "Valor pago maior que o valor da conta" }, { status: 400 });
+  if (valorEfetivo > contaValor + 0.01) return NextResponse.json({ error: "Valor pago maior que o valor da conta" }, { status: 400 });
+  if (valorEfetivo > contaValor) valorEfetivo = contaValor;
 
-  const ehPagamentoParcial = valorEfetivo < Number(conta.valor);
-  const valorRestante = ehPagamentoParcial ? Number(conta.valor) - valorEfetivo : 0;
+  const ehPagamentoParcial = valorEfetivo < contaValor;
+  const valorRestante = ehPagamentoParcial ? contaValor - valorEfetivo : 0;
+
+  /**
+   * REGRA DE NEGÓCIO (crediário PARCELADO) — o "A Receber" da venda é UM só,
+   * mesmo quando o crediário tem N parcelas: a migration 317 gera N linhas em
+   * contas_receber (uma por parcela) mas mantém UMA linha em pagamentos_venda
+   * com forma 'A Receber' (o financiamento inteiro).
+   *
+   * O QUÊ: `ehPagamentoParcial` (acima) responde "o cliente pagou a PARCELA
+   * inteira?" e manda no split da conta a receber. Quem manda no pagamento da
+   * venda é outra pergunta — "sobra 'A Receber' depois deste recebimento?" —
+   * respondida aqui comparando o valor do crediário INTEIRO com o que entrou.
+   *
+   * O PORQUÊ: até 06/08/2026 o PASSO 2 usava `ehPagamentoParcial`. Baixar a
+   * parcela 1/4 de R$ 9.000 confirmava o "A Receber" de R$ 36.000 INTEIRO — a
+   * venda ficava 100% paga com 3 parcelas em aberto e a comissão (regime de
+   * caixa, segue o pagamento confirmado) saía sobre a venda toda. Caso real:
+   * venda 15678 (Germana, 30/06/2026) comissionou R$ 279,00 em vez de
+   * R$ 111,60; o dado foi corrigido em prod em 04/08/2026 (log 399).
+   * É a mesma lógica que a cascata (receber-cascata/route.ts) já faz certo.
+   *
+   * IMPACTO SE REMOVER: volta a comissionar o crediário parcelado inteiro na
+   * primeira baixa, e a 2ª parcela quebra com 500 PAGAMENTO_EXCEDE_TOTAL
+   * (sem "A Receber" pendente, o PASSO 2c cria linha nova por cima do total).
+   *
+   * Crediário de 1 parcela (a maioria): pagamento.valor == valor da conta,
+   * `precisaSplit` dá false e o fluxo é idêntico ao de sempre.
+   * Tolerância de meio centavo = o `Math.abs(a-b) < 0.005` do projeto.
+   */
+  const valorAReceber = pagamento ? Number(pagamento.valor) : 0;
+  const precisaSplit = !!pagamento && valorAReceber > valorEfetivo + 0.005;
+
+  // Quanto continua devendo no pagamento da venda. Medido sobre o "A Receber"
+  // (crediário inteiro), NUNCA sobre a parcela — senão o valor das outras
+  // parcelas some da soma da venda. Invariante: SUM(pagamentos_venda) = total_venda.
+  const restantePagamento = precisaSplit
+    ? Math.round((valorAReceber - valorEfetivo) * 100) / 100
+    : 0;
 
   let saldoDevolvido = false;
 
@@ -153,7 +238,7 @@ export async function POST(
           CURRENT_DATE,
           'pendente',
           'venda',
-          ${`Parcial de R$ ${valorEfetivo.toFixed(2)} pago via ${formaRecebimento ?? "não informado"}. Restante: R$ ${valorRestante.toFixed(2)}`},
+          ${`Parcial de R$ ${valorEfetivo.toFixed(2)} pago via ${formaRecebimento}. Restante: R$ ${valorRestante.toFixed(2)}`},
           ${user.id}::uuid
         FROM alissonerp.contas_receber cr
         WHERE cr.id = ${contaId}
@@ -162,64 +247,66 @@ export async function POST(
       novoCreditoId = nova?.id ?? null;
     }
 
-    // PASSO 2 — Confirmar pagamento_venda (pagamento TOTAL)
+    // PASSO 2 — Confirmar pagamento_venda (quitou o "A Receber" INTEIRO)
+    // Só entra aqui quando o que entrou cobre todo o crediário pendente
+    // (crediário de 1 parcela, ou a última parcela de um parcelado).
     // O campo 'gateway' é preenchido com a forma de recebimento (ex: "Dinheiro").
     // Isso alimenta o texto "via {gateway}" no card de pagamento da venda
     // (VendaDetalheClient.tsx:2573).
     //
     // Para Ouro: salvamos também peso, valor/grama e foto_path da balança.
-    if (pagamento && !ehPagamentoParcial) {
+    if (pagamento && !precisaSplit) {
       if (ouroPeso && ouroValorGrama && ouroFotoPath) {
         await tx`
           UPDATE alissonerp.pagamentos_venda
           SET status = 'confirmado', data_confirmacao = NOW(),
-              gateway = ${formaRecebimento ?? null},
+              forma = ${formaRecebimento},
+              gateway = ${formaRecebimento},
+              comissionavel = ${comissionavel},
               ouro_peso = ${ouroPeso},
               ouro_valor_grama = ${ouroValorGrama},
               ouro_foto_path = ${ouroFotoPath}
           WHERE id = ${pagamento.id}
         `;
-      } else if (formaRecebimento) {
-        await tx`
-          UPDATE alissonerp.pagamentos_venda
-          SET status = 'confirmado', data_confirmacao = NOW(), gateway = ${formaRecebimento}
-          WHERE id = ${pagamento.id}
-        `;
       } else {
         await tx`
           UPDATE alissonerp.pagamentos_venda
-          SET status = 'confirmado', data_confirmacao = NOW()
+          SET status = 'confirmado', data_confirmacao = NOW(),
+              forma = ${formaRecebimento}, gateway = ${formaRecebimento},
+              comissionavel = ${comissionavel}
           WHERE id = ${pagamento.id}
         `;
       }
     }
 
-    // PASSO 2b — SPLIT DO PAGAMENTO (pagamento parcial)
-    // Atualiza o pagamento original com o valor pago e cria um NOVO
-    // pagamento_venda 'A Receber' pendente com o valor restante.
+    // PASSO 2b — SPLIT DO PAGAMENTO (sobrou "A Receber")
+    // Reduz o pagamento original ao valor efetivamente recebido (confirmado)
+    // e cria um NOVO pagamento_venda 'A Receber' pendente com o restante.
     // Isso mantém o total da venda consistente (soma dos pagamentos = total_venda).
-    if (pagamento && ehPagamentoParcial) {
+    //
+    // ⚠️ A ORDEM IMPORTA: REDUZIR primeiro, INSERIR depois. O trigger
+    // fn_pagamento_nao_exceder_total (mig 333) recusa qualquer linha que faça
+    // a soma passar do total_venda — inserindo antes de reduzir, a soma
+    // passaria e a baixa morreria com 500 PAGAMENTO_EXCEDE_TOTAL.
+    if (pagamento && precisaSplit) {
       if (ouroPeso && ouroValorGrama && ouroFotoPath) {
         await tx`
           UPDATE alissonerp.pagamentos_venda
           SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW(),
-              gateway = ${formaRecebimento ?? null},
+              forma = ${formaRecebimento},
+              gateway = ${formaRecebimento},
+              comissionavel = ${comissionavel},
               ouro_peso = ${ouroPeso},
               ouro_valor_grama = ${ouroValorGrama},
               ouro_foto_path = ${ouroFotoPath}
           WHERE id = ${pagamento.id}
         `;
-      } else if (formaRecebimento) {
-        await tx`
-          UPDATE alissonerp.pagamentos_venda
-          SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW(),
-              gateway = ${formaRecebimento}
-          WHERE id = ${pagamento.id}
-        `;
       } else {
         await tx`
           UPDATE alissonerp.pagamentos_venda
-          SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW()
+          SET valor = ${valorEfetivo}, status = 'confirmado', data_confirmacao = NOW(),
+              forma = ${formaRecebimento}, gateway = ${formaRecebimento},
+              comissionavel = ${comissionavel}
           WHERE id = ${pagamento.id}
         `;
       }
@@ -227,9 +314,46 @@ export async function POST(
         INSERT INTO alissonerp.pagamentos_venda
           (venda_id, forma, valor, parcelas, status)
         VALUES (
-          ${vendaId}, 'A Receber', ${valorRestante}, 1, 'pendente'
+          ${vendaId}, 'A Receber', ${restantePagamento}, 1, 'pendente'
         )
       `;
+    }
+
+    // PASSO 2c — FALLBACK: Criar pagamento_venda quando não existe "A Receber" pendente
+    // Ocorre quando a conta_receber é um saldo restante de split anterior
+    // ou quando todos os pagamentos originais já foram confirmados por outro meio.
+    // Nesse caso, criamos um novo registro confirmado em vez de atualizar.
+    if (!pagamento && vendaId) {
+      if (ouroPeso && ouroValorGrama && ouroFotoPath) {
+        await tx`
+          INSERT INTO alissonerp.pagamentos_venda
+            (venda_id, forma, valor, parcelas, status, data_confirmacao,
+             gateway, comissionavel, ouro_peso, ouro_valor_grama, ouro_foto_path)
+          VALUES (
+            ${vendaId}, ${formaRecebimento}, ${valorEfetivo}, 1, 'confirmado', NOW(),
+            ${formaRecebimento}, ${comissionavel}, ${ouroPeso}, ${ouroValorGrama}, ${ouroFotoPath}
+          )
+        `;
+      } else {
+        await tx`
+          INSERT INTO alissonerp.pagamentos_venda
+            (venda_id, forma, valor, parcelas, status, data_confirmacao, gateway, comissionavel)
+          VALUES (
+            ${vendaId}, ${formaRecebimento}, ${valorEfetivo}, 1, 'confirmado', NOW(),
+            ${formaRecebimento}, ${comissionavel}
+          )
+        `;
+      }
+
+      if (ehPagamentoParcial) {
+        await tx`
+          INSERT INTO alissonerp.pagamentos_venda
+            (venda_id, forma, valor, parcelas, status)
+          VALUES (
+            ${vendaId}, 'A Receber', ${valorRestante}, 1, 'pendente'
+          )
+        `;
+      }
     }
 
     // PASSO 3 — Histórico de comunicação
@@ -245,7 +369,7 @@ export async function POST(
       VALUES (
         ${contaId},
         'aviso_recebimento',
-        ${obs ?? `Recebido via ${formaRecebimento ?? "não informado"} — R$ ${valorEfetivo.toFixed(2)}${msgOuro} — ${conta.descricao}`},
+        ${obs ?? `Recebido via ${formaRecebimento} — R$ ${valorEfetivo.toFixed(2)}${msgOuro} — ${conta.descricao}`},
         ${user.id}::uuid
       )
     `;

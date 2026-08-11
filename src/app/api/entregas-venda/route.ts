@@ -26,14 +26,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { criarEntrega } from "@/lib/entrega-venda";
+import { criarEntrega, formatarEnderecoEntregaAvulso } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
 import { authOr401, ForbiddenError } from "@/lib/auth-server";
 import { isVendasFullAccess, requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 
 // REGRA DE NEGÓCIO: papéis que podem visualizar a lista de entregas.
 // "consultora" tem visibilidade restrita (apenas entregas de suas vendas).
-const ROLES_ENTREGAS = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
+//
+// BLOCO 5 (jul/2026) — `estoquista_loja` entrou aqui, espelhando o mesmo gate
+// de `page.tsx` (SSR). Sem isso, a paginação/filtro client-side (que bate
+// nesta rota depois da primeira página SSR) devolveria 403 pra esse papel
+// mesmo com a tela já carregada. Ver docs/regras-negocio/entregas.md §8/§3.5.
+const ROLES_ENTREGAS = ["desenvolvedor", "admin", "gerente_loja", "consultora", "estoquista_loja"];
 
 // ─── Zod Schema para criação de entrega ─────────────────────────────────────
 // REGRA DE NEGÓCIO: valida os campos obrigatórios antes de delegar para a lib.
@@ -58,6 +63,7 @@ const CriarEntregaSchema = z.object({
     .optional(),
   motoboyId: z.string().optional(),
   freteCobrado: z.number().nonnegative("freteCobrado não pode ser negativo").optional(),
+  freteMotoboy: z.number().nonnegative("freteMotoboy não pode ser negativo").optional(),
   observacoes: z.string().max(2000, "observacoes muito longa").optional(),
 });
 
@@ -78,6 +84,10 @@ export async function GET(req: NextRequest) {
     SELECT role, vendedor_id FROM alissonerp.usuarios
     WHERE id = ${user.id}::uuid LIMIT 1
   `;
+
+  // REGRA DE NEGÓCIO (migration 353 — REVERTIDO na virada V2): o portão
+  // especial para o liberador de frete avulso (aba "Solicitações") foi
+  // removido junto com a aba — volta a ser role-only.
   if (!usuario || !ROLES_ENTREGAS.includes(usuario.role as string)) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
@@ -88,6 +98,17 @@ export async function GET(req: NextRequest) {
   const motoboyId = url.searchParams.get("motoboy_id");
   const dataInicio = url.searchParams.get("data_inicio") ?? "";
   const dataFim = url.searchParams.get("data_fim") ?? "";
+  // REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07 — 3 abas: Retirada em
+  // loja / Entregas motoboy / Pagamento do motoboy): filtro opcional por
+  // forma_entrega, usado pelo recarregar() client-side de
+  // EntregasVendaClient.tsx para manter a aba atual ao atualizar a lista
+  // depois de uma ação no drawer (mesmo filtro já aplicado no SSR de
+  // page.tsx). Só aceita os 2 valores reais da coluna — qualquer outra coisa
+  // é ignorada (sem filtro), nunca vira SQL livre.
+  // IMPACTO SE REMOVIDO: recarregar() voltaria a misturar retirada+motoboy
+  // na aba errada depois de fechar o drawer.
+  const formaEntregaParam = url.searchParams.get("forma_entrega") ?? "";
+  const formaEntrega = ["retirada", "motoboy"].includes(formaEntregaParam) ? formaEntregaParam : "";
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 50));
   const offset = (page - 1) * limit;
@@ -112,15 +133,24 @@ export async function GET(req: NextRequest) {
     ? sql`AND ev.venda_id = ${Number(vendaId)}`
     : sql``;
 
-  // REGRA DE NEGÓCIO: canceladas não aparecem por padrão (auto-cancel do modal
-  // sem código). Só reaparecem se o filtro pedir explicitamente situacao=cancelada.
-  // IMPACTO SE REMOVIDO: lixo operacional polui a lista de entregas ativas.
+  // REGRA DE NEGÓCIO (blindagem V4 — comentário corrigido: não existe mais
+  // aba "Solicitações", removida na virada V2): canceladas e solicitadas não
+  // aparecem na lista padrão (auto-cancel do modal sem código; solicitadas
+  // ainda não foram liberadas — a decisão do pool acontece via tarefa, tipo
+  // 'frete_avulso', em /tarefas, não numa aba própria desta tela). Só
+  // reaparecem se o filtro pedir explicitamente situacao=cancelada/solicitada.
+  // IMPACTO SE REMOVIDO: lixo operacional e solicitações não-liberadas
+  // poluiriam a lista de entregas ativas.
   const whereSituacao = situacao
     ? sql`AND ev.status = ${situacao}`
-    : sql`AND ev.status <> 'cancelada'`;
+    : sql`AND ev.status NOT IN ('cancelada', 'solicitada')`;
 
   const whereMotoboy = motoboyId
     ? sql`AND ev.motoboy_id = ${Number(motoboyId)}`
+    : sql``;
+
+  const whereFormaEntrega = formaEntrega
+    ? sql`AND ev.forma_entrega = ${formaEntrega}`
     : sql``;
 
   const whereDataInicio = dataInicio
@@ -162,7 +192,15 @@ export async function GET(req: NextRequest) {
         COALESCE(c.nome, ca.nome) AS cliente_nome,
         mb.nome AS motoboy_nome,
         ev.is_avulso,
-        ev.descricao_avulso
+        ev.descricao_avulso,
+        -- Colunas estruturadas de endereço (migration 355) — montadas em
+        -- texto legível via formatarEnderecoEntregaAvulso() abaixo.
+        ev.endereco_entrega, ev.endereco_entrega_numero, ev.endereco_entrega_complemento,
+        ev.endereco_entrega_bairro, ev.endereco_entrega_cidade, ev.endereco_entrega_cep,
+        ev.endereco_entrega_uf,
+        ev.liberada_por,
+        ev.liberada_em,
+        ev.motivo_recusa
       FROM alissonerp.entregas_venda ev
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = ev.venda_id
       LEFT JOIN public.contatos c ON c.id_contato = ve.cliente_id
@@ -173,6 +211,7 @@ export async function GET(req: NextRequest) {
         ${whereVenda}
         ${whereSituacao}
         ${whereMotoboy}
+        ${whereFormaEntrega}
         ${whereDataInicio}
         ${whereDataFim}
       ORDER BY ev.created_at DESC, ev.id DESC
@@ -187,6 +226,7 @@ export async function GET(req: NextRequest) {
         ${whereVenda}
         ${whereSituacao}
         ${whereMotoboy}
+        ${whereFormaEntrega}
         ${whereDataInicio}
         ${whereDataFim}
     `,
@@ -218,6 +258,20 @@ export async function GET(req: NextRequest) {
       aprovacao_frete_necessaria: Boolean(r.aprovacao_frete_necessaria),
       is_avulso: Boolean(r.is_avulso),
       descricao_avulso: r.descricao_avulso ? String(r.descricao_avulso) : null,
+      // REGRA DE NEGÓCIO (migration 353, modelo POOL): campos da solicitação/
+      // liberação de frete avulso — usados pela aba "Solicitações" (endereço
+      // pedido, quem liberou/quando, ou motivo se foi recusada). Não há mais
+      // "responsável" fixo — qualquer liberador do pool decide.
+      // REGRA DE NEGÓCIO (migration 355): endereço agora estruturado no banco
+      // — formatarEnderecoEntregaAvulso() monta o mesmo texto legível de
+      // antes (fonte única, ver src/lib/entrega-venda.ts). As colunas
+      // estruturadas (endereco_entrega_numero, _bairro, etc.) continuam
+      // disponíveis na resposta via `...r` acima, para quem precisar delas
+      // campo a campo no futuro.
+      endereco_entrega: formatarEnderecoEntregaAvulso(r as Record<string, string | null>),
+      liberada_por: r.liberada_por ? String(r.liberada_por) : null,
+      liberada_em: r.liberada_em ?? null,
+      motivo_recusa: r.motivo_recusa ? String(r.motivo_recusa) : null,
     })),
     total,
     page,
@@ -281,6 +335,7 @@ export async function POST(req: NextRequest) {
         regiao: body.regiao,
         motoboyId: body.motoboyId,
         freteCobrado: body.freteCobrado,
+        freteMotoboy: body.freteMotoboy,
         observacoes: body.observacoes,
       },
       user.id,

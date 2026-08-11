@@ -4,6 +4,10 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { fetchPayment, fetchMerchantOrder, getWebhookSecret } from "@/lib/mercado-pago";
 import { estornarVenda } from "@/lib/vendas-aprovar";
+import {
+  fecharContaReceberAposPagamentoMp,
+  type FecharContaMpResult,
+} from "@/lib/crediario-baixa-automatica";
 
 // Webhook MP — payload do gateway pode vir com campos adicionais (passthrough).
 // Validamos apenas a forma; tipo "merchant_order" usa o mesmo schema.
@@ -63,6 +67,68 @@ async function getSystemUserId(vendaId: number): Promise<string | null> {
 
   console.error(`[webhook-mp] getSystemUserId venda=${vendaId} retornou NULL — sem mp_system_user_id em configuracoes_unificado e sem created_by na venda. Pagamento sera confirmado MAS venda NAO sera concluida automaticamente. Configure mp_system_user_id ou conclua manualmente.`);
   return null;
+}
+
+/**
+ * Fecha a PARCELA do crediário que o cliente acabou de pagar pelo QR Pix /
+ * maquininha gerados na tela do Crediário.
+ *
+ * O QUÊ: chama `fecharContaReceberAposPagamentoMp` DENTRO da transação do
+ * webhook — a mesma que confirma o pagamento. A função só age quando a forma
+ * confirmada é 'A Receber' (venda à vista não tem conta a receber).
+ *
+ * O PORQUÊ: até 06/08/2026 essa lib existia e NUNCA foi chamada por rota
+ * nenhuma — era código morto, apesar de `cobrar-pix`, `cobrar-cartao` e o
+ * CrediarioClient afirmarem em comentário que "o webhook fecha a conta".
+ * Resultado em produção: o cliente pagava, o pagamento era confirmado e a
+ * parcela ficava aberta PARA SEMPRE — o cron seguia cobrando quem já tinha
+ * pago (aconteceu nas vendas 15769 e 15312; contas fechadas na mão, log 402).
+ *
+ * ATÔMICO DE PROPÓSITO: um erro aqui derruba a transação inteira e o Mercado
+ * Pago reenvia o webhook. É melhor reprocessar do que confirmar o dinheiro e
+ * deixar a parcela aberta de novo — foi exatamente esse "meio caminho" que
+ * gerou o passivo.
+ *
+ * IMPACTO SE REMOVER: volta o passivo de parcela paga que continua sendo
+ * cobrada, e o crediário parcelado volta a comissionar a venda inteira na
+ * primeira parcela paga pelo QR (o split mora dentro da lib).
+ */
+async function fecharParcelaCrediario(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any,
+  args: {
+    vendaId: number;
+    pagamentoId: number;
+    formaPagamento: string;
+    valorPago: number;
+    gatewayPayload: Record<string, unknown> | null;
+  },
+): Promise<FecharContaMpResult | { fechou: false; motivo: string }> {
+  // Sai ANTES de qualquer consulta quando não é crediário: venda à vista não
+  // tem conta a receber, e o caminho comum do webhook não paga o custo disso.
+  if (args.formaPagamento !== "A Receber") return { fechou: false, motivo: "nao_e_crediario" };
+
+  const usuarioId = await getSystemUserId(args.vendaId);
+  if (!usuarioId) {
+    // Sem usuário-sistema a lib não consegue assinar a auditoria. Não derruba o
+    // webhook: o dinheiro é real e a confirmação vale; a parcela fica pra baixa
+    // manual e o erro sai gritando no log (getSystemUserId já loga o motivo).
+    console.error(`[webhook-mp] venda=${args.vendaId} pagamento=${args.pagamentoId}: crediario confirmado MAS parcela NAO fechada — sem usuario-sistema. Baixe a parcela na tela do Crediario.`);
+    return { fechou: false, motivo: "sem_usuario_sistema" };
+  }
+
+  // A cobrança grava em qual parcela ela mirava; sem isso, a lib fecha a mais
+  // antiga em aberto.
+  const contaDoPayload = Number(args.gatewayPayload?.conta_receber_id ?? 0) || null;
+
+  return fecharContaReceberAposPagamentoMp(tx, {
+    vendaId: args.vendaId,
+    pagamentoId: args.pagamentoId,
+    formaPagamento: args.formaPagamento,
+    valorPago: args.valorPago,
+    usuarioId,
+    contaReceberId: contaDoPayload,
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -163,11 +229,12 @@ async function handleMerchantOrder(orderId: string | null, liveMode?: boolean): 
   const transactionAmount = Number(aprovado.transaction_amount ?? 0);
   const paymentId = String(aprovado.id ?? "");
 
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result = await (sql as any).begin(async (tx: typeof sql) => {
     // C2: SELECT FOR UPDATE dentro da tx previne race conditions com webhooks concorrentes
     const [pagTx] = await tx`
-      SELECT id, venda_id, status FROM alissonerp.pagamentos_venda
+      SELECT id, venda_id, status, forma, gateway_payload FROM alissonerp.pagamentos_venda
       WHERE id = ${pagamentoId} AND venda_id = ${vendaId} FOR UPDATE
     `;
     if (!pagTx) return { ignored: true };
@@ -203,12 +270,22 @@ async function handleMerchantOrder(orderId: string | null, liveMode?: boolean): 
           })}::text::jsonb
       WHERE id = ${pagamentoId}
     `;
+    // Crediário: fecha a PARCELA que foi paga (ver comentário do bloco gêmeo
+    // no fluxo 'payment', mais abaixo).
+    const crediario = await fecharParcelaCrediario(tx, {
+      vendaId,
+      pagamentoId,
+      formaPagamento: String(pagTx.forma ?? ""),
+      valorPago: transactionAmount,
+      gatewayPayload: pagTx.gateway_payload as Record<string, unknown> | null,
+    });
+
     const [{ soma_confirmados, total_venda }] = await tx`
       SELECT
         COALESCE((SELECT SUM(valor) FROM alissonerp.pagamentos_venda WHERE venda_id = ${vendaId} AND status = 'confirmado'), 0)::numeric AS soma_confirmados,
         (SELECT total_venda FROM alissonerp.vendas_erp WHERE id = ${vendaId})::numeric AS total_venda
     `;
-    return { quitada: Number(soma_confirmados) + 0.01 >= Number(total_venda) };
+    return { quitada: Number(soma_confirmados) + 0.01 >= Number(total_venda), crediario };
   });
 
   if (result?.ignored) return NextResponse.json({ ok: true, ignored: "pagamento não encontrado" });
@@ -435,11 +512,12 @@ export async function POST(req: NextRequest) {
       `;
       return NextResponse.json({ ok: false, ignored: "transaction_amount inválido" });
     }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await (sql as any).begin(async (tx: typeof sql) => {
       // C2: SELECT FOR UPDATE dentro da tx — garante atomicidade contra webhooks concorrentes
       const [pagTx] = await tx`
-        SELECT id, status, gateway_payload
+        SELECT id, status, forma, gateway_payload
         FROM alissonerp.pagamentos_venda
         WHERE id = ${pagamentoId} AND venda_id = ${vendaId}
         FOR UPDATE
@@ -480,6 +558,17 @@ export async function POST(req: NextRequest) {
         WHERE id = ${pagamentoId}
       `;
 
+      // 7a-bis. CREDIÁRIO: fecha a parcela paga (e divide o "A Receber" se o
+      // crediário for parcelado). Roda na MESMA transação — ver
+      // fecharParcelaCrediario.
+      const crediario = await fecharParcelaCrediario(tx, {
+        vendaId,
+        pagamentoId,
+        formaPagamento: String(pagTx.forma ?? ""),
+        valorPago: Number(payment.transaction_amount ?? 0),
+        gatewayPayload: pagTx.gateway_payload as Record<string, unknown> | null,
+      });
+
       // 7b. Verifica se total pago cobre a venda
       const [{ soma_confirmados, total_venda }] = await tx`
         SELECT
@@ -491,7 +580,7 @@ export async function POST(req: NextRequest) {
       const total = Number(total_venda);
       const quitada = pago + 0.01 >= total; // tolerância de 1 centavo
 
-      return { quitada, pago, total };
+      return { quitada, pago, total, crediario };
     });
 
     if (result?.ignored) return NextResponse.json({ ok: true, ignored: "pagamento_id não encontrado" });

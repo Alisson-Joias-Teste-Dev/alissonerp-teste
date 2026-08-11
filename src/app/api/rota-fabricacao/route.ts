@@ -148,9 +148,14 @@ export async function GET(req: NextRequest) {
               OR v.data_conclusao >= NOW() - (${JANELA_FINALIZADAS_DIAS} || ' days')::interval
           ))
         )
-        -- Exclui OFs em service SOMENTE quando status=ativas. Pra histórico
-        -- (concluidas/canceladas/todas) mostrar tudo, mesmo se a OF passou
-        -- por service em algum momento — afinal a fabricação terminou.
+        -- Exclui OFs em service SOMENTE quando status=ativas.
+        -- Regra: toda ordem de serviço nasce com uma linha em servicos (status aguardando,
+        -- sem transferencia_service_id). Sem o filtro abaixo, ela some do filtro padrão
+        -- "Ativas" mesmo sem nunca ter ido pro service. Só esconde quem foi DE VERDADE
+        -- (transferencia_service_id preenchido) — mesma semântica do na_service.
+        -- Pra histórico (concluidas/canceladas/todas) mostra tudo, independente.
+        -- Impacto se remover o transferencia_service_id IS NOT NULL: 31 ordens de serviço
+        -- em etapa ativa voltam a sumir do filtro padrão.
         AND (
           ${status}::text <> 'ativas'
           OR (
@@ -158,6 +163,7 @@ export async function GET(req: NextRequest) {
               SELECT 1 FROM alissonerp.servicos s3
               WHERE s3.pcp_id = v.id
                 AND s3.status IN ('em_servico', 'aguardando', 'concluido')
+                AND s3.transferencia_service_id IS NOT NULL
             )
             AND NOT EXISTS (
               SELECT 1 FROM alissonerp.transferencias_ordem t

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isPrecificacaoAccess } from "@/lib/roles";
+import { podeDecidir } from "@/lib/aprovacoes";
 import PrecificacaoClient from "./PrecificacaoClient";
 import sql from "@/lib/db";
 import {
@@ -25,6 +26,15 @@ export default async function PrecificacaoPage() {
   const role = user.user_metadata?.role as string | undefined;
 
   if (!isPrecificacaoAccess(role)) redirect("/");
+
+  // REGRA DE NEGÓCIO: quem aprova é o(s) UUID(s) configurado(s) em Configurações ›
+  // Aprovadores › "Precificação" (política config-first — 03b-config-first-estrito.md),
+  // não mais um cargo fixo. Calculado aqui (server) e passado como prop pro client
+  // decidir se mostra o botão "Aprovar" — sem isso, um aprovador configurado que não
+  // seja admin/dev/diretor ficaria sem o botão (regressão de UX).
+  const podeAprovarPrecificacao = (
+    await podeDecidir({ id: user.id, role: role ?? null }, "precificacao")
+  ).pode;
 
   // Server-side: buscar dados iniciais
   const [faixasPedrasRaw, configRaw, cotacoesRaw] = await Promise.all([
@@ -91,6 +101,7 @@ export default async function PrecificacaoPage() {
       }}
       currentUserId={user.id}
       currentUserRole={role ?? ""}
+      podeAprovarPrecificacao={podeAprovarPrecificacao}
       curvaConfigInicial={curvaConfig}
       curvaCategoriasInicial={curvaCategorias}
     />

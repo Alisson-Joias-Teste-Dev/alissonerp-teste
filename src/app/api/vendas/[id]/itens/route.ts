@@ -21,6 +21,7 @@ import { getDescontoThreshold } from "@/lib/aprovacao-regras";
 // REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
 // Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos endpoints.
 import { normalizarTextoBusca, isServicoRodio, round2, getPctRodio } from "@/lib/servico-rodio";
+import { resolverItemComissao } from "@/lib/comissao-item";
 
 const VendaItemPostSchema = z.object({
   produto_id: IdSchema.nullable().optional(),
@@ -394,10 +395,58 @@ export async function POST(
     }
   }
 
+  // ── Server-side elegibilidade: produto sem estoque + reposição inativa não pode ser vendido ──
+  // REGRA DE NEGÓCIO (correção URGENTE 07/2026 — PROBLEMA 2): revalida no servidor para evitar
+  // bypass pela busca direta por SKU/RFID.
+  if (body.produto_id) {
+    const [eleg] = await sql`
+      SELECT
+        COALESCE(ecc.controla_estoque, true) AS controla_estoque,
+        COALESCE(est.saldo, 0)::float8 AS saldo,
+        (prc.ativo = true) AS reposicao_ativa
+      FROM public.produtos p
+      LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
+      LEFT JOIN (
+        SELECT produto_id, SUM(disponivel)::float8 AS saldo
+        FROM alissonerp.vw_saldo_estoque_comercial
+        GROUP BY produto_id
+      ) est ON est.produto_id = p.id_produto
+      LEFT JOIN alissonerp.produto_reposicao_config prc ON prc.produto_id = p.id_produto AND prc.ativo = true
+      WHERE p.id_produto = ${body.produto_id}
+      LIMIT 1
+    `;
+    if (eleg && Boolean(eleg.controla_estoque) && Number(eleg.saldo) <= 0 && !Boolean(eleg.reposicao_ativa)) {
+      return NextResponse.json(
+        { error: `"${body.nome_produto}" (${body.sku ?? 'sem SKU'}) não pode ser vendido: sem estoque e sem reposição ativa.` },
+        { status: 409 },
+      );
+    }
+  }
+
+  // ── Comissão: quem manda é o SERVIDOR, não o navegador ──────────────────────
+  // Antes daqui a rota gravava `${body.pct_comissao}` cru. Para item em promoção
+  // o navegador media o desconto contra o preço já promocional, enxergava 0% e
+  // mandava a faixa cheia de 4% onde a tabela mandava 0,50%. Ver comissao-item.ts.
+  // Item sem produto_id (aliança/personalizada) devolve comissao=null de
+  // propósito: a regra deles é do módulo de orçamento, que calcula pelo peso.
+  const resolvido = await resolverItemComissao({
+    produtoId: body.produto_id ?? null,
+    precoLista: precoListaFinal,
+    precoUnitario: precoUnitarioFinal,
+    totalItem: totalItemFinal,
+    situacaoVenda: venda.situacao,
+  });
+  if (resolvido.comissao) {
+    valorComissaoFinal = resolvido.comissao.valor_comissao;
+  }
+  const pctComissaoFinal = resolvido.comissao
+    ? resolvido.comissao.pct_comissao
+    : (body.pct_comissao ?? 0);
+
   const [novoItem] = await sql`
     INSERT INTO alissonerp.itens_venda_erp (
       venda_id, produto_id, nome_produto, sku,
-      quantidade, preco_lista,
+      quantidade, preco_lista, preco_lista_cheio,
       pct_desconto, preco_unitario, total_item,
       pct_comissao, valor_comissao,
       peso_estimado, observacao, personalizacao
@@ -408,10 +457,11 @@ export async function POST(
       ${body.sku ?? null},
       ${body.quantidade},
       ${precoListaFinal},
+      ${resolvido.preco_lista_cheio},
       ${body.pct_desconto ?? 0},
       ${precoUnitarioFinal},
       ${totalItemFinal},
-      ${body.pct_comissao ?? 0},
+      ${pctComissaoFinal},
       ${valorComissaoFinal},
       ${pesoEstimadoFinal},
       ${observacaoFinal},
@@ -444,21 +494,33 @@ export async function POST(
   // Se novo item tem desconto > threshold numa venda em rascunho, invalida aprovação anterior
   const thresholdNovoItem = await getDescontoThreshold(vendaId);
   if (venda.situacao === "rascunho" && (body.pct_desconto ?? 0) > thresholdNovoItem) {
+    // BUG FIX (jun/2026, venda 15628): captura o ponteiro da tarefa ANTES de zerar.
+    // Soltar aprovacao_desconto_tarefa_id é obrigatório — senão, se a tarefa antiga
+    // já estava 'aprovada', o front esconde o botão de solicitar e o banner de
+    // aguardando, e a venda trava em rascunho sem como reaprovar.
+    const [vDesc] = await sql`
+      SELECT aprovacao_desconto_tarefa_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    `;
+    const tarefaAnteriorId = vDesc?.aprovacao_desconto_tarefa_id as number | null;
     await sql`
       UPDATE alissonerp.vendas_erp
       SET desconto_aprovado_por           = NULL,
           desconto_aprovado_em            = NULL,
+          aprovacao_desconto_tarefa_id    = NULL,
           desconto_revalidacao_necessaria = true,
           updated_at                      = NOW()
       WHERE id = ${vendaId}
     `;
-    await sql`
-      UPDATE alissonerp.tarefas
-      SET status = 'cancelado', updated_at = NOW()
-      WHERE venda_id = ${vendaId}
-        AND status = 'aguardando_aprovacao'
-        AND tags @> ARRAY['aprovacao_desconto']::text[]
-    `.catch((err) => console.error("[vendas/itens] tarefa cancel falhou", err));
+    // Cancela a tarefa vinculada SÓ se ainda estava pendente. Mira pelo ID (o filtro
+    // por tag 'aprovacao_desconto' antigo nunca batia: a tag real é 'aprov_desconto_acima').
+    if (tarefaAnteriorId) {
+      await sql`
+        UPDATE alissonerp.tarefas
+        SET status = 'cancelado', updated_at = NOW()
+        WHERE id = ${tarefaAnteriorId}
+          AND status = 'aguardando_aprovacao'
+      `.catch((err) => console.error("[vendas/itens] tarefa cancel falhou", err));
+    }
   }
 
   return NextResponse.json({ id: novoItem.id }, { status: 201 });

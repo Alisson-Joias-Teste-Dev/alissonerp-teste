@@ -5,7 +5,7 @@
 > Se algo conflitar com outro doc, este arquivo vence.
 
 **Stack:** Next.js 16.1.6 | React 19 | PostgreSQL 15 (Supabase self-hosted) | TailwindCSS v4 | Zustand
-**Versao:** v2.65.5 | **Branch:** `homolog` (nunca main direto)
+**Versao:** v2.83.6 | **Branch:** `homolog` (nunca main direto)
 **Docs completos:** `docs/arquitetura.md` | **Changelog:** `docs/CHANGELOG.md`
 
 > Projeto **100% desenvolvido por IA**. A disciplina de processo (§0) é o que mantém a qualidade — leia a §0 ANTES de qualquer coisa.
@@ -45,6 +45,9 @@
   Mesmo em "modo build", qualquer modificação precisa de autorização prévia.
 - NÃO gastar tokens à toa — direto ao ponto, sem exploração desnecessária,
   sem retrabalho. Eficiência é regra.
+- PRÉVIAS VISUAIS para o Jonathan: enviar SEMPRE como imagem/GIF animado,
+  que abre direto na conversa sem precisar salvar. HTML interativo só como
+  complemento opcional (o app do Claude pode baixar em vez de abrir).
 - COMENTAR A REGRA DE NEGÓCIO (em PT) em todo código novo ou alterado:
     • O QUÊ o trecho faz
     • O PORQUÊ (a regra de negócio por trás)
@@ -149,14 +152,15 @@ O token de acesso ao banco de PRODUCAO e COMPARTILHADO entre a IA do Jonathan
 ANTES de qualquer DDL/DML manual no banco (view, funcao, trigger, INSERT/UPDATE/DELETE):
 
   SELECT alissonerp.assinar_mudanca_banco(
-    '<autor>',     -- quem AUTORIZOU: 'jonathan' | 'chefe'
+    '<autor>',     -- quem AUTORIZOU: 'alisson' | 'jonathan' | 'chefe' — SEMPRE quem de fato mandou (nunca assinar por outro)
     '<agente>',    -- ferramenta executora: 'claude-code' | 'ia-chefe'
     '<descricao>', -- o que muda, em linguagem clara
     '<sql>'        -- o SQL aplicado (resumo fiel)
   );
 
 E setar a etiqueta da conexao ANTES de conectar:  PGAPPNAME='claude-code-jonathan'
-(a IA do chefe deve usar a sua propria etiqueta, ex 'ia-chefe').
+(a IA do chefe deve usar a sua propria etiqueta, ex 'ia-chefe';
+sessoes do Alisson via Claude Code Web usam PGAPPNAME='claude-code-alisson' e autor 'alisson').
 
 Livro: alissonerp.log_mudancas_banco (append-only, criado na migration 303).
 Captura sozinho app_name + IP de origem + usuario. NUNCA pular a assinatura.
@@ -201,6 +205,7 @@ Ouro Total: SO deposito geral ID=1 (outros sao operadores)
 Gemini: gemini-2.5-flash (2.0-flash descontinuado)
 IA virgula: normalizar "2,02" -> 2.02 antes de comparar
 IA float: Math.abs(a-b) < 0.005 em vez de ===
+postgres.js: BIGINT volta como STRING, INTEGER como number — `vendas_erp.vendedor_id` e `public.vendedores.id_vendedor` sao BIGINT, `fechamento_comissao_itens.consultora_id` e INTEGER. Cruzar as duas fontes numa chave de Map/Set SEM `::int` no SELECT duplica a linha (cada vendedora apareceu 2x no extrato de comissao, 03/08/2026). tsc NAO pega — so o driver rodando pega. Sempre `::int` (ou `Number()`) antes de virar chave.
 contatos.id_contato (NAO contatos.id) — PK real
 public.produtos.id_produto (NAO id) — PK real, BIGINT
 directus.ordens.peso_metal_negocido (TYPO sem A)
@@ -219,6 +224,7 @@ Estoque comercial: inserir item de venda CRIA RESERVA (nunca saida direta) — r
 Curva precificacao: chamar aplicarCurvaProduto() apos criar/editar produto com peso+categoria (src/lib/aplicar-curva-produto.ts)
 Vale-troca: vale > total venda gera NOVO vale com troco (vale_origem_id rastreia cadeia) — cada vale usado UMA vez
 Orcamento rascunho QuadradoCanal (Bordas Elevadas): 6 useEffects de auto-ajuste em OrcamentoClient.tsx (linhas ~911, ~968, ~988, ~1082, ~1135, ~1153) DEVEM começar com `if (isHydratingRef.current) return;` — sem isso, ao reabrir rascunho o sistema recalcula canalWidth/stoneRows/stoneCount e sobrescreve modelo/valor/peso negociados. Bug recorrente desde v2.42 — NUNCA REMOVER OS GATES.
+ORDEM DE ALIANCA NAO NASCE SOZINHA (362, 27/07/2026): approveVenda NAO cria ordem quando orcamentos.tipo='alianca' — criarOrdemDoOrcamento so cria com opts.aroConfirmado, flag passada SO por POST /api/vendas/[id]/abrir-ordem (confirmacao do aro de cada alianca). Peca personalizada segue automatica. Trocar o aro recalcula peso (src/lib/orcamento-aro-peso.ts, por DELTA) e altera ordens.peso_metal_negociado, NUNCA orcamentos.peso/valor (base do preco). Ficha 2 so conta se quantidade=2. Ver docs/regras-negocio/comercial.md §12
 ABC: classificar por receita_total_12m (ultimos 12 meses), NUNCA por capital (estoque * preco) — produto sem venda em 12m = C automatico
 parametros_sistema: usar PARAM.X de src/lib/parametros.ts, NUNCA literals como deposito_id=1
 reposicao de estoque: verificar SUM(disponivel) pre-reserva, nao SUM(saldo)
@@ -228,6 +234,14 @@ audit: logAudit(tx, ...) dentro da mesma transacao — nunca falha a operacao pr
 catches silenciosos: usar useErrorStore.getState().push() em vez de .catch(() => {})
 defineRoute: novo padrao de API route — ver src/lib/api-handler.ts
 fila_sync: erros Tiny vao para fila_sync_externo, nao bloqueiam a operacao principal
+itens_inventario_comercial.diferenca: coluna GERADA pelo banco — NUNCA escrever nela via UPDATE (mig 336 blinda)
+inventario comercial: cartoes Faltando/Excesso somam TUDO (v2.83.6) — Faltando = contadas a menos + nunca contadas; Excesso = contadas a mais + "fora do inventario". Chips "Sem contagem"/"Fora do invent." sao RECORTE do cartao, nao contagem paralela; filtrar por Excesso mostra as duas listas (mostraForaInventario aceita "excesso")
+inventario comercial: "conferido" != "contado" — marcar conferido NUNCA grava quantidade_contada (bug v2.79 gravava qtd do sistema = contagem falsa)
+inventario comercial: NAO ajusta estoque ao concluir (auditoria pura); roles em ROLES_INVENTARIO_* de src/lib/roles.ts; regras em docs/regras-negocio/comercial.md §7
+inventario comercial: PECA PRONTA filtrada na LEITURA via condPecaPronta() de src/lib/inventario-peca-pronta.ts (GET/concluir/contar/app) — vale ate para inventario aberto antes da regra; snapshot novo tambem exclui (v2.81.4)
+inventario comercial: fechar pendencia como resolvida EXIGE desfecho_tipo (mig 338) — venda_sem_baixa valida a venda e EFETIVA a reserva junto com a saida (senao disponivel cai em dobro); desfecho com movimento nao se desfaz (409, exige estorno)
+baixa manual de estoque NAO EXISTE por cargo (v2.81.3) — /movimentos recusa QUALQUER saida (403, ate admin/dev); movimento so por CONCILIACAO com documento conferido (falta<->venda sem baixa, sobra<->devolucao sem entrada), exclusiva de ROLES_BAIXA_MANUAL (admin/dev) + dupla confirmacao; desfecho 'perda' do INVENTARIO = so registro, SEM baixa
+PERDA/EXTRAVIO (354, 21/07/2026): UNICA baixa manual do ERP, endpoint proprio /api/estoque-comercial/perda, gate por IDENTIDADE (isMasterAdmin -> parametros_sistema.MASTER_ADMIN_USER_ID), NUNCA por role — nem admin nem dev; estorno de perda tambem so o master; limitada ao DISPONIVEL; motivo 'perda_extravio' em src/lib/perda-extravio.ts; ver docs/regras-negocio/comercial.md §11
 ```
 
 ---
@@ -314,6 +328,7 @@ gerente_loja     -> ordens + protocolo + auditoria loja + precificacao
 ourives          -> PCP (so deposito dele)
 motoboy          -> protocolo (so cria, NUNCA conclui)
 consultora       -> so suas ordens + corrige reprovadas
+operador_inventario -> VE tudo do estoque + conta via RFID; NAO edita nada direto (abrir/concluir/cancelar inventario = solicitacao aprovada pelo admin, mig 339)
 pcp              -> PCP completo
 
 Fonte de verdade: alissonerp.usuarios.role (VARCHAR(50))

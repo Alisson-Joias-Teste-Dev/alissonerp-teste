@@ -27,7 +27,7 @@
 
 import sql from "@/lib/db";
 import { verificarReposicaoAutomatica } from "@/lib/reposicao-automatica";
-import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { getDescontoThreshold, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
 import { reverterAplicacaoVale } from "@/lib/vale-troca";
 import { orcamentoFichaToDados, nomeItemOrdem } from "@/lib/orcamento-ficha-to-dados";
 
@@ -58,102 +58,11 @@ const SITUACAO_TINY: Record<string, number> = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Tiny OAuth2 token refresh (extraído do PATCH /api/vendas/[id])
+// Tiny OAuth2 — extraído para src/lib/tiny-auth.ts (módulo leve)
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function readTinyToken(): Promise<string | null> {
-  const [row] = await sql`
-    SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_bearer_token'
-  `;
-  if (!row?.valor_encrypted) return null;
-  let token: string;
-  try { token = JSON.parse(row.valor_encrypted); } catch { token = String(row.valor_encrypted); }
-  return token.replace(/"/g, "").trim() || null;
-}
-
-async function refreshTinyToken(): Promise<string | null> {
-  const [ciRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_client_id'`;
-  const [csRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_client_secret'`;
-  if (!ciRow?.valor_encrypted || !csRow?.valor_encrypted) return null;
-
-  let clientId: string, clientSecret: string;
-  try { clientId = JSON.parse(ciRow.valor_encrypted); } catch { clientId = String(ciRow.valor_encrypted); }
-  try { clientSecret = JSON.parse(csRow.valor_encrypted); } catch { clientSecret = String(csRow.valor_encrypted); }
-  clientId = clientId.replace(/"/g, "").trim();
-  clientSecret = clientSecret.replace(/"/g, "").trim();
-
-  const [rtRow] = await sql`SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_refresh_token'`;
-  const attempts: URLSearchParams[] = [];
-  if (rtRow?.valor_encrypted) {
-    let rt: string;
-    try { rt = JSON.parse(rtRow.valor_encrypted); } catch { rt = String(rtRow.valor_encrypted); }
-    rt = rt.replace(/"/g, "").trim();
-    if (rt) {
-      attempts.push(new URLSearchParams({
-        grant_type: "refresh_token", refresh_token: rt,
-        client_id: clientId, client_secret: clientSecret,
-      }));
-    }
-  }
-  attempts.push(new URLSearchParams({
-    grant_type: "client_credentials",
-    client_id: clientId, client_secret: clientSecret,
-  }));
-
-  for (const body of attempts) {
-    try {
-      const res = await fetch("https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!res.ok) continue;
-      const tokens = await res.json() as { access_token: string; refresh_token?: string; expires_in?: number };
-      await sql`INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted) VALUES ('tiny_bearer_token', ${JSON.stringify(tokens.access_token)}) ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(tokens.access_token)}`;
-      if (tokens.refresh_token) {
-        await sql`INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted) VALUES ('tiny_refresh_token', ${JSON.stringify(tokens.refresh_token)}) ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(tokens.refresh_token)}`;
-      }
-      if (tokens.expires_in) {
-        const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
-        await sql`INSERT INTO alissonerp.configuracoes_secrets (chave, valor_encrypted) VALUES ('tiny_token_expires_at', ${JSON.stringify(expiresAt)}) ON CONFLICT (chave) DO UPDATE SET valor_encrypted = ${JSON.stringify(expiresAt)}`;
-      }
-      return tokens.access_token;
-    } catch { continue; }
-  }
-  return null;
-}
-
-export async function ensureTinyToken(): Promise<string> {
-  let token = await readTinyToken();
-  if (!token) {
-    const refreshed = await refreshTinyToken();
-    if (!refreshed) throw new Error("Token do Tiny não configurado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'.");
-    token = refreshed;
-  }
-
-  // Verificação proativa: token expira em < 10 min? Renova antes
-  const [expiresRow] = await sql`
-    SELECT valor_encrypted FROM alissonerp.configuracoes_secrets WHERE chave = 'tiny_token_expires_at'
-  `;
-  if (expiresRow?.valor_encrypted) {
-    let expiresAtIso: string;
-    try { expiresAtIso = JSON.parse(expiresRow.valor_encrypted); } catch { expiresAtIso = String(expiresRow.valor_encrypted); }
-    expiresAtIso = expiresAtIso.replace(/"/g, "").trim();
-    const expiresAt = new Date(expiresAtIso);
-    if (!isNaN(expiresAt.getTime()) && expiresAt.getTime() - Date.now() < 10 * 60 * 1000) {
-      const newToken = await refreshTinyToken();
-      if (newToken) {
-        token = newToken;
-      } else if (expiresAt.getTime() < Date.now()) {
-        // Token já expirou E o refresh falhou — não adianta tentar enviar
-        throw new Error("Token do Tiny expirado. Vá em Configurações > Integrações e clique 'Reconectar Tiny'.");
-      }
-    }
-  }
-
-  return token;
-}
+import { ensureTinyToken, refreshTinyToken } from "@/lib/tiny-auth";
+export { ensureTinyToken, refreshTinyToken };
 
 // ═══════════════════════════════════════════════════════════════════════════
 // sendToTiny — envia pedido pro Tiny (idempotente)
@@ -347,9 +256,30 @@ export async function sendToTiny(vendaId: number): Promise<void> {
 // Criação automática de ordem a partir de orçamento (extraído do PATCH)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * REGRA DE NEGÓCIO (27/07/2026, Jonathan) — ORDEM DE ALIANÇA NÃO NASCE SOZINHA.
+ *
+ * O QUE: orçamento de aliança (`orcamentos.tipo = 'alianca'`) só gera ordem
+ * quando `opts.aroConfirmado` é true — o que acontece exclusivamente pelo
+ * endpoint POST /api/vendas/[id]/abrir-ordem, depois de alguém confirmar a
+ * numeração do aro de cada aliança. A aprovação da venda (approveVenda) chama
+ * esta função SEM a flag, então a aliança sai daqui sem ordem, de propósito.
+ *
+ * POR QUE: o aro é obrigatório no orçamento, mas na venda o cliente muitas
+ * vezes ainda não sabe o tamanho do dedo. A consultora digitava um número
+ * qualquer para conseguir fechar a venda e a ordem nascia aqui no mesmo
+ * instante — a fábrica recebia a numeração chutada e produzia no tamanho
+ * errado.
+ *
+ * IMPACTO SE A FLAG FOR REMOVIDA/IGNORADA: volta a criação automática e o bug
+ * do tamanho errado na fábrica volta com ela. Peça personalizada
+ * (`tipo != 'alianca'`) NÃO passa por esta trava — continua automática, porque
+ * não tem aro para confirmar.
+ */
 export async function criarOrdemDoOrcamento(
   vendaId: number,
-  userId: string
+  userId: string,
+  opts: { aroConfirmado?: boolean } = {}
 ): Promise<{ id: number; numero_ordem: string } | null> {
   // Ficha técnica COMPLETA (mesmos campos do antigo inline do PATCH /api/vendas/[id]):
   // sem os campos de perfil/friso/canal/pedra a ordem nasce com ficha incompleta
@@ -369,13 +299,33 @@ export async function criarOrdemDoOrcamento(
            ft.friso_largura, ft.friso_profundidade, ft.friso_offset,
            ft.canal_largura, ft.canal_borda_altura, ft.chanfro_tamanho,
            ft.pedra_fileiras, ft.pedra_drill, ft.pedra_meia_lua,
-           ft.pedra_volta_completa, ft.tipo_pedra
+           ft.pedra_volta_completa, ft.tipo_pedra,
+           -- Peso das FICHAS (anel 1 + anel 2). Para aliança é a mesma conta que
+           -- alimenta orcamentos.peso (pricing.weight + pricing2.weight), com uma
+           -- diferença que importa: quando o aro é confirmado diferente do orçado,
+           -- as fichas já estão com o peso do aro REAL e o orcamentos.peso segue
+           -- sendo o do orçamento (base do preço, que não muda). A ordem tem que
+           -- sair com o peso da ficha, senão o ourives recebe grama que não fecha.
+           (SELECT COALESCE(SUM(f.peso_estimado), 0)
+              FROM alissonerp.orcamento_fichas_tecnicas f
+             WHERE f.id IN (o.ficha_tecnica_id, o.ficha_tecnica_2_id)) AS peso_fichas_total
     FROM alissonerp.vendas_erp v
     LEFT JOIN alissonerp.orcamentos o ON o.id = v.orcamento_id
     LEFT JOIN alissonerp.orcamento_fichas_tecnicas ft ON ft.id = o.ficha_tecnica_id
     WHERE v.id = ${vendaId} AND v.orcamento_id IS NOT NULL
   `;
   if (!vendaOrc?.orc_id) return null;
+
+  // Trava da aliança (ver bloco de regra acima da função). Fica ANTES de tudo:
+  // nenhuma escrita acontece quando a ordem não pode nascer ainda.
+  if (vendaOrc.tipo === "alianca" && !opts.aroConfirmado) {
+    console.log(
+      `[criarOrdemDoOrcamento] venda=${vendaId}: orçamento de aliança — ordem NÃO criada automaticamente. ` +
+      `Aguardando confirmação do aro em /api/vendas/${vendaId}/abrir-ordem.`
+    );
+    return null;
+  }
+
   if (vendaOrc.ordem_gerada_id) {
     // Ordem já foi criada — idempotente
     const [existente] = await sql`
@@ -409,7 +359,13 @@ export async function criarOrdemDoOrcamento(
     const numeroOrdem = "C-" + String(nextNum).padStart(4, "0");
     const isPar = Number(vendaOrc.quantidade) === 2;
     const pesoItem1 = Number(vendaOrc.peso_estimado ?? vendaOrc.peso ?? 0);
-    const pesoNeg = Number(vendaOrc.peso ?? vendaOrc.peso_estimado ?? 0);
+    // Aliança: peso da ORDEM = soma das fichas (peso do aro confirmado).
+    // Peça personalizada: segue no orcamentos.peso, comportamento original.
+    // Fallback no orcamentos.peso protege ficha legada sem peso_estimado.
+    const pesoFichas = Number(vendaOrc.peso_fichas_total ?? 0);
+    const pesoNeg = vendaOrc.tipo === "alianca" && pesoFichas > 0
+      ? pesoFichas
+      : Number(vendaOrc.peso ?? vendaOrc.peso_estimado ?? 0);
 
     const [ordem] = await tx`
       INSERT INTO alissonerp.ordens (
@@ -638,10 +594,14 @@ export async function approveVenda(
   }
 
   // ── Bloquear aprovação se cartão foi liberado mas sem pagamento ainda ────
+  // REGRA DE NEGÓCIO (Fase 5, 15/07): limite do cartão vem de
+  // configuracoes_sistema.limite_desconto_cartao_pct (fallback 20% no código
+  // se a chave ainda não existir) — antes era o literal 20 hardcoded aqui.
+  const limiteCartaoApprove = await buscarLimiteDescontoCartao();
   const [cartaoBlock] = await sql`
     SELECT
       (SELECT desconto_cartao_aprovado_por FROM alissonerp.vendas_erp WHERE id = ${vendaId}) IS NOT NULL AS cartao_ja_liberado,
-      EXISTS(SELECT 1 FROM alissonerp.itens_venda_erp WHERE venda_id = ${vendaId} AND pct_desconto > 20) AS tem_desconto_cartao,
+      EXISTS(SELECT 1 FROM alissonerp.itens_venda_erp WHERE venda_id = ${vendaId} AND pct_desconto > ${limiteCartaoApprove}) AS tem_desconto_cartao,
       EXISTS(SELECT 1 FROM alissonerp.pagamentos_venda WHERE venda_id = ${vendaId} AND status = 'confirmado') AS tem_pagamento_confirmado
   `;
   if (cartaoBlock?.cartao_ja_liberado && cartaoBlock?.tem_desconto_cartao && !cartaoBlock?.tem_pagamento_confirmado) {
@@ -657,6 +617,32 @@ export async function approveVenda(
       VALUES ('approveVenda_bloqueado', ${JSON.stringify({ vendaId, userId, motivo: "desconto_pendente" })}::text::jsonb, 409, 'desconto >${approveVendaThreshold}% sem aprovação')
     `.catch((e) => console.error("[approveVenda] webhook_log falhou:", e));
     throw new Error(`Venda tem desconto acima de ${approveVendaThreshold}% aguardando aprovação. Solicite aprovação de desconto antes de prosseguir.`);
+  }
+
+  // ── Bloquear aprovação se sobra saldo SEM forma de pagamento declarada ────
+  // REGRA DE NEGÓCIO (06/08/2026): não se aprova venda com saldo que ninguém
+  // declarou como vai ser pago. A venda 15861 foi aprovada com R$ 2.000 de Pix
+  // num total de R$ 20.524; o gatilho fn_venda_gerar_conta_receber caiu no ELSE
+  // genérico e INVENTOU um crediário vencendo na data de entrega.
+  //
+  // A conta e as decisões de projeto vivem em verificarSaldoDeclarado() (fim
+  // deste arquivo). Aqui só o bloqueio.
+  //
+  // ⚠️ NÃO gravar em webhook_log aqui. A 1ª versão desta trava (PR #142) fazia
+  // um INSERT copiando o formato do guard de desconto acima — e aquele INSERT
+  // tem `'texto >${var}%'` com interpolação DENTRO de aspas, o que faz o driver
+  // mandar 2 parâmetros para uma query que só usa 1. Isso é recusado no meio do
+  // protocolo e pode deixar a conexão do pool embaralhada. Produção caiu em
+  // 06/08/2026 logo após aquele deploy. A causa nunca foi provada (não houve
+  // log), mas esta versão não escreve NADA no banco — só lê. Se for reintroduzir
+  // registro de auditoria aqui, use uma query com parâmetros de verdade e teste
+  // com build de produção, não com `npm run dev`.
+  const saldo = await verificarSaldoDeclarado(vendaId);
+  if (!saldo.ok) {
+    console.error(
+      `[approveVenda] BLOQUEADO venda=${vendaId}: falta ${saldo.falta} de ${saldo.total} sem forma de pagamento declarada`,
+    );
+    throw new Error(saldo.mensagem);
   }
 
   // 1. Envia pro Tiny (noop se tiny_pedido_id já existe)
@@ -917,4 +903,112 @@ export async function estornarVenda(
       cr_canceladas: crResult.length,
     };
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// verificarSaldoDeclarado — a venda pode ser aprovada com este saldo?
+//
+// REGRA DE NEGÓCIO (06/08/2026, decisão do Jonathan): não se aprova venda que
+// tenha saldo SEM forma de pagamento declarada. Se falta dinheiro, alguém tem
+// que dizer COMO ele vai entrar (Pix, cartão, vale, ouro, ou "A Receber") —
+// não o sistema adivinhar. Sem piso: barra qualquer diferença acima de 1 centavo.
+//
+// Conta: soma de TODOS os pagamentos lançados (`confirmado` + `pendente`,
+// qualquer forma) contra `total_venda`.
+//   • Pendente CONTA: o fluxo normal aprova com o Pix/cartão do Mercado Pago
+//     ainda aguardando o webhook, que confirma segundos depois. Exigir
+//     "confirmado" barraria ~429 vendas boas por trimestre.
+//   • `estornado`/`cancelado` NÃO contam: deixaram de ser pagamento.
+//   • `credi_tipo` NÃO é exigido: 4 em cada 10 "A Receber" da loja são lançados
+//     sem prazo. A trava garante que o saldo EXISTE declarado, não o prazo.
+//
+// ── BLINDAGEM (por que este código é chato de propósito) ──────────────────
+// Esta função é uma CONFERÊNCIA. Conferência não pode derrubar a loja.
+//   1) SÓ LÊ. Nenhum INSERT/UPDATE. Uma escrita a mais no caminho da aprovação
+//      é superfície de risco sem contrapartida.
+//   2) UMA query, UM parâmetro, e o parâmetro é validado como inteiro finito
+//      ANTES de encostar no driver — `undefined`/NaN nunca chegam ao postgres.js
+//      (é o erro `UNDEFINED_VALUE`, que aborta a query no meio da escrita e pode
+//      deixar a conexão do pool inutilizável para as requisições seguintes).
+//   3) FALHA ABERTA. Qualquer erro inesperado → devolve ok:true e deixa a venda
+//      aprovar, registrando no log. Uma trava de conferência que derruba o
+//      sistema é pior que a falha que ela previne.
+//   4) CHAVE DE DESLIGAR sem deploy: `configuracoes_unificado.chave =
+//      'trava_saldo_nao_declarado'` com valor 'false'/'0'/'off' desliga na hora.
+//      Ausente = ligada (é o padrão).
+//
+// IMPACTO SE ALTERADO: mexer na conta aqui muda a trava nos dois lugares que a
+// usam (approveVenda e a rota solicitar-aprovacao). Não copiar a query pra outro
+// arquivo. E não remover o try/catch — ele é o que garante o item 3.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface SaldoDeclarado {
+  ok: boolean;
+  total: number;
+  declarado: number;
+  falta: number;
+  mensagem: string;
+}
+
+/** Resposta de "pode passar" — usada também quando a trava falha ou está desligada. */
+function saldoLiberado(total = 0, declarado = 0): SaldoDeclarado {
+  return { ok: true, total, declarado, falta: 0, mensagem: "" };
+}
+
+export async function verificarSaldoDeclarado(vendaId: number): Promise<SaldoDeclarado> {
+  // (2) O parâmetro nunca sai daqui sem ser um inteiro de verdade.
+  const id = Number(vendaId);
+  if (!Number.isInteger(id) || id <= 0) {
+    console.error(`[verificarSaldoDeclarado] vendaId invalido (${String(vendaId)}) — liberando`);
+    return saldoLiberado();
+  }
+
+  try {
+    const [row] = await sql`
+      SELECT
+        v.total_venda::numeric AS total_venda,
+        COALESCE((
+          SELECT SUM(p.valor) FROM alissonerp.pagamentos_venda p
+          WHERE p.venda_id = v.id AND p.status IN ('confirmado', 'pendente')
+        ), 0)::numeric AS total_declarado,
+        COALESCE((
+          SELECT cs.valor FROM alissonerp.configuracoes_unificado cs
+          WHERE cs.chave = 'trava_saldo_nao_declarado'
+        ), 'true') AS trava_ligada
+      FROM alissonerp.vendas_erp v
+      WHERE v.id = ${id}
+    `;
+
+    if (!row) return saldoLiberado();
+
+    // (4) Chave de desligar — vale na hora, sem deploy.
+    const ligada = !["false", "0", "off", "nao", "não"].includes(
+      String(row.trava_ligada ?? "true").trim().toLowerCase(),
+    );
+    if (!ligada) {
+      console.error(`[verificarSaldoDeclarado] venda=${id}: trava DESLIGADA por configuracoes_unificado`);
+      return saldoLiberado(Number(row.total_venda ?? 0), Number(row.total_declarado ?? 0));
+    }
+
+    const total = Number(row.total_venda ?? 0);
+    const declarado = Number(row.total_declarado ?? 0);
+    if (!Number.isFinite(total) || !Number.isFinite(declarado)) return saldoLiberado();
+
+    const falta = Number((total - declarado).toFixed(2));
+    // Tolerância de R$ 0,01 — mesma dos demais guards de pagamento do sistema.
+    if (falta <= 0.01) return saldoLiberado(total, declarado);
+
+    const faltaFmt = falta.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    return {
+      ok: false,
+      total,
+      declarado,
+      falta,
+      mensagem: `Falta ${faltaFmt} sem forma de pagamento. Lance o valor que falta (ou declare como "A Receber") antes de aprovar a venda.`,
+    };
+  } catch (err) {
+    // (3) FALHA ABERTA — de propósito. Ver blindagem no cabeçalho.
+    console.error(`[verificarSaldoDeclarado] ERRO na venda=${id}, liberando a aprovacao:`, err);
+    return saldoLiberado();
+  }
 }

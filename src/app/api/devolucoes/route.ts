@@ -2,13 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
+import { hasRole, ROLES_DEVOLUCAO_ABRIR } from "@/lib/roles";
 import {
   criarDevolucao,
   type CriarDevolucaoOpts,
   type ItemDevolucaoInput,
   type TipoCompensacao,
 } from "@/lib/devolucoes";
+// Ownership (escopo "só as vendas dela"): consultora só lista/cria devolução das
+// próprias vendas. Reusa os helpers já usados no módulo de vendas (auth-vendas).
+import { getUserVendedorId, isVendasFullAccess, requireVendaOwnership } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
 import { zodError, IdSchema, PercentSchema } from "@/lib/schemas/common";
 
@@ -41,7 +44,7 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
 
   const role = await getUserRole(user.id);
-  if (!hasRole(role, ROLES_DEVOLUCAO)) {
+  if (!hasRole(role, ROLES_DEVOLUCAO_ABRIR)) {
     return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
   }
 
@@ -60,6 +63,22 @@ export async function GET(req: NextRequest) {
   // por nome do cliente, numero da devolucao e numero da venda.
   const busca = (searchParams.get("busca") ?? "").trim() || null;
 
+  // ESCOPO (só as vendas dela): consultora vê só as devoluções das próprias vendas;
+  // roles full (admin/dev/diretor/gerente_loja) veem todas (meuVendedorId = null).
+  // INLINE de propósito (NÃO usar ownershipWhereVendas): postgres@3 perde a inferência
+  // de fragmento quando o `sql` vem de outro módulo async — dava "syntax error at or
+  // near AND" e quebrava a listagem. Usamos o mesmo padrão parametrizado das outras
+  // condições do WHERE. Falha clara (401/403) se a consultora não tiver vendedor vinculado.
+  let meuVendedorId: number | null = null;
+  if (!isVendasFullAccess(role)) {
+    try {
+      meuVendedorId = await getUserVendedorId(user.id);
+    } catch (e) {
+      const st = (e as { status?: number }).status ?? 403;
+      return NextResponse.json({ error: (e as Error).message }, { status: st });
+    }
+  }
+
   const rows = await sql`
     SELECT d.id, d.numero, d.venda_id, d.tipo, d.motivo, d.status, d.tipo_compensacao,
            d.valor_total_devolvido, d.valor_retido, d.valor_compensacao,
@@ -77,6 +96,7 @@ export async function GET(req: NextRequest) {
            OR d.numero ILIKE '%' || ${busca} || '%'
            OR v.numero_venda ILIKE '%' || ${busca} || '%'
            OR c.nome ILIKE '%' || ${busca} || '%')
+      AND (${meuVendedorId}::int IS NULL OR v.vendedor_id = ${meuVendedorId})
     ORDER BY d.created_at DESC
     LIMIT ${limit} OFFSET ${offset}
   `;
@@ -93,6 +113,7 @@ export async function GET(req: NextRequest) {
            OR d.numero ILIKE '%' || ${busca} || '%'
            OR v.numero_venda ILIKE '%' || ${busca} || '%'
            OR c.nome ILIKE '%' || ${busca} || '%')
+      AND (${meuVendedorId}::int IS NULL OR v.vendedor_id = ${meuVendedorId})
   `;
 
   return NextResponse.json({
@@ -119,7 +140,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Nao autenticado" }, { status: 401 });
 
   const role = await getUserRole(user.id);
-  if (!hasRole(role, ROLES_DEVOLUCAO)) {
+  if (!hasRole(role, ROLES_DEVOLUCAO_ABRIR)) {
     return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
   }
 
@@ -127,6 +148,16 @@ export async function POST(req: NextRequest) {
   const parsed = DevolucaoPostSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;
+
+  // ESCOPO (só as vendas dela): consultora só cria devolução da PRÓPRIA venda.
+  // Roles full (admin/dev/diretor/gerentes) passam direto. Lança 403 se não for
+  // dona, 404 se a venda não existir. Reusa a mesma trava do módulo de vendas.
+  try {
+    await requireVendaOwnership({ id: user.id, role: role ?? "", email: "" }, body.venda_id);
+  } catch (e) {
+    const st = (e as { status?: number }).status ?? 403;
+    return NextResponse.json({ error: (e as Error).message }, { status: st });
+  }
 
   // REGRA DE NEGÓCIO: devolução só pode ser criada para vendas entregues
   // Validação server-side para evitar bypass via API direta

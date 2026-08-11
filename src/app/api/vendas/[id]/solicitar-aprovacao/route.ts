@@ -15,8 +15,9 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { submeterVendaParaAprovacaoCredito } from "@/lib/vendas-credito-aprovar";
-import { approveVenda } from "@/lib/vendas-aprovar";
-import { avaliarRegras, criarTarefaAprovacao, getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { HttpError } from "@/lib/devolucoes";
+import { approveVenda, verificarSaldoDeclarado } from "@/lib/vendas-aprovar";
+import { avaliarRegras, criarTarefaAprovacao, getDescontoThreshold, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
@@ -83,8 +84,22 @@ export async function POST(
     if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
     throw e;
   }
-  // ── Bloquear solicitação de crédito/gerente se desconto > threshold não aprovado ─
-  if (tipo !== "desconto" && venda.tem_desconto_alto && !venda.desconto_aprovado_por) {
+  // ── Bloquear solicitação de CRÉDITO se desconto > threshold não aprovado ─
+  // REGRA DE NEGÓCIO: o valor do "A Receber" é derivado do desconto — aprovar
+  // crédito antes seria aprovar um número que ainda pode mudar. Por isso o
+  // crédito continua esperando o desconto ser decidido.
+  //
+  // MUDANÇA (16/07, decisão do Jonathan): `cartao_desconto` saiu deste bloqueio.
+  // ANTES: a tela mostrava os 2 botões (desconto + cartão) mas o de cartão dava
+  // 409 aqui — a consultora tinha que aprovar o desconto, voltar e pedir o cartão.
+  // AGORA: as 2 podem ser pedidas juntas ("Solicitar todas as aprovações").
+  // O risco de aprovar cartão de um desconto que depois cai foi coberto pela
+  // regra irmã: REPROVAR o desconto reprova a tarefa de cartão em cascata
+  // (ver bloco `desconto_acima` em tarefas/[id]/aprovacao/route.ts). Aprovar o
+  // desconto NÃO aprova o cartão — cada uma tem sua decisão.
+  // IMPACTO SE REVERTIDO: o botão "Solicitar todas" volta a falhar em 409.
+  const bloqueiaPorDescontoPendente = tipo !== "desconto" && tipo !== "cartao_desconto";
+  if (bloqueiaPorDescontoPendente && venda.tem_desconto_alto && !venda.desconto_aprovado_por) {
     return NextResponse.json(
       { error: `Esta venda tem desconto acima de ${descontoThreshold}%. Solicite aprovação de desconto primeiro (tipo=desconto).` },
       { status: 409 }
@@ -111,6 +126,16 @@ export async function POST(
       SELECT numero_venda, total_venda FROM alissonerp.vendas_erp WHERE id = ${vendaId}
     `;
 
+    // REGRA DE NEGÓCIO (Fase 5, 15/07): o gate de "desconto passou do limite?"
+    // agora é EXPLÍCITO aqui — avaliarRegras não filtra mais por percentual
+    // (condicao_json.percentual deixou de ser lido pra desconto_acima). O
+    // threshold é 100% o pessoal do vendedor (descontoThreshold, já calculado
+    // no topo da função). IMPACTO SE REMOVIDO: toda venda com QUALQUER desconto
+    // > 0 criaria tarefa de aprovação, mesmo dentro do limite do vendedor.
+    if (maiorDesconto <= descontoThreshold) {
+      return NextResponse.json({ ok: true, aguardando_aprovacao_desconto: false, message: "Nenhuma regra de aprovação aplicável" });
+    }
+
     const regras = await avaliarRegras({
       tipo: "desconto_acima",
       venda_id: vendaId,
@@ -136,19 +161,30 @@ export async function POST(
       return `• ${it.sku ?? "?"} — ${it.nome_produto ?? it.sku ?? "Produto"}\n  Tabela: ${sem} | Desconto: ${Number(it.pct_desconto).toFixed(0)}% | Final: ${com}`;
     }).join("\n");
 
-    const tarefaId = await criarTarefaAprovacao(
-      regra,
-      {
-        tipo: "desconto_acima",
-        venda_id: vendaId,
-        percentual_desconto: maiorDesconto,
-        valor_venda: Number(vendaInfo?.total_venda ?? 0),
-        venda_numero: vendaInfo?.numero_venda ?? `#${vendaId}`,
-        venda_total: Number(vendaInfo?.total_venda ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
-        itens_desconto: linhasItens,
-      },
-      user.id,
-    );
+    // REGRA DE NEGÓCIO (Fase 3g.3): sem aprovador de desconto configurado
+    // (política config-first), `criarTarefaAprovacao` lança HttpError(409) —
+    // tratado abaixo pra mensagem chegar ao front, mesmo padrão do crédito (3g.2).
+    let tarefaId: number;
+    try {
+      tarefaId = await criarTarefaAprovacao(
+        regra,
+        {
+          tipo: "desconto_acima",
+          venda_id: vendaId,
+          percentual_desconto: maiorDesconto,
+          valor_venda: Number(vendaInfo?.total_venda ?? 0),
+          venda_numero: vendaInfo?.numero_venda ?? `#${vendaId}`,
+          venda_total: Number(vendaInfo?.total_venda ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+          itens_desconto: linhasItens,
+        },
+        user.id,
+      );
+    } catch (err) {
+      if (err instanceof HttpError) {
+        return NextResponse.json({ error: err.message }, { status: err.status });
+      }
+      return internalError("[POST /api/vendas/[id]/solicitar-aprovacao] desconto", err);
+    }
 
     await sql`
       UPDATE alissonerp.vendas_erp
@@ -169,9 +205,18 @@ export async function POST(
       return NextResponse.json({ ok: true, aguardando_aprovacao_cartao: true, message: "Já existe aprovação pendente para cartão de crédito." });
     }
 
+    // REGRA DE NEGÓCIO (Fase 5, 15/07): limite do cartão vem de
+    // configuracoes_sistema.limite_desconto_cartao_pct (fallback 20% no código
+    // se a chave ainda não existir) — antes era o literal 20 hardcoded aqui.
+    // MERGE-NOTA: src/lib/aprovacao-regras.ts (fora do meu escopo de arquivos)
+    // ainda lê de alissonerp.configuracoes_sistema, não da tabela unificada
+    // configuracoes_unificado — mesmo problema achado em src/lib/pagamento-motoboy.ts.
+    // Sinalizado no relatório final; não corrigido aqui por estar fora da lista de arquivos.
+    const limiteCartao = await buscarLimiteDescontoCartao();
+
     // BLINDAGEM: gate de cartão só se a venda tem pagamento em Cartão de Crédito
-    // de fato pendente. Sem isso, venda paga em Pix/Dinheiro com desconto >20%
-    // disparava aprovação de cartão indevidamente (caso da venda 15516).
+    // de fato pendente. Sem isso, venda paga em Pix/Dinheiro com desconto acima
+    // do limite disparava aprovação de cartão indevidamente (caso da venda 15516).
     const [pagCartao] = await sql`
       SELECT 1 FROM alissonerp.pagamentos_venda
       WHERE venda_id = ${vendaId} AND forma = 'Cartão de Crédito' AND status = 'pendente'
@@ -183,11 +228,11 @@ export async function POST(
 
     const itensDesconto = await sql`
       SELECT pct_desconto FROM alissonerp.itens_venda_erp
-      WHERE venda_id = ${vendaId} AND pct_desconto > 20
+      WHERE venda_id = ${vendaId} AND pct_desconto > ${limiteCartao}
       ORDER BY pct_desconto DESC
     `;
     if (itensDesconto.length === 0) {
-      return NextResponse.json({ ok: true, message: "Nenhum item com desconto acima de 20%." });
+      return NextResponse.json({ ok: true, message: `Nenhum item com desconto acima de ${limiteCartao}%.` });
     }
 
     const maiorDesconto = Math.max(...itensDesconto.map(i => Number(i.pct_desconto)));
@@ -212,7 +257,7 @@ export async function POST(
     const itensDetalhe = await sql`
       SELECT sku, nome_produto, preco_lista, pct_desconto, preco_unitario, quantidade
       FROM alissonerp.itens_venda_erp
-      WHERE venda_id = ${vendaId} AND pct_desconto > 20
+      WHERE venda_id = ${vendaId} AND pct_desconto > ${limiteCartao}
       ORDER BY id
     `;
     const linhasItens = itensDetalhe.map((it) => {
@@ -221,19 +266,30 @@ export async function POST(
       return `• ${it.sku ?? "?"} — ${it.nome_produto ?? it.sku ?? "Produto"}\n  Tabela: ${sem} | Desconto: ${Number(it.pct_desconto).toFixed(0)}% | Final: ${com}`;
     }).join("\n");
 
-    const tarefaId = await criarTarefaAprovacao(
-      regra,
-      {
-        tipo: "cartao_desconto",
-        venda_id: vendaId,
-        percentual_desconto: maiorDesconto,
-        valor_venda: Number(vendaInfo?.total_venda ?? 0),
-        venda_numero: vendaInfo?.numero_venda ?? `#${vendaId}`,
-        venda_total: Number(vendaInfo?.total_venda ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
-        itens_desconto: linhasItens,
-      },
-      user.id,
-    );
+    // REGRA DE NEGÓCIO (Fase 3g.3): sem aprovador de cartão configurado
+    // (política config-first), `criarTarefaAprovacao` lança HttpError(409) —
+    // tratado abaixo pra mensagem chegar ao front, mesmo padrão do crédito (3g.2).
+    let tarefaId: number;
+    try {
+      tarefaId = await criarTarefaAprovacao(
+        regra,
+        {
+          tipo: "cartao_desconto",
+          venda_id: vendaId,
+          percentual_desconto: maiorDesconto,
+          valor_venda: Number(vendaInfo?.total_venda ?? 0),
+          venda_numero: vendaInfo?.numero_venda ?? `#${vendaId}`,
+          venda_total: Number(vendaInfo?.total_venda ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+          itens_desconto: linhasItens,
+        },
+        user.id,
+      );
+    } catch (err) {
+      if (err instanceof HttpError) {
+        return NextResponse.json({ error: err.message }, { status: err.status });
+      }
+      return internalError("[POST /api/vendas/[id]/solicitar-aprovacao] cartao_desconto", err);
+    }
 
     await sql`
       UPDATE alissonerp.vendas_erp
@@ -278,8 +334,34 @@ export async function POST(
         message: result.message,
       });
     } catch (err) {
+      // REGRA DE NEGÓCIO (Fase 3g.2): "aprovador de crédito não configurado" tem
+      // status/mensagem próprios (política config-first) — as demais mensagens
+      // de erro continuam genéricas via internalError, contrato idêntico ao de
+      // antes (mesmo padrão da Fase 3e em devolucoes/[id]/solicitar-aprovacao).
+      if (err instanceof HttpError) {
+        return NextResponse.json({ error: err.message }, { status: err.status });
+      }
       return internalError("[POST /api/vendas/[id]/solicitar-aprovacao]", err);
     }
+  }
+
+  // ── Saldo sem forma de pagamento declarada bloqueia a aprovação ───────────
+  // REGRA DE NEGÓCIO (06/08/2026): esta é a porta que a loja de fato usa para
+  // aprovar venda — o botão "Solicitar aprovação". Até aqui ela aprovava direto
+  // sem olhar saldo nenhum, e foi por ela que passou a venda 15861 (R$ 2.000 de
+  // Pix num total de R$ 20.524, R$ 18.524 sem plano nenhum).
+  //
+  // A trava DE VERDADE está no approveVenda (vale para os 8 caminhos que
+  // aprovam venda). Esta checagem existe só para a mensagem chegar à
+  // consultora: o catch abaixo usa internalError, que mascara qualquer erro em
+  // "Erro ao aprovar venda" — ela não saberia o que fazer.
+  //
+  // verificarSaldoDeclarado NUNCA lança (falha aberta) — ver o cabeçalho dela.
+  // IMPACTO SE REMOVIDO: a trava continua funcionando, mas a consultora recebe
+  // 502 "Erro ao aprovar venda" e abre chamado em vez de lançar o que falta.
+  const saldoDeclarado = await verificarSaldoDeclarado(vendaId);
+  if (!saldoDeclarado.ok) {
+    return NextResponse.json({ error: saldoDeclarado.mensagem }, { status: 409 });
   }
 
   // Sem "A Receber" — aprovar direto (qualquer role, incluindo consultora).

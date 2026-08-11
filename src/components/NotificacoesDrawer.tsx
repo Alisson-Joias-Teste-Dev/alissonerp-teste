@@ -11,7 +11,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X, Bell, BellRing } from "lucide-react";
 import { AprovacaoBottomSheet } from "@/components/AprovacaoBottomSheet";
 import { usePushSubscription } from "@/hooks/usePushSubscription";
@@ -57,6 +57,41 @@ function extrairTarefaId(link: string | null): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/**
+ * BLOCO 5 (jul/2026), P3(b) — "botão de decidir só quando dá pra decidir".
+ *
+ * O QUE: TODA notificação de tarefa (pedido de decisão OU o desfecho — ambas
+ * gravadas com `tipo: 'aprovacao'`, ver PATCH .../aprovacao e demais rotas
+ * que chamam criarNotificacao com esse tipo) caía no mesmo `tarefaIdAprov !=
+ * null ? <botão Aprovar>` — sem diferenciar "ainda dá pra decidir" de "isso
+ * já foi decidido". Resultado: quem SOLICITOU (ex.: consultora pedindo frete
+ * avulso) recebia a notificação do PRÓPRIO desfecho ("Frete avulso
+ * recusado") e via o botão "Aprovar →" nela — clicar abria o bottom-sheet e,
+ * antes do fix em AprovacaoBottomSheet.tsx, tentava decidir de novo (409).
+ *
+ * POR QUE checar aqui (e não só confiar no PATCH): a UI não deveria nem
+ * OFERECER a ação quando ela não é válida — o servidor recusar depois é a
+ * segunda linha de defesa, não a primeira.
+ *
+ * COMO: reusa GET /api/tarefas/[id] (já existe, já devolve `status` +
+ * `pode_decidir` calculado no servidor pro usuário logado — mesma
+ * autoridade do PATCH, nunca calculado no client). Busca 1x por tarefa
+ * (cache em `statusPorTarefa`, ver componente) só para notificações
+ * tipo='aprovacao' ainda não checadas. Botão só aparece quando o servidor
+ * confirma status 'aguardando_aprovacao' E pode_decidir=true PARA ESTE
+ * usuário — cobre tanto o caso do solicitante (pode_decidir=false) quanto o
+ * de um 2º/3º aprovador cuja aprovação específica já foi resolvida por
+ * outro (status deixa de ser 'aguardando_aprovacao').
+ *
+ * IMPACTO SE REMOVIDO: volta o "Aprovar →" fantasma em notificações de
+ * desfecho — não é falha de segurança (o PATCH já recusa certo), é
+ * confusão de UX que half-day 21/07 mostrou incomodar o usuário real.
+ */
+export function tarefaAindaDecidivel(info: { status?: string; podeDecidir?: boolean } | undefined): boolean {
+  if (!info) return false; // enquanto não carregou, mostra "Ver →" (conservador)
+  return info.status === "aguardando_aprovacao" && info.podeDecidir === true;
+}
+
 export function NotificacoesDrawer({
   aberto,
   onFechar,
@@ -67,7 +102,46 @@ export function NotificacoesDrawer({
   onRecarregar,
 }: Props) {
   const [tarefaAprovId, setTarefaAprovId] = useState<number | null>(null);
+  // BLOCO 5, P3(b) — cache local {tarefaId: {status, podeDecidir}} pra não
+  // refazer o GET a cada re-render (o drawer recebe `notificacoes` de novo
+  // a cada poll do Sidebar). Ver tarefaAindaDecidivel() acima.
+  const [statusPorTarefa, setStatusPorTarefa] = useState<Record<number, { status?: string; podeDecidir?: boolean }>>({});
   const { suportado, inscrito, carregando: carregandoPush, erro, permissao, inscrever } = usePushSubscription();
+
+  useEffect(() => {
+    const idsParaChecar = notificacoes
+      .filter((n) => n.tipo === "aprovacao")
+      .map((n) => extrairTarefaId(n.link))
+      .filter((id): id is number => id != null && !(id in statusPorTarefa));
+    if (idsParaChecar.length === 0) return;
+    let cancelado = false;
+    Promise.all(
+      idsParaChecar.map(async (id) => {
+        try {
+          const r = await fetch(`/api/tarefas/${id}`);
+          if (!r.ok) return [id, { status: undefined, podeDecidir: false }] as const;
+          const t = (await r.json()) as { status?: string; pode_decidir?: boolean };
+          return [id, { status: t.status, podeDecidir: Boolean(t.pode_decidir) }] as const;
+        } catch {
+          return [id, { status: undefined, podeDecidir: false }] as const;
+        }
+      }),
+    ).then((resultados) => {
+      if (cancelado) return;
+      setStatusPorTarefa((prev) => {
+        const next = { ...prev };
+        for (const [id, val] of resultados) next[id] = val;
+        return next;
+      });
+    });
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- statusPorTarefa
+    // fica de FORA de propósito: ele só é lido (pra filtrar o que falta
+    // buscar), nunca deveria disparar o efeito de novo — incluí-lo criaria um
+    // loop (fetch -> setState -> effect de novo) sem nunca convergir.
+  }, [notificacoes]);
   /**
    * REGRA DE NEGOCIO: o usuario precisa saber se o celular foi realmente
    * inscrito para receber alertas de aprovacao, mencao e tarefas fora do ERP.
@@ -181,7 +255,7 @@ export function NotificacoesDrawer({
                       </p>
                     )}
 
-                    {tarefaIdAprov != null ? (
+                    {tarefaIdAprov != null && tarefaAindaDecidivel(statusPorTarefa[tarefaIdAprov]) ? (
                       <button
                         onClick={(e) => { e.stopPropagation(); setTarefaAprovId(tarefaIdAprov); }}
                         className="text-[11px] mt-1.5 font-semibold hover:underline"

@@ -41,20 +41,24 @@ export async function PATCH(
   `;
 
   /**
-   * REGRA DE NEGÓCIO: conclusão forçada é restrita ao dono; desenvolvedor é
-   * fallback técnico controlado para contingência de permissão.
+   * REGRA DE NEGÓCIO: quem pode EXECUTAR a conclusão forçada (trava real).
    *
-   * O QUE: permite execução por master admin e, em ambiente interno, por
-   * desenvolvedor.
-   * POR QUE: garante continuidade operacional caso o MASTER_ADMIN_USER_ID
-   * esteja temporariamente divergente.
+   * O QUE: master admin (dono) sempre; role "desenvolvedor" (fallback técnico);
+   * e role "admin" — administradores da loja (decisão do dono em 13/07/2026,
+   * "todos os admins"). MESMA regra do front (ordens/page.tsx) — o front só
+   * esconde o botão; esta é a trava efetiva. Manter as duas em sincronia.
+   * POR QUE: distribui a contingência de destravamento sem depender só do
+   * dono/responsável técnico.
    * IMPACTO SE REMOVIDO: bloqueio total da rotina de destravamento em cenários
    * urgentes de produção.
    */
-  const permitido = await isMasterAdmin(user.id) || usuario?.role === "desenvolvedor";
+  const permitido =
+    (await isMasterAdmin(user.id)) ||
+    usuario?.role === "desenvolvedor" ||
+    usuario?.role === "admin";
   if (!permitido) {
     return NextResponse.json(
-      { error: "Ação restrita ao master admin" },
+      { error: "Ação restrita a administradores" },
       { status: 403 },
     );
   }

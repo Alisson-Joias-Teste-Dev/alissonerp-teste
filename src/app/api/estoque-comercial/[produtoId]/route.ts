@@ -33,6 +33,11 @@ export async function GET(
       WHERE produto_id = ${id}
     `;
 
+    // Localizacao fisica da peca (carga externa + edicao manual) — vive em erp_produtos.
+    const [prodExtra] = await sql`
+      SELECT localizacao FROM alissonerp.erp_produtos WHERE produto_id = ${id}::bigint
+    `;
+
     const saldoPorLocal = await sql`
       SELECT
         local_estoque_id, local_nome,
@@ -62,7 +67,7 @@ export async function GET(
     const reservas = await sql`
       SELECT
         r.id, r.quantidade, r.local_estoque_id, r.status,
-        r.venda_id, r.item_venda_id, r.ordem_id,
+        r.venda_id, r.item_venda_id, r.ordem_id, r.protocolo_id,
         v.numero_venda,
         o.numero_ordem,
         o.tipo_ordem::text AS tipo_ordem,
@@ -74,6 +79,10 @@ export async function GET(
           WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao_sku' THEN 'conversao_sku'
           WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao' THEN 'conversao_estoque'
           WHEN r.ordem_id IS NOT NULL THEN 'ordem'
+          -- Reserva criada por um protocolo de transferencia: a peca esta segurada
+          -- na origem enquanto ninguem coleta. Sem este caso ela caia em
+          -- 'indefinida' e quem olha o produto nao sabia por que estava reservada.
+          WHEN r.protocolo_id IS NOT NULL THEN 'protocolo'
           ELSE 'indefinida'
         END AS tipo_reserva,
         CASE
@@ -81,6 +90,7 @@ export async function GET(
           WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao_sku' THEN 'Conversao SKU ' || COALESCE(o.numero_ordem, '#' || r.ordem_id::text)
           WHEN r.ordem_id IS NOT NULL AND o.tipo_ordem::text = 'conversao' THEN 'Conversao Estoque ' || COALESCE(o.numero_ordem, '#' || r.ordem_id::text)
           WHEN r.ordem_id IS NOT NULL THEN 'Ordem ' || COALESCE(o.numero_ordem, '#' || r.ordem_id::text)
+          WHEN r.protocolo_id IS NOT NULL THEN 'Aguardando coleta - protocolo #' || r.protocolo_id::text
           ELSE 'Origem indefinida'
         END AS origem_label,
         r.created_at
@@ -119,6 +129,7 @@ export async function GET(
 
     return NextResponse.json({
       consolidado: consolidado ?? null,
+      localizacao: prodExtra?.localizacao ?? null,
       saldoPorLocal: saldoPorLocal.map(r => ({
         ...r,
         saldo_fisico: Number(r.saldo_fisico ?? 0),
@@ -161,8 +172,14 @@ export async function GET(
     em_transito: 0,
   } : null;
 
+  // Localizacao fisica da peca (vive em erp_produtos), tambem no caminho legado.
+  const [prodExtraLegado] = await sql`
+    SELECT localizacao FROM alissonerp.erp_produtos WHERE produto_id = ${id}::bigint
+  `;
+
   return NextResponse.json({
     consolidado,
+    localizacao: prodExtraLegado?.localizacao ?? null,
     saldoPorLocal: [],
     movimentos: movimentos.map(m => ({
       ...m,

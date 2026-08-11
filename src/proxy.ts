@@ -11,7 +11,7 @@ async function maybeRefreshTinyToken() {
   if (now - lastTinyKeepalive < TINY_KEEPALIVE_MS) return;
   lastTinyKeepalive = now;
   try {
-    const { ensureTinyToken } = await import("@/lib/vendas-aprovar");
+    const { ensureTinyToken } = await import("@/lib/tiny-auth");
     await ensureTinyToken();
   } catch { /* token refresh best-effort, não bloqueia requests */ }
 }

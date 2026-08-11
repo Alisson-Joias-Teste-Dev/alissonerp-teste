@@ -27,6 +27,7 @@ import AplicarTemplateModal from "@/components/produtos/AplicarTemplateModal";
 import { useAuth } from "@/hooks/useAuth";
 // REGRA DE NEGOCIO: helpers de rodio (Frente C — 30/05/2026)
 import { isServicoRodio } from "@/lib/servico-rodio";
+import { BotaoImprimirEtiqueta } from "@/components/rfid/BotaoImprimirEtiqueta";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ interface ProdutoDetalhe {
   cor_metal?: string | null;
   observacao_erp?: string | null;
   fornecedor?: string | null;
+  localizacao?: string | null;
   largura_aro?: string | null;
   altura_aro?: string | null;
   base?: string | null;
@@ -502,6 +504,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
   const [temPedra, setTemPedra] = useState(false);
   const [observacaoErp, setObservacaoErp] = useState("");
   const [fornecedorEdit, setFornecedorEdit] = useState("");
+  const [localizacaoEdit, setLocalizacaoEdit] = useState("");
   const [fornecedoresOpts, setFornecedoresOpts] = useState<string[]>([]);
   const [larguraAro, setLarguraAro] = useState("");
   const [alturaAro, setAlturaAro] = useState("");
@@ -765,6 +768,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       setTemPedra(data.produto.tem_pedra_preciosa);
       setObservacaoErp(data.produto.observacao_erp ?? "");
       setFornecedorEdit(data.produto.fornecedor ?? "");
+      setLocalizacaoEdit(data.produto.localizacao ?? "");
       setLarguraAro(data.produto.largura_aro ?? "");
       setAlturaAro(data.produto.altura_aro ?? "");
       setBaseVal(data.produto.base ?? "");
@@ -900,6 +904,9 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       const fornAtual = fornecedorEdit.trim() || null;
       const fornOriginal = (produto.fornecedor ?? "").trim() || null;
       if (fornAtual !== fornOriginal) body.fornecedor = fornAtual;
+      const locAtual = localizacaoEdit.trim() || null;
+      const locOriginal = (produto.localizacao ?? "").trim() || null;
+      if (locAtual !== locOriginal) body.localizacao = locAtual;
       const larg = larguraAro ? parseFloat(larguraAro) : null;
       const alt  = alturaAro  ? parseFloat(alturaAro)  : null;
       const bas  = baseVal    ? parseFloat(baseVal)     : null;
@@ -1015,7 +1022,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
         const LABELS: Record<string, string> = {
           situacao: "situação", tipo_metal: "metal", categoria_geral: "categoria",
           categoria_precificacao: "categoria de preço", tem_pedra_preciosa: "tem pedra",
-          fator: "fator", observacao_erp: "observação", fornecedor: "fornecedor",
+          fator: "fator", observacao_erp: "observação", fornecedor: "fornecedor", localizacao: "localização",
           largura_aro: "largura do aro", altura_aro: "altura do aro", base: "base",
           nome: "nome", peso_precificado: "peso", preco_pedras: "preço das pedras",
           tipo_item: "tipo", preco_servico: "preço de serviço", pct_calculo_servico: "% serviço",
@@ -1262,6 +1269,7 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
     produto !== null &&
     ((observacaoErp.trim() || null) !== (produto.observacao_erp?.trim() || null) ||
       (fornecedorEdit.trim() || null) !== ((produto.fornecedor ?? "").trim() || null) ||
+      (localizacaoEdit.trim() || null) !== ((produto.localizacao ?? "").trim() || null) ||
       (larguraAro || "") !== (produto.largura_aro ?? "") ||
       (alturaAro  || "") !== (produto.altura_aro  ?? "") ||
       (baseVal    || "") !== (produto.base         ?? "") ||
@@ -1352,6 +1360,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                       {syncingTiny ? "Sincronizando..." : "Sync Tiny"}
                     </button>
                   )}
+                  {/* REGRA DE NEGOCIO: botao de etiqueta RFID (imprimir + gravar chip) do produto aberto no drawer */}
+                  {produto?.id_produto ? (
+                    <BotaoImprimirEtiqueta produtoId={produto.id_produto} variant="compact" />
+                  ) : null}
                 </div>
               </>
             ) : (
@@ -1480,6 +1492,16 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                         <datalist id="drawer-fornecedores-options-pedra">
                           {fornecedoresOpts.map((f) => <option key={f} value={f} />)}
                         </datalist>
+                      </div>
+                      <div>
+                        <p className={labelCls}>Localização</p>
+                        <input
+                          type="text"
+                          value={localizacaoEdit}
+                          onChange={(e) => setLocalizacaoEdit(e.target.value)}
+                          placeholder="—"
+                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white font-mono focus:outline-none focus:border-[#184036]"
+                        />
                       </div>
                     </div>
                   </section>
@@ -1855,6 +1877,16 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
                       <datalist id="drawer-fornecedores-options">
                         {fornecedoresOpts.map((f) => <option key={f} value={f} />)}
                       </datalist>
+                    </div>
+                    <div className="col-span-2">
+                      <p className={labelCls}>Localização</p>
+                      <input
+                        type="text"
+                        value={localizacaoEdit}
+                        onChange={(e) => setLocalizacaoEdit(e.target.value)}
+                        placeholder="—"
+                        className="w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm text-gray-800 bg-white font-mono focus:outline-none focus:border-[#184036]"
+                      />
                     </div>
                   </div>
                   {tipoItemEdit === "servico" && (

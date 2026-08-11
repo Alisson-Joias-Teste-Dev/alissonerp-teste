@@ -11,6 +11,7 @@ import { authOr401 } from "@/lib/auth-server";
 import { isPrecificacaoAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { zodError } from "@/lib/schemas/common";
+import { resolverAprovadores } from "@/lib/aprovacoes";
 
 const SolicitarAprovPostSchema = z.object({
   tipo: z.enum(["ouro", "pedra"]),
@@ -38,6 +39,17 @@ export async function POST(req: NextRequest) {
   const parsed = SolicitarAprovPostSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const { tipo, faixa_id, faixa_nome, markup_anterior, markup_novo, stats, simulacao } = parsed.data;
+
+  // REGRA DE NEGÓCIO: sem aprovador configurado, a solicitação de markup não
+  // nasce (política config-first — 03b-config-first-estrito.md). Sem
+  // ctx.solicitanteId: precificação não exclui quem está solicitando.
+  const resol = await resolverAprovadores("precificacao");
+  if (resol.status === "nao_configurado") {
+    return NextResponse.json(
+      { error: "Aprovador de precificação não configurado. Defina em Configurações › Aprovadores." },
+      { status: 409 },
+    );
+  }
 
   try {
     const [alteracao] = await sql`

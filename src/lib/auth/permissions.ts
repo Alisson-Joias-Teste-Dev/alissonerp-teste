@@ -9,7 +9,8 @@ export type Role =
   | "consultora"
   | "estoquista_fabrica"
   | "estoquista_loja"
-  | "pcp";
+  | "pcp"
+  | "operador_inventario";
 
 export interface MenuItem {
   label: string;
@@ -42,8 +43,12 @@ const ALL_MENUS: MenuItem[] = [
   { label: "Insumos",            href: "/insumos",            icon: "FlaskConical"    },
   { label: "Cadastrar Tag RFID", href: "/rfid/cadastro",      icon: "Tag"             },
   { label: "Protocolo",          href: "/protocolo",          icon: "FileText"        },
+  { label: "Movimentação Interna", href: "/movimentacao-interna", icon: "ArrowLeftRight" },
   { label: "Conferência",        href: "/conferencia",        icon: "ClipboardCheck"  },
-  { label: "Entrega",            href: "/entrega",            icon: "PackageCheck"    },
+  // "Preparação de Entrega" = passo da ORDEM (fábrica); "Entregas" = entrega da
+  // VENDA ao cliente. Os dois rótulos eram "Entrega"/"Entregas" e ninguém achava
+  // a tela certa. Renomear NUNCA muda o href — a permissão é ligada à rota.
+  { label: "Preparação de Entrega", href: "/entrega",         icon: "PackageCheck"    },
   { label: "Entregas",           href: "/entregas-venda",    icon: "Truck"           },
   { label: "Financeiro",         href: "/financeiro",         icon: "DollarSign"      },
   { label: "A Pagar",            href: "/financeiro/a-pagar",   icon: "ArrowUpCircle"   },
@@ -76,10 +81,10 @@ const ALL_MENUS: MenuItem[] = [
 ];
 
 const ROLE_MENUS: Record<Role, string[]> = {
-  desenvolvedor:      ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/entregas-venda", "/auditoria", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/vendas", "/vendas/solicitacoes-alteracao", "/estoque-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/comissoes", "/financeiro/conciliacao", "/crediario", "/produtos", "/comercial/promocoes", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/site", "/metal", "/editor-ia"],
-  admin:              ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/conferencia", "/entrega", "/entregas-venda", "/auditoria", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/vendas", "/vendas/solicitacoes-alteracao", "/estoque-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/comissoes", "/financeiro/conciliacao", "/crediario", "/produtos", "/comercial/promocoes", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/site", "/metal", "/editor-ia"],
-  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/auditoria", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/vendas", "/estoque-comercial", "/conversoes", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/comissoes", "/financeiro/conciliacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/metal", "/editor-ia"],
-  gerente_loja:       ["/dashboard-comercial", "/ordens", "/estoque", "/protocolo", "/conferencia", "/entregas-venda", "/auditoria", "/vendas", "/estoque-comercial", "/compras-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/metal", "/editor-ia", "/crediario", "/financeiro/comissoes"],
+  desenvolvedor:      ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/movimentacao-interna", "/conferencia", "/entrega", "/entregas-venda", "/auditoria", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/vendas", "/vendas/solicitacoes-alteracao", "/estoque-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/comissoes", "/financeiro/conciliacao", "/crediario", "/produtos", "/comercial/promocoes", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/site", "/metal", "/editor-ia"],
+  admin:              ["/dashboard-fabrica", "/dashboard-comercial", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/movimentacao-interna", "/conferencia", "/entrega", "/entregas-venda", "/auditoria", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/vendas", "/vendas/solicitacoes-alteracao", "/estoque-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/comissoes", "/financeiro/conciliacao", "/crediario", "/produtos", "/comercial/promocoes", "/precificacao", "/tarefas", "/relatorios", "/configuracoes", "/service-painel", "/orcamento", "/gestao-estoque", "/site", "/metal", "/editor-ia"],
+  gerente_fabrica:    ["/dashboard-fabrica", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/estoque", "/quebra", "/protocolo", "/movimentacao-interna", "/auditoria", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/vendas", "/estoque-comercial", "/conversoes", "/financeiro", "/financeiro/a-pagar", "/financeiro/a-receber", "/financeiro/caixa", "/financeiro/comissoes", "/financeiro/conciliacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/metal", "/editor-ia"],
+  gerente_loja:       ["/dashboard-comercial", "/ordens", "/estoque", "/protocolo", "/movimentacao-interna", "/conferencia", "/entregas-venda", "/auditoria", "/vendas", "/estoque-comercial", "/compras-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/produtos", "/precificacao", "/tarefas", "/relatorios", "/service-painel", "/orcamento", "/gestao-estoque", "/metal", "/editor-ia", "/crediario", "/financeiro/comissoes"],
   ourives:            ["/ordens", "/pcp", "/editor-ia"],
   motoboy:            ["/protocolo", "/editor-ia"],
   // REGRA DE NEGOCIO: role especifica para entregadores de app.
@@ -89,21 +94,35 @@ const ROLE_MENUS: Record<Role, string[]> = {
   // - O que faz: libera o módulo Metal para TODAS as consultoras.
   // - Por que: a operação comercial precisa registrar compra/recebimento de metal sem depender de gerente.
   // - Impacto se removido: consultora perde acesso ao menu/rotas de metal e bloqueia o fluxo no dia a dia.
-  consultora:         ["/dashboard-comercial", "/ordens", "/estoque", "/conferencia", "/orcamento", "/editor-ia", "/crediario", "/metal"],
+  consultora:         ["/dashboard-comercial", "/ordens", "/estoque", "/conferencia", "/orcamento", "/editor-ia", "/crediario", "/metal", "/movimentacao-interna"],
   estoquista_fabrica: ["/estoque", "/quebra", "/compras", "/compras-comercial", "/insumos", "/rfid/cadastro", "/editor-ia"],
   // REGRA DE NEGOCIO:
   // - O que faz: estoquista de loja pode operar compra comercial para entrada de produto acabado.
   // - Por que: essa funcao pertence ao fluxo operacional de loja/estoque comercial.
   // - Impacto se removido: loja nao consegue registrar compras comerciais no modulo dedicado.
-  estoquista_loja:    ["/estoque", "/estoque-comercial", "/compras-comercial", "/editor-ia"],
+  //
+  // BLOCO 5 (jul/2026): "/entregas-venda" entrou na lista. Este e o fallback
+  // hardcoded usado SO quando role_permissoes nao tem NENHUMA linha pra este
+  // papel (getMenuGroupsForRole, ver permissions.ts). Confirmado em homolog
+  // (21/07): estoquista_loja TEM linhas em role_permissoes (pode_ler=true em
+  // estoque/estoque_comercial/editor_ia/promocoes/tarefas), entao normalmente
+  // quem decide e o caminho via banco + injecao client (Sidebar.tsx
+  // ROLES_ENTREGAS_VENDA) - esta linha e so a rede de seguranca caso o banco
+  // um dia fique zerado pra este papel (ambiente novo, reset de permissoes).
+  estoquista_loja:    ["/estoque", "/estoque-comercial", "/compras-comercial", "/editor-ia", "/movimentacao-interna", "/entregas-venda"],
   pcp:                ["/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/quebra", "/editor-ia"],
+  // REGRA DE NEGOCIO (v2.83.0): operador de inventario (Ytalo/Geovana) VE tudo
+  // do estoque (conta via RFID), mas NAO edita direto — acoes de inventario
+  // viram solicitacao aprovada pelo admin; edicoes em outras telas de estoque
+  // sao bloqueadas na API (403) ate a Etapa 2.
+  operador_inventario: ["/dashboard-comercial", "/estoque", "/estoque-comercial", "/conversoes", "/gestao-estoque", "/rfid/cadastro", "/editor-ia"],
 };
 
 // Agrupamento do menu lateral
 const MENU_GROUPS: MenuGroup[] = [
   { type: "group", label: "Produção",    icon: "Factory",     items: ["/dashboard-fabrica", "/ordens", "/pcp", "/rotas-padrao", "/setores", "/distribuicao", "/purificacao", "/service-painel"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Suprimentos", icon: "Package",     items: ["/estoque", "/quebra", "/insumos", "/compras", "/compras-comercial", "/rfid/cadastro", "/metal"].map(h => ALL_MENUS.find(m => m.href === h)!) },
-  { type: "group", label: "Logística",   icon: "Truck",       items: ["/protocolo", "/conferencia", "/entregas-venda"].map(h => ALL_MENUS.find(m => m.href === h)!) },
+  { type: "group", label: "Logística",   icon: "Truck",       items: ["/protocolo", "/movimentacao-interna", "/conferencia", "/entregas-venda"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Qualidade",   icon: "ShieldCheck", items: ["/auditoria"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Gestão",     icon: "ListTodo",    items: ["/tarefas", "/relatorios", "/gestao-estoque"].map(h => ALL_MENUS.find(m => m.href === h)!) },
   { type: "group", label: "Comercial",   icon: "Briefcase",   items: ["/dashboard-comercial", "/vendas", "/vendas/solicitacoes-alteracao", "/estoque-comercial", "/conversoes", "/devolucoes", "/vale-troca", "/produtos", "/comercial/promocoes", "/orcamento"].map(h => ALL_MENUS.find(m => m.href === h)!) },
@@ -153,6 +172,7 @@ const HREF_TO_MODULO: Record<string, string> = {
   "/compras-comercial": "compras",
   "/rfid/cadastro":     "rfid_cadastro",
   "/protocolo":         "protocolo",
+  "/movimentacao-interna": "movimentacao_interna",
   "/conferencia":       "conferencia",
   "/entrega":           "entrega",
   "/entregas-venda":    "entregas_venda",
@@ -160,6 +180,7 @@ const HREF_TO_MODULO: Record<string, string> = {
   "/vendas":                      "vendas",
   "/vendas/solicitacoes-alteracao": "vendas",
   "/estoque-comercial":           "estoque_comercial",
+  "/estoque-comercial/auditoria": "estoque_comercial",
   "/conversoes":                  "estoque_comercial",
   "/devolucoes":                  "devolucoes",
   "/vale-troca":                  "vale_troca",

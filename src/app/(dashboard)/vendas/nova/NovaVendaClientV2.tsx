@@ -25,6 +25,8 @@ import { isServicoRodioProduto, descricaoItemComBaseRodio, calcularPreviewRodioP
 // (pente-fino 10/08/2026, etapa 1) — nao duplicar getComissao() nos frontends.
 import { getComissao as getComissaoBase, type FaixaComissao } from "@/lib/comissao";
 import { useErrorStore } from "@/stores/errorStore";
+// Formas que contam como cartão pro gate de desconto (fonte única, espelha o servidor).
+import { ehFormaCartao } from "@/lib/desconto/precificar-item";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -258,6 +260,9 @@ interface Props {
   vendedorNome: string;
   maxDesconto: number;
   descontoAuthThreshold?: number;
+  /** Limite (%) acima do qual o Cartão de Crédito exige aprovação. Vem da config
+   *  `limite_desconto_cartao_pct` (Configurações › Aprovadores), não mais fixo em 20. */
+  limiteDescontoCartao?: number;
   vendedores?: { id: number; nome: string }[];
   userId: string;
   userName: string;
@@ -606,7 +611,7 @@ function RodioBaseSelector({ pct, valorPreview, baseLabel, erro, onSelectBase, o
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
-export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxDesconto, descontoAuthThreshold, vendedores = [], userId, userName }: Props) {
+export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxDesconto, descontoAuthThreshold, limiteDescontoCartao, vendedores = [], userId, userName }: Props) {
   const router = useRouter();
 
   // ── Wizard state ──────────────────────────────────────────────────────────
@@ -817,7 +822,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     const saldo = pagamentos.filter(p => p.forma === "A Receber").reduce((s, p) => s + p.valor, 0);
     return calcularCrediPreview({ tipo: crediTipo, valorBase: saldo, parcelas: crediParcelas, diaVenc: crediDiaVenc, dias: crediDias });
   }, [temAReceber, pagForma, pagamentos, crediTipo, crediParcelas, crediDiaVenc, crediDias, totalVenda]);
-  const LIMITE_DESCONTO_CARTAO = 20;
+  // REGRA DE NEGÓCIO (Fase 5, fix 16/07): vem da config limite_desconto_cartao_pct
+  // (Configurações › Aprovadores), não mais cravado em 20 — a tela divergia do
+  // gate real do servidor quando a config era alterada. Fallback 20 = mesmo
+  // default do backend (LIMITE_DESCONTO_CARTAO_PADRAO em precificar-item.ts).
+  const LIMITE_DESCONTO_CARTAO = limiteDescontoCartao ?? 20;
   // Só precisa aprovação se desconto > maxDesconto (exceto admin = bypass com 100)
   const precisaAprovacaoDesconto = maxDesconto < 100 && itens.some(i => i.pct_desconto > maxDesconto);
   const temDescontoCartao = itens.some(i => i.pct_desconto > LIMITE_DESCONTO_CARTAO);
@@ -1790,7 +1799,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
     }
     if (step === 3 && tipoVenda !== "servico" && itens.length === 0) { setSaveErr("Adicione pelo menos 1 item"); return; }
     if (step === 3 && precisaAprovacaoDesconto) { setSaveErr(`Desconto acima de ${maxDesconto}% requer aprovação. Clique em 'Solicitar Aprovação'.`); return; }
-    if (step === 3 && cartaoBloqueado && pagForma === "Cartão de Crédito") { setSaveErr("Cartão de crédito bloqueado para esta venda devido a descontos acima de 20%. Solicite aprovação ou escolha outra forma de pagamento."); return; }
+    if (step === 3 && cartaoBloqueado && ehFormaCartao(pagForma)) { setSaveErr(`Pagamento em ${pagForma} bloqueado: desconto acima de ${LIMITE_DESCONTO_CARTAO}%. Solicite aprovação ou escolha outra forma — as demais seguem liberadas.`); return; }
     // Valida pendencias de personalizacao no passo 3
     if (step === 3) {
       const pendencias = itens
@@ -1895,8 +1904,8 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
       setConcluindo(false);
       return;
     }
-    if (cartaoBloqueado && pagForma === "Cartão de Crédito") {
-      setSaveErr("Cartão de crédito bloqueado para esta venda. Solicite aprovação ou escolha outra forma de pagamento.");
+    if (cartaoBloqueado && ehFormaCartao(pagForma)) {
+      setSaveErr(`Pagamento em ${pagForma} bloqueado para esta venda. Solicite aprovação ou escolha outra forma — as demais seguem liberadas.`);
       setConcluindo(false);
       return;
     }
@@ -2848,6 +2857,23 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                 Sob encomenda · estoque: {item.saldo_disponivel}
                               </span>
                             )}
+                            {/* Promoção: sem isto a linha fica "lista 599,00 · desc 0 ·
+                                comissão 0,50%" e não há como explicar o 0,50%. O que puxa
+                                a faixa é o desconto contra o preço CHEIO da campanha.
+                                Ver docs/regras-negocio/comercial.md §2.1.2. */}
+                            {/* div (e não span inline): sem ela o selo cola no de
+                                "Sob encomenda · estoque: 0" e sai "estoque: 0promoção". */}
+                            {(item.preco_lista_original ?? 0) > item.preco_lista && (
+                              <div className="mt-0.5">
+                                <span className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded"
+                                  style={{ backgroundColor: "#E8F0EC", color: "#184036" }}>
+                                  promoção{item.promocao_nome ? ` · ${item.promocao_nome}` : ""}
+                                  {" · "}
+                                  {((((item.preco_lista_original ?? 0) - item.preco_lista) / (item.preco_lista_original ?? 1)) * 100)
+                                    .toFixed(2).replace(".", ",")}%
+                                </span>
+                              </div>
+                            )}
                           </td>
                           {(tipoVenda === "produto" || tipoVenda === "garantia") && (
                             <td className="px-3 py-2.5 font-mono text-xs" style={{ color: "#6B7280" }}>{item.sku ?? "—"}</td>
@@ -2862,6 +2888,11 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                               value={item.preco_lista}
                               onCommit={val => updateItem(item._key, "preco_lista", val)}
                             />
+                            {(item.preco_lista_original ?? 0) > item.preco_lista && (
+                              <div className="text-[10px] mt-0.5" style={{ color: "#9CA3AF" }}>
+                                cheio <span style={{ textDecoration: "line-through" }}>{fmt(item.preco_lista_original ?? 0)}</span>
+                              </div>
+                            )}
                           </td>
                           {(tipoVenda === "produto" || tipoVenda === "garantia") && (<>
                             <td className="px-3 py-2.5">
@@ -2939,6 +2970,15 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
                                   </span>
                                 </span>
                               ) : "—"}
+                              {(item.preco_lista_original ?? 0) > item.preco_lista && (() => {
+                                const cheio = item.preco_lista_original ?? 0;
+                                const desc = Math.max(0, Math.round(((cheio - item.preco_unitario) / cheio) * 10000) / 100);
+                                return (
+                                  <div className="text-[10px] font-normal" style={{ color: "#9CA3AF" }}>
+                                    faixa de {desc.toFixed(2).replace(".", ",")}%
+                                  </div>
+                                );
+                              })()}
                             </td>
                           )}
                           <td className="px-3 py-2.5 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.total_item)}</td>
@@ -3214,6 +3254,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               vendaId={vendaId}
               numeroVenda={numeroVenda || "Nova"}
               mode="criacao"
+              role={role}
               gateways={gateways}
               // Payment form
               pagForma={pagForma} setPagForma={setPagForma}
@@ -3295,6 +3336,7 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
               onPagamentoConfirmado={(id) => { if (tipoVenda === "servico") concluirVenda(id); else router.push(`/vendas/${id}`); }}
               showAReceberWarning={temAReceber}
               cartaoBloqueado={cartaoBloqueado}
+              limiteDescontoCartao={LIMITE_DESCONTO_CARTAO}
               onSolicitarAprovacaoCartao={async () => {
                 /**
                  * REGRA DE NEGÓCIO: cartão com desconto acima do limite exige

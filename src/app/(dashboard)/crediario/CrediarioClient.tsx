@@ -479,7 +479,9 @@ function DetalheDrawer({
           method: "POST",
           body: JSON.stringify({
             forma_recebimento: formaRecebimento,
-            valor_pago: peso * grama,
+            // Arredonda a 2 casas (igual ao Total exibido). Sem isso, peso × grama
+            // gera fração de centavo (ex.: 2,93 × 597,27 = 1750,0011) e o back barra.
+            valor_pago: Math.round(peso * grama * 100) / 100,
             ouro_peso: peso,
             ouro_valor_grama: grama,
             ouro_foto_path: fotoPath,
@@ -735,7 +737,7 @@ function DetalheDrawer({
                   <>
                     <div style={{ fontSize: 11, color: C.cinza, marginBottom: 8 }}>Como o cliente pagou?</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                      {(["Dinheiro", "Cartão de Crédito", "Pix", "Ouro", "Vale-Troca", "Manual (MP)", "PagBank"] as const).map(f => (
+                      {(["Dinheiro", "Cartão de Crédito", "Pix", "Ouro", "Vale-Troca", "Manual (MP)", "PagBank", "Permuta", "Ajuste Consultora"] as const).map(f => (
                         <button
                           key={f}
                           onClick={() => {
@@ -1826,12 +1828,12 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
   // Quem pode registrar baixa: gerente + consultora (no back, a consultora
   // só baixa conta de venda DELA — ownership em requireCrediarioOwnership).
   const podeBaixar = isGerente || userRole === "consultora";
-  // Cascata (recebe várias parcelas de uma vez): restrita a gerente/dev/admin/
-  // diretor. NÃO libera consultora aqui — a rota nova ainda não tem a mesma
-  // trava de "só a venda dela" que o baixa avulso tem (ownership pendente,
-  // já sinalizado ao Jonathan como pendência separada). Evita alargar esse
-  // buraco enquanto ele não for corrigido.
-  const podeCascata = isGerente || userRole === "diretor";
+  // Cascata (recebe várias parcelas de uma vez): mesma regra da baixa avulsa.
+  // A consultora entrou em 06/08/2026, junto com a trava de dono da venda
+  // (requireVendaOwnership) na rota receber-cascata — antes disso ela ficava
+  // de fora aqui de propósito, porque a rota aceitaria a venda de qualquer
+  // colega. Se a trava sair da rota, esta linha tem que voltar a excluí-la.
+  const podeCascata = podeBaixar || userRole === "diretor";
 
   // Deep-link "Receber no Crediario" (vindo da tela da venda):
   // /crediario?venda=<id> abre direto o drawer da conta pendente daquela venda,

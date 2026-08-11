@@ -14,6 +14,12 @@
       "runtimeArgs": ["next", "dev", "--hostname", "0.0.0.0", "--port", "3010"],
       "port": 3010,
       "autoPort": false
+    },
+    {
+      "name": "erp-homolog",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "3005"],
+      "port": 3005
     }
   ]
 }

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Package, AlertTriangle, CheckCircle, Search,
-  RefreshCw, Loader2, X, ClipboardList, ScanLine, Printer,
+  RefreshCw, Loader2, X, ClipboardList, ClipboardCheck, ScanLine, Printer, MapPin,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -22,6 +22,7 @@ interface ItemEstoque {
   config_id:           number | null;
   total_movimentacoes: number;
   alerta:              "ok" | "no_minimo" | "abaixo_minimo" | "zerado" | "negativo";
+  localizacao:         string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -34,7 +35,7 @@ const ALERTA_STYLE: Record<string, { bg: string; text: string; label: string }> 
 };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function EstoqueComercialClient() {
+export default function EstoqueComercialClient({ isAdmin = false }: { isAdmin?: boolean }) {
   const router = useRouter();
   const [items,     setItems]   = useState<ItemEstoque[]>([]);
   const [loading,   setLoading] = useState(true);
@@ -76,6 +77,17 @@ export default function EstoqueComercialClient() {
           <p className="text-sm text-gray-500 mt-0.5">Controle de produtos acabados para venda</p>
         </div>
         <div className="flex items-center gap-2">
+          {isAdmin && (
+            <button
+              onClick={() => router.push("/estoque-comercial/importar-localizacao")}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium hover:bg-gray-100 transition-colors"
+              style={{ color: "#184036" }}
+              title="Importar localização das peças"
+            >
+              <MapPin size={15} />
+              <span className="hidden sm:inline">Localização</span>
+            </button>
+          )}
           <button
             onClick={() => router.push("/rfid/testar")}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium hover:bg-gray-100 transition-colors"
@@ -103,6 +115,15 @@ export default function EstoqueComercialClient() {
             <ClipboardList size={15} />
             <span className="hidden sm:inline">Inventario</span>
            </button>
+          <button
+            onClick={() => router.push("/estoque-comercial/auditoria")}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium hover:bg-gray-100 transition-colors"
+            style={{ color: "#184036" }}
+            title="Auditoria"
+          >
+            <ClipboardCheck size={15} />
+            <span className="hidden sm:inline">Auditoria</span>
+          </button>
           <button
             onClick={fetchData}
             className="p-2 rounded-xl hover:bg-gray-100 transition-colors"
@@ -172,6 +193,7 @@ export default function EstoqueComercialClient() {
             <thead style={{ background: "#F9F6F0" }}>
               <tr>
                 <th className="text-left px-4 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Produto</th>
+                <th className="text-left px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Localização</th>
                 <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#9CA3AF" }}>Fisico</th>
                 <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#2563EB" }}>Reservado</th>
                 <th className="text-center px-3 py-3 font-semibold text-xs uppercase tracking-wider" style={{ color: "#059669" }}>Disponivel</th>
@@ -196,6 +218,15 @@ export default function EstoqueComercialClient() {
                         {item.nome_produto}
                       </p>
                       {item.sku && <p className="text-xs text-gray-400">{item.sku}</p>}
+                    </td>
+                    <td className="px-3 py-3">
+                      {item.localizacao ? (
+                        <span className="text-xs font-mono px-2 py-0.5 rounded" style={{ background: "#F3F4F6", color: "#374151" }}>
+                          {item.localizacao}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-center">
                       <span className="text-sm font-medium" style={{ color: "#6B7280" }}>

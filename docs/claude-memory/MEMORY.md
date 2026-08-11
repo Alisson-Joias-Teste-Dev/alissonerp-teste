@@ -368,6 +368,8 @@ Modelo externo anel (aguardando valores do Jonathan)
 
 ## 17. USUARIOS TESTE
 
+### Usuarios antigos (nomes reais, ja existiam antes)
+
 Conferido contra o banco em 2026-05-22. Apenas estes existem e estao ativos:
 
 | Email | Senha | Role | Observacao |
@@ -392,6 +394,59 @@ Conferido contra o banco em 2026-05-22. Apenas estes existem e estao ativos:
 
 Todos criados via `auth.users`+`auth.identities` (mesmo formato bcrypt do GoTrue) — o perfil em
 `alissonerp.usuarios` nasce sozinho pelo trigger `alissonerp.fn_handle_new_user()`.
+
+### Usuarios de teste — 1 por role (criados 16/07/2026, SO EM HOMOLOG)
+
+Criados pra ter login de teste dedicado por role, sem usar credenciais de gente real. **Senha unica
+pra todos: `Teste@123`**. Todos `ativo=true`, `mx_desconto_permitido=0` (default — sem cadastro de
+desconto, cai no fallback da Fase 5 = 0%, exceto admin/desenvolvedor que sao full-access=100%).
+
+**IMPORTANTE — login e compartilhado entre homolog e prod pro MESMO Supabase Auth, mas os dois
+bancos Postgres (homolog/prod) sao independentes** (ver [[reference_criar_login_erp]]).
+`alissonerp.usuarios` (o perfil/role de negocio) existe **SO em HOMOLOG** (banco `postgres-homolog`,
+cloud.alisson.api.br:5435) — sem perfil em producao, entao nao aparecem/nao funcionam la.
+
+**CORRECAO 16/07 (testado e confirmado funcionando):** `auth.users`/`auth.identities` (o login em
+si) tiveram que ser criados TAMBEM em PRODUCAO (mesmo UUID, assinado via `assinar_mudanca_banco`,
+assinatura #227) — o GoTrue que autentica de verdade nao le o Postgres de homolog (confirmado:
+`auth.audit_log_entries` de homolog nunca registra nenhuma tentativa, nem as validas). So inserir em
+homolog deixa o login SEMPRE falhando, silenciosamente. Detalhe completo em
+[[reference_criar_login_erp]]. **Login CONFIRMADO funcionando** (testado `teste-consultora@alisson.com`
+no app apontando pra homolog, 16/07).
+
+| Email | Role | UUID |
+|---|---|---|
+| teste-admin@alisson.com | admin | `57171a43-c526-4861-b4e8-124299eacd67` |
+| teste-desenvolvedor@alisson.com | desenvolvedor | `ae7d63dc-111b-4620-b6b8-2f95d16ff5f9` |
+| teste-diretor@alisson.com | diretor | `a503130b-be1d-4930-ab5e-74cef65883cc` |
+| teste-gerente_fabrica@alisson.com | gerente_fabrica | `48183383-2cc3-45c1-82ba-2fa47c7588ae` |
+| teste-gerente_loja@alisson.com | gerente_loja | `d0d9312e-f892-4063-bfa2-bf95472d4937` |
+| teste-consultora@alisson.com | consultora | `648f80ea-3f9c-4e09-b314-78fe4372f109` |
+| teste-ourives@alisson.com | ourives | `1960c637-b09e-424e-b95c-8850f5b759dd` |
+| teste-motoboy@alisson.com | motoboy | `8e731aa3-71dd-469f-ae4c-a61caa1376da` |
+| teste-pcp@alisson.com | pcp | `6c75a3f0-fef7-48e3-b4e9-2225a4ad2974` |
+| teste-operador_inventario@alisson.com | operador_inventario | `145c2de4-bc3f-419c-a551-a406f8dfa3f4` |
+| teste-administrativo@alisson.com | administrativo | `117cf6b9-92ee-4e0e-a040-1048fe0d983c` |
+| teste-entregador@alisson.com | entregador | `73e7e7f5-53a5-42a5-8df8-59f39f43fec5` |
+| teste-estoquista_loja@alisson.com | estoquista_loja | `3db0b5e0-7cf8-4b20-b999-24b6b361d5c4` |
+| teste-estoquista_fabrica@alisson.com | estoquista_fabrica | `4963a1a3-39d6-46ec-8b6c-9bcde1a125f9` |
+| teste-financeiro@alisson.com | financeiro | `5637ef3e-6dfc-4171-b255-aba6a6b66b84` |
+
+**`teste-admin` também foi adicionado (append, sem tirar ninguém) como aprovador extra em TODAS as
+16 chaves de `configuracoes_sistema` que decidem aprovações hoje** (`aprovador_desconto_padrao`,
+`aprovador_cartao_desconto_padrao`, `aprovadora_credito_gerente`, `aprovador_credito_diretor`,
+`aprovador_entrega_sem_pagamento`, `aprovador_devolucao`, `aprovador_devolucao_estoque`,
+`aprovador_compra_comercial`, `aprovador_conversao`, `aprovador_precificacao`, `aprovador_limpeza`,
+`metal_aprovador_id`, `aprovadores_devolver_peca`, `aprovador_vale_troca_excecao`,
+`aprovador_alteracao_venda`, `aprovadores_conversao_reversa`) — só em homolog. Serve pra testar
+qualquer fluxo de aprovação logando só com `teste-admin`, sem precisar da senha do Alisson/Germana/
+Rafael/Jonathan. **Reversível**: pra tirar, remover o UUID `57171a43-c526-4861-b4e8-124299eacd67` de
+cada `valor` (ou rodar `UPDATE ... SET valor = replace(valor, ',57171a43-c526-4861-b4e8-124299eacd67', '')`).
+
+**Uso sugerido pra testar a centralização das aprovações**: `teste-consultora` solicita
+desconto/crédito/devolução (sem cadastro = testa o fallback 0% da Fase 5) → `teste-admin` aprova
+(está em todas as chaves). Pra testar "só o configurado decide, nem admin passa", usar
+`teste-desenvolvedor` (NÃO está em nenhuma chave) tentando aprovar — deve dar 403 sempre.
 
 ---
 

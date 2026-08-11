@@ -36,5 +36,20 @@ export async function GET(req: NextRequest) {
   const modulos_leitura  = rows.filter(p => p.pode_ler).map(p => p.modulo as string);
   const modulos_escrita  = rows.filter(p => p.pode_escrever).map(p => p.modulo as string);
 
-  return NextResponse.json({ role, modulos_leitura, modulos_escrita, is_operador_service: usuario.is_operador_service ?? false });
+  // is_vendedora: existe vendedora ATIVA ligada a este usuário?
+  //
+  // O PORQUÊ: é o que faz aparecer "Minha comissão" no menu (03/08/2026). Não dá
+  // pra deduzir pelo papel — a Germana é `gerente_loja` e É vendedora, a Geovana
+  // é `gerente_loja` e NÃO é. Mostrar por papel colocaria no menu da Geovana um
+  // atalho que só a devolveria pra home.
+  const [vend] = await sql`
+    SELECT 1 FROM public.vendedores
+    WHERE user_id = ${userId}::uuid AND situacao = 'Ativo' LIMIT 1
+  `;
+
+  return NextResponse.json({
+    role, modulos_leitura, modulos_escrita,
+    is_operador_service: usuario.is_operador_service ?? false,
+    is_vendedora: !!vend,
+  });
 }

@@ -28,20 +28,29 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { confirmarEntrega } from "@/lib/entrega-venda";
+import { confirmarEntrega, MAX_FOTOS_ENTREGA } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
 import { authOr401, ForbiddenError } from "@/lib/auth-server";
 import { requireEntregaVendaAccess, NotFoundError } from "@/lib/auth-vendas";
+import { LIMITS, checkArrayLength, checkBase64Length, payloadTooLargeResponse } from "@/lib/payload-limits";
 
 // Schema de validação do body
-// REGRA DE NEGÓCIO: código de verificação obrigatório. foto_base64 é opcional
-// e permite anexar comprovante visual da retirada/entrega.
+// REGRA DE NEGÓCIO: código de verificação obrigatório — NUNCA mexer nesta
+// validação por causa das fotos (ver comentário abaixo). fotos_base64 é
+// OPCIONAL (migration 357) e permite anexar VÁRIAS fotos de comprovação da
+// retirada/entrega — até MAX_FOTOS_ENTREGA.
+// REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026): latitude/longitude
+// OPCIONAIS no schema (quem confirma pelo escritório nunca manda) — a
+// obrigatoriedade real (só para o motoboy confirmando entrega ao cliente) é
+// decidida dentro de confirmarEntrega(), com base em user.role, não aqui.
 const ConfirmarEntregaSchema = z.object({
   codigo: z
     .string()
     .min(1, "Código de verificação é obrigatório")
     .max(6, "Código deve ter no máximo 6 dígitos"),
-  foto_base64: z.string().optional(),
+  fotos_base64: z.array(z.string().max(LIMITS.IMAGE_BASE64_MAX)).max(MAX_FOTOS_ENTREGA).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
 });
 
 export async function POST(
@@ -81,20 +90,39 @@ export async function POST(
   const parsed = ConfirmarEntregaSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
 
-  const { codigo, foto_base64 } = parsed.data;
+  const { codigo, fotos_base64, latitude, longitude } = parsed.data;
+
+  // Defesa em profundidade (zod já limita acima) — mesmo padrão de
+  // src/app/api/produtos/[id]/imagens/route.ts.
+  if (fotos_base64) {
+    try {
+      checkArrayLength("fotos_base64", fotos_base64, MAX_FOTOS_ENTREGA);
+      fotos_base64.forEach((f, i) => checkBase64Length(`fotos_base64[${i}]`, f, LIMITS.IMAGE_BASE64_MAX));
+    } catch (e) {
+      const r = payloadTooLargeResponse(e);
+      if (r) return r;
+      throw e;
+    }
+  }
 
   // Delega a confirmação para a lib, que gerencia:
-  // - Verificação de unicidade e validade do código
+  // - Verificação de unicidade e validade do código (SEMPRE antes de tudo —
+  //   ver ordem inviolável no comentário de confirmarEntrega)
   // - Atualização dos campos de confirmação (data_saida, data_retirada, etc)
   // - Baixa de estoque (baixa_estoque_realizada = true)
-  // - Upload da foto de entrega (se fornecida)
+  // - Upload das fotos de entrega, se fornecidas (opcional, best-effort,
+  //   processado só DEPOIS do código validado — nunca condiciona a aprovação)
   // - Transação atômica e auditoria
   //
   // REGRA DE NEGÓCIO: a lib lança Error com mensagens específicas para
   // cada caso de erro (código inválido, já confirmada, já cancelada, etc).
   // Capturamos e retornamos como erro 400 para o frontend.
   try {
-    const resultado = await confirmarEntrega(entregaId, codigo, user.id, foto_base64);
+    const resultado = await confirmarEntrega(entregaId, codigo, user.id, fotos_base64, {
+      usuarioRole: user.role,
+      latitude,
+      longitude,
+    });
 
     // Mensagem amigável conforme a etapa da confirmação
     // REGRA DE NEGÓCIO: mensagens diferentes ajudam o operador a entender

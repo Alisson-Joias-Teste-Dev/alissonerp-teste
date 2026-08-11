@@ -24,10 +24,10 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createServerSupabase } from "@/lib/supabase/server";
-import sql from "@/lib/db";
 import { atualizarTransporte } from "@/lib/entrega-venda";
 import { zodError } from "@/lib/schemas/common";
+import { authOr401, ForbiddenError } from "@/lib/auth-server";
+import { requireEntregaVendaAccess, NotFoundError } from "@/lib/auth-vendas";
 
 // Schema de validação: todos os campos são opcionais (partial update)
 // REGRA DE NEGÓCIO: o frontend envia apenas os campos que o usuário alterou.
@@ -48,20 +48,50 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const supabase = await createServerSupabase();
-  const { data } = await supabase.auth.getUser();
-  const user = data.user;
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
 
   const { id } = await params;
   const entregaId = Number(id);
   if (isNaN(entregaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  // Verifica se o usuário existe no ERP
-  const [usuario] = await sql`
-    SELECT id FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
-  `;
-  if (!usuario) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  /**
+   * REGRA DE NEGÓCIO (fecha buraco de autorização, 21/07 — o mais grave dos 3):
+   * antes esta rota só verificava que o usuário EXISTIA em alissonerp.usuarios
+   * — QUALQUER autenticado (motoboy incluso) conseguia alterar frete_motoboy e
+   * motoboy_id de QUALQUER entrega. Isso permitia:
+   *   (a) inflar o próprio acerto — o pagamento do motoboy lê
+   *       ev.frete_motoboy no momento de pagar;
+   *   (b) roubar corrida do pool contornando o claim atômico de
+   *       aceitarFreteAvulso (entregas-venda/[id]/aceitar-avulso/route.ts).
+   *
+   * O QUE: reusa requireEntregaVendaAccess (auth-vendas.ts) SEM
+   * permitirMotoboy — mesmo padrão de cancelar/route.ts (a rota irmã mais
+   * próxima: também é uma alteração administrativa da entrega, não uma ação
+   * do motoboy na rua). Libera:
+   *   - roles de vendas full (admin/dev/diretor/gerente_loja/gerente_fabrica);
+   *   - consultora dona da venda da entrega.
+   * Motoboy/entregador NÃO entram aqui de propósito — são o vetor de abuso
+   * descrito acima (frete e atribuição de motoboy são decisão de loja/gestão,
+   * não do próprio entregador).
+   *
+   * MAPEAMENTO DE CHAMADORES (21/07): o único ponto do front que chama este
+   * PATCH é components/entregas/AprovacaoFreteModal.tsx — e este componente
+   * NÃO é importado/renderizado em NENHUM lugar da árvore atual (grep por
+   * "<AprovacaoFreteModal" não retorna nada) — ou seja, hoje não existe fluxo
+   * de produção usando esta rota. Isso reduz a zero o risco de quebrar tela
+   * existente ao restringir o gate.
+   *
+   * IMPACTO SE REMOVIDO: reabre o buraco — qualquer autenticado volta a poder
+   * alterar transporte de qualquer entrega.
+   */
+  try {
+    await requireEntregaVendaAccess(user, entregaId);
+  } catch (e) {
+    if (e instanceof NotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
 
   // Validação do body
   let raw: unknown;

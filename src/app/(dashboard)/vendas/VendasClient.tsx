@@ -138,6 +138,16 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
 
   // Filtros
   const [tabSituacao,   setTabSituacao]   = useState("");
+  /**
+   * REGRA DE NEGÓCIO (27/07/2026): fila de "aliança sem ordem aberta".
+   * O QUE: filtro independente das abas de situação — venda de aliança já
+   * fechada que ainda não virou ordem na fábrica (falta confirmar o aro).
+   * POR QUE: a ordem de aliança não nasce mais na aprovação da venda; sem esta
+   * fila, uma venda pode ficar esquecida sem nunca chegar na produção.
+   * IMPACTO SE REMOVIDO: a gestão perde a visão da fila e só descobre a
+   * pendência abrindo venda por venda.
+   */
+  const [soAliancaSemOrdem, setSoAliancaSemOrdem] = useState(false);
   const [busca,         setBusca]         = useState("");
   const [vendedorFiltro, setVendedorFiltro] = useState<number | "">(
     isFullAccess ? "" : (vendedorId ?? "")
@@ -206,6 +216,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
       if (vid) params.set("vendedor_id", String(vid));
       const termoBusca = (buscaTexto ?? busca).trim();
       if (termoBusca) params.set("q", termoBusca);
+      if (soAliancaSemOrdem) params.set("alianca_sem_ordem", "1");
 
       const res  = await fetch(`/api/vendas?${params}`);
       const body = await res.json() as VendasPaginatedResponse | { error: string };
@@ -220,7 +231,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [tabSituacao, vendedorFiltro, busca]);
+  }, [tabSituacao, vendedorFiltro, busca, soAliancaSemOrdem]);
 
   // Carregar ao montar + quando filtros mudam
   useEffect(() => {
@@ -228,7 +239,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
       fetchVendas(inicio, fim, 1);
     }, 250);
     return () => clearTimeout(delay);
-  }, [fetchVendas, inicio, fim, tabSituacao, vendedorFiltro, busca]);
+  }, [fetchVendas, inicio, fim, tabSituacao, vendedorFiltro, busca, soAliancaSemOrdem]);
 
   // Stats
   const stats = useMemo(() => ({
@@ -450,6 +461,21 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
             )}
           </button>
         ))}
+        {/* Fila da fábrica: aliança vendida que ainda não virou ordem.
+            Filtro independente da situação — a ordem de aliança só nasce
+            depois que alguem confirma o aro com o cliente. */}
+        <button
+          onClick={() => setSoAliancaSemOrdem(v => !v)}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ml-2"
+          style={{
+            backgroundColor: soAliancaSemOrdem ? "#92400E" : "transparent",
+            color: soAliancaSemOrdem ? "#FEF3C7" : "#92400E",
+            border: `1px solid ${soAliancaSemOrdem ? "#92400E" : "#FDE68A"}`,
+          }}
+          title="Vendas de aliança já fechadas que ainda não têm ordem na fábrica"
+        >
+          Aliança sem ordem
+        </button>
       </div>
 
       {/* ── Busca + Vendedor ── */}
@@ -599,6 +625,12 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
+                          {/* MERGE: botão de emissão de NFC-e da produção (origin/main) removido
+                              de propósito — módulo de NF-e abandonado por decisão do dono
+                              (ver docs/migracao/LIVRO-DE-REGRAS-migracao-erp-novo.md §4.1/§10.1:
+                              vendas_erp.nota_fiscal_id e .empresa_emitente_id foram apagadas,
+                              sempre vazias, 0 uso real). `setVendaNfce` não existe em nenhum
+                              outro ponto deste arquivo. */}
                           <Link
                             href={`/vendas/${v.id}`}
                             className="p-1 rounded hover:bg-gray-100 transition-colors inline-flex"

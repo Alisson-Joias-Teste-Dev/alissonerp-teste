@@ -93,6 +93,7 @@ import {
 // REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
 // Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos endpoints.
 import { normalizarTextoBusca, isServicoRodio, round2, getPctRodio } from "@/lib/servico-rodio";
+import { resolverItemComissao, buscarFaixasComissao } from "@/lib/comissao-item";
 
 // ─── GET /api/vendas ───────────────────────────────────────────────────────────
 // Query params: inicio, fim, situacao, vendedor_id, q (busca)
@@ -133,7 +134,35 @@ export async function GET(req: NextRequest) {
   const fim        = searchParams.get("fim");
   const situacao   = searchParams.get("situacao");   // rascunho|aprovado|enviado|cancelado|concluido
   const vendedorId = searchParams.get("vendedor_id");
+  // REGRA DE NEGÓCIO (03/08/2026 — sugestão de venda por cliente no Frete
+  // Avulso): filtro adicional, mesmo padrão de vendedorId — usado por
+  // FreteAvulsoModal pra listar as vendas de um cliente já selecionado
+  // (contato_id), sem precisar de endpoint novo.
+  const clienteId  = searchParams.get("cliente_id");
   const q          = searchParams.get("q")?.trim();
+  /**
+   * REGRA DE NEGÓCIO (27/07/2026): filtro "aliança sem ordem aberta".
+   *
+   * O QUE: `?alianca_sem_ordem=1` devolve só vendas já fechadas cujo orçamento é
+   * de aliança e que ainda não têm ordem na fábrica.
+   *
+   * POR QUE: a ordem de aliança deixou de nascer na aprovação da venda (a
+   * consultora chutava o aro para fechar a venda e a fábrica produzia no tamanho
+   * errado). O efeito colateral é venda fechada que ninguém mandou produzir —
+   * este filtro é como a gestão enxerga essa fila.
+   *
+   * IMPACTO SE REMOVIDO: a pendência só aparece abrindo venda por venda.
+   */
+  const aliancaSemOrdem = searchParams.get("alianca_sem_ordem") === "1";
+  const filtroAliancaSemOrdem = aliancaSemOrdem
+    ? sql`AND v.situacao IN ('aprovado','confirmado','concluido','em_rota','entregue')
+          AND EXISTS (
+            SELECT 1 FROM alissonerp.orcamentos o
+             WHERE o.venda_gerada_id = v.id
+               AND o.tipo = 'alianca'
+               AND o.ordem_gerada_id IS NULL
+          )`
+    : sql``;
   const pageRaw = Number(searchParams.get("page") ?? "1");
   const pageSizeRaw = Number(searchParams.get("page_size") ?? "15");
 
@@ -172,6 +201,8 @@ export async function GET(req: NextRequest) {
       ${isFullAccess ? sql`` : sql`AND v.vendedor_id = ${meuVendedorId!}`}
       ${situacao   ? sql`AND v.situacao    = ${situacao}`              : sql``}
       ${vendedorId ? sql`AND v.vendedor_id = ${Number(vendedorId)}`    : sql``}
+      ${clienteId  ? sql`AND v.cliente_id  = ${Number(clienteId)}`     : sql``}
+      ${filtroAliancaSemOrdem}
       ${isDocSearch
           ? sql`AND regexp_replace(COALESCE(v.cliente_cpf_cnpj, ''), '\D', '', 'g') ILIKE ${'%' + qDigits + '%'}`
           : q
@@ -229,6 +260,8 @@ export async function GET(req: NextRequest) {
       ${isFullAccess ? sql`` : sql`AND v.vendedor_id = ${meuVendedorId!}`}
       ${situacao   ? sql`AND v.situacao    = ${situacao}`              : sql``}
       ${vendedorId ? sql`AND v.vendedor_id = ${Number(vendedorId)}`    : sql``}
+      ${clienteId  ? sql`AND v.cliente_id  = ${Number(clienteId)}`     : sql``}
+      ${filtroAliancaSemOrdem}
       ${isDocSearch
           ? sql`AND regexp_replace(COALESCE(v.cliente_cpf_cnpj, ''), '\D', '', 'g') ILIKE ${'%' + qDigits + '%'}`
           : q
@@ -405,7 +438,12 @@ export async function POST(req: NextRequest) {
         'rascunho',
         ${user.id}::uuid
       )
-      RETURNING id
+      -- situacao no RETURNING: resolverItemComissao() so recalcula em venda
+      -- rascunho, e sem isto ela chegava undefined — o recalculo era pulado em
+      -- silencio e a comissao do navegador passava batido. Pego no teste do
+      -- banco local (04/08/2026): item promocional gravou 4,00% em vez de 0,50%.
+      -- (sem crase neste comentario: ele vive dentro de um template literal.)
+      RETURNING id, situacao
     `;
 
 
@@ -443,11 +481,80 @@ export async function POST(req: NextRequest) {
         const produtosUpgrade = new Set<number>(
           upgradesRows.map((r: Record<string, unknown>) => Number(r.produto_id))
         );
+        /**
+         * REGRA DE NEGOCIO (Item de Servico): produto com controla_estoque=false
+         * (conserto, ajuste, repolimento, componente sob encomenda) nao tem
+         * estoque fisico e NAO deve abrir ordem de reposicao/fabricacao.
+         * O QUE: remove itens de servico da lista de produtos que viram reposicao.
+         * POR QUE: servico e mao de obra, nao peca fisica faltando em estoque.
+         * COALESCE(...,true): produto sem linha na config controla estoque por
+         * padrao (mesma convencao usada em src/lib/entrega-venda.ts).
+         * IMPACTO SE REMOVIDO: vender AS1001-1/servico abre ordem indevida no
+         * PCP, que fica presa para sempre e trava a entrega (ENTREGA_BLOCKED).
+         */
+        const semControleRows = await tx`
+          SELECT produto_id
+          FROM alissonerp.estoque_comercial_config
+          WHERE produto_id = ANY(${pids}::bigint[])
+            AND COALESCE(controla_estoque, true) = false
+        `;
+        const produtosSemControleEstoque = new Set<number>(
+          semControleRows.map((r: Record<string, unknown>) => Number(r.produto_id))
+        );
         for (const item of body.itens as ItemInput[]) {
           if (!item.produto_id) continue;
           if (produtosUpgrade.has(Number(item.produto_id))) continue;
+          if (produtosSemControleEstoque.has(Number(item.produto_id))) continue;
           const disp = dispMap.get(Number(item.produto_id)) ?? 0;
           if (disp < item.quantidade) produtosParaReposicao.add(Number(item.produto_id));
+        }
+      }
+    }
+
+    // ── Server-side elegibilidade: produto sem estoque + reposição inativa não pode ser vendido ──
+    // REGRA DE NEGÓCIO (correção URGENTE 07/2026 — PROBLEMA 2): a busca já filtra, mas o
+    // servidor também deve revalidar ao criar a venda (evita bypass por SKU direto/RFID).
+    // Bloqueia se: controla_estoque=true AND saldo<=0 AND reposição INATIVA.
+    if (Array.isArray(body.itens) && body.itens.length > 0) {
+      const pidsEleg = (body.itens as ItemInput[])
+        .map(i => i.produto_id)
+        .filter((pid): pid is number => pid != null && pid > 0);
+      if (pidsEleg.length > 0) {
+        const elegibilidade = await tx`
+          SELECT
+            p.id_produto AS produto_id,
+            COALESCE(ecc.controla_estoque, true) AS controla_estoque,
+            COALESCE(est.saldo, 0)::float8 AS saldo,
+            (prc.ativo = true) AS reposicao_ativa
+          FROM public.produtos p
+          LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
+          LEFT JOIN (
+            SELECT produto_id, SUM(disponivel)::float8 AS saldo
+            FROM alissonerp.vw_saldo_estoque_comercial
+            GROUP BY produto_id
+          ) est ON est.produto_id = p.id_produto
+          LEFT JOIN alissonerp.produto_reposicao_config prc ON prc.produto_id = p.id_produto AND prc.ativo = true
+          WHERE p.id_produto = ANY(${pidsEleg}::bigint[])
+        `;
+        const elegMap = new Map<number, { controla_estoque: boolean; saldo: number; reposicao_ativa: boolean }>(
+          elegibilidade.map((r: Record<string, unknown>) => [
+            Number(r.produto_id),
+            {
+              controla_estoque: Boolean(r.controla_estoque),
+              saldo: Number(r.saldo),
+              reposicao_ativa: Boolean(r.reposicao_ativa),
+            },
+          ])
+        );
+        for (const item of body.itens as ItemInput[]) {
+          if (!item.produto_id) continue;
+          const eleg = elegMap.get(Number(item.produto_id));
+          if (!eleg) continue;
+          if (eleg.controla_estoque && eleg.saldo <= 0 && !eleg.reposicao_ativa) {
+            throw new Error(
+              `"${item.nome_produto}" (${item.sku ?? 'sem SKU'}) não pode ser vendido: sem estoque e sem reposição ativa.`,
+            );
+          }
         }
       }
     }
@@ -456,6 +563,9 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(body.itens) || body.itens.length === 0) {
       throw new Error("Venda deve ter pelo menos um item");
     }
+    // As faixas são lidas UMA vez para a venda toda, não por item — a tabela é
+    // pequena e fixa, e uma venda pode ter 5 itens.
+    const faixasComissao = await buscarFaixasComissao(tx);
     for (const item of body.itens) {
         if (item.produto_id !== null && item.produto_id !== undefined && Number(item.produto_id) <= 0) {
           throw new Error("produto_id inválido em item");
@@ -754,10 +864,30 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // ── Comissão: quem manda é o SERVIDOR ────────────────────────────────
+        // Ver comissao-item.ts. Item sem produto_id (aliança/personalizada) sai
+        // com comissao=null e mantém o que o chamador mandou — a regra deles é
+        // do módulo de orçamento, que calcula pelo peso.
+        const resolvidoItem = await resolverItemComissao({
+          produtoId: item.produto_id ?? null,
+          precoLista: precoListaFinal,
+          precoUnitario: precoUnitarioFinal,
+          totalItem: totalItemFinal,
+          situacaoVenda: venda.situacao,
+          faixas: faixasComissao,
+          txClient: tx,
+        });
+        if (resolvidoItem.comissao) {
+          valorComissaoFinal = resolvidoItem.comissao.valor_comissao;
+        }
+        const pctComissaoItem = resolvidoItem.comissao
+          ? resolvidoItem.comissao.pct_comissao
+          : (item.pct_comissao ?? 0);
+
         const [itemRow] = await tx`
           INSERT INTO alissonerp.itens_venda_erp (
             venda_id, produto_id, nome_produto, sku,
-            quantidade, preco_lista,
+            quantidade, preco_lista, preco_lista_cheio,
             pct_desconto, preco_unitario, total_item,
             pct_comissao, valor_comissao,
             peso_estimado, observacao, personalizacao
@@ -768,10 +898,11 @@ export async function POST(req: NextRequest) {
             ${item.sku ?? null},
             ${item.quantidade},
             ${precoListaFinal},
+            ${resolvidoItem.preco_lista_cheio},
             ${item.pct_desconto ?? 0},
             ${precoUnitarioFinal},
             ${totalItemFinal},
-            ${item.pct_comissao ?? 0},
+            ${pctComissaoItem},
             ${valorComissaoFinal},
             ${pesoEstimadoFinal},
             ${observacaoItem},

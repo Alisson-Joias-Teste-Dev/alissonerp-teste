@@ -81,11 +81,15 @@ export default async function CrediarioPage() {
       ? sql`SELECT NULL::numeric AS saldo_atual, NULL::numeric AS saldo_limite`
       : sql`
           SELECT
-            -- Saldo GERAL (regra v2.78.0): limite − todo o A Receber pendente,
-            -- derivado ao vivo (não o contador 'saldo_gerente_atual', que dava drift).
-            -- Pode ser NEGATIVO quando o total a receber passa do limite.
+            -- Saldo GERAL (regra v2.78.0): limite − A Receber pendente, derivado ao
+            -- vivo (não o contador 'saldo_gerente_atual', que dava drift). Pendente =
+            -- SÓ crediário REAL (mesmo filtro whereCrediario do card "Pendente");
+            -- sem ele, conta pendente que não é A Receber inflava e dava negativo falso.
+            -- GLOBAL (sem whereVendedor). Pode ser NEGATIVO se o A Receber passa do limite.
+            -- configuracoes_sistema + parametros_sistema foram fundidas em
+            -- configuracoes_unificado (migração de schema) — lendo daqui já com o nome novo.
             (SELECT valor::numeric FROM alissonerp.configuracoes_unificado WHERE chave='saldo_gerente_limite' LIMIT 1)
-              - COALESCE((SELECT SUM(valor) FROM alissonerp.vw_crediario WHERE situacao='pendente'), 0) AS saldo_atual,
+              - COALESCE((SELECT SUM(valor) FROM alissonerp.vw_crediario WHERE situacao='pendente' ${whereCrediario}), 0) AS saldo_atual,
             (SELECT valor::numeric FROM alissonerp.configuracoes_unificado WHERE chave='saldo_gerente_limite' LIMIT 1) AS saldo_limite
         `,
   ]);

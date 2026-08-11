@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from "react";
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -9,12 +9,10 @@ import {
   CheckCircle,
   Clock,
   AlertTriangle,
-  FileUp,
   Landmark,
   Plus,
   X,
   Loader2,
-  Link2,
   Save,
   TrendingUp,
   Calendar,
@@ -27,12 +25,15 @@ import {
   Ban,
   Search,
   DollarSign,
+  Gem,
 } from "lucide-react";
 import { dispararWebhook } from "@/lib/webhooks";
 import PeriodoFiltro, { type Periodo, calcPeriodo } from "@/components/ui/PeriodoFiltro";
+import ConversaoReversaModal, { type OrigemReversa } from "@/components/forms/ConversaoReversaModal";
 import { useErrorStore } from "@/stores/errorStore";
 import { STATUS_LABEL, STATUS_COLORS } from "@/lib/cofre-ouro-status";
 import { apiFetch } from "@/lib/apiFetch";
+import { getPublicUrl } from "@/lib/storage-url";
 
 // ─── palette (tema claro/creme consistente com o resto do sistema) ───────────
 const C = {
@@ -159,6 +160,86 @@ const fmt = (v: number) =>
 const fmtDate = (d: string | null) => {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("pt-BR", { timeZone: "UTC" });
+};
+
+/** Percentual com 2 casas no formato BR. "—" quando é zero e zero não informa
+ *  nada (desconto). Na comissão o zero é informação e passa. */
+const fmtPct = (n: number, zeroComoTraco = false) =>
+  zeroComoTraco && n === 0 ? "—" : `${n.toFixed(2).replace(".", ",")}%`;
+
+/** Uma VENDA no extrato: os pagamentos dela que comissionaram naquele mês. */
+interface GrupoVenda {
+  chave: string;
+  data: string;
+  data_fim: string;
+  descricao: string;
+  pedido: string | null;
+  venda_id: number | null;
+  data_venda: string | null;
+  valor_pago: number | null;
+  base_comissao: number | null;
+  valor: number;
+  previsto: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pagamentos: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  itens: any[];
+}
+
+/**
+ * Agrupa as linhas de "Comissões do mês" por VENDA.
+ *
+ * O PORQUÊ (Jonathan, 04/08/2026): a comissão nasce por PAGAMENTO, então um
+ * pedido pago em parcelas virava várias linhas soltas e ninguém sabia se era a
+ * mesma venda ou vendas diferentes. Em julho/2026 a Germana tinha 120 linhas
+ * para 78 pedidos, e o pedido 15310 sozinho ocupava 12 linhas.
+ *
+ * ⚠️ Agrupa SÓ a visualização. O saldo e o Resumo continuam vindo prontos do
+ * servidor — se este agrupamento estiver errado, a conta do extrato não muda.
+ *
+ * 138 dos 187 pedidos de julho têm um pagamento só: esses ficam IDÊNTICOS ao
+ * que eram, com a forma na descrição. Só quem tem 2+ troca para "N pagamentos".
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const agruparPorVenda = (linhas: any[]): GrupoVenda[] => {
+  const grupos = new Map<string, GrupoVenda>();
+  const soltas: GrupoVenda[] = [];
+
+  linhas.forEach((l, i) => {
+    const base: GrupoVenda = {
+      chave: `v${l.venda_id}`,
+      data: l.data, data_fim: l.data,
+      descricao: l.descricao, pedido: l.pedido, venda_id: l.venda_id,
+      data_venda: l.data_venda ?? null,
+      valor_pago: l.valor_pago, base_comissao: l.base_comissao,
+      valor: Number(l.valor), previsto: !!l.previsto,
+      pagamentos: [l], itens: Array.isArray(l.itens) ? l.itens : [],
+    };
+    // Linha sem venda não agrupa: não há o que juntar e forçar viraria uma
+    // linha "fantasma" somando fatos diferentes.
+    if (l.venda_id == null) { soltas.push({ ...base, chave: `s${i}` }); return; }
+
+    const g = grupos.get(base.chave);
+    if (!g) { grupos.set(base.chave, base); return; }
+    g.valor += Number(l.valor);
+    g.valor_pago = (g.valor_pago ?? 0) + (l.valor_pago ?? 0);
+    g.previsto = g.previsto || !!l.previsto;
+    if (l.data < g.data) g.data = l.data;
+    if (l.data > g.data_fim) g.data_fim = l.data;
+    g.pagamentos.push(l);
+    if (g.itens.length === 0 && Array.isArray(l.itens)) g.itens = l.itens;
+  });
+
+  for (const g of grupos.values()) {
+    if (g.pagamentos.length > 1) {
+      const n = g.pagamentos.length;
+      g.descricao = `${g.pagamentos[0].cliente ?? "—"}`
+        + (g.pedido ? ` · pedido ${g.pedido}` : "")
+        + ` · ${n} pagamentos`;
+    }
+  }
+
+  return [...grupos.values(), ...soltas].sort((a, b) => a.data.localeCompare(b.data));
 };
 
 const isVencido = (d: string | null, situacao: string) => {
@@ -1464,10 +1545,16 @@ const D = {
   dourado: "#DB9864",
 };
 
-function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
+function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, podeReversa, caixaOuroTrigger }: {
   caixa: CaixaDinheiro[];
   baixas: CaixaBaixa[];
   podeBaixar: boolean;
+  // REGRA DE NEGÓCIO: quem pode ABRIR conversão reversa ("Virou joia") é um
+  // conjunto de roles DIFERENTE de quem dá baixa no cofre — bate exatamente com
+  // ROLES_PERMITIDOS do POST /api/conversao-reversa (estoquista_loja, gerente_loja,
+  // admin, desenvolvedor). Sem essa distinção o botão apareceria pra gerente_fabrica
+  // (que toma 403) e sumiria pro estoquista_loja (que tem permissão).
+  podeReversa: boolean;
   caixaOuroTrigger: number;
 }) {
   const [baixas, setBaixas] = useState(baixasInit);
@@ -1544,6 +1631,48 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
     created_at: string;
     data_venda: string | null;
   }
+  /**
+   * REGRA DE NEGÓCIO: conversão reversa (peça "virando joia" e saindo do cofre)
+   * fica PENDENTE até aprovação — enquanto pendente, a origem trava (a rota POST
+   * /api/conversao-reversa barra 2ª solicitação pra mesma origem com 409).
+   * O QUE: tipa o resumo vindo de GET /api/conversao-reversa?status=pendente.
+   * POR QUE: o front usa isso pra mostrar o selo "aguardando aprovação" e
+   * esconder o botão "Virou joia" nos itens do cofre já travados por uma reversa.
+   * IMPACTO SE REMOVIDO: usuário tenta abrir 2ª reversa pra mesma origem sem
+   * saber que já existe uma pendente (só descobre no erro 409 ao enviar).
+   */
+  interface ReversaPendenteResumo {
+    id: number;
+    origem_tipo: "venda_ouro" | "upgrade" | "compra_metal" | "conversao";
+    origem_id: number;
+    produto_id: number;
+    quantidade: number;
+    peso_saida: number;
+    status_conversao: string;
+    ordem_id: number;
+    numero_ordem: string;
+  }
+  /**
+   * REGRA DE NEGÓCIO: toda baixa do Caixa de Ouro com destino='estoque' foi
+   * gerada por uma conversão reversa concluída (peça "virando joia" — ver
+   * /api/conversao-reversa/aprovar). Este tipo espelha o retorno de
+   * GET /api/conversao-reversa/detalhe-baixa, usado pra detalhar essa baixa
+   * específica no Histórico de Baixas do Ouro (produto, solicitante,
+   * aprovador, ordem e foto do peso).
+   */
+  interface DetalheReversa {
+    id: number;
+    quantidade: number;
+    peso_saida: number;
+    foto_abertura: string | null;
+    aprovado_em: string | null;
+    created_at: string;
+    numero_ordem: string;
+    produto_nome: string | null;
+    produto_sku: string | null;
+    solicitante_nome: string | null;
+    aprovador_nome: string | null;
+  }
   const [baixasOuro, setBaixasOuro] = useState<BaixaOuro[]>([]);
   const [saldoOuroDisp, setSaldoOuroDisp] = useState<number>(0);
   const [loadingOuro, setLoadingOuro] = useState(false);
@@ -1555,11 +1684,17 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   const [itensByBaixa, setItensByBaixa] = useState<Record<number, BaixaOuroItem[]>>({});
   const [itensLoadingByBaixa, setItensLoadingByBaixa] = useState<Record<number, boolean>>({});
   const [rastreiosByBaixa, setRastreiosByBaixa] = useState<Record<number, RastreioOuroLegado[]>>({});
+  // REQUISITO 3 conversão reversa (15/07): cache por baixa do detalhe da
+  // conversão reversa (quando a baixa for destino='estoque'). null = já
+  // buscou e não é conversão reversa; undefined = ainda não buscou.
+  const [reversaPorBaixa, setReversaPorBaixa] = useState<Record<number, DetalheReversa | null>>({});
   const [ouroSelecionadosIds, setOuroSelecionadosIds] = useState<string[]>([]);
   const [itensBaixadosAtivos, setItensBaixadosAtivos] = useState<BaixaOuroItem[]>([]);
   const [comprasMetal, setComprasMetal] = useState<CompraMetalResumo[]>([]);
   const [conversoesData, setConversoesData] = useState<ConversaoCofreResumo[]>([]);
   const [upgradesData, setUpgradesData] = useState<UpgradeCofreResumo[]>([]);
+  const [reversasPendentes, setReversasPendentes] = useState<ReversaPendenteResumo[]>([]);
+  const [reversaTarget, setReversaTarget] = useState<{ origem_tipo: "venda_ouro" | "upgrade" | "compra_metal" | "conversao"; origem_id: number; referencia: string; restante: number } | null>(null);
 
   // ── Etapa 2 (13/06): pagamentos do MOTOBOY aguardando conferência ──────────
   // REGRA DE NEGÓCIO: Dinheiro/Ouro que o motoboy recebeu na rua entram em
@@ -1678,6 +1813,19 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
       .catch(() => useErrorStore.getState().push("Erro ao carregar gateways de pagamento", { level: "warning" }));
   }, []);
 
+  /**
+   * REGRA DE NEGÓCIO: carrega junto as conversões reversas PENDENTES — usadas
+   * pra travar (selo "aguardando aprovação") o item do cofre que já tem uma
+   * reversa em aberto, evitando abrir uma 2ª solicitação pra mesma origem.
+   */
+  const carregarReversasPendentes = useCallback(async () => {
+    try {
+      const r = await fetch("/api/conversao-reversa?status=pendente");
+      const json = r.ok ? await r.json().catch(() => null) : null;
+      if (json && Array.isArray(json.conversoes)) setReversasPendentes(json.conversoes as ReversaPendenteResumo[]);
+    } catch { /* silencioso — não trava a aba Ouro */ }
+  }, []);
+
   // ─── Carregar dados do cofre de ouro ────────────────────────────────────────
   useEffect(() => {
     setLoadingOuro(true);
@@ -1688,8 +1836,9 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
       fetch("/api/financeiro/cofre-ouro/baixas-itens").then(r => r.ok ? r.json() : []),
       fetch("/api/financeiro/cofre-ouro/conversoes").then(r => r.ok ? r.json() : []),
       fetch("/api/financeiro/cofre-ouro/upgrades").then(r => r.ok ? r.json() : []),
+      fetch("/api/conversao-reversa?status=pendente").then(r => r.ok ? r.json() : null),
     ])
-      .then(([disp, bx, comprasResp, itensAtivos, convResp, upgradesResp]) => {
+      .then(([disp, bx, comprasResp, itensAtivos, convResp, upgradesResp, reversasResp]) => {
         if (disp) setSaldoOuroDisp(Number(disp.disponivel_gramas ?? 0));
         if (Array.isArray(bx)) setBaixasOuro(bx);
         if (comprasResp && Array.isArray(comprasResp.data)) {
@@ -1703,6 +1852,9 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
         }
         if (Array.isArray(upgradesResp)) {
           setUpgradesData(upgradesResp as UpgradeCofreResumo[]);
+        }
+        if (reversasResp && Array.isArray(reversasResp.conversoes)) {
+          setReversasPendentes(reversasResp.conversoes as ReversaPendenteResumo[]);
         }
       })
       .catch(() => useErrorStore.getState().push("Erro ao carregar baixas de ouro", { level: "warning" }))
@@ -1843,10 +1995,41 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
     const bt = b.data ? new Date(b.data).getTime() : 0;
     return bt - at;
   });
-  const baixadoKeys = new Set(itensBaixadosAtivos.map((it) => `${it.origem_tipo}:${it.origem_id}`));
-  const ouroMovimentosPendentes = ouroMovimentos.filter((m) => !baixadoKeys.has(`${m.origem_tipo}:${m.origem_id}`));
+  /**
+   * REGRA DE NEGÓCIO (15/07 — aprovado Jonathan): um lote de ouro no cofre pode
+   * ter VÁRIAS baixas parciais (sangria normal + conversão reversa). O pendente
+   * deve mostrar o que AINDA RESTA daquela origem, não sumir da lista inteira
+   * na 1ª baixa (comportamento antigo: qualquer baixa, mesmo parcial, escondia
+   * o item por completo).
+   * O QUE: soma as gramas já baixadas (baixas ATIVAS) por origem_tipo:origem_id
+   * e calcula `restante = ouro_gramas - já_baixado` por item. Só entra nos
+   * pendentes quem ainda tem restante > 0 (epsilon pra evitar ruído de float).
+   * IMPACTO SE ALTERADO/REMOVIDO: opera baixa/reversa sobre o peso CHEIO já
+   * parcialmente baixado — duplica saída do cofre (saldo negativo) ou some da
+   * lista um restante que ainda podia ser baixado/convertido.
+   * ⚠️ Isso também muda a sangria normal de vendas/upgrade: antes mandava o
+   * peso cheio do item, agora manda o restante — pra elas o restante é sempre
+   * igual ao peso cheio até a 1ª baixa (não têm baixa parcial), então o
+   * comportamento observado não muda; só passa a ser calculado do mesmo jeito.
+   */
+  const EPSILON_GRAMAS_RESTANTE = 0.0005;
+  const baixadoPorOrigem = new Map<string, number>();
+  itensBaixadosAtivos.forEach((it) => {
+    const chave = `${it.origem_tipo}:${it.origem_id}`;
+    baixadoPorOrigem.set(chave, (baixadoPorOrigem.get(chave) ?? 0) + Number(it.gramas));
+  });
+  type OuroMovPendente = OuroMov & { restante: number };
+  const ouroMovimentosPendentes: OuroMovPendente[] = ouroMovimentos
+    .map((m): OuroMovPendente => {
+      const chave = `${m.origem_tipo}:${m.origem_id}`;
+      const restante = Number(m.ouro_gramas) - (baixadoPorOrigem.get(chave) ?? 0);
+      return { ...m, restante };
+    })
+    .filter((m) => m.restante > EPSILON_GRAMAS_RESTANTE);
+  const reversaPendenteKeys = new Set(reversasPendentes.map((r) => `${r.origem_tipo}:${r.origem_id}`));
   const ouroSelecionados = ouroMovimentosPendentes.filter((m) => ouroSelecionadosIds.includes(m.id));
-  const ouroSelecionadoTotalG = ouroSelecionados.reduce((s, m) => s + Number(m.ouro_gramas), 0);
+  // REGRA DE NEGÓCIO: a seleção pra baixa soma o RESTANTE (não o peso cheio) — ver comentário acima.
+  const ouroSelecionadoTotalG = ouroSelecionados.reduce((s, m) => s + Number(m.restante), 0);
   const ouroSelecionadoTotalValor = ouroSelecionados.reduce((s, m) => s + Number(m.valor), 0);
   const podeAbrirBaixaOuro = podeBaixar && saldoOuroDisp > 0 && ouroSelecionadosIds.length > 0;
   const baixaOuroResumoSelecao = ouroSelecionadosIds.length > 0
@@ -1929,7 +2112,10 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
             referencia: m.referencia,
             pessoa_nome: m.pessoa,
             data_origem: m.data,
-            gramas: Number(m.ouro_gramas),
+            // REGRA DE NEGÓCIO: manda o RESTANTE da origem, não o peso cheio —
+            // permite baixas parciais múltiplas pra mesma origem (ver comentário
+            // em `ouroMovimentosPendentes`).
+            gramas: Number(m.restante),
             valor_brl: Number(m.valor),
           })),
         }),
@@ -1989,6 +2175,26 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
       setRastreiosByBaixa((prev) => ({ ...prev, [baixaId]: [] }));
     } finally {
       setItensLoadingByBaixa((prev) => ({ ...prev, [baixaId]: false }));
+    }
+  }
+
+  /**
+   * REGRA DE NEGÓCIO: só baixas com destino='estoque' vêm de uma conversão
+   * reversa (peça virando joia). Busca sob demanda (ao expandir a baixa) os
+   * dados legíveis — produto, solicitante, aprovador, ordem, foto do peso —
+   * pra detalhar essa baixa específica no Histórico. Cacheia no state pra não
+   * refazer a requisição a cada abrir/fechar do <details>.
+   * IMPACTO SE REMOVIDO: Histórico de Baixas do Ouro volta a mostrar só o
+   * total genérico da baixa, sem dizer qual peça específica saiu do cofre.
+   */
+  async function carregarReversaBaixa(baixaId: number) {
+    if (reversaPorBaixa[baixaId] !== undefined) return;
+    try {
+      const res = await fetch(`/api/conversao-reversa/detalhe-baixa?baixa_id=${baixaId}`);
+      const json = await res.json().catch(() => ({}));
+      setReversaPorBaixa((prev) => ({ ...prev, [baixaId]: res.ok ? (json.conversao_reversa ?? null) : null }));
+    } catch {
+      setReversaPorBaixa((prev) => ({ ...prev, [baixaId]: null }));
     }
   }
 
@@ -2274,6 +2480,26 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
         </div>
       )}
 
+      {/* Modal "Virou joia" (Conversão Reversa) */}
+      <ConversaoReversaModal
+        isOpen={!!reversaTarget}
+        origem={reversaTarget as OrigemReversa | null}
+        onClose={() => setReversaTarget(null)}
+        onSuccess={() => {
+          // REGRA DE NEGÓCIO: após enviar p/ aprovação, o item some do CTA "Virou
+          // joia" (vira selo "aguardando aprovação") — recarrega reversas +
+          // itens/saldo do cofre pra refletir na hora.
+          carregarReversasPendentes();
+          Promise.all([
+            fetch("/api/financeiro/cofre-ouro/baixas-itens").then((r) => r.ok ? r.json() : []),
+            fetch("/api/financeiro/cofre-ouro/disponivel").then((r) => r.ok ? r.json() : null),
+          ]).then(([itensResp, dispResp]) => {
+            if (Array.isArray(itensResp)) setItensBaixadosAtivos(itensResp as BaixaOuroItem[]);
+            if (dispResp) setSaldoOuroDisp(Number(dispResp.disponivel_gramas ?? 0));
+          });
+        }}
+      />
+
       {/* Baixa de Ouro */}
       {formaFiltro === "Ouro" && (
         <div className="space-y-4">
@@ -2470,7 +2696,16 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                     <td colSpan={8} className="px-4 py-8 text-center text-sm" style={{ color: C.cinza }}>Nenhum registro.</td>
                   </tr>
                 )}
-                {ouroMovimentosPendentes.map((r) => (
+                {ouroMovimentosPendentes.map((r) => {
+                  // REGRA DE NEGÓCIO (15/07 — Jonathan): QUALQUER ouro pendente de baixa
+                  // no cofre pode "virar joia" — venda em ouro, upgrade, compra de metal
+                  // ou conversão. Todos representam metal físico que pode conter/virar
+                  // uma peça vendável. Gate só por papel (podeReversa).
+                  const podeVirarJoia = podeReversa;
+                  const chaveOrigem = `${r.origem_tipo}:${r.origem_id}`;
+                  const temReversaPendente = reversaPendenteKeys.has(chaveOrigem);
+                  const parcial = r.restante < r.ouro_gramas - EPSILON_GRAMAS_RESTANTE;
+                  return (
                   <tr key={r.id} className="border-t hover:bg-gray-50 transition-colors" style={{ borderColor: C.cremeBorder }}>
                     <td className="px-4 py-3">
                       <input
@@ -2503,23 +2738,54 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                     </td>
                     <td className="px-4 py-3 text-sm" style={{ color: "#374151" }}>{r.pessoa}</td>
                     <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{fmtDatetime(r.data)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: "#92400E" }}>{r.ouro_gramas.toFixed(3)}g</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: C.verde }}>{fmt(r.valor)}</td>
-                    <td className="px-4 py-3 text-right">
-                      {r.venda && podeBaixar ? (
-                        <button
-                          onClick={() => { setEstornoErro(null); setEstornoTarget(r.venda!); }}
-                          className="text-xs px-2.5 py-1 rounded-lg border font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-1"
-                          style={{ borderColor: C.vermelho, color: C.vermelho, backgroundColor: "white" }}
-                        >
-                          <RefreshCw size={11} /> Estornar
-                        </button>
+                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: "#92400E" }}>
+                      {parcial ? (
+                        <>
+                          <div>{r.restante.toFixed(3)}g restantes</div>
+                          <div className="text-[10px] font-normal" style={{ color: C.cinza }}>(de {r.ouro_gramas.toFixed(3)}g)</div>
+                        </>
                       ) : (
-                        <span className="text-xs" style={{ color: C.cinza }}>—</span>
+                        `${r.restante.toFixed(3)}g`
                       )}
                     </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: C.verde }}>{fmt(r.valor)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                        {r.venda && podeBaixar && (
+                          <button
+                            onClick={() => { setEstornoErro(null); setEstornoTarget(r.venda!); }}
+                            className="text-xs px-2.5 py-1 rounded-lg border font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-1"
+                            style={{ borderColor: C.vermelho, color: C.vermelho, backgroundColor: "white" }}
+                          >
+                            <RefreshCw size={11} /> Estornar
+                          </button>
+                        )}
+                        {podeVirarJoia && (
+                          temReversaPendente ? (
+                            <span
+                              className="text-[11px] px-2 py-1 rounded-lg font-medium inline-flex items-center gap-1"
+                              style={{ backgroundColor: "#E0F2FE", color: "#0369A1" }}
+                            >
+                              <Clock size={11} /> Reversa aguardando aprovação
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setReversaTarget({ origem_tipo: r.origem_tipo, origem_id: r.origem_id, referencia: r.referencia, restante: r.restante })}
+                              className="text-xs px-2.5 py-1 rounded-lg border font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-1"
+                              style={{ borderColor: "#B45309", color: "#92400E", backgroundColor: "#FEF3C7" }}
+                            >
+                              <Gem size={11} /> Virou joia
+                            </button>
+                          )
+                        )}
+                        {!r.venda && !podeVirarJoia && (
+                          <span className="text-xs" style={{ color: C.cinza }}>—</span>
+                        )}
+                      </div>
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -2553,6 +2819,9 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
               const loadingItens = !!itensLoadingByBaixa[b.id];
               const totalItensG = itens.reduce((s, it) => s + Number(it.gramas ?? 0), 0);
               const totalItensValor = itens.reduce((s, it) => s + Number(it.valor_brl ?? 0), 0);
+              // REQUISITO 3 conversão reversa: baixa destino='estoque' → detalhe
+              // da peça que saiu do cofre (produto, quem pediu/aprovou, foto).
+              const reversa = b.destino === "estoque" ? reversaPorBaixa[b.id] : undefined;
               return (
                 <details
                   key={b.id}
@@ -2560,7 +2829,13 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                   style={{ borderColor: C.cremeBorder }}
                   onToggle={(e) => {
                     const el = e.currentTarget as HTMLDetailsElement;
-                    if (el.open) carregarItensBaixa(b.id);
+                    if (el.open) {
+                      carregarItensBaixa(b.id);
+                      // REGRA DE NEGÓCIO: só baixa destino='estoque' pode ser
+                      // conversão reversa — evita chamada desnecessária pras
+                      // baixas normais (alisson/fabrica/service).
+                      if (b.destino === "estoque") carregarReversaBaixa(b.id);
+                    }
                   }}
                 >
                   <summary className="px-4 py-3 flex items-center justify-between gap-3 cursor-pointer select-none list-none" style={{ backgroundColor: C.cremeBg }}>
@@ -2675,6 +2950,65 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
                       </p>
                     </div>
                   )}
+                  {/*
+                    REQUISITO 3 conversão reversa (15/07): baixa destino='estoque'
+                    é sempre gerada por uma conversão reversa concluída — detalha
+                    aqui QUAL peça saiu do cofre, quem pediu, quem aprovou e a
+                    foto do peso tirada na abertura (prova física da conversão).
+                    Só renderiza se a busca já achou uma conversão reversa
+                    vinculada a esta baixa (reversa !== null/undefined).
+                  */}
+                  {reversa && (
+                    <div className="px-4 py-3 border-t" style={{ borderColor: C.cremeBorder, backgroundColor: "#FEF3C7" }}>
+                      <p className="text-[11px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color: "#92400E" }}>
+                        <Gem size={12} /> Conversão Reversa
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 text-xs">
+                          <div>
+                            <p style={{ color: C.cinza }}>Produto que virou</p>
+                            <p className="font-medium" style={{ color: "#1A1A1A" }}>
+                              {reversa.produto_nome ?? "—"}{reversa.produto_sku ? ` (${reversa.produto_sku})` : ""}
+                            </p>
+                          </div>
+                          <div>
+                            <p style={{ color: C.cinza }}>Ordem</p>
+                            <p className="font-medium" style={{ color: "#1A1A1A" }}>{reversa.numero_ordem}</p>
+                          </div>
+                          <div>
+                            <p style={{ color: C.cinza }}>Quantidade</p>
+                            <p className="font-medium" style={{ color: "#1A1A1A" }}>{reversa.quantidade} peça(s)</p>
+                          </div>
+                          <div>
+                            <p style={{ color: C.cinza }}>Peso</p>
+                            <p className="font-medium" style={{ color: "#92400E" }}>{Number(reversa.peso_saida).toFixed(3)}g</p>
+                          </div>
+                          <div>
+                            <p style={{ color: C.cinza }}>Solicitado por</p>
+                            <p className="font-medium" style={{ color: "#1A1A1A" }}>{reversa.solicitante_nome ?? "—"}</p>
+                          </div>
+                          <div>
+                            <p style={{ color: C.cinza }}>Aprovado por</p>
+                            <p className="font-medium" style={{ color: "#1A1A1A" }}>{reversa.aprovador_nome ?? "—"}</p>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs mb-1" style={{ color: C.cinza }}>Foto do peso</p>
+                          {reversa.foto_abertura ? (
+                            <a href={getPublicUrl("conversao-fotos", reversa.foto_abertura)} target="_blank" rel="noopener noreferrer">
+                              <img
+                                src={getPublicUrl("conversao-fotos", reversa.foto_abertura)}
+                                alt="Foto do peso na abertura da conversão reversa"
+                                style={{ width: 140, height: 105, objectFit: "cover", borderRadius: 8, border: `1px solid ${C.cremeBorder}`, cursor: "pointer" }}
+                              />
+                            </a>
+                          ) : (
+                            <p className="text-xs italic" style={{ color: C.cinza }}>sem foto</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </details>
               );
             })}
@@ -2691,497 +3025,681 @@ function TabCaixa({ caixa, baixas: baixasInit, podeBaixar, caixaOuroTrigger }: {
   );
 }
 
-// ─── TabComissoes ─────────────────────────────────────────────────────────────
+// ─── ExtratoComissao ──────────────────────────────────────────────────────────
 
 /**
- * Aba de Pagamento de Comissões
- * REGRA DE NEGÓCIO: fechamento mensal de comissão por consultora.
- * O que: lista fechamentos, permite criar, aprovar e gerar conta a pagar.
- * Por que: módulo completo de pagamento de comissão com rastreio.
- * Impacto se alterado: risco de pagar comissão sem controle ou duplicar.
+ * Extrato de comissão — DUAS telas (migration 363)
+ *
+ * REGRA DE NEGÓCIO: a comissão é uma conta-corrente por consultora.
+ *   Tela 1 (lista)   — uma linha por vendedora no mês, com as colunas do extrato:
+ *                      saldo anterior, comissões, débitos de devolução, outros
+ *                      créditos/débitos, pagamentos e o saldo.
+ *   Tela 2 (detalhe) — as linhas de cada balde e o resumo que fecha o saldo.
+ * POR QUE: o saldo é a SOMA dos lançamentos, sem cálculo escondido — é o que
+ * permite conferir pedido a pedido e faz a conta bater por construção.
+ * IMPACTO SE ALTERADO: "Comis. pend." (crediário não pago) NUNCA entra no saldo.
+ * O que firma a comissão é o pagamento — somar ali paga sobre dinheiro que não
+ * entrou. Ver docs/regras-negocio/comercial.md §2.1.
  */
-function TabComissoes({ fechamentos, vendedores }: { fechamentos: any[]; vendedores?: any[] }) {
-  const [lista, setLista] = useState(fechamentos);
-  const [resumo, setResumo] = useState<{ disponivel: number; em_rascunho: number; gerado: number; pago: number } | null>(null);
-  const [loadingResumo, setLoadingResumo] = useState(true);
-  const [criando, setCriando] = useState(false);
-  const [showCriar, setShowCriar] = useState(false);
-  const [filtro, setFiltro] = useState("todos");
-  const [detailId, setDetailId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<any | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [actionId, setActionId] = useState<string | null>(null);
-  const [showCancelForm, setShowCancelForm] = useState<string | null>(null);
-  const [cancelMotivo, setCancelMotivo] = useState("");
-  const [consultoraFiltro, setConsultoraFiltro] = useState("");
-  const [sortAsc, setSortAsc] = useState(false);
-
-  // Form criar
-  const [form, setForm] = useState({ consultora_id: "", periodo_inicio: "", periodo_fim: "", competencia: "" });
+export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } = {}) {
   const hoje = new Date();
-  const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`;
+  const [competencia, setCompetencia] = useState(
+    `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`,
+  );
+  const [lista, setLista] = useState<any[] | null>(null);
+  const [detalhe, setDetalhe] = useState<any | null>(null);
+  // soConsultoraId: modo "minha comissão" — abre direto no extrato da pessoa,
+  // sem lista de colegas e sem botão de voltar. Quem decide o que ela pode ver
+  // é o servidor (comissao-permissao.ts); isto aqui é só a navegação.
+  const [abertaId, setAbertaId] = useState<number | null>(soConsultoraId ?? null);
+  // Uma linha aberta por vez: o detalhe dos itens é para conferir um pedido, não
+  // para virar uma segunda tabela empilhada. Chave = "balde-índice".
+  const [linhaAberta, setLinhaAberta] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [soComMovimento, setSoComMovimento] = useState(true);
+  const [verPendentes, setVerPendentes] = useState(false);
+  const [menuAberto, setMenuAberto] = useState(false);
+  const [modal, setModal] = useState<null | "pagar" | "lancar" | "estornar">(null);
+  const [salvando, setSalvando] = useState(false);
+  const [formPagar, setFormPagar] = useState({ data: "", valor: "", descricao: "" });
+  const [formLanc, setFormLanc] = useState({ tipo: "ajuste_positivo", valor: "", pedido: "", motivo: "" });
+  const [motivoEstorno, setMotivoEstorno] = useState("");
 
-  useEffect(() => {
-    if (showCriar) {
-      // Preenche defaults
-      const inicio = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}-01`;
-      const fim = hoje.toISOString().slice(0, 10);
-      setForm(f => ({ ...f, periodo_inicio: f.periodo_inicio || inicio, periodo_fim: f.periodo_fim || fim, competencia: f.competencia || mesAtual }));
-    }
-  }, [showCriar, mesAtual]);
+  const podePagar = detalhe?.permissoes?.podePagar === true;
 
-  // Carrega resumo
-  useEffect(() => {
-    fetch("/api/financeiro/comissoes/resumo")
-      .then(r => r.ok ? r.json() : null)
-      .then(d => setResumo(d))
-      .catch(() => {})
-      .finally(() => setLoadingResumo(false));
-  }, []);
-
-  // Abre detail
-  function abrirDetail(id: string) {
-    setDetailId(id);
-    setDetailLoading(true);
-    fetch(`/api/financeiro/comissoes/fechamentos/${id}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => setDetail(d))
-      .catch(() => setDetail(null))
-      .finally(() => setDetailLoading(false));
+  function recarregar() {
+    setModal(null); setMenuAberto(false); setSalvando(false);
+    setDetalhe(null);
+    setAbertaId(a => a); // dispara o efeito de detalhe
+    setCompetencia(c => c);
+    fetch(`/api/financeiro/comissoes/extrato/${abertaId}?competencia=${competencia}`)
+      .then(r => r.ok ? r.json() : null).then(d => d && setDetalhe(d)).catch(() => {});
   }
 
-  async function handleCriar() {
-    if (!form.consultora_id || !form.periodo_inicio || !form.periodo_fim || !form.competencia) return;
-    setCriando(true);
+  async function acao(url: string, init: RequestInit, erroPadrao: string) {
+    setSalvando(true);
     try {
-      const res = await fetch("/api/financeiro/comissoes/fechamentos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      if (res.ok) {
-        const nova = await res.json();
-        setLista(prev => [{ id: nova.id, consultora_nome_snapshot: form.consultora_id, valor_total: nova.valor_total, qtd_itens: nova.qtd_itens, status: "rascunho", created_at: new Date().toISOString() }, ...prev] as any[]);
-        setShowCriar(false);
-        setForm({ consultora_id: "", periodo_inicio: "", periodo_fim: "", competencia: "" });
-      } else {
-        const err = await res.json().catch(() => ({ error: "Erro ao criar" }));
-        alert(err.error);
+      const res = await fetch(url, init);
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        alert(e.error ?? erroPadrao);
+        return false;
       }
+      recarregar();
+      return true;
     } finally {
-      setCriando(false);
+      setSalvando(false);
     }
   }
 
-  async function handleFechar(id: string) {
-    setActionId(id);
-    try {
-      const res = await fetch(`/api/financeiro/comissoes/fechamentos/${id}/fechar`, { method: "POST" });
-      if (res.ok) {
-        setLista(prev => prev.map(f => f.id === id ? { ...f, status: "fechado" } : f));
-      } else {
-        const err = await res.json().catch(() => ({ error: "Erro" }));
-        alert(err.error);
-      }
-    } finally {
-      setActionId(null);
-    }
-  }
-
-  async function handleGerarConta(id: string) {
-    setActionId(id);
-    try {
-      const res = await fetch(`/api/financeiro/comissoes/fechamentos/${id}/gerar-conta-pagar`, { method: "POST" });
-      if (res.ok) {
-        const data = await res.json();
-        setLista(prev => prev.map(f => f.id === id ? { ...f, status: "enviado_financeiro", conta_pagar_id: data.conta_pagar_id } : f));
-      } else {
-        const err = await res.json().catch(() => ({ error: "Erro" }));
-        alert(err.error);
-      }
-    } finally {
-      setActionId(null);
-    }
-  }
-
-  async function handleCancelar(id: string) {
-    if (!cancelMotivo.trim()) return;
-    setActionId(id);
-    try {
-      const res = await fetch(`/api/financeiro/comissoes/fechamentos/${id}/cancelar`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ motivo: cancelMotivo.trim() }),
-      });
-      if (res.ok) {
-        setLista(prev => prev.map(f => f.id === id ? { ...f, status: "cancelado" } : f));
-        setShowCancelForm(null);
-        setCancelMotivo("");
-      } else {
-        const err = await res.json().catch(() => ({ error: "Erro" }));
-        alert(err.error);
-      }
-    } finally {
-      setActionId(null);
-    }
-  }
-
-  const consultorasUnicas = useMemo(() => {
-    const map = new Map<string, string>();
-    lista.forEach(f => {
-      const id = f.consultora_id;
-      const nome = f.consultora_nome_snapshot;
-      if (id && nome) map.set(String(id), nome);
-    });
-    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [lista]);
-
-  const filtradas = useMemo(() => {
-    let r = lista;
-    if (filtro !== "todos") r = r.filter(f => f.status === filtro);
-    if (consultoraFiltro) r = r.filter(f => String(f.consultora_id) === consultoraFiltro);
-    return r;
-  }, [lista, filtro, consultoraFiltro]);
-
-  const statusBadge = (s: string) => {
-    const map: Record<string, { label: string; color: string; bg: string }> = {
-      rascunho:           { label: "Rascunho",  color: "#D4833C", bg: "#FFF3E0" },
-      fechado:            { label: "Fechado",   color: "#4A7C5E", bg: "#E8F5E9" },
-      enviado_financeiro: { label: "Enviado",   color: "#184036", bg: "#E0F2F1" },
-      pago:               { label: "Pago",      color: "#2E7D32", bg: "#E8F5E9" },
-      cancelado:          { label: "Cancelado", color: "#B54747", bg: "#FFEBEE" },
-    };
-    return map[s] ?? { label: s, color: "#666", bg: "#F5F5F5" };
+  const rotuloMes = (comp: string) => {
+    const [a, m] = comp.split("-");
+    return new Date(Number(a), Number(m) - 1)
+      .toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
   };
 
-  if (detailId) {
+  function mudarMes(delta: number) {
+    const [a, m] = competencia.split("-").map(Number);
+    const d = new Date(a, m - 1 + delta, 1);
+    setCompetencia(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+
+  useEffect(() => {
+    if (abertaId) return;
+    setLoading(true); setErro(null);
+    fetch(`/api/financeiro/comissoes/extrato?competencia=${competencia}`)
+      .then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Erro ao carregar");
+        return r.json();
+      })
+      .then(d => setLista(d.linhas))
+      .catch(e => { setErro(e.message); setLista(null); })
+      .finally(() => setLoading(false));
+  }, [competencia, abertaId]);
+
+  // A busca do detalhe vive num efeito (e não dentro do abrir()) porque o mês
+  // também muda DENTRO da tela de detalhe. Se ficar só no clique, trocar o mês
+  // no detalhe muda o rótulo e não recarrega nada — foi o bug reportado em
+  // 03/08/2026. Depende de abertaId E de competencia.
+  useEffect(() => {
+    if (!abertaId) { setDetalhe(null); return; }
+    let cancelado = false;
+    // Trocar de mês/consultora recarrega a lista: a linha aberta apontava pro
+    // índice antigo e abriria o pedido errado.
+    setLinhaAberta(null);
+    setLoading(true); setErro(null);
+    fetch(`/api/financeiro/comissoes/extrato/${abertaId}?competencia=${competencia}`)
+      .then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Erro ao carregar");
+        return r.json();
+      })
+      .then(d => { if (!cancelado) setDetalhe(d); })
+      .catch(e => { if (!cancelado) { setErro(e.message); setDetalhe(null); } })
+      .finally(() => { if (!cancelado) setLoading(false); });
+    // cancelado: troca rápida de mês dispara duas buscas; sem isso a resposta
+    // mais lenta pode chegar depois e sobrescrever o mês certo com o antigo.
+    return () => { cancelado = true; };
+  }, [abertaId, competencia]);
+
+  function abrir(id: number) {
+    setAbertaId(id);
+  }
+
+  const filtroMes = (
+    <div className="flex items-center gap-2">
+      <button onClick={() => mudarMes(-1)} aria-label="Mês anterior"
+        className="px-2 py-1.5 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder, color: C.cinza }}>←</button>
+      <span className="px-3 py-1.5 rounded-lg border text-sm font-medium capitalize"
+        style={{ borderColor: C.esmeralda, color: C.esmeralda }}>{rotuloMes(competencia)}</span>
+      <button onClick={() => mudarMes(1)} aria-label="Próximo mês"
+        className="px-2 py-1.5 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder, color: C.cinza }}>→</button>
+    </div>
+  );
+
+  // ─── TELA 2: detalhe da consultora ───────────────────────────────────────
+  if (abertaId) {
+    const secoes: Array<{ chave: string; titulo: string; sinal: "+" | "-"; colunas: boolean }> = [
+      { chave: "comissao",      titulo: "Comissões do mês",        sinal: "+", colunas: true },
+      { chave: "devolucao",     titulo: "(−) Débitos de devoluções", sinal: "-", colunas: false },
+      { chave: "outro_credito", titulo: "(+) Outros créditos",      sinal: "+", colunas: false },
+      { chave: "outro_debito",  titulo: "(−) Outros débitos",       sinal: "-", colunas: false },
+      { chave: "pagamento",     titulo: "(−) Pagamentos efetuados", sinal: "-", colunas: false },
+    ];
+
     return (
       <div className="space-y-5">
-        <button onClick={() => { setDetailId(null); setDetail(null); }}
-          className="flex items-center gap-1 text-sm font-medium" style={{ color: C.esmeralda }}>
-          ← Voltar para lista
-        </button>
-        {detailLoading ? (
-          <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin" style={{ color: C.esmeralda }} /></div>
-        ) : detail ? (
-          <div className="space-y-5">
-            <div className="rounded-xl bg-white p-5 border" style={{ borderColor: C.cremeBorder }}>
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-bold" style={{ color: "#1A1A1A" }}>{detail.consultora_nome_snapshot}</h3>
-                  <p className="text-xs" style={{ color: C.cinza }}>
-                    {(() => {
-                      const [ano, mes] = (detail.competencia ?? "").split("-");
-                      const data = new Date(Number(ano), Number(mes) - 1);
-                      return data.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-                    })()} · {fmtDate(detail.periodo_inicio)} a {fmtDate(detail.periodo_fim)}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          {soConsultoraId ? <span /> : (
+            <button onClick={() => { setAbertaId(null); setDetalhe(null); }}
+              className="flex items-center gap-1 text-sm font-medium" style={{ color: C.esmeralda }}>
+              ← Voltar para a lista
+            </button>
+          )}
+          <div className="flex items-center gap-2">
+            {filtroMes}
+            {podePagar && (
+              <div className="relative">
+                <button onClick={() => setMenuAberto(v => !v)}
+                  className="px-3 py-1.5 rounded-lg border text-sm font-medium"
+                  style={{ borderColor: C.esmeralda, color: C.esmeralda }}>
+                  mais ações ⋯
+                </button>
+                {menuAberto && (
+                  <div className="absolute right-0 mt-1 z-20 rounded-lg border bg-white shadow-lg py-1 min-w-[210px]"
+                    style={{ borderColor: C.cremeBorder }}>
+                    {detalhe?.pago ? (
+                      <button onClick={() => { setMotivoEstorno(""); setModal("estornar"); setMenuAberto(false); }}
+                        className="w-full text-left px-4 py-2 text-sm hover:opacity-70" style={{ color: C.vermelho }}>
+                        ↺ Estornar pagamento
+                      </button>
+                    ) : (
+                      <button onClick={() => {
+                        setFormPagar({
+                          data: new Date().toISOString().slice(0, 10),
+                          valor: String(detalhe?.resumo?.saldo ?? ""),
+                          descricao: "",
+                        });
+                        setModal("pagar"); setMenuAberto(false);
+                      }} className="w-full text-left px-4 py-2 text-sm hover:opacity-70" style={{ color: "#1A1A1A" }}>
+                        ✓ Realizar pagamento
+                      </button>
+                    )}
+                    <button onClick={() => { setFormLanc({ tipo: "ajuste_positivo", valor: "", pedido: "", motivo: "" }); setModal("lancar"); setMenuAberto(false); }}
+                      className="w-full text-left px-4 py-2 text-sm hover:opacity-70" style={{ color: "#1A1A1A" }}>
+                      ＋ Incluir lançamento
+                    </button>
+                    <button onClick={() => { setMenuAberto(false); window.print(); }}
+                      className="w-full text-left px-4 py-2 text-sm hover:opacity-70" style={{ color: C.cinza }}>
+                      ⎙ Imprimir extrato
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Modais ─────────────────────────────────────────────────────── */}
+        {modal && (
+          <div className="fixed inset-0 z-40 flex items-start justify-center pt-16 px-4"
+            style={{ backgroundColor: "rgba(0,0,0,.35)" }} onClick={() => setModal(null)}>
+            <div className="w-full max-w-md rounded-xl bg-white p-5 border" style={{ borderColor: C.cremeBorder }}
+              onClick={e => e.stopPropagation()}>
+
+              {modal === "pagar" && (
+                <>
+                  <h4 className="text-base font-bold mb-1" style={{ color: "#1A1A1A" }}>Pagamento de comissão</h4>
+                  <p className="text-xs mb-4" style={{ color: C.cinza }}>
+                    {detalhe?.consultora?.nome} · referente a <span className="capitalize">{rotuloMes(competencia)}</span>
                   </p>
-                </div>
-                <span className="px-3 py-1 rounded-full text-xs font-semibold"
-                  style={{ color: statusBadge(detail.status).color, backgroundColor: statusBadge(detail.status).bg }}>
-                  {statusBadge(detail.status).label}
-                </span>
-              </div>
-              <div className="text-3xl font-bold tabular-nums mb-4" style={{ color: C.esmeralda }}>
-                {fmt(Number(detail.valor_total))}
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-4">
-                <div><span style={{ color: C.cinza }}>Aprovado por: </span><span style={{ color: "#1A1A1A" }}>{detail.approved_by ?? "—"}</span></div>
-                <div><span style={{ color: C.cinza }}>Aprovado em: </span><span style={{ color: "#1A1A1A" }}>{detail.approved_at ? fmtDate(detail.approved_at) : "—"}</span></div>
-                <div><span style={{ color: C.cinza }}>Conta Pagar: </span><span style={{ color: "#1A1A1A" }}>{detail.conta_pagar_id ? `#${detail.conta_pagar_id}` : "—"}</span></div>
-                <div><span style={{ color: C.cinza }}>Itens: </span><span style={{ color: "#1A1A1A" }}>{detail.qtd_itens}</span></div>
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Data do pagamento</label>
+                  <input type="date" value={formPagar.data} onChange={e => setFormPagar(f => ({ ...f, data: e.target.value }))}
+                    className="w-full mb-3 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Valor</label>
+                  <input type="number" step="0.01" value={formPagar.valor}
+                    onChange={e => setFormPagar(f => ({ ...f, valor: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <p className="text-[11px] mt-1 mb-3" style={{ color: C.cinza }}>
+                    Vem do saldo do mês. Edite se o Pix saiu diferente — o extrato grava o que saiu.
+                  </p>
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Descrição <span style={{ opacity: .7 }}>(opcional)</span></label>
+                  <input value={formPagar.descricao} onChange={e => setFormPagar(f => ({ ...f, descricao: e.target.value }))}
+                    className="w-full mb-4 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <div className="flex items-center gap-3">
+                    <button disabled={salvando || !formPagar.data}
+                      onClick={() => acao(`/api/financeiro/comissoes/extrato/${abertaId}/pagar`, {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          competencia, data_pagamento: formPagar.data,
+                          valor: formPagar.valor ? Number(formPagar.valor) : null,
+                          descricao: formPagar.descricao || null,
+                        }),
+                      }, "Erro ao registrar o pagamento")}
+                      className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                      style={{ backgroundColor: C.esmeralda }}>
+                      {salvando ? "Salvando…" : "Salvar"}
+                    </button>
+                    <button onClick={() => setModal(null)} className="text-sm" style={{ color: C.cinza }}>cancelar</button>
+                  </div>
+                </>
+              )}
+
+              {modal === "lancar" && (
+                <>
+                  <h4 className="text-base font-bold mb-1" style={{ color: "#1A1A1A" }}>Lançamento manual</h4>
+                  <p className="text-xs mb-4" style={{ color: C.cinza }}>
+                    {detalhe?.consultora?.nome} · entra em <span className="capitalize">{rotuloMes(competencia)}</span>
+                  </p>
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Tipo</label>
+                  <div className="flex gap-2 mb-3">
+                    {([["ajuste_positivo", "(+) crédito"], ["ajuste_negativo", "(−) débito"]] as const).map(([v, r]) => (
+                      <button key={v} onClick={() => setFormLanc(f => ({ ...f, tipo: v }))}
+                        className="px-3 py-1.5 rounded-lg border text-xs font-medium"
+                        style={formLanc.tipo === v
+                          ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
+                          : { borderColor: C.cremeBorder, color: C.cinza }}>{r}</button>
+                    ))}
+                  </div>
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Valor</label>
+                  <input type="number" step="0.01" value={formLanc.valor}
+                    onChange={e => setFormLanc(f => ({ ...f, valor: e.target.value }))}
+                    className="w-full mb-3 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Venda <span style={{ opacity: .7 }}>(opcional — id da venda)</span></label>
+                  <input value={formLanc.pedido} onChange={e => setFormLanc(f => ({ ...f, pedido: e.target.value }))}
+                    className="w-full mb-3 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>
+                    Motivo <span style={{ color: C.vermelho }}>obrigatório</span>
+                  </label>
+                  <input value={formLanc.motivo} onChange={e => setFormLanc(f => ({ ...f, motivo: e.target.value }))}
+                    placeholder="por que esse acerto existe"
+                    className="w-full mb-4 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <div className="flex items-center gap-3">
+                    <button disabled={salvando || !formLanc.valor || !formLanc.motivo.trim()}
+                      onClick={() => acao("/api/financeiro/comissoes/ajustes", {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          consultora_id: abertaId, competencia, tipo_item: formLanc.tipo,
+                          valor: Number(formLanc.valor), justificativa: formLanc.motivo.trim(),
+                          venda_id: formLanc.pedido ? Number(formLanc.pedido) : null,
+                        }),
+                      }, "Erro ao lançar")}
+                      className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                      style={{ backgroundColor: C.esmeralda }}>
+                      {salvando ? "Salvando…" : "Salvar"}
+                    </button>
+                    <button onClick={() => setModal(null)} className="text-sm" style={{ color: C.cinza }}>cancelar</button>
+                  </div>
+                </>
+              )}
+
+              {modal === "estornar" && (
+                <>
+                  <h4 className="text-base font-bold mb-1" style={{ color: C.vermelho }}>Estornar pagamento</h4>
+                  <p className="text-xs mb-4" style={{ color: C.cinza }}>
+                    O pagamento de <span className="capitalize">{rotuloMes(competencia)}</span> volta a ficar em aberto e o saldo sobe de novo. Nenhum lançamento é apagado.
+                  </p>
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>
+                    Motivo <span style={{ color: C.vermelho }}>obrigatório</span>
+                  </label>
+                  <input value={motivoEstorno} onChange={e => setMotivoEstorno(e.target.value)}
+                    className="w-full mb-4 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: C.cremeBorder }} />
+                  <div className="flex items-center gap-3">
+                    <button disabled={salvando || motivoEstorno.trim().length < 5}
+                      onClick={() => acao(
+                        `/api/financeiro/comissoes/extrato/${abertaId}/pagar?competencia=${competencia}&motivo=${encodeURIComponent(motivoEstorno.trim())}`,
+                        { method: "DELETE" }, "Erro ao estornar")}
+                      className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                      style={{ backgroundColor: C.vermelho }}>
+                      {salvando ? "Estornando…" : "Estornar"}
+                    </button>
+                    <button onClick={() => setModal(null)} className="text-sm" style={{ color: C.cinza }}>cancelar</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {loading && <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin" style={{ color: C.esmeralda }} /></div>}
+        {erro && <div className="rounded-xl p-4 text-sm" style={{ backgroundColor: C.vermelhoLt, color: C.vermelho }}>{erro}</div>}
+
+        {!loading && detalhe && (
+          <>
+            <div className="rounded-xl bg-white p-5 border" style={{ borderColor: C.cremeBorder }}>
+              <h3 className="text-lg font-bold" style={{ color: "#1A1A1A" }}>{detalhe.consultora.nome}</h3>
+              <p className="text-xs capitalize" style={{ color: C.cinza }}>Extrato de {rotuloMes(competencia)}</p>
+              <div className="flex items-center justify-between mt-4 pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                <span className="text-sm" style={{ color: C.cinza }}>Saldo antes de {fmtDate(detalhe.de)}</span>
+                <span className="text-sm font-semibold tabular-nums"
+                  style={{ color: detalhe.saldo_anterior < 0 ? C.vermelho : "#1A1A1A" }}>{fmt(detalhe.saldo_anterior)}</span>
               </div>
             </div>
 
-            {/* Itens do fechamento */}
-            <div className="rounded-xl bg-white overflow-hidden border" style={{ borderColor: C.cremeBorder }}>
-              <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: C.cremeBorder }}>
-                <h4 className="text-sm font-bold" style={{ color: "#1A1A1A" }}>Detalhamento dos Itens</h4>
-                <button onClick={() => setSortAsc(!sortAsc)}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border"
-                  style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
-                  {sortAsc ? "↑ Data ↑" : "↓ Data ↓"}
-                </button>
+            {secoes.map(sec => {
+              const brutas = detalhe.baldes[sec.chave] ?? [];
+              // Só "Comissões do mês" agrupa por venda. Nos outros baldes cada
+              // linha já é um fato único (uma devolução, um ajuste, um
+              // pagamento) — agrupar ali juntaria coisas diferentes.
+              const linhas: any[] = sec.colunas ? agruparPorVenda(brutas) : brutas;
+              const total = brutas.reduce((s: number, l: any) => s + Number(l.valor), 0);
+              return (
+                <div key={sec.chave} className="rounded-xl bg-white border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+                  <div className="px-4 py-3 border-b" style={{ borderColor: C.cremeBorder }}>
+                    <h4 className="text-sm font-bold" style={{ color: "#1A1A1A" }}>{sec.titulo}</h4>
+                  </div>
+                  {linhas.length === 0 ? (
+                    <p className="px-4 py-4 text-xs" style={{ color: C.cinza }}>Nenhum lançamento no mês.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr style={{ backgroundColor: C.cremeBg }}>
+                            <th className="px-3 py-2 text-left text-[11px] font-semibold" style={{ color: C.cinza }}>Data</th>
+                            <th className="px-3 py-2 text-left text-[11px] font-semibold" style={{ color: C.cinza }}>Descrição</th>
+                            {sec.colunas && <th className="px-3 py-2 text-right text-[11px] font-semibold" style={{ color: C.cinza }}>Valor pago</th>}
+                            {sec.colunas && <th className="px-3 py-2 text-right text-[11px] font-semibold" style={{ color: C.cinza }}>Base comissão</th>}
+                            <th className="px-3 py-2 text-right text-[11px] font-semibold" style={{ color: C.cinza }}>Valor comissão</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {linhas.map((l: any, i: number) => {
+                            const chave = `${sec.chave}-${i}`;
+                            const itens: any[] = Array.isArray(l.itens) ? l.itens : [];
+                            const pagamentos: any[] = Array.isArray(l.pagamentos) ? l.pagamentos : [];
+                            // Abre quando há itens OU quando a venda teve mais de um
+                            // pagamento — nesse caso o detalhe é a única forma de ver
+                            // quais formas comissionaram e em que dia.
+                            const abre = itens.length > 0 || pagamentos.length > 1;
+                            const aberta = linhaAberta === chave;
+                            const nCols = sec.colunas ? 5 : 3;
+                            // Data vira faixa quando os pagamentos caem em dias
+                            // diferentes; um dia só continua mostrando um dia só.
+                            const rotuloData = l.data_fim && l.data_fim !== l.data
+                              ? `${fmtDate(l.data)} – ${fmtDate(l.data_fim)}`
+                              : fmtDate(l.data);
+                            return (
+                              <Fragment key={chave}>
+                                <tr className="border-t" style={{ borderColor: C.cremeBorder, cursor: abre ? "pointer" : undefined }}
+                                  onClick={abre ? () => setLinhaAberta(aberta ? null : chave) : undefined}>
+                                  <td className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: C.cinza }}>{rotuloData}</td>
+                                  <td className="px-3 py-2 text-xs" style={{ color: "#1A1A1A" }}>
+                                    <span className="inline-block w-3 mr-1" style={{ color: C.cinza }}>
+                                      {abre ? (aberta ? "▾" : "▸") : ""}
+                                    </span>
+                                    {l.venda_id ? (
+                                      // O link vive SÓ no texto do pedido; o resto da linha abre o detalhe.
+                                      // Sem o stopPropagation, um clique no pedido faria as duas coisas.
+                                      <a href={`/vendas/${l.venda_id}`} target="_blank" rel="noopener noreferrer"
+                                        onClick={e => e.stopPropagation()}
+                                        className="hover:underline" style={{ color: C.esmeralda }}>{l.descricao}</a>
+                                    ) : l.descricao}
+                                    {/* Data da VENDA. A comissão segue o dinheiro, então
+                                        venda de maio paga em julho cai em julho — e a linha
+                                        não dizia isso. Âmbar quando o mês da venda difere da
+                                        competência: em julho/2026 a Germana tinha 11 pedidos
+                                        de outros meses, um deles de MARÇO DE 2025. */}
+                                    {sec.colunas && l.data_venda && (() => {
+                                      const outroMes = l.data_venda.slice(0, 7) !== competencia;
+                                      return (
+                                        <span style={{ color: outroMes ? C.ambar : C.cinza }}>
+                                          {" · venda "}{fmtDate(l.data_venda)}
+                                        </span>
+                                      );
+                                    })()}
+                                    {l.previsto && (
+                                      <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium"
+                                        style={{ backgroundColor: C.ambarLt, color: C.ambar }}>a lançar</span>
+                                    )}
+                                  </td>
+                                  {sec.colunas && <td className="px-3 py-2 text-xs text-right tabular-nums" style={{ color: C.cinza }}>{l.valor_pago != null ? fmt(l.valor_pago) : "—"}</td>}
+                                  {sec.colunas && <td className="px-3 py-2 text-xs text-right tabular-nums" style={{ color: C.cinza }}>{l.base_comissao != null ? fmt(l.base_comissao) : "—"}</td>}
+                                  <td className="px-3 py-2 text-xs text-right tabular-nums font-medium"
+                                    style={{ color: Number(l.valor) < 0 ? C.vermelho : Number(l.valor) === 0 ? C.cinza : "#1A1A1A" }}>
+                                    {fmt(Math.abs(Number(l.valor)))}
+                                  </td>
+                                </tr>
+                                {aberta && (
+                                  <tr>
+                                    <td colSpan={nCols} className="px-3 pb-3 pt-1" style={{ backgroundColor: C.cremeBg }}>
+                                      {/* Pagamentos: responde POR QUE esse valor.
+                                          Só aparece quando há mais de um — com um
+                                          pagamento só, a linha de cima já diz tudo.
+                                          NÃO corta a lista: o pedido 15310 tem 12
+                                          pagamentos e é justamente o que alguém vai
+                                          querer conferir. */}
+                                      {pagamentos.length > 1 && (
+                                        <>
+                                          <p className="px-2 pt-2 pb-1 text-[11px] font-semibold" style={{ color: C.cinza }}>
+                                            Pagamentos que comissionaram ({pagamentos.length})
+                                          </p>
+                                          <table className="w-full text-[11px] mb-3">
+                                            <thead>
+                                              <tr>
+                                                <th className="px-2 py-1 text-left font-semibold" style={{ color: C.cinza }}>Data</th>
+                                                <th className="px-2 py-1 text-left font-semibold" style={{ color: C.cinza }}>Forma</th>
+                                                <th className="px-2 py-1 text-right font-semibold whitespace-nowrap" style={{ color: C.cinza }}>Valor pago</th>
+                                                <th className="px-2 py-1 text-right font-semibold" style={{ color: C.cinza }}>Comissão</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {pagamentos.map((p: any, k: number) => (
+                                                <tr key={k}>
+                                                  <td className="px-2 py-1 whitespace-nowrap" style={{ color: C.cinza }}>{fmtDate(p.data)}</td>
+                                                  <td className="px-2 py-1" style={{ color: "#1A1A1A" }}>
+                                                    {p.forma ?? "—"}
+                                                    {p.previsto && (
+                                                      <span className="ml-1.5 px-1 py-0.5 rounded text-[9px] font-medium"
+                                                        style={{ backgroundColor: C.ambarLt, color: C.ambar }}>a lançar</span>
+                                                    )}
+                                                  </td>
+                                                  <td className="px-2 py-1 text-right tabular-nums" style={{ color: C.cinza }}>
+                                                    {p.valor_pago != null ? fmt(p.valor_pago) : "—"}
+                                                  </td>
+                                                  <td className="px-2 py-1 text-right tabular-nums font-medium" style={{ color: "#1A1A1A" }}>
+                                                    {fmt(Math.abs(Number(p.valor)))}
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </>
+                                      )}
+                                      {itens.length > 0 && (
+                                        <p className="px-2 pb-1 text-[11px] font-semibold" style={{ color: C.cinza }}>
+                                          Itens da venda
+                                        </p>
+                                      )}
+                                      <table className="w-full text-[11px]">
+                                        <thead>
+                                          <tr>
+                                            <th className="px-2 py-1 text-left font-semibold" style={{ color: C.cinza }}>Item</th>
+                                            <th className="px-2 py-1 text-right font-semibold" style={{ color: C.cinza }}>Desconto</th>
+                                            <th className="px-2 py-1 text-right font-semibold whitespace-nowrap" style={{ color: C.cinza }}>% comissão</th>
+                                            <th className="px-2 py-1 text-right font-semibold whitespace-nowrap" style={{ color: C.cinza }}>Comissão do item</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {itens.map((it: any, j: number) => (
+                                            <tr key={j}>
+                                              <td className="px-2 py-1" style={{ color: "#1A1A1A" }}>
+                                                {it.sku && <span style={{ color: C.cinza }}>{it.sku} · </span>}
+                                                {it.nome_produto}
+                                                {it.quantidade > 1 && <span style={{ color: C.cinza }}> ×{it.quantidade}</span>}
+                                              </td>
+                                              <td className="px-2 py-1 text-right tabular-nums" style={{ color: C.cinza }}>{fmtPct(Number(it.desconto), true)}</td>
+                                              <td className="px-2 py-1 text-right tabular-nums font-medium" style={{ color: "#1A1A1A" }}>{fmtPct(Number(it.pct_comissao))}</td>
+                                              <td className="px-2 py-1 text-right tabular-nums" style={{ color: C.cinza }}>{fmt(Number(it.valor_comissao))}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                      <p className="px-2 pt-2 text-[10px]" style={{ color: C.cinza }}>
+                                        A comissão do item é da venda inteira. Esta linha pagou a parte proporcional ao que o cliente já quitou.
+                                      </p>
+                                    </td>
+                                  </tr>
+                                )}
+                              </Fragment>
+                            );
+                          })}
+                          <tr className="border-t" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
+                            <td colSpan={sec.colunas ? 4 : 2} className="px-3 py-2 text-xs font-semibold" style={{ color: C.cinza }}>
+                              Total de {sec.titulo.replace(/^\([+−]\)\s*/, "").toLowerCase()} ({linhas.length})
+                            </td>
+                            <td className="px-3 py-2 text-xs text-right tabular-nums font-bold"
+                              style={{ color: sec.sinal === "-" ? C.vermelho : C.esmeralda }}>{fmt(Math.abs(total))}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <div className="rounded-xl bg-white p-5 border" style={{ borderColor: C.cremeBorder }}>
+              <h4 className="text-sm font-bold mb-3" style={{ color: "#1A1A1A" }}>Resumo</h4>
+              {([
+                ["Saldo anterior", detalhe.resumo.saldo_anterior, false],
+                ["(+) Comissões do mês", detalhe.resumo.comissoes_mes, false],
+                ["(−) Débitos de devoluções", detalhe.resumo.debito_devolucoes, true],
+                ["(+) Outros créditos", detalhe.resumo.outros_creditos, false],
+                ["(−) Outros débitos", detalhe.resumo.outros_debitos, true],
+                ["(−) Pagamentos", detalhe.resumo.pagamentos, true],
+              ] as Array<[string, number, boolean]>).map(([rot, val, neg], i) => (
+                <div key={rot} className="flex items-center justify-between py-1.5 text-sm"
+                  style={{ backgroundColor: i % 2 === 1 ? C.cremeBg : undefined }}>
+                  <span className="px-1" style={{ color: C.cinza }}>{rot}</span>
+                  <span className="px-1 tabular-nums" style={{ color: neg && val > 0 ? C.vermelho : "#1A1A1A" }}>{fmt(val)}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between pt-3 mt-2 border-t" style={{ borderColor: C.cremeBorder }}>
+                <span className="text-base font-bold" style={{ color: "#1A1A1A" }}>(=) Saldo</span>
+                <span className="text-xl font-bold tabular-nums"
+                  style={{ color: detalhe.resumo.saldo < 0 ? C.vermelho : C.esmeralda }}>{fmt(detalhe.resumo.saldo)}</span>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr style={{ backgroundColor: C.cremeBg }}>
-                      {["Pedido", "Data Venda", "Cliente", "Pagamento", "Forma", "Recebido em", "Valor Comissionável", "% Rateio", "% Com.", "Comissão", "Tipo"].map(h => (
-                        <th key={h} className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-semibold" style={{ color: C.cinza }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(detail.itens ?? []).slice().sort((a: any, b: any) => {
-                      const da = a.data_recebimento ?? "";
-                      const db = b.data_recebimento ?? "";
-                      return sortAsc ? da.localeCompare(db) : db.localeCompare(da);
-                    }).map((item: any) => (
-                      <tr key={item.id} className="border-t" style={{ borderColor: C.cremeBorder }}>
-                        <td className="px-3 py-2 text-xs">
-                          {item.venda_id ? (
-                            <a href={`/vendas/${item.venda_id}`} target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: C.esmeralda, fontWeight: 500 }}>#{item.numero_venda_snapshot ?? item.venda_id}</a>
-                          ) : (
-                            <span style={{ color: "#1A1A1A" }}>#{item.numero_venda_snapshot ?? "—"}</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-xs" style={{ color: C.cinza }}>{item.data_venda ? fmtDate(item.data_venda) : "—"}</td>
-                        <td className="px-3 py-2 text-xs" style={{ color: C.cinza }}>{item.cliente_nome_snapshot ?? "—"}</td>
-                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: "#1A1A1A" }}>{fmt(item.valor_pagamento)}</td>
-                        <td className="px-3 py-2 text-xs" style={{ color: "#1A1A1A" }}>{item.forma_recebimento}</td>
-                        <td className="px-3 py-2 text-xs" style={{ color: C.cinza }}>{item.data_recebimento ? fmtDate(item.data_recebimento) : "—"}</td>
-                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: "#1A1A1A" }}>{fmt(item.valor_comissionavel)}</td>
-                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: C.cinza }}>{(Number(item.percentual_rateio) * 100).toFixed(2)}%</td>
-                        <td className="px-3 py-2 text-xs tabular-nums" style={{ color: C.ambar }}>
-                          {Number(item.valor_comissionavel) > 0
-                            ? `${(Number(item.comissao_calculada) / Number(item.valor_comissionavel) * 100).toFixed(2)}%`
-                            : "—"}
-                        </td>
-                        <td className="px-3 py-2 text-xs tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(item.comissao_calculada)}</td>
-                        <td className="px-3 py-2 text-xs" style={{ color: item.tipo_item === "estorno" || item.tipo_item === "ajuste_negativo" ? C.vermelho : item.tipo_item === "ajuste_positivo" ? C.esmeralda : C.cinza, fontWeight: item.tipo_item !== "normal" ? 600 : 400 }}>{item.tipo_item}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr style={{ borderTop: `2px solid ${C.esmeralda}`, backgroundColor: C.cremeBg }}>
-                      <td className="px-3 py-2 text-xs font-bold" style={{ color: C.esmeralda }} colSpan={3}>
-                        Total ({detail.itens?.length ?? 0} itens)
-                      </td>
-                      <td className="px-3 py-2 text-xs tabular-nums font-bold" style={{ color: C.esmeralda }}>
-                        {fmt((detail.itens ?? []).reduce((s: number, i: any) => s + Number(i.valor_pagamento), 0))}
-                      </td>
-                      <td className="px-3 py-2 text-xs" />
-                      <td className="px-3 py-2 text-xs" />
-                      <td className="px-3 py-2 text-xs tabular-nums font-bold" style={{ color: C.esmeralda }}>
-                        {fmt((detail.itens ?? []).reduce((s: number, i: any) => s + Number(i.valor_comissionavel), 0))}
-                      </td>
-                      <td className="px-3 py-2 text-xs" />
-                      <td className="px-3 py-2 text-xs" />
-                      <td className="px-3 py-2 text-xs tabular-nums font-bold" style={{ color: C.esmeralda }}>
-                        {fmt((detail.itens ?? []).reduce((s: number, i: any) => s + Number(i.comissao_calculada), 0))}
-                      </td>
-                      <td className="px-3 py-2 text-xs" />
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
+              {/* Clicável: abre as parcelas por trás da previsão. Sem isso a
+                  consultora vê um total e não tem como conferir de onde vem. */}
+              <button onClick={() => setVerPendentes(v => !v)}
+                className="w-full flex items-center justify-between pt-3 mt-3 border-t text-sm text-left hover:opacity-80"
+                style={{ borderColor: C.cremeBorder }}>
+                <span style={{ color: C.cinza }}>
+                  <span style={{ color: C.esmeralda, fontWeight: 500 }}>
+                    {verPendentes ? "▾" : "▸"} Comissões ainda pendentes
+                  </span>
+                  <span className="ml-2 text-[11px]">não entra no saldo</span>
+                  {(detalhe.pendentes.parcelas ?? 0) > 0 && (
+                    <span className="ml-2 text-[11px]">
+                      · {detalhe.pendentes.parcelas} parcela{detalhe.pendentes.parcelas > 1 ? "s" : ""}
+                    </span>
+                  )}
+                </span>
+                <span className="tabular-nums" style={{ color: "#1A1A1A" }}>
+                  {fmt(detalhe.pendentes.total)}
+                  {detalhe.pendentes.atrasado > 0 && (
+                    <span className="ml-2 text-[11px]" style={{ color: C.ambar }}>({fmt(detalhe.pendentes.atrasado)} atrasado)</span>
+                  )}
+                </span>
+              </button>
+
+              {verPendentes && (
+                (detalhe.pendentes.itens ?? []).length === 0 ? (
+                  <p className="mt-3 text-xs" style={{ color: C.cinza }}>Nenhuma parcela em aberto.</p>
+                ) : (
+                  <div className="mt-3 overflow-x-auto rounded-lg border" style={{ borderColor: C.cremeBorder }}>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ backgroundColor: C.cremeBg }}>
+                          <th className="px-3 py-2 text-left text-[11px] font-semibold" style={{ color: C.cinza }}>Vencimento</th>
+                          <th className="px-3 py-2 text-left text-[11px] font-semibold" style={{ color: C.cinza }}>Pedido</th>
+                          <th className="px-3 py-2 text-left text-[11px] font-semibold" style={{ color: C.cinza }}>Cliente</th>
+                          <th className="px-3 py-2 text-right text-[11px] font-semibold" style={{ color: C.cinza }}>Parcela</th>
+                          <th className="px-3 py-2 text-right text-[11px] font-semibold" style={{ color: C.cinza }}>Comissão prevista</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(detalhe.pendentes.itens ?? []).map((p: any) => (
+                          <tr key={p.conta_id} className="border-t" style={{ borderColor: C.cremeBorder }}>
+                            <td className="px-3 py-2 text-xs whitespace-nowrap"
+                              style={{ color: p.atrasado ? C.ambar : C.cinza }}>
+                              {p.vencimento ? fmtDate(p.vencimento) : "sem data"}
+                              {p.atrasado && <span className="ml-1 text-[10px]">atrasado</span>}
+                            </td>
+                            <td className="px-3 py-2 text-xs">
+                              {p.venda_id ? (
+                                <a href={`/vendas/${p.venda_id}`} target="_blank" rel="noopener noreferrer"
+                                  className="hover:underline" style={{ color: C.esmeralda, fontWeight: 500 }}>#{p.pedido ?? p.venda_id}</a>
+                              ) : <span style={{ color: "#1A1A1A" }}>—</span>}
+                            </td>
+                            <td className="px-3 py-2 text-xs" style={{ color: "#1A1A1A" }}>{p.cliente ?? "—"}</td>
+                            <td className="px-3 py-2 text-xs text-right tabular-nums" style={{ color: C.cinza }}>{fmt(p.valor_parcela)}</td>
+                            <td className="px-3 py-2 text-xs text-right tabular-nums font-medium" style={{ color: "#1A1A1A" }}>{fmt(p.comissao_prevista)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
             </div>
-          </div>
-        ) : (
-          <p className="text-center text-sm py-8" style={{ color: C.cinza }}>Erro ao carregar detalhe</p>
+          </>
         )}
       </div>
     );
   }
 
+  // ─── TELA 1: lista de vendedoras ─────────────────────────────────────────
+  const visiveis = (lista ?? []).filter(l =>
+    !soComMovimento || l.tem_movimento || l.saldo_anterior !== 0 || l.comissoes_pendentes !== 0);
+
+  const COLS: Array<[string, string, boolean]> = [
+    ["Saldo ant.", "saldo_anterior", false],
+    ["(+) Comis. mês", "comissoes_mes", false],
+    ["(−) Déb. devoluções", "debito_devolucoes", true],
+    ["(+) Out. créditos", "outros_creditos", false],
+    ["(−) Out. débitos", "outros_debitos", true],
+    ["(−) Pgtos", "pagamentos", true],
+    ["Comis. pend.", "comissoes_pendentes", false],
+  ];
+
   return (
-    <div className="space-y-5">
-      {/* Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard label="Disponível" value={fmt(resumo?.disponivel ?? 0)} valueColor={C.esmeralda} icon={CheckCircle} accent={C.esmeralda} sub="pagamentos não fechados" />
-        <KpiCard label="Em Rascunho" value={fmt(resumo?.em_rascunho ?? 0)} valueColor={C.ambar} icon={Clock} accent={C.ambar} sub="aguardando aprovação" />
-        <KpiCard label="Enviado Financeiro" value={fmt(resumo?.gerado ?? 0)} valueColor={C.esmeralda} icon={ArrowUpCircle} accent={C.esmeralda} sub="conta a pagar gerada" />
-        <KpiCard label="Pago" value={fmt(resumo?.pago ?? 0)} valueColor={C.verde} icon={CheckCircle} accent={C.verde} sub="já liquidado" />
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        {filtroMes}
+        <label className="flex items-center gap-2 text-xs" style={{ color: C.cinza }}>
+          <input type="checkbox" checked={soComMovimento} onChange={e => setSoComMovimento(e.target.checked)} />
+          Ocultar quem não teve movimento
+        </label>
       </div>
 
-      {/* Ações */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <button onClick={() => setShowCriar(!showCriar)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-90"
-            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-            {showCriar ? <X size={14} /> : <Plus size={14} />}
-            {showCriar ? "Cancelar" : "Novo Fechamento"}
-          </button>
-          <button onClick={async () => {
-            if (!confirm("Gerar fechamentos de maio/2026 para todas as consultoras com pagamentos no período?")) return;
-            setCriando(true);
-            try {
-              const res = await fetch("/api/financeiro/comissoes/gerar-maio", { method: "POST" });
-              const data = await res.json();
-              if (res.ok) {
-                // Recarrega lista
-                const listaRes = await fetch("/api/financeiro/comissoes/fechamentos");
-                if (listaRes.ok) setLista(await listaRes.json());
-                // Recarrega resumo
-                fetch("/api/financeiro/comissoes/resumo").then(r => r.ok ? r.json() : null).then(d => setResumo(d));
-                const msg = data.gerados?.length
-                  ? `✅ Gerados: ${data.gerados.map((g: any) => `${g.consultora} (R$ ${g.valor_total.toFixed(2)})`).join(", ")}`
-                  : "Nenhum fechamento gerado";
-                const errMsg = data.erros?.length ? `\n⚠️ ${data.erros.join("\n")}` : "";
-                alert(msg + errMsg);
-              } else {
-                alert(data.error || "Erro ao gerar fechamentos");
-              }
-            } catch {
-              alert("Erro de conexão");
-            } finally {
-              setCriando(false);
-            }
-          }} disabled={criando}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-90"
-            style={{ backgroundColor: C.ambar, color: "white" }}>
-            {criando ? <Loader2 size={14} className="animate-spin" /> : <Calendar size={14} />}
-            Gerar Fechamentos de Maio
-          </button>
-        </div>
+      {loading && <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin" style={{ color: C.esmeralda }} /></div>}
+      {erro && <div className="rounded-xl p-4 text-sm" style={{ backgroundColor: C.vermelhoLt, color: C.vermelho }}>{erro}</div>}
 
-        <div className="flex gap-1.5 flex-wrap">
-          {[
-            { key: "todos", label: "Todos" },
-            { key: "rascunho", label: "Rascunho", color: C.ambar },
-            { key: "fechado", label: "Fechado", color: C.esmeralda },
-            { key: "enviado_financeiro", label: "Enviado", color: C.esmeralda },
-            { key: "pago", label: "Pago", color: C.verde },
-            { key: "cancelado", label: "Cancelado", color: C.vermelho },
-          ].map(({ key, label, color }) => (
-            <button key={key} onClick={() => setFiltro(key)}
-              className="text-xs px-3 py-1.5 rounded-full transition-colors border"
-              style={{
-                backgroundColor: filtro === key ? (color ?? C.esmeralda) : "white",
-                borderColor: filtro === key ? (color ?? C.esmeralda) : (color ? `${color}44` : C.cremeBorder),
-                color: filtro === key ? "white" : (color ?? C.cinza),
-                fontWeight: filtro === key ? 600 : 400,
-              }}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Form criar */}
-      {showCriar && (
-        <div className="rounded-xl bg-white p-5 border space-y-3" style={{ borderColor: C.cremeBorder }}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Consultora *">
-              <select value={form.consultora_id} onChange={e => setForm(f => ({ ...f, consultora_id: e.target.value }))}
-                className="border rounded-lg px-2 py-1.5 text-xs outline-none w-full"
-                style={{ borderColor: C.cremeBorder, color: "#1A1A1A" }}>
-                <option value="">Selecione...</option>
-                {(vendedores ?? []).map((v: any) => (
-                  <option key={v.id_vendedor} value={v.id_vendedor}>{v.nome}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Competência *">
-              <Input type="month" value={form.competencia} onChange={e => setForm(f => ({ ...f, competencia: e.target.value }))} />
-            </Field>
-            <Field label="Período Início *">
-              <Input type="date" value={form.periodo_inicio} onChange={e => setForm(f => ({ ...f, periodo_inicio: e.target.value }))} />
-            </Field>
-            <Field label="Período Fim *">
-              <Input type="date" value={form.periodo_fim} onChange={e => setForm(f => ({ ...f, periodo_fim: e.target.value }))} />
-            </Field>
-          </div>
-          <button onClick={handleCriar} disabled={criando || !form.consultora_id || !form.competencia}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
-            style={{ backgroundColor: C.esmeralda, color: C.creme }}>
-            {criando ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            Gerar Fechamento
-          </button>
-        </div>
-      )}
-
-      {/* Filtro consultora */}
-      {consultorasUnicas.length > 0 && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium" style={{ color: C.cinza }}>Consultora:</span>
-          <select value={consultoraFiltro} onChange={e => setConsultoraFiltro(e.target.value)}
-            className="border rounded-lg px-2 py-1.5 text-xs outline-none" style={{ borderColor: C.cremeBorder }}>
-            <option value="">Todas</option>
-            {consultorasUnicas.map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
-          </select>
-        </div>
-      )}
-
-      {/* Tabela */}
-      <div className="rounded-xl bg-white overflow-hidden border" style={{ borderColor: C.cremeBorder }}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
-                {["Período", "Consultora", "Valor", "Itens", "Status", "Conta Pagar", "Ações"].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-[11px] uppercase tracking-wider font-semibold" style={{ color: C.cinza }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtradas.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm" style={{ color: C.cinza }}>Nenhum fechamento encontrado</td></tr>
-              ) : (
-                filtradas.map((f: any) => {
-                  const sb = statusBadge(f.status ?? "rascunho");
-                  return (
-                    <tr key={f.id} className="border-t" style={{ borderColor: C.cremeBorder }}>
-                      <td className="px-4 py-3 text-xs" style={{ color: "#1A1A1A" }}>{f.competencia ?? "—"}</td>
-                      <td className="px-4 py-3">
-                        <span className="text-sm font-medium" style={{ color: "#1A1A1A" }}>{f.consultora_nome_snapshot ?? "—"}</span>
-                      </td>
-                      <td className="px-4 py-3 text-xs tabular-nums font-medium" style={{ color: C.esmeralda }}>{fmt(Number(f.valor_total ?? 0))}</td>
-                      <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{f.qtd_itens ?? 0}</td>
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                          style={{ color: sb.color, backgroundColor: sb.bg }}>
-                          {sb.label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-xs" style={{ color: C.cinza }}>{f.conta_pagar_id ? `#${f.conta_pagar_id}` : "—"}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <button onClick={() => abrirDetail(f.id)}
-                            className="px-2 py-1 rounded text-[10px] font-medium border"
-                            style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
-                            Detalhe
-                          </button>
-                          {f.status === "rascunho" && (
-                            <>
-                              <button onClick={() => handleFechar(f.id)} disabled={actionId === f.id}
-                                className="px-2 py-1 rounded text-[10px] font-medium border"
-                                style={{ borderColor: C.esmeralda, color: C.esmeralda }}>
-                                {actionId === f.id ? <Loader2 size={10} className="animate-spin" /> : "Fechar"}
-                              </button>
-                              <button onClick={() => setShowCancelForm(f.id)}
-                                className="px-2 py-1 rounded text-[10px] font-medium border"
-                                style={{ borderColor: C.vermelho, color: C.vermelho }}>
-                                Cancelar
-                              </button>
-                            </>
-                          )}
-                          {f.status === "fechado" && (
-                            <button onClick={() => handleGerarConta(f.id)} disabled={actionId === f.id}
-                              className="px-2 py-1 rounded text-[10px] font-medium border"
-                              style={{ borderColor: C.esmeralda, color: C.esmeralda }}>
-                              {actionId === f.id ? <Loader2 size={10} className="animate-spin" /> : "Gerar Conta"}
-                            </button>
-                          )}
-                        </div>
-                        {/* Form cancelar inline */}
-                        {showCancelForm === f.id && (
-                          <div className="mt-2 flex items-center gap-2">
-                            <input type="text" value={cancelMotivo} onChange={e => setCancelMotivo(e.target.value)}
-                              placeholder="Motivo do cancelamento *"
-                              className="border rounded px-2 py-1 text-[10px] outline-none w-40"
-                              style={{ borderColor: C.cremeBorder }} />
-                            <button onClick={() => handleCancelar(f.id)} disabled={actionId === f.id || !cancelMotivo.trim()}
-                              className="px-2 py-1 rounded text-[10px] font-medium"
-                              style={{ backgroundColor: C.vermelho, color: "white" }}>
-                              {actionId === f.id ? <Loader2 size={10} className="animate-spin" /> : "Confirmar"}
-                            </button>
-                          </div>
+      {!loading && lista && (
+        <div className="rounded-xl bg-white border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ backgroundColor: C.cremeBg }}>
+                  <th className="px-3 py-2.5 text-left text-[11px] font-semibold whitespace-nowrap" style={{ color: C.cinza }}>Vendedora</th>
+                  {COLS.map(([rot]) => (
+                    <th key={rot} className="px-3 py-2.5 text-right text-[11px] font-semibold whitespace-nowrap" style={{ color: C.cinza }}>{rot}</th>
+                  ))}
+                  <th className="px-3 py-2.5 text-right text-[11px] font-semibold whitespace-nowrap" style={{ color: C.cinza }}>(=) Saldo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visiveis.map(l => (
+                  <tr key={l.consultora_id} className="border-t hover:opacity-80 cursor-pointer"
+                    style={{ borderColor: C.cremeBorder }} onClick={() => abrir(l.consultora_id)}>
+                    <td className="px-3 py-2.5 text-xs font-medium whitespace-nowrap" style={{ color: C.esmeralda }}>{l.consultora}</td>
+                    {COLS.map(([rot, campo, neg]) => (
+                      <td key={rot} className="px-3 py-2.5 text-xs text-right tabular-nums"
+                        style={{ color: neg && l[campo] > 0 ? C.vermelho : campo === "comissoes_pendentes" ? C.cinza : "#1A1A1A" }}>
+                        {fmt(l[campo])}
+                        {campo === "comissoes_pendentes" && l.pendentes_atrasado > 0 && (
+                          <span className="ml-1 text-[10px]" style={{ color: C.ambar }}>({fmt(l.pendentes_atrasado)} atr.)</span>
                         )}
                       </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                    ))}
+                    <td className="px-3 py-2.5 text-xs text-right tabular-nums font-bold"
+                      style={{ color: l.saldo < 0 ? C.vermelho : C.esmeralda }}>{fmt(l.saldo)}</td>
+                  </tr>
+                ))}
+                {visiveis.length === 0 && (
+                  <tr><td colSpan={9} className="px-3 py-8 text-center text-xs" style={{ color: C.cinza }}>
+                    Nenhuma vendedora com movimento no mês.
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="px-4 py-3 text-[11px] border-t" style={{ borderColor: C.cremeBorder, color: C.cinza }}>
+            Clique na vendedora para ver o detalhe. &quot;Comis. pend.&quot; é crediário ainda não pago — não entra no saldo.
+          </p>
         </div>
-        <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: C.cremeBorder, backgroundColor: C.cremeBg }}>
-          <p className="text-xs" style={{ color: C.cinza }}>{filtradas.length} fechamento(s)</p>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -3282,9 +3800,9 @@ export default function FinanceiroClient({ pagar, receber, caixaPagamentos, caix
       {/* Content */}
       {tab === "pagar"                && <TabPagar pagar={pagar} />}
       {tab === "receber"              && <TabReceber receber={receber} saldoLiquido={totalReceber} />}
-      {tab === "caixa"                && <TabCaixa caixa={caixaPagamentos} baixas={caixaBaixas} podeBaixar={["admin","desenvolvedor","gerente_loja","gerente_fabrica"].includes(userRole ?? "")} caixaOuroTrigger={caixaOuroTrigger} />}
+      {tab === "caixa"                && <TabCaixa caixa={caixaPagamentos} baixas={caixaBaixas} podeBaixar={["admin","desenvolvedor","gerente_loja","gerente_fabrica"].includes(userRole ?? "")} podeReversa={["admin","desenvolvedor","gerente_loja","estoquista_loja"].includes(userRole ?? "")} caixaOuroTrigger={caixaOuroTrigger} />}
       {tab === "conciliacao_pendente" && <TabConciliacaoPendente />}
-      {tab === "comissoes"            && <TabComissoes fechamentos={comissoes ?? []} vendedores={vendedores} />}
+      {tab === "comissoes"            && <ExtratoComissao />}
     </div>
   );
 }

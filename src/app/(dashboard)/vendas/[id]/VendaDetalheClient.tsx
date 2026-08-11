@@ -7,7 +7,7 @@ import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle, XCircle, AlertCircle,
   Truck, Video, RefreshCw, Share2, Download,
   Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
-  RotateCcw, ArrowRight, PackageCheck, ScanLine,
+  RotateCcw, ArrowRight, PackageCheck, ScanLine, Bike, AlertTriangle, Factory,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { maskCpfCnpj, maskCelular, onlyDigits } from "@/lib/formatters";
@@ -24,6 +24,16 @@ import { calcularCrediPreview, type CrediTipo } from "@/lib/credi-preview";
 import UpgradeItemFields from "@/components/vendas/UpgradeItemFields";
 // REGRA DE NEGÓCIO: modal de entrega (parcial/total) da venda
 import MarcarEntregaModal from "@/components/entregas/MarcarEntregaModal";
+import AbrirOrdemAliancaModal from "@/components/vendas/AbrirOrdemAliancaModal";
+// REGRA DE NEGÓCIO (V3): modal de solicitação de frete avulso, aberto de
+// dentro da venda com modoSolicitacao (vendaId fixado, ver props abaixo)
+import FreteAvulsoModal from "@/components/entregas/FreteAvulsoModal";
+// REGRA DE NEGÓCIO (BLOCO 3 — fonte única de permissão): quem pode SOLICITAR
+// frete avulso vem de src/lib/permissoes/frete-avulso.ts — backend
+// (route.ts) e este front usam o MESMO predicado. NUNCA reescrever a lista
+// aqui (ver comentário completo no módulo).
+import { podeSolicitarFreteAvulso } from "@/lib/permissoes/frete-avulso";
+import { enderecoDaVenda } from "@/components/endereco/EnderecoForm";
 import { useErrorStore } from "@/stores/errorStore";
 import { getPublicUrl } from "@/lib/storage-url";
 // REGRA DE NEGOCIO: helpers de rodio (Frente A — 30/05/2026)
@@ -62,6 +72,14 @@ interface ItemVenda {
   preco_unitario: number; total_item: number; pct_comissao: number;
   valor_comissao: number; peso_estimado: number | null; unidade: string | null;
   observacao?: string | null;
+  /** Preço CHEIO da campanha (migration 366). Num item em promoção,
+   *  `preco_lista` guarda o preço PROMOCIONAL — este é o de verdade, e é dele
+   *  que sai a faixa de comissão. Igual a `preco_lista` fora de promoção.
+   *  Sem ele a tela mostrava "lista 599,00 · % Desc — · comissão 0,50%" e não
+   *  havia como a consultora entender de onde saiu o 0,50%.
+   *  Ver docs/regras-negocio/comercial.md §2.1.2. */
+  preco_lista_cheio?: number | null;
+  promocao_nome?: string | null;
   /** Markup gravado quando o item vem de orçamento (aliança/peça). Quando
    *  presente, a comissão usa commissionForMarkup (curva). Quando null,
    *  cai na faixas_comissao por desconto. */
@@ -137,6 +155,8 @@ interface Venda {
     quantidade: number; preco_lista: number; pct_desconto: number;
     preco_unitario: number; total_item: number; pct_comissao: number;
     valor_comissao: number; observacao: string | null; peso_estimado?: number | null;
+    preco_lista_cheio?: number | null;
+    promocao_nome?: string | null;
     markup_aplicado?: number | null;
     personalizacao?: { valor?: string; preco_por_letra?: number; peso_por_letra?: number } | null;
     /** Dados de upgrade (nulo se não for item upgrade) */
@@ -154,6 +174,9 @@ interface Venda {
     id: number; numero_ordem: string; tipo_ordem: string;
     situacao: string; status: string; created_at: string;
   }>;
+  /** Venda de aliança já fechada e ainda SEM ordem na fábrica — falta confirmar
+   *  o aro e abrir (a ordem de aliança não nasce mais na aprovação da venda). */
+  alianca_sem_ordem?: boolean;
   /** Alianças: ficha de cada anel (só exibição — preenchido por /api/vendas/[id]). */
   aliancaRings?: Array<{
     anel: number; modelo: string | null; perfil: string | null;
@@ -163,6 +186,9 @@ interface Venda {
     pedras: Array<{ tipo: string | null; corte: string | null; tamanho_mm: number | null; qtd: number | null; ct_total: number | null; preco_total_rs: number | null }>;
   }>;
   descontoThreshold?: number | null;
+  /** Limite (%) de desconto acima do qual o Cartão de Crédito exige aprovação.
+   *  Vem da config `limite_desconto_cartao_pct` (Configurações › Aprovadores). */
+  limiteDescontoCartao?: number | null;
   devolucoes?: Array<{
     id: number;
     numero: string;
@@ -664,6 +690,10 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   // REGRA DE NEGÓCIO: controla a abertura do modal de Marcar Entrega — permite
   // registrar entregas parciais ou totais dos itens da venda aprovada.
   const [showMarcarEntrega, setShowMarcarEntrega] = useState(false);
+  // REGRA DE NEGÓCIO (V3): controla a abertura do modal de Solicitar Frete
+  // Avulso — a consultora dona da venda pede diretamente daqui, sem passar
+  // pelo menu Entregas (ver botão/status na barra de banners abaixo).
+  const [showFreteAvulsoModal, setShowFreteAvulsoModal] = useState(false);
 
   // Modal de solicitação de alteração (quando o backend devolve 403 com solicitar:true)
   const [solicitarPayload, setSolicitarPayload] = useState<{
@@ -677,6 +707,9 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [solicitarEnviando, setSolicitarEnviando] = useState(false);
   const [solicitarErro, setSolicitarErro] = useState("");
   const [solicitarSucesso, setSolicitarSucesso] = useState(false);
+  // Confirmação do aro + abertura da ordem de aliança (ver banner e modal).
+  const [abrirOrdemAberto, setAbrirOrdemAberto] = useState(false);
+  const [ordemAbertaMsg, setOrdemAbertaMsg] = useState("");
 
   // ── Load venda ──────────────────────────────────────────────────────────────
   // silent=true: recarrega os dados da venda SEM trocar a tela pelo spinner de
@@ -841,6 +874,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       preco_unitario: i.preco_unitario, total_item: i.total_item,
       pct_comissao: i.pct_comissao, valor_comissao: i.valor_comissao,
       peso_estimado: i.peso_estimado ?? null, unidade: null, observacao: i.observacao,
+      preco_lista_cheio: i.preco_lista_cheio ?? null,
+      promocao_nome: i.promocao_nome ?? null,
       markup_aplicado: i.markup_aplicado ?? null,
       personalizacao: i.personalizacao ?? null,
       upgrade: i.upgrade ?? null,
@@ -1655,6 +1690,51 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     finally { setUpdating(false); }
   }
 
+  /**
+   * REGRA DE NEGÓCIO (16/07, pedido do Jonathan): pede de uma vez TODAS as
+   * aprovações pendentes da venda (desconto + cartão), pra consultora não ter
+   * que clicar em dois banners.
+   *
+   * O QUÊ: dispara os POSTs em sequência e junta o resultado. Cada pedido é
+   *   independente: se um falhar, o outro segue e a falha é reportada.
+   * O PORQUÊ: os botões individuais CONTINUAM existindo — se a venda vai ser
+   *   paga no Pix, ela pede só o desconto e não incomoda o aprovador com uma
+   *   aprovação de cartão que não vai usar. Este botão é atalho, não substituto.
+   * O IMPACTO: só aparece quando há 2+ pendentes (ver aprovacoesPendentes).
+   * NOTA: pedir cartão junto só funciona porque o guard do backend foi
+   *   liberado pra cartao_desconto em 16/07 (solicitar-aprovacao/route.ts) —
+   *   antes dava 409 "solicite o desconto primeiro".
+   */
+  async function solicitarTodasAprovacoes() {
+    if (!venda) return;
+    setUpdating(true); setSaveErr("");
+    const pedidos: { tipo: string; label: string }[] = [];
+    if (precisaSolicitarDesconto) pedidos.push({ tipo: "desconto", label: "Desconto" });
+    if (precisaSolicitarDescontoCartao) pedidos.push({ tipo: "cartao_desconto", label: "Cartão" });
+    const falhas: string[] = [];
+    for (const p of pedidos) {
+      try {
+        const res = await fetch(`/api/vendas/${venda.id}/solicitar-aprovacao`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tipo: p.tipo }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error((d.error as string | undefined) ?? `HTTP ${res.status}`);
+      } catch (e) {
+        falhas.push(`${p.label}: ${e instanceof Error ? e.message : "erro"}`);
+      }
+    }
+    await load();
+    setUpdating(false);
+    if (falhas.length > 0) {
+      setSaveErr(
+        falhas.length === pedidos.length
+          ? `Nenhuma solicitação foi enviada — ${falhas.join(" | ")}`
+          : `Enviadas com 1 falha — ${falhas.join(" | ")}`,
+      );
+    }
+  }
+
   // ── Solicitar aprovação (com suporte a crédito gerente) ────────────────────
   async function solicitarAprovacao() {
     if (!venda) return;
@@ -1760,7 +1840,17 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
     try {
       const patch: Record<string, unknown> = {};
       if (edit.full) {
-        if (cliente?.id !== venda.cliente_id) patch.cliente_id = cliente?.id ?? null;
+        // REGRA DE NEGÓCIO (troca de cliente em rascunho — jul/2026):
+        // Só mandar cliente_id quando um cliente DE VERDADE está selecionado.
+        // O QUÊ: nunca autosalvar cliente_id nulo.
+        // POR QUÊ: ao trocar o cliente a consultora primeiro LIMPA o campo (cliente = null)
+        //   e só depois busca/escolhe o novo — isso leva mais que os 1,5s do autosave.
+        //   Se o autosave disparasse com cliente vazio, mandava cliente_id=null; o backend
+        //   faz COALESCE(null, cliente_id) e MANTÉM o cliente antigo, e o reload seguinte
+        //   "volta" o cliente antigo no meio da edição (a tela parecia recarregar sozinha
+        //   e não deixava trocar). Cliente é obrigatório, então null nunca é um save válido.
+        // IMPACTO SE ALTERADO: volta o bug de o campo Cliente resetar/recarregar ao trocar.
+        if (cliente?.id && cliente.id !== venda.cliente_id) patch.cliente_id = cliente.id;
         if ((vendedorSel || null) !== (venda.vendedor_id ?? null)) patch.vendedor_id = vendedorSel || null;
         if (dataVenda !== (venda.data_venda?.slice(0, 10) ?? "")) patch.data_venda = dataVenda;
       }
@@ -1973,10 +2063,12 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
     setClienteSyncMsg(null);
     try {
       const res = await fetch(`/api/contatos/${venda.cliente_id}/tiny-sync`, { method: "POST" });
-      const data = await res.json() as { ok?: boolean; tiny_id?: number; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Erro ao sincronizar cliente");
+      const text = await res.text();
+      let data: Record<string, unknown> = {};
+      try { data = JSON.parse(text); } catch { data = { error: "Resposta inesperada do servidor. Tente novamente." }; }
+      if (!res.ok) throw new Error((data.error as string) ?? "Erro ao sincronizar cliente");
       setClienteSyncMsg("Cliente enviado ao Tiny com sucesso!");
-      setVenda(prev => prev ? { ...prev, cliente_id_tiny: data.tiny_id ?? prev.cliente_id_tiny } : prev);
+      setVenda(prev => prev ? { ...prev, cliente_id_tiny: (data.tiny_id as number) ?? prev.cliente_id_tiny } : prev);
     } catch (e) {
       setClienteSyncMsg(e instanceof Error ? e.message : "Erro ao sincronizar cliente");
     } finally {
@@ -2087,6 +2179,38 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const situacaoStyle = SITUACAO_COLOR[venda.situacao] ?? SITUACAO_COLOR.rascunho;
   const proximasAcoes = PROXIMA_SITUACAO[venda.situacao] ?? [];
 
+  // ── Frete avulso solicitado a partir da venda (V3) ──────────────────────────
+  // REGRA DE NEGÓCIO (BLOCO 3 — fonte única de permissão): quem PODE solicitar
+  // (o cargo) vem de podeSolicitarFreteAvulso() (src/lib/permissoes/frete-avulso.ts)
+  // — o MESMO predicado usado pelo backend (route.ts) e testado na matriz
+  // papel×capacidade. Antes essa lista vivia solta aqui (inline), causando a
+  // classe de bug "front libera um papel, backend 403" (ex.: diretor).
+  // IMPACTO SE VOLTAR A LISTA INLINE: reabre a divergência front/backend.
+  // QUANDO (decisão Jonathan) — isto AQUI continua local, é regra da VENDA,
+  // não de cargo: a janela INTEIRA da entrega — 'aprovado' (antes de sair),
+  // 'em_rota' (entrega a caminho) e 'entregue'. O QUE: 'entregue' entra de
+  // propósito, não é engano. POR QUÊ: existe corrida complementar DEPOIS da
+  // entrega — o caso real é "levar a aliança que ficou para ajuste". Cortar em
+  // 'em_rota' mataria justamente esse cenário.
+  // Fora da lista: 'rascunho' (venda ainda não fechada), 'cancelado' e
+  // 'virou_credito' (não há mais entrega a fazer).
+  // ⚠️ 'enviado'/'concluido' NÃO entram: são situações APOSENTADAS (ver
+  // src/lib/vendas-situacoes.ts) — nenhuma venda transiciona para elas desde
+  // 06/2026, o fluxo atual é rascunho → aprovado → em_rota → entregue.
+  // IMPACTO SE ALTERADO: tirar 'entregue' esconde o botão no cenário de ajuste
+  // pós-entrega; incluir 'rascunho' deixaria pedir frete de venda não fechada.
+  // DESATIVADO temporariamente (pedido do Jonathan, 05/08/2026) — o atalho
+  // "Solicitar frete avulso" de dentro da venda fica escondido por enquanto.
+  // Reverter: trocar a linha abaixo de volta pela condição original comentada.
+  const podeSolicitarFreteAvulsoAqui = false;
+  // const podeSolicitarFreteAvulsoAqui =
+  //   podeSolicitarFreteAvulso(role) &&
+  //   ["aprovado", "em_rota", "entregue"].includes(venda.situacao);
+  // REGRA DE NEGÓCIO (migration 355 — endereço estruturado): endereço
+  // sugerido para pré-preencher o EnderecoForm do modal de frete avulso —
+  // CAMPO A CAMPO (enderecoDaVenda), não mais concatenado num texto único.
+  const enderecoInicialFreteAvulso = enderecoDaVenda(venda);
+
   // REGRA DE NEGÓCIO (12/06 — Jonathan): reposição bloqueia a entrega POR ITEM
   // (ver temItemEntregavel/bloqueioVendaInteira acima, vindos do saldo-pendente):
   // o item da reposição espera, mas os itens prontos podem ser entregues. A regra
@@ -2132,6 +2256,32 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const totalEmPagamentos = venda.pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0);
   const pagamentoCobreTotal = totalEmPagamentos + 0.01 >= venda.total_venda;
 
+  /**
+   * REGRA DE NEGÓCIO (17/07, decisão do Jonathan): "crédito aprovado, mas a
+   * venda não". Aprovar o crédito e aprovar a venda são 2 passos; o 2º
+   * (approveVenda) pode falhar por motivo OPERACIONAL — o clássico é cliente
+   * sem celular. Quando falha, a aprovação do crédito CONTINUA valendo (não
+   * voltamos a tarefa pra fila: "pedir aprovação é chato") e alguém precisa
+   * corrigir o cadastro e aprovar a venda na mão. Sem esta faixa, quem abre a
+   * venda não tem como saber disso — o aprovador via 200 "sucesso".
+   *
+   * DEDUZIDO, não gravado (decisão do Jonathan: sem migration). Os 3 estados se
+   * separam sozinhos, porque quando a venda aprova de fato o
+   * `aprovacao_credito_tarefa_id` é LIMPO (vendas-credito-aprovar.ts):
+   *   - aprovou              → campo NULL          → creditoFoiAprovado=false aqui
+   *   - esperando pagamento  → campo preenchido + AINDA há pagamento não-"A
+   *     Receber" pendente  → NÃO é falha, não mostra (espera legítima)
+   *   - approveVenda falhou  → campo preenchido + todos os outros já confirmados
+   * A 3ª condição espelha `todosOutrosConfirmados` da lib (linhas 380-385):
+   * COUNT de pagamentos com forma != 'A Receber' e status 'pendente' = 0.
+   * IMPACTO SE A REGRA DA LIB MUDAR: a faixa pode aparecer na hora errada — é
+   * só um aviso com botão, não trava nada, mas tem que andar junto.
+   */
+  const outrosPagamentosConfirmados = !venda.pagamentos.some(
+    p => p.forma !== "A Receber" && p.status === "pendente",
+  );
+  const creditoAprovadoVendaNao = creditoFoiAprovado && vendaEmRascunho && outrosPagamentosConfirmados;
+
   // Desconto acima do limite — usa campo próprio (aprovacao_desconto_tarefa_id)
   const isDescontoApproval = !!venda.aprovacao_desconto_tarefa_id && venda.aprovacao_desconto_status === "aguardando_aprovacao";
 
@@ -2145,7 +2295,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const temDescontoAlto = venda.itens.some(i => Number(i.pct_desconto) > descontoThreshold);
   // REGRA DE NEGÓCIO #1: verifica campo próprio de desconto, não de crédito
   const precisaSolicitarDesconto = temDescontoAlto && !venda.desconto_aprovado_por_nome && !venda.aprovacao_desconto_tarefa_id && venda.situacao === "rascunho";
-  const LIMITE_DESCONTO_CARTAO = 20;
+  // REGRA DE NEGÓCIO (Fase 5, fix 16/07): limite do cartão vem da config
+  // (limite_desconto_cartao_pct), não mais `const = 20` cravado aqui — a tela
+  // ficava dizendo "acima de 20%" mesmo com a config em 30, divergindo do gate
+  // real do servidor. Fallback 20 = mesmo default do backend (LIMITE_DESCONTO_CARTAO_PADRAO).
+  const LIMITE_DESCONTO_CARTAO = venda.limiteDescontoCartao ?? 20;
   const temDescontoCartao = venda.itens.some(i => Number(i.pct_desconto) > LIMITE_DESCONTO_CARTAO);
   // BLINDAGEM: gate de cartão só vale se a venda tem pagamento em Cartão de
   // Crédito pendente de fato — senão venda no Pix/Dinheiro com desconto >20%
@@ -2155,6 +2309,10 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   const cartaoBloqueado = temDescontoCartao && temPagamentoCartaoPendente && !descontoCartaoAprovado;
   // REGRA DE NEGÓCIO #1: verifica campo próprio de cartão, não de crédito
   const precisaSolicitarDescontoCartao = cartaoBloqueado && !venda.aprovacao_cartao_desconto_tarefa_id && venda.situacao === "rascunho";
+  // REGRA DE NEGÓCIO (16/07): quantas aprovações esta venda ainda precisa pedir.
+  // Só com 2+ o atalho "Solicitar todas" faz sentido — com 1 o banner individual
+  // já resolve e um botão a mais só polui.
+  const aprovacoesPendentes = [precisaSolicitarDesconto, precisaSolicitarDescontoCartao].filter(Boolean).length;
   // REGRA DE NEGOCIO: Automacao de Estoque 2.0.
   // O QUE: badge visual e derivado do backend quando venda entregue ainda tem
   // saldo aberto aprovado por excecao.
@@ -2259,6 +2417,12 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {/* MERGE: botões de NFC-e da produção (origin/main) removidos de propósito —
+              módulo de NF-e abandonado por decisão do dono (ver
+              docs/migracao/LIVRO-DE-REGRAS-migracao-erp-novo.md §4.1/§10.1:
+              vendas_erp.nota_fiscal_id foi apagada, sempre vazia, 0 uso real).
+              `setVerNotaId`/`setAbrirNfce` não existem em nenhum outro ponto deste
+              arquivo. */}
           <button onClick={gerarPdf} disabled={gerandoPdf}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 hover:bg-gray-50"
             style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
@@ -2329,6 +2493,57 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         </div>
       )}
 
+      {/* ── Banner: crédito aprovado, mas a venda não (approveVenda falhou) ──
+           Laranja, não amarelo-"aguardando": aqui não há espera — a decisão já
+           foi tomada e a bola está com quem abriu a venda. Ver a dedução em
+           `creditoAprovadoVendaNao`. */}
+      {creditoAprovadoVendaNao && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-2"
+          style={{ backgroundColor: "#FFF7ED", borderColor: "#FED7AA", color: "#7C2D12" }}>
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle size={16} className="shrink-0" />
+            <p className="text-sm font-medium break-words">
+              Crédito aprovado — falta aprovar a venda. A aprovação automática não passou
+              (geralmente cadastro do cliente incompleto, ex.: sem celular). Corrija o cadastro
+              e aprove a venda.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {ordemAbertaMsg && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center gap-2"
+          style={{ backgroundColor: "#D1FAE5", borderColor: "#A7F3D0", color: "#065F46" }}>
+          <CheckCircle size={16} className="shrink-0" />
+          <p className="text-sm font-medium">{ordemAbertaMsg}</p>
+        </div>
+      )}
+
+      {/* ── Banner: aliança vendida SEM ordem na fábrica ──
+          REGRA DE NEGÓCIO (27/07/2026, Jonathan): a ordem de aliança não nasce
+          mais junto com a aprovação da venda, porque o cliente muitas vezes
+          ainda não sabe o tamanho do dedo e a consultora chutava um aro só pra
+          fechar a venda — a fábrica recebia a numeração errada. Agora alguém
+          confirma o aro e abre a ordem aqui.
+          IMPACTO SE REMOVIDO: a venda pode ficar esquecida sem nunca chegar na
+          fábrica — este banner é o que cobra a abertura. */}
+      {venda.alianca_sem_ordem && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-3 flex-wrap"
+          style={{ backgroundColor: "#FEF3C7", borderColor: "#FDE68A", color: "#92400E" }}>
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertTriangle size={16} className="shrink-0" />
+            <p className="text-sm font-medium break-words">
+              Aliança sem ordem na fábrica — confirme o aro com o cliente para abrir a ordem.
+            </p>
+          </div>
+          <button onClick={() => setAbrirOrdemAberto(true)}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg shrink-0"
+            style={{ backgroundColor: C.esmeralda, color: "#fff" }}>
+            Confirmar aro e abrir ordem →
+          </button>
+        </div>
+      )}
+
       {/* ── Banner: aprovação de desconto pendente ── */}
       {isDescontoApproval && (
         <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-2"
@@ -2355,6 +2570,23 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           style={{ backgroundColor: "#EFF6FF", borderColor: "#BFDBFE", color: "#1E40AF" }}>
           <Loader2 size={16} className="animate-spin shrink-0" />
           <p className="text-sm font-medium">Confirme o pagamento Manual (MP) antes de aprovar a venda.</p>
+        </div>
+      )}
+
+      {/* ── Atalho: pedir todas as aprovações de uma vez ──
+          Aparece só com 2+ pendentes. Os banners individuais abaixo continuam —
+          quem vai receber no Pix pede só o desconto (decisão do Jonathan, 16/07). */}
+      {aprovacoesPendentes >= 2 && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-3"
+          style={{ backgroundColor: "#F5F3FF", borderColor: "#DDD6FE", color: "#5B21B6" }}>
+          <p className="text-sm font-medium">
+            Esta venda precisa de {aprovacoesPendentes} aprovações. Você pode pedir todas de uma vez ou uma por uma abaixo.
+          </p>
+          <button onClick={solicitarTodasAprovacoes} disabled={updating}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 disabled:opacity-50"
+            style={{ backgroundColor: "#6D28D9", color: "#fff" }}>
+            {updating ? "Enviando..." : `Solicitar todas (${aprovacoesPendentes})`}
+          </button>
         </div>
       )}
 
@@ -2402,7 +2634,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-3"
           style={{ backgroundColor: "#FFF7ED", borderColor: "#FED7AA", color: "#9A3412" }}>
           <p className="text-sm font-medium">
-            Esta venda tem itens com desconto acima de 20%. Para pagar no cartão de crédito, solicite aprovação.
+            Esta venda tem itens com desconto acima de {LIMITE_DESCONTO_CARTAO}%. Para pagar no cartão de crédito, solicite aprovação.
           </p>
           <button onClick={solicitarAprovacaoCartao} disabled={updating}
             className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 whitespace-nowrap"
@@ -2490,6 +2722,30 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
             <span className="ml-auto text-xs opacity-80">peça com antecedência</span>
           </button>
         )
+      )}
+
+      {/* ── Solicitar frete avulso (atalho contextual da venda) ──
+          REGRA DE NEGÓCIO (decisão do Jonathan, 21/07): a venda deixou de
+          acompanhar o STATUS da solicitação (aguardando/liberada/recusada) —
+          esse acompanhamento agora é só no módulo Tarefas, que passou a ser o
+          lugar único das solicitações. Aqui fica só o atalho: a venda já é
+          conhecida, então abrir o modal direto (modoSolicitacao, ver abaixo)
+          poupa quem solicita de buscar a venda de novo. Tentar solicitar de
+          novo pra uma venda que já tem solicitação em aberto é barrado pelo
+          backend (POST /api/entregas-venda/frete-avulso), que devolve
+          mensagem clara — não duplicar essa checagem aqui.
+          IMPACTO SE REMOVIDO: quem solicita perde o atalho de dentro da
+          própria venda e passa a depender só da busca de venda dentro do
+          Tarefas. */}
+      {podeSolicitarFreteAvulsoAqui && (
+        <button
+          onClick={() => setShowFreteAvulsoModal(true)}
+          className="mb-3 w-full px-4 py-2.5 rounded-lg border flex items-center gap-2 text-left transition-all hover:brightness-95"
+          style={{ backgroundColor: "#FAFAF7", borderColor: C.cremeBorder, color: C.esmeralda }}
+        >
+          <Bike size={15} className="shrink-0" />
+          <span className="text-sm font-medium">Solicitar frete avulso</span>
+        </button>
       )}
 
       {/* ── Alerta: concluir bloqueado por pagamentos pendentes ── */}
@@ -2853,6 +3109,17 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       <tr><td colSpan={10} className="px-3 py-8 text-center text-sm" style={{ color: "#9CA3AF" }}>Nenhum produto adicionado</td></tr>
                     )}
                     {itens.map((item, idx) => {
+                      // ── Promoção: o que explica a comissão nesta linha ──────────
+                      // Num item em campanha, `preco_lista` é o preço PROMOCIONAL.
+                      // O que puxa a faixa é o desconto contra o preço CHEIO. Sem
+                      // mostrar isso, a linha fica "lista 599,00 · % Desc — ·
+                      // comissão 0,50%" e a consultora abre chamado — com razão,
+                      // porque pela tela não existe desconto nenhum.
+                      // % Desc continua sendo o desconto de ALÇADA (sobre o promo)
+                      // e fica "—" mesmo: promoção é pré-aprovada, não pede
+                      // aprovação. Ver docs/regras-negocio/comercial.md §2.1.2.
+                      const cheioItem = Number(item.preco_lista_cheio ?? item.preco_lista);
+                      const emPromocao = cheioItem > Number(item.preco_lista);
                       return (<Fragment key={item._key}>
                       <tr className="border-t hover:bg-stone-50" style={{ borderColor: C.cremeBorder }}>
                         <td className="px-2 py-2 tabular-nums" style={{ color: "#9CA3AF" }}>{idx + 1}</td>
@@ -2868,6 +3135,14 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                               style={{ backgroundColor: "#D1FAE5", color: "#065F46" }}>
                               Upgrade
                             </span>
+                          )}
+                          {emPromocao && (
+                            <div className="mt-1">
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                                style={{ backgroundColor: "#E8F0EC", color: "#184036" }}>
+                                promoção{item.promocao_nome ? ` · ${item.promocao_nome}` : ""}
+                              </span>
+                            </div>
                           )}
                         </td>
                         <td className="px-2 py-2 font-mono" style={{ color: "#6B7280" }}>{item.sku}</td>
@@ -2893,7 +3168,14 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                           })()}
                         </td>
                         <td className="px-2 py-2" style={{ color: "#9CA3AF" }}>{item.unidade ?? "un"}</td>
-                        <td className="px-2 py-2 tabular-nums" style={{ color: "#374151" }}>{fmt(item.preco_lista)}</td>
+                        <td className="px-2 py-2 tabular-nums" style={{ color: "#374151" }}>
+                          {fmt(item.preco_lista)}
+                          {emPromocao && (
+                            <div className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                              cheio <span style={{ textDecoration: "line-through" }}>{fmt(cheioItem)}</span>
+                            </div>
+                          )}
+                        </td>
                         {(() => {
                           const editandoPreco = localPrecoUn[item.id!] !== undefined;
                           const effPct = editandoPreco
@@ -2912,7 +3194,16 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                           const effTotal    = effPrecoUn * item.quantidade;
                           const effDescVal  = item.preco_lista * effPct / 100;
                           const editandoDesc  = editandoPreco || localPct[item.id!] !== undefined;
-                          const effPctComissao = editandoDesc ? getComissao(effPct) : item.pct_comissao;
+                          // Desconto que decide a FAIXA: contra o preço CHEIO da
+                          // campanha, não contra o promocional. É o número que a
+                          // consultora precisa ver pra conferir na tabela de faixas.
+                          const descComissao = cheioItem > 0
+                            ? Math.max(0, Math.round(((cheioItem - effPrecoUn) / cheioItem) * 10000) / 100)
+                            : 0;
+                          // Ao editar, a prévia usa a MESMA base do servidor. Antes
+                          // era getComissao(effPct), que ignora promoção: a tela
+                          // mostrava 4,00% e o valor virava 0,50% depois de salvar.
+                          const effPctComissao = editandoDesc ? getComissao(descComissao) : item.pct_comissao;
                           const effValComissao = editandoDesc ? effTotal * effPctComissao / 100 : item.valor_comissao;
                           return (<>
                         <td className="px-2 py-2 tabular-nums text-center" style={{ color: effPct > 0 ? "#D97706" : "#9CA3AF" }}>
@@ -2946,6 +3237,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                               )}
                             </div>
                           ) : (effPct > 0 ? `${effPct}%` : "—")}
+                          {emPromocao && (
+                            <div className="text-[10px]" style={{ color: "#184036" }}>
+                              promo {(((cheioItem - item.preco_lista) / cheioItem) * 100).toFixed(2).replace(".", ",")}%
+                            </div>
+                          )}
                         </td>
                         {edit.limited && (
                           <td className="px-2 py-2 tabular-nums text-right" style={{ color: "#374151" }}>
@@ -2993,6 +3289,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                               </span>
                             </span>
                           ) : "—"}
+                          {emPromocao && (
+                            <div className="text-[10px] font-normal" style={{ color: "#9CA3AF" }}>
+                              faixa de {descComissao.toFixed(2).replace(".", ",")}%
+                            </div>
+                          )}
                         </td>
                         <td className="px-2 py-2 tabular-nums font-semibold" style={{ color: C.esmeralda }}>{fmt(effTotal)}</td>
                           </>);
@@ -3729,7 +4030,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                             <AlertCircle size={14} className="shrink-0 mt-0.5" style={{ color: "#9A3412" }} />
                             <div className="text-xs" style={{ color: "#9A3412" }}>
                               <p className="font-medium">Cartão de crédito bloqueado</p>
-                              <p>Este pedido possui itens com desconto acima de 20%. Aguarde aprovação para pagar no cartão.</p>
+                              <p>Este pedido possui itens com desconto acima de {LIMITE_DESCONTO_CARTAO}%. Aguarde aprovação para pagar no cartão.</p>
                             </div>
                           </div>
                         ) : (
@@ -3948,6 +4249,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                   vendaId={venda.id}
                   numeroVenda={venda.numero_venda}
                   mode="edicao"
+                  role={role}
                   gateways={gateways.length > 0 ? gateways : [{ id: 1, nome: "Mercado Pago" }, { id: 2, nome: "PagBank" }]}
                   // Payment form
                   pagForma={newPagForma} setPagForma={setNewPagForma}
@@ -4021,6 +4323,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                   onAplicarVale={aplicarValeSingleComCodigo}
                   onPaymentSaved={load}
                   cartaoBloqueado={cartaoBloqueado}
+                  limiteDescontoCartao={LIMITE_DESCONTO_CARTAO}
                   onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}
                   solicitandoAprovacaoCartao={updating}
                 />
@@ -4060,6 +4363,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       vendaId={venda.id}
                       numeroVenda={venda.numero_venda}
                       mode="edicao"
+                      role={role}
                       gateways={gateways.length > 0 ? gateways : [{ id: 1, nome: "Mercado Pago" }, { id: 2, nome: "PagBank" }]}
                       pagForma={newPagForma} setPagForma={setNewPagForma}
                       pagGateway={newPagGateway} setPagGateway={setNewPagGateway}
@@ -4128,6 +4432,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                       onAplicarVale={aplicarValeSingleComCodigo}
                       onPaymentSaved={() => { load(); setAddingPag(false); }}
                       cartaoBloqueado={cartaoBloqueado}
+                      limiteDescontoCartao={LIMITE_DESCONTO_CARTAO}
                       onSolicitarAprovacaoCartao={solicitarAprovacaoCartao}
                       solicitandoAprovacaoCartao={updating}
                     />
@@ -4266,11 +4571,29 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         </Secao>
 
         {/* ── 7. Ordens vinculadas ── */}
-        {venda.ordens && venda.ordens.length > 0 && (
+        {((venda.ordens && venda.ordens.length > 0) || venda.alianca_sem_ordem) && (
           <Secao>
             <STitle>Ordens Vinculadas</STitle>
+            {/* Aliança sem ordem: a pendência aparece AQUI também, no lugar onde
+                quem procura a ordem vai olhar primeiro. */}
+            {venda.alianca_sem_ordem && (
+              <div className="mb-2 p-3 rounded-lg border flex items-center justify-between gap-3 flex-wrap"
+                style={{ backgroundColor: "#FFFBEB", borderColor: "#FDE68A" }}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Factory size={16} style={{ color: "#92400E" }} className="shrink-0" />
+                  <p className="text-sm break-words" style={{ color: "#92400E" }}>
+                    Nenhuma ordem aberta. A aliança só vai para a fábrica depois que o aro for confirmado.
+                  </p>
+                </div>
+                <button onClick={() => setAbrirOrdemAberto(true)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg shrink-0"
+                  style={{ backgroundColor: C.esmeralda, color: "#fff" }}>
+                  Confirmar aro e abrir ordem →
+                </button>
+              </div>
+            )}
             <div className="space-y-2">
-              {venda.ordens.map(ord => {
+              {(venda.ordens ?? []).map(ord => {
                 const statusColor: Record<string, { bg: string; text: string }> = {
                   aguardando: { bg: "#FEF3C7", text: "#92400E" },
                   em_andamento: { bg: "#DBEAFE", text: "#1E40AF" },
@@ -4491,6 +4814,36 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
         formaEnvioVenda={venda.forma_envio}
         onSuccess={(_entrega: unknown) => {
           setShowMarcarEntrega(false);
+          load();
+        }}
+      />
+    )}
+    {/* REGRA DE NEGÓCIO (atalho contextual — ver comentário do botão acima):
+     * Modal de Solicitar Frete Avulso aberto com a venda já definida.
+     * vendaId fixo esconde o buscador de venda do modal; enderecoInicial
+     * pré-preenche o textarea editável. Não recarrega mais a venda ao
+     * solicitar (onSolicitado) — desde que o acompanhamento de status saiu
+     * da tela da venda (passou pro Tarefas), não há mais nada aqui que
+     * dependa desse refresh. */}
+    {showFreteAvulsoModal && venda && (
+      <FreteAvulsoModal
+        isOpen={showFreteAvulsoModal}
+        onClose={() => setShowFreteAvulsoModal(false)}
+        onCriado={() => setShowFreteAvulsoModal(false)}
+        modoSolicitacao
+        vendaId={venda.id}
+        enderecoInicial={enderecoInicialFreteAvulso}
+        contatoIdInicial={venda.cliente_id ?? undefined}
+      />
+    )}
+    {/* Confirmação do aro antes de a ordem de aliança ir para a fábrica. */}
+    {abrirOrdemAberto && venda && (
+      <AbrirOrdemAliancaModal
+        vendaId={venda.id}
+        onClose={() => setAbrirOrdemAberto(false)}
+        onSucesso={(numeroOrdem) => {
+          setAbrirOrdemAberto(false);
+          setOrdemAbertaMsg(`Ordem ${numeroOrdem} aberta para a fábrica.`);
           load();
         }}
       />

@@ -1,23 +1,35 @@
 "use client";
 
 /**
- * PagarMotoboyModal — Modal para pagamento em lote de entregas de um motoboy.
+ * PagarMotoboyModal — modal de pagamento em lote AD-HOC de entregas de um
+ * motoboy (seleciona por checkbox, paga na hora — sem relatório).
  *
- * REGRA DE NEGÓCIO: admin/gerente seleciona entregas confirmadas ainda não
- * pagas de um motoboy e confirma o pagamento em lote. Cada entrega só pode
- * ser paga 1x (garantido pela UNIQUE no banco).
+ * REGRA DE NEGÓCIO: aberto pelo botão "Pagar" do drawer de Motoboys
+ * (MotoboyDrawer.tsx → EntregasVendaClient.tsx). Continua existindo como
+ * ponto de entrada — nenhum caller foi alterado.
  *
- * O QUE: carrega entregas confirmadas não pagas do motoboy selecionado,
- * permite marcar quais pagar via checkbox, mostra total, confirma via
- * POST /api/entregas-venda/motoboy/pagar.
+ * O QUE (reforma da aba "Pagamento do motoboy", 21/07/2026 — relatórios
+ * PERSISTIDOS, mockup aprovado pelo Jonathan; ver
+ * docs/regras-negocio/entregas.md §12.8): esta tela de "seleciona motoboy +
+ * marca entregas por checkbox + paga na hora" morava em
+ * `PagamentoMotoboyPainel.tsx`, reusada aqui DENTRO do modal e TAMBÉM direto
+ * (sem moldura) na aba "Pagamento do motoboy". A decisão do Jonathan foi
+ * substituir o uso DA ABA por um fluxo de RELATÓRIO persistido (criar
+ * relatório → lista paginada → confirmar/abrir) — o formulário solto de
+ * "seleciona motoboy" saiu da aba (ver EntregasVendaClient.tsx). Esse fluxo
+ * ad-hoc por checkbox CONTINUA existindo, mas agora só tem UM consumidor
+ * (este modal, aberto pelo drawer de Motoboys) — por isso a lógica foi
+ * REINTEGRADA aqui (não duplicada: só tem uma cópia, só mudou de arquivo) e
+ * `PagamentoMotoboyPainel.tsx` foi reescrito para ser o formulário de criar
+ * relatório + lista (ver aquele arquivo).
  *
- * IMPACTO SE ALTERADO: sem validação de unicidade, pagamento duplicado.
+ * IMPACTO SE ALTERADO: mudanças de comportamento (validação, API, seleção)
+ * deste fluxo ad-hoc só afetam este modal — não há mais um segundo ponto de
+ * entrada reusando o mesmo componente.
  */
 
 import { useState, useEffect, useCallback } from "react";
-import {
-  X, Loader2, CheckCircle, DollarSign,
-} from "lucide-react";
+import { X, DollarSign, CheckCircle, Loader2 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 
 const C = {
@@ -44,11 +56,6 @@ interface EntregaNaoPaga {
   data_entrega_realizada: string | null;
 }
 
-interface PagarMotoboyModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
-
 function fmtBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
@@ -56,6 +63,11 @@ function fmtBRL(v: number) {
 function fmtData(s: string | null) {
   if (!s) return "—";
   return new Date(s).toLocaleDateString("pt-BR");
+}
+
+interface PagarMotoboyModalProps {
+  isOpen: boolean;
+  onClose: () => void;
 }
 
 export default function PagarMotoboyModal({ isOpen, onClose }: PagarMotoboyModalProps) {
@@ -77,7 +89,7 @@ export default function PagarMotoboyModal({ isOpen, onClose }: PagarMotoboyModal
   hoje.setDate(hoje.getDate() + 7);
   const [dataVencimento, setDataVencimento] = useState(hoje.toISOString().slice(0, 10));
 
-  // Carregar motoboys ao abrir
+  // Carregar motoboys quando o modal abre
   const carregarMotoboys = useCallback(async () => {
     setLoadingMotoboys(true);
     try {
@@ -186,12 +198,13 @@ export default function PagarMotoboyModal({ isOpen, onClose }: PagarMotoboyModal
         position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
         zIndex: 80, width: "min(520px, 92vw)", background: "#fff",
         borderRadius: 12, boxShadow: "0 12px 48px rgba(0,0,0,0.15)", overflow: "hidden",
+        maxHeight: "90vh", display: "flex", flexDirection: "column",
       }}>
         {/* Header */}
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "14px 18px", borderBottom: `1px solid ${C.cremeBorder}`,
-          background: C.cremeBg,
+          background: C.cremeBg, flexShrink: 0,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <DollarSign size={18} color={C.esmeralda} />
@@ -204,7 +217,7 @@ export default function PagarMotoboyModal({ isOpen, onClose }: PagarMotoboyModal
           </button>
         </div>
 
-        <div style={{ padding: "18px" }}>
+        <div style={{ padding: "18px", overflowY: "auto" }}>
           {/* Selecionar motoboy */}
           <label style={{ fontSize: 12, fontWeight: 600, color: C.cinza, marginBottom: 6, display: "block" }}>
             Motoboy
@@ -250,31 +263,18 @@ export default function PagarMotoboyModal({ isOpen, onClose }: PagarMotoboyModal
 
           {entregas.length > 0 && (
             <>
-              <div style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                marginBottom: 8,
-              }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: C.cinza }}>
                   {entregas.length} entrega(s)
                 </span>
                 <button onClick={toggleSelecionarTodas}
-                  style={{
-                    fontSize: 11, color: C.esmeralda, border: "none", background: "none",
-                    cursor: "pointer", fontWeight: 600,
-                  }}>
+                  style={{ fontSize: 11, color: C.esmeralda, border: "none", background: "none", cursor: "pointer", fontWeight: 600 }}>
                   {entregas.every((e) => selecionadas[e.id]) ? "Desmarcar todas" : "Marcar todas"}
                 </button>
               </div>
-              <div style={{
-                maxHeight: 250, overflow: "auto", marginBottom: 12,
-                border: `1px solid ${C.cremeBorder}`, borderRadius: 8,
-              }}>
+              <div style={{ maxHeight: 250, overflow: "auto", marginBottom: 12, border: `1px solid ${C.cremeBorder}`, borderRadius: 8 }}>
                 {entregas.map((e) => (
-                  <label key={e.id} style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "10px 12px", borderBottom: `1px solid ${C.cremeBorder}`,
-                    cursor: "pointer", fontSize: 12,
-                  }}>
+                  <label key={e.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: `1px solid ${C.cremeBorder}`, cursor: "pointer", fontSize: 12 }}>
                     <input type="checkbox" checked={!!selecionadas[e.id]}
                       onChange={() => toggleEntrega(e.id)}
                       style={{ accentColor: C.esmeralda }} />
@@ -294,11 +294,7 @@ export default function PagarMotoboyModal({ isOpen, onClose }: PagarMotoboyModal
               </div>
 
               {/* Total */}
-              <div style={{
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                padding: "10px 0", borderTop: `1px solid ${C.cremeBorder}`,
-                marginBottom: 12,
-              }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderTop: `1px solid ${C.cremeBorder}`, marginBottom: 12 }}>
                 <span style={{ fontSize: 13, color: C.cinza }}>
                   {idsSelecionados.length} selecionada(s)
                 </span>
@@ -313,11 +309,7 @@ export default function PagarMotoboyModal({ isOpen, onClose }: PagarMotoboyModal
               </label>
               <input type="date" value={dataVencimento}
                 onChange={e => setDataVencimento(e.target.value)}
-                style={{
-                  width: "100%", padding: "10px 12px", fontSize: 13,
-                  border: `1px solid ${C.cremeBorder}`, borderRadius: 6,
-                  background: "#fff", color: "#1f2937", marginBottom: 14,
-                }} />
+                style={{ width: "100%", padding: "10px 12px", fontSize: 13, border: `1px solid ${C.cremeBorder}`, borderRadius: 6, background: "#fff", color: "#1f2937", marginBottom: 14 }} />
 
               <button onClick={handlePagar}
                 disabled={idsSelecionados.length === 0 || submetendo}
@@ -334,9 +326,9 @@ export default function PagarMotoboyModal({ isOpen, onClose }: PagarMotoboyModal
               </button>
             </>
           )}
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </>
   );
 }

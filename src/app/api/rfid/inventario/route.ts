@@ -4,6 +4,8 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
+import { ROLES_INVENTARIO_CONTAR, hasRole } from "@/lib/roles";
+import { extrairIdProduto } from "@/lib/rfid/epc";
 
 const InventarioRfidSchema = z.object({
   leituras: z.array(z.string()).min(1, "leituras obrigatório"),
@@ -11,13 +13,6 @@ const InventarioRfidSchema = z.object({
   local_estoque_id: z.coerce.number().int().optional(),
   concluir: z.boolean().optional(),
 }).passthrough();
-
-function extrairIdApi(epc: string): number | null {
-  if (!epc || epc.length < 13) return null;
-  if (!/^\d{24}$/.test(epc)) return null;
-  const id = parseInt(epc.slice(4, 13), 10);
-  return isNaN(id) || id <= 0 ? null : id;
-}
 
 async function getLocalNomeFromId(localId: number): Promise<string> {
   const [row] = await sql`
@@ -32,6 +27,14 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
+    // BLINDAGEM (v2.81.1): leituras alimentam a CONTAGEM do inventário —
+    // qualquer logado podia "informar quantidade" mandando lista de etiquetas
+    // e envenenar a contagem. Restrito a quem pode contar.
+    const [usuario] = await sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1`;
+    if (!hasRole(usuario?.role, ROLES_INVENTARIO_CONTAR)) {
+      return NextResponse.json({ error: "Sem permissão para registrar leituras de inventário" }, { status: 403 });
     }
 
     const raw = await req.json().catch(() => ({}));
@@ -58,13 +61,13 @@ export async function POST(req: NextRequest) {
       }
     });
 
-    // Extrai id_api_produto de cada EPC e busca os produtos
-    const idsApi = [...new Set(leituras.map(extrairIdApi).filter(Boolean) as number[])];
+    // Extrai id_api_produto de cada EPC usando a lib centralizada
+    const idsApi = [...new Set(leituras.map(extrairIdProduto).filter(Boolean) as number[])];
     const naoIdentificados: string[] = [];
 
     const contagem: Record<number, { epcs: string[]; count: number }> = {};
     for (const epc of leituras) {
-      const idApi = extrairIdApi(epc);
+      const idApi = extrairIdProduto(epc);
       if (!idApi) { naoIdentificados.push(epc); continue; }
       if (!contagem[idApi]) contagem[idApi] = { epcs: [], count: 0 };
       contagem[idApi].epcs.push(epc);

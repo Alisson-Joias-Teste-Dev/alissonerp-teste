@@ -18,6 +18,7 @@ import sql from "@/lib/db";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 import { uploadFile } from "@/lib/storage";
 import { getModuloConfig, getCotacaoOuro } from "./config";
+import { resolverAprovadores } from "@/lib/aprovacoes";
 import type { RecebimentoInput, RecebimentoRecord, CreditoClienteRecord } from "./types";
 
 /**
@@ -51,10 +52,17 @@ export async function criarRecebimentoMetal(
   const valorTotal = parseFloat((input.peso_gramas * input.valor_credito_grama).toFixed(2));
 
   // REGRA DE NEGÓCIO: Se valor acima do teto, recebimento nasce com
-  // status 'pendente_aprovacao' e precisa de aprovação antes de entrar no cofre.
-  const aprovadorMetalId = (config.metal_aprovador_id ?? "").trim();
-  if (excedeuTeto && !aprovadorMetalId) {
-    throw new Error("Aprovador de metal acima do teto não configurado.");
+  // status 'pendente_aprovacao' e precisa de aprovador configurado (política
+  // config-first — 03b-config-first-estrito.md) antes de entrar no cofre. Sem
+  // ctx.solicitanteId: metal não exclui quem está cadastrando o recebimento
+  // (regra 3 do pacote 3a). O aprovador em si é resolvido de novo (mesma
+  // config, sem cache) em recebimentos/route.ts na hora de criar a tarefa —
+  // recebimentos_metal não tem coluna própria de aprovador pra reusar aqui.
+  if (excedeuTeto) {
+    const resolucao = await resolverAprovadores("recebimento_metal");
+    if (resolucao.status === "nao_configurado") {
+      throw new Error("Aprovador de metal acima do teto não configurado.");
+    }
   }
 
   // Busca a venda vinculada

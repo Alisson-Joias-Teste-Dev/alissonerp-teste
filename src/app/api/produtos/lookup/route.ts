@@ -31,10 +31,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "id_api invalido" }, { status: 400 });
     }
 
+    // REGRA DE NEGOCIO (11/07 — Jonathan): resolve o produto pelo id_api olhando
+    // a erp_produtos (via produtos_compat) ALEM da public.produtos — mesmo motivo
+    // do export: o id gravado por UPDATE nao chega no public, entao o app nao achava
+    // o produto (SKU vazio). Erp primeiro; onde as duas tem, o numero e identico.
     const rows = await sql`
       SELECT id_produto, id_api_produto, sku, nome
-      FROM public.produtos
-      WHERE id_api_produto = ${idApi}
+      FROM (
+        SELECT produto_id AS id_produto, id_api_produto, sku, nome, 1 AS pri
+          FROM alissonerp.produtos_compat WHERE id_api_produto = ${idApi}
+        UNION ALL
+        SELECT id_produto, id_api_produto, sku, nome, 2 AS pri
+          FROM public.produtos WHERE id_api_produto = ${idApi}
+      ) t
+      ORDER BY pri
       LIMIT 1
     `;
 

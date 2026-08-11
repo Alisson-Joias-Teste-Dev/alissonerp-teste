@@ -40,3 +40,12 @@ export function Badge({ variant = "light", color = "brand", size = "md", startIc
     </span>
   );
 }
+
+export function StatusBadge({ ativo }: { ativo: boolean }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap ${ativo ? "text-green-600" : "text-gray-400"}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${ativo ? "bg-green-500" : "bg-gray-300"}`} />
+      {ativo ? "Ativo" : "Inativo"}
+    </span>
+  );
+}

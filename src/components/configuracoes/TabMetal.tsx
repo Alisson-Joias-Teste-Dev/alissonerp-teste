@@ -49,7 +49,7 @@ export default function TabMetal() {
       </Card>
       </div>
 
-      <Card title="Abrir Metal ao Logar" desc="Usuários com estas roles serão redirecionados para o módulo Metal ao acessar o sistema.">
+      <Card title="Abrir Metal ao Logar" desc="Usuários com estas roles serão redirecionados para o módulo Metal ao acessar o sistema. Nenhum selecionado = ninguém é redirecionado.">
         <div className="flex flex-wrap gap-2">
           {["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja", "estoquista_fabrica", "consultora"].map((role) => {
             const checked = config.metal_home_roles.includes(role);

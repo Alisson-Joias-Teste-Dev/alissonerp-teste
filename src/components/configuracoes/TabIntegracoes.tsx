@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Loader2, Pencil, Globe, Store, MessageCircle, ShoppingBag, Building2, CreditCard, Coins, Bot } from "lucide-react";
+import { Loader2, Pencil, Globe, Store, MessageCircle, ShoppingBag, Building2, CreditCard, Coins, Bot, ExternalLink, RefreshCw } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -33,6 +33,15 @@ export default function TabIntegracoes() {
   const [editAtivo, setEditAtivo] = useState(true);
   const [editErro, setEditErro] = useState("");
 
+  // Tiny ERP usa OAuth2 (não basta salvar client_id/secret — precisa autorizar
+  // via redirect). tinyConectado = já tem bearer_token (conectado de fato);
+  // "Configurado" no card genérico só indica credenciais salvas.
+  // IMPACTO SE REMOVIDO: perde o botão de conectar/reconectar e o de reenviar
+  // vendas que ficaram em fila_sync_externo por erro de sincronização.
+  const [tinyConectado, setTinyConectado] = useState(false);
+  const [retryingAllTiny, setRetryingAllTiny] = useState(false);
+  const [retryAllMsg, setRetryAllMsg] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
+
   // ── Carregar dados ──
   async function carregarTudo() {
     setLoading(true);
@@ -46,11 +55,15 @@ export default function TabIntegracoes() {
       const status: Record<string, boolean> = {};
       status.woocommerce = !!(data.woo_url && data.woo_key);
       status.kommo = !!(data.kommo_url && data.kommo_token);
-      status.tiny = !!(data.tiny_client_id && data.tiny_client_secret);
+      // tiny_has_credentials = client_id/secret salvos; tiny_configured = OAuth
+      // concluído (tem bearer_token) — o card mostra "Configurado" já com as
+      // credenciais salvas, mas o botão de conectar (abaixo) depende do 2º.
+      status.tiny = !!data.tiny_has_credentials;
       status.open_exchange = !!data.open_exchange_api_key_configured;
       status.mercado_pago = !!(data.mp_access_token);
       status.pagbank = !!(data.pagbank_connect_token);
-      status.banco_inter = !!(data.inter_client_id && data.inter_client_secret);
+      status.banco_inter = !!data.inter_configured;
+      setTinyConectado(!!data.tiny_configured);
       const ks = (iaData as unknown as { keys_status?: Record<string, boolean> }).keys_status || {};
       status.ia_providers = Object.values(ks).some(Boolean);
       setConfigured(status);
@@ -82,8 +95,36 @@ export default function TabIntegracoes() {
   }, [editId]);
 
   // ── Abrir modal de edição ──
-  function abrirEdicao(id: string) { setEditId(id); setEditData({}); setEditVisible({}); setEditAtivo(true); setEditErro(""); }
+  function abrirEdicao(id: string) { setEditId(id); setEditData({}); setEditVisible({}); setEditAtivo(true); setEditErro(""); setRetryAllMsg(null); }
   function fecharEdicao() { setEditId(null); setEditData({}); setEditVisible({}); setEditErro(""); }
+
+  // Gera um segredo aleatório pro campo Cron Secret do Banco Inter — o usuário
+  // não precisa inventar/lembrar uma string forte na mão.
+  function gerarCronSecret() {
+    const secret = Array.from({ length: 32 }, () => Math.random().toString(36).charAt(2)).join("");
+    setEditData(prev => ({ ...prev, inter_cron_secret: secret }));
+  }
+
+  // Reenvia ao Tiny as vendas que ficaram presas em fila_sync_externo por erro
+  // de sincronização (ex.: instabilidade da API do Tiny). Não bloqueia a venda
+  // em si — só tenta de novo o espelhamento pro ERP externo.
+  async function reenviarPendentesTiny() {
+    setRetryingAllTiny(true); setRetryAllMsg(null);
+    try {
+      const res = await fetch("/api/tiny/resync-erros", { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        if (d.total === 0) setRetryAllMsg({ tipo: "ok", texto: "Nenhuma venda com erro para reenviar." });
+        else setRetryAllMsg({ tipo: d.erros === 0 ? "ok" : "erro", texto: `${d.sincronizados}/${d.total} reenviados.${d.erros > 0 ? ` ${d.erros} falharam.` : ""}` });
+      } else {
+        setRetryAllMsg({ tipo: "erro", texto: d.error ?? "Erro ao reenviar" });
+      }
+    } catch {
+      setRetryAllMsg({ tipo: "erro", texto: "Erro de rede" });
+    } finally {
+      setRetryingAllTiny(false);
+    }
+  }
 
   // ── Campos de cada integração ──
   function renderFields() {
@@ -125,6 +166,10 @@ export default function TabIntegracoes() {
         fields.push({ key: "inter_cert_pem", label: "Certificado PEM", secret: true });
         fields.push({ key: "inter_key_pem", label: "Chave PEM", secret: true });
         fields.push({ key: "inter_conta_corrente", label: "Conta Corrente" });
+        // Segredo que o webhook/cron do Inter usa para autenticar a chamada de
+        // conciliação automática — sem ele configurado, o job de extrato roda
+        // sem autenticação (ou não roda, dependendo do endpoint).
+        fields.push({ key: "inter_cron_secret", label: "Cron Secret (segredo p/ webhook)", secret: true, placeholder: "Gere ou cole um segredo" });
         break;
       case "ia_providers":
         fields.push({ key: "ia_provedor", label: "Provedor", placeholder: "claude / openai / gemini" });
@@ -225,6 +270,42 @@ export default function TabIntegracoes() {
             <Switch checked={editAtivo} onChange={setEditAtivo} color="brand" />
           </div>
           {renderFields?.()}
+
+          {/* Banco Inter: gerar o Cron Secret em 1 clique em vez de digitar na mão. */}
+          {editId === "banco_inter" && (
+            <Button variant="outline" size="sm" onClick={gerarCronSecret}>
+              <RefreshCw size={12} /> Gerar Cron Secret
+            </Button>
+          )}
+
+          {/* Tiny ERP: OAuth2 exige autorizar via redirect — salvar client_id/secret
+              não conecta por si só. Mostra a URL de callback e o botão de autorizar,
+              mais o reenvio de vendas que ficaram presas em fila_sync_externo. */}
+          {editId === "tiny" && (
+            <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+              <div>
+                <label className="text-[11px] uppercase tracking-widest block mb-1 font-semibold text-gray-500">URL de Redirecionamento</label>
+                <input readOnly
+                  value={`${typeof window !== "undefined" ? window.location.origin : ""}/api/integracoes/tiny/callback`}
+                  className="w-full px-3 py-2 rounded-lg text-xs border border-gray-200 bg-white text-gray-500 select-all outline-none"
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <a href="/api/integracoes/tiny/auth"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors no-underline">
+                  <ExternalLink size={12} /> {tinyConectado ? "Reconectar ao Tiny" : "Conectar ao Tiny"}
+                </a>
+                {tinyConectado && (
+                  <Button variant="outline" size="sm" loading={retryingAllTiny} onClick={reenviarPendentesTiny}>
+                    <RefreshCw size={12} /> Reenviar Pendentes
+                  </Button>
+                )}
+              </div>
+              {retryAllMsg && <p className={`text-xs ${retryAllMsg.tipo === "ok" ? "text-success-600" : "text-error-600"}`}>{retryAllMsg.texto}</p>}
+            </div>
+          )}
+
           {editErro && <div className="rounded-lg border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700">{editErro}</div>}
           <div className="flex justify-end gap-3 pt-3">
             <Button variant="outline" size="md" onClick={fecharEdicao}>Cancelar</Button>

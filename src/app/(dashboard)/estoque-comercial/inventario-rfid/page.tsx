@@ -57,6 +57,8 @@ export default function InventarioRfidPage() {
   const [enviando, setEnviando] = useState(false);
   const [concluindo, setConcluindo] = useState(false);
   const [concluido, setConcluido] = useState(false);
+  // Linha de produto expandida no resultado (mostra o chip de cada peça)
+  const [rfidExpandido, setRfidExpandido] = useState<number | null>(null);
   const [timer, setTimer] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [produtos, setProdutos] = useState<Record<string, { sku?: string; nome?: string }>>({});
@@ -294,89 +296,111 @@ export default function InventarioRfidPage() {
         </div>
       )}
 
-      {resultado && (
+      {resultado && (() => {
+        // Contagem dupla PEÇAS × SKUs a partir do relatório da conferência
+        const produtos = resultado.produtos;
+        const skus = produtos.length;
+        const esperadoPecas = resultado.resumo.total_esperado;
+        const lidoPecas = resultado.resumo.total_encontrado;
+        const faltandoPecas = produtos.reduce((acc, p) => acc + (p.divergencia < 0 ? -p.divergencia : 0), 0);
+        const excessoPecas  = produtos.reduce((acc, p) => acc + (p.divergencia > 0 ? p.divergencia : 0), 0);
+        const faltandoSkus = produtos.filter(p => p.status === "faltando").length;
+        const excessoSkus  = produtos.filter(p => p.status === "excedente" || p.status === "nao_cadastrado").length;
+        // Veredito em uma linha
+        const veredParts: string[] = [];
+        if (faltandoPecas > 0) veredParts.push(`Falta ${faltandoPecas} peça${faltandoPecas > 1 ? "s" : ""}`);
+        if (excessoPecas > 0) veredParts.push(`${excessoPecas} peça${excessoPecas > 1 ? "s" : ""} a mais`);
+        const veredTexto = veredParts.length ? veredParts.join(" · ") : "Bateu certo";
+        const vStyle = faltandoPecas > 0 ? { bg: "#FEF2F2", bd: "#FCA5A5", tx: "#991B1B" }
+          : excessoPecas > 0 ? { bg: "#EFF6FF", bd: "#BFDBFE", tx: "#1E40AF" }
+          : { bg: "#F0FDF4", bd: "#BBF7D0", tx: "#065F46" };
+        const cards = [
+          { label: "Esperado", pecas: esperadoPecas, skus, color: "#184036" },
+          { label: "Lido",     pecas: lidoPecas,     skus, color: "#184036" },
+          { label: "Faltando", pecas: faltandoPecas, skus: faltandoSkus, color: "#DC2626" },
+          { label: "Excesso",  pecas: excessoPecas,  skus: excessoSkus,  color: "#2563EB" },
+        ];
+        return (
         <div className="space-y-4">
           <div
             className="rounded-xl p-5"
             style={{ background: "#FAFAF7", border: "1px solid #E8DCC8" }}
           >
-            <div className="flex items-center gap-2 mb-4">
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
               <ClipboardList size={18} style={{ color: "#184036" }} />
               <h2 className="font-bold" style={{ color: "#184036" }}>
-                Inventario — {resultado.local_nome}
+                Conferência — {resultado.local_nome}
               </h2>
               {concluido && (
                 <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#D1FAE5", color: "#065F46" }}>
-                  Concluido
+                  Concluído
                 </span>
               )}
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium ml-auto"
+                style={{ background: vStyle.bg, color: vStyle.tx, border: `1px solid ${vStyle.bd}` }}>
+                {veredTexto}
+              </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-              <div className="bg-white rounded-lg p-3 text-center border" style={{ borderColor: "#E8DCC8" }}>
-                <p className="text-2xl font-bold" style={{ color: "#184036" }}>{resultado.total_epcs_unicos}</p>
-                <p className="text-xs text-gray-500">Peças lidas</p>
-              </div>
-              <div className="bg-white rounded-lg p-3 text-center border" style={{ borderColor: "#E8DCC8" }}>
-                <p className="text-2xl font-bold" style={{ color: "#184036" }}>{resultado.resumo.total_esperado}</p>
-                <p className="text-xs text-gray-500">Esperado</p>
-              </div>
-              <div className="bg-white rounded-lg p-3 text-center border" style={{ borderColor: "#E8DCC8" }}>
-                <p className="text-2xl font-bold" style={{ color: resultado.resumo.produtos_com_divergencia > 0 ? "#DC2626" : "#059669" }}>
-                  {resultado.resumo.produtos_com_divergencia}
-                </p>
-                <p className="text-xs text-gray-500">Divergencias</p>
-              </div>
-              <div className="bg-white rounded-lg p-3 text-center border" style={{ borderColor: "#E8DCC8" }}>
-                <p className="text-2xl font-bold" style={{ color: resultado.resumo.total_encontrado === resultado.resumo.total_esperado ? "#059669" : "#DC2626" }}>
-                  {resultado.resumo.total_encontrado - resultado.resumo.total_esperado > 0 ? "+" : ""}
-                  {resultado.resumo.total_encontrado - resultado.resumo.total_esperado}
-                </p>
-                <p className="text-xs text-gray-500">Diferenca</p>
-              </div>
+            {/* 4 cartões de MÉTRICA em contagem dupla peças×SKU */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+              {cards.map(c => (
+                <div key={c.label} className="rounded-xl px-3 py-2.5" style={{ background: "#fff", border: "1px solid #E8DCC8" }}>
+                  <p className="text-xs" style={{ color: "#8A857A" }}>{c.label}</p>
+                  <p className="text-xl font-bold leading-tight" style={{ color: c.color }}>
+                    {c.pecas} <span className="text-xs font-medium" style={{ color: "#9A948A" }}>pç</span>
+                  </p>
+                  <p className="text-[11px]" style={{ color: "#9A948A" }}>{c.skus} SKU{c.skus === 1 ? "" : "s"}</p>
+                </div>
+              ))}
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-xs text-gray-500 uppercase border-b" style={{ borderColor: "#E8DCC8" }}>
-                    <th className="text-left py-2 pr-2 font-medium">Produto</th>
-                    <th className="text-center px-2 py-2 font-medium">SKU</th>
-                    <th className="text-center px-2 py-2 font-medium">Esperado</th>
-                    <th className="text-center px-2 py-2 font-medium">Lido</th>
-                    <th className="text-center px-2 py-2 font-medium">Div.</th>
-                    <th className="text-right pl-2 py-2 font-medium">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {resultado.produtos.map(p => {
-                    const st = statusStyle(p.status);
-                    return (
-                      <tr key={p.produto_id ?? p.id_api_produto} className="border-b" style={{ borderColor: "#F3F4F6" }}>
-                        <td className="py-2.5 pr-2">
-                          <span className="truncate block max-w-[200px]" style={{ color: "#184036" }}>
-                            {p.nome ?? `API #${p.id_api_produto}`}
-                          </span>
-                        </td>
-                        <td className="text-center px-2 py-2.5 text-gray-400 text-xs">{p.sku ?? "-"}</td>
-                        <td className="text-center px-2 py-2.5 font-medium">{p.esperado}</td>
-                        <td className="text-center px-2 py-2.5 font-medium">{p.encontrado}</td>
-                        <td className="text-center px-2 py-2.5 font-medium" style={{
-                          color: p.divergencia === 0 ? "#6B7280"
-                            : p.divergencia < 0 ? "#DC2626" : "#F59E0B"
-                        }}>
-                          {p.divergencia > 0 ? `+${p.divergencia}` : p.divergencia}
-                        </td>
-                        <td className="text-right pl-2 py-2.5">
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background: st.bg, color: st.text }}>
-                            {st.label}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            {/* Linhas por produto (dot + sku/nome + contagem + status). Clique
+                expande e mostra o número do chip de cada peça lida. */}
+            <div className="flex flex-col gap-1.5">
+              {produtos.map((p, idx) => {
+                const st = statusStyle(p.status);
+                const chave = p.produto_id ?? p.id_api_produto;
+                const aberto = chave !== null && rfidExpandido === chave;
+                const temChips = p.epcs.length > 0;
+                return (
+                  <div key={chave ?? p.sku ?? idx}>
+                    <div className="flex items-center gap-3 px-4 py-2.5"
+                      style={{
+                        background: "#FAFAF7", border: "1px solid #F3F0E8",
+                        borderRadius: aberto ? "0.75rem 0.75rem 0 0" : "0.75rem",
+                        cursor: temChips ? "pointer" : "default",
+                      }}
+                      onClick={() => temChips && chave !== null && setRfidExpandido(prev => prev === chave ? null : chave)}>
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: st.text }} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate font-mono" style={{ color: "#184036" }}>
+                          {p.sku ?? `API #${p.id_api_produto}`}
+                        </p>
+                        <p className="text-xs text-gray-400 truncate">{p.nome ?? "produto não cadastrado"}</p>
+                      </div>
+                      <span className="text-sm font-bold shrink-0" style={{ color: "#374151" }}>
+                        {p.encontrado}/{p.esperado}
+                      </span>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full shrink-0"
+                        style={{ background: st.bg, color: st.text }}>
+                        {st.label}
+                      </span>
+                    </div>
+                    {aberto && temChips && (
+                      <div className="px-4 py-2 rounded-b-xl" style={{ background: "#FDFBF6", border: "1px solid #F3F0E8", borderTop: "none" }}>
+                        {p.epcs.map((epc, i) => (
+                          <div key={epc} className="flex items-center gap-2 py-1 text-[13px]"
+                            style={{ borderTop: i === 0 ? "none" : "1px solid #F1ECE1" }}>
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: "#059669" }} />
+                            <span className="flex-1 min-w-0">peça {i + 1} · <span className="font-mono text-gray-500">chip {epc.length > 8 ? "…" + epc.slice(-8) : epc}</span></span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             {resultado.nao_identificados.length > 0 && (
@@ -414,7 +438,8 @@ export default function InventarioRfidPage() {
             )}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {!resultado && reader.epcs.length > 0 && (
         <div>

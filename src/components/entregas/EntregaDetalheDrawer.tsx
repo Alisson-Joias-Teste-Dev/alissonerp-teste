@@ -51,7 +51,9 @@ import {
 import ConfirmarPagamentoMotoboyModal from "./ConfirmarPagamentoMotoboyModal";
 import { apiFetch } from "@/lib/apiFetch";
 import ConfirmarEntregaModal from "./ConfirmarEntregaModal";
+import FinalizarAvulsoModal from "./FinalizarAvulsoModal";
 import CorreiosRastreioModal from "./CorreiosRastreioModal";
+import { getPublicUrl } from "@/lib/storage-url";
 
 // ── Paleta ──────────────────────────────────────────────────────────────────────
 const C = {
@@ -97,6 +99,13 @@ interface EntregaDetalhe {
   created_at: string;
   updated_at: string | null;
   foto_entrega_path: string | null;
+  /** MULTIFOTO (migration 357): lista já unificada — ver buscarFotosEntrega. */
+  fotos_entrega: string[];
+  /** REGRA DE NEGÓCIO (03/08/2026): posição GPS bruta do motoboy na
+   *  confirmação — vira link do Google Maps na exibição, sem geocodificação
+   *  reversa (ver migration 366). */
+  latitude_entrega: number | null;
+  longitude_entrega: number | null;
   numero_venda: string | null;
   total_venda: number | null;
   venda_situacao: string | null;
@@ -106,6 +115,10 @@ interface EntregaDetalhe {
   cliente_celular: string | null;
   cliente_telefone: string | null;
   vendedor_id: number | null;
+  // BLOCO 4 (jul/2026), P1: já vem RESOLVIDO pelo backend — endereço da
+  // ENTREGA (confirmado na solicitação) se ela tiver algum campo próprio
+  // preenchido, senão o da VENDA. Ver resolverEnderecoEntrega,
+  // src/lib/entrega-venda.ts, e o GET /api/entregas-venda/[id].
   endereco_entrega: string | null;
   endereco_entrega_numero: string | null;
   endereco_entrega_complemento: string | null;
@@ -138,6 +151,12 @@ interface EntregaDetalhe {
   itens_count: number;
   is_avulso: boolean;
   descricao_avulso: string | null;
+  auto_criado: boolean;
+  /** REGRA DE NEGÓCIO (04/08/2026 — timeline fiel): preenchido só quando a
+   *  corrida passou pelo pool de aprovadores (solicitação) — null em
+   *  criação direta. Ver GET /api/entregas-venda/[id]/route.ts. */
+  liberada_em: string | null;
+  liberada_por_nome: string | null;
 }
 
 // ── Props ───────────────────────────────────────────────────────────────────────
@@ -234,7 +253,14 @@ export default function EntregaDetalheDrawer({
     entregaId: number;
     tipo: "codigo_motoboy" | "codigo_cliente";
     aberto: boolean;
-  }>({ entregaId: 0, tipo: "codigo_cliente", aberto: false });
+    /** REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026): distingue os 2
+     *  botões que chamam `abrirConfirmar("codigo_cliente")` — "Confirmar
+     *  Retirada" (cliente busca na loja, forma_entrega='retirada') e
+     *  "Confirmar Entrega ao Cliente" (motoboy entrega, forma_entrega=
+     *  'motoboy') têm o MESMO tipo de código, mas só o 2º é o momento de
+     *  "finalizar a corrida" pro motoboy — só ele exige localização/foto. */
+    entregaAoClientePeloMotoboy: boolean;
+  }>({ entregaId: 0, tipo: "codigo_cliente", aberto: false, entregaAoClientePeloMotoboy: false });
 
   const [modalCorreios, setModalCorreios] = useState(false);
 
@@ -245,8 +271,10 @@ export default function EntregaDetalheDrawer({
   const [cancelando, setCancelando] = useState(false);
   const [mostrarCancelarConfirm, setMostrarCancelarConfirm] = useState(false);
 
-  // Confirmação de frete avulso (sem código de verificação)
-  const [confirmandoAvulso, setConfirmandoAvulso] = useState(false);
+  // REGRA DE NEGÓCIO (migration 357): finalizar corrida avulsa abre o modal
+  // que pergunta se quer anexar fotos (opcional) — antes era um clique direto
+  // sem nenhuma pergunta (ver FinalizarAvulsoModal).
+  const [modalFinalizarAvulso, setModalFinalizarAvulso] = useState(false);
 
   // Toggle visibilidade dos códigos (mascarados → completos)
   const [mostrarCodigos, setMostrarCodigos] = useState(false);
@@ -293,9 +321,9 @@ export default function EntregaDetalheDrawer({
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   /** Confirmar retirada (código A) ou registrar saída (código B) */
-  function abrirConfirmar(tipo: "codigo_motoboy" | "codigo_cliente") {
+  function abrirConfirmar(tipo: "codigo_motoboy" | "codigo_cliente", entregaAoClientePeloMotoboy = false) {
     if (!entregaId) return;
-    setModalConfirmar({ entregaId, tipo, aberto: true });
+    setModalConfirmar({ entregaId, tipo, aberto: true, entregaAoClientePeloMotoboy });
   }
 
   /** Cancelar entrega */
@@ -318,20 +346,10 @@ export default function EntregaDetalheDrawer({
     }
   }
 
-  /** Confirmar frete avulso (sem código — botão simples) */
-  async function handleConfirmarAvulso() {
+  /** Abre o modal de finalizar corrida avulsa (pergunta opcional de fotos). */
+  function handleConfirmarAvulso() {
     if (!entregaId) return;
-    setConfirmandoAvulso(true);
-    try {
-      await apiFetch(`/api/entregas-venda/${entregaId}/confirmar-avulso`, {
-        method: "POST",
-      });
-      await carregar();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro ao confirmar corrida.");
-    } finally {
-      setConfirmandoAvulso(false);
-    }
+    setModalFinalizarAvulso(true);
   }
 
   /** Callback após confirmação ou rastreio bem-sucedidos */
@@ -369,8 +387,12 @@ export default function EntregaDetalheDrawer({
   const podeConfirmarPagamento =
     isPendente && temNaEntregaPendente && !detalhe?.is_avulso &&
     (isRetirada || (isMotoboy && !!detalhe?.data_saida));
-  // Avulso confirma com botão simples, sem código nem registro de saída
-  const podeConfirmarAvulso = isPendente && !!detalhe?.is_avulso;
+  // Avulso confirma com botão simples, sem código nem registro de saída.
+  // REGRA (anti-fraude): a corrida que o PRÓPRIO entregador registrou fica
+  // pendente de confirmação da LOJA — ele não confirma o próprio lançamento
+  // (o backend confirmar-avulso também bloqueia). Loja/admin confirma normal.
+  const avulsoAutoCriadoDele = !!detalhe?.auto_criado && userRole === "entregador";
+  const podeConfirmarAvulso = isPendente && !!detalhe?.is_avulso && !avulsoAutoCriadoDele;
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -653,8 +675,15 @@ export default function EntregaDetalheDrawer({
             </div>
 
             {/* ── Endereço de Entrega (apenas motoboy) ─────────────────────── */}
-            {/* REGRA DE NEGÓCIO: endereço de entrega é crítico para o motoboy.
-                A venda pode ter um endereço diferente do cadastro do cliente.
+            {/* REGRA DE NEGÓCIO (BLOCO 4, jul/2026, P1): endereço de entrega é
+                crítico para o motoboy. Os campos `detalhe.endereco_entrega*`
+                abaixo já vêm RESOLVIDOS pelo backend (GET /api/entregas-venda/[id]
+                → resolverEnderecoEntrega, src/lib/entrega-venda.ts): é o
+                endereço CONFIRMADO na solicitação de frete avulso quando a
+                entrega tem QUALQUER campo próprio preenchido (nunca mistura
+                com o da venda); senão, o da VENDA (entrega normal/não-avulsa,
+                que nunca grava endereço próprio). O cadastro do CLIENTE é o
+                fallback final, só quando nem entrega nem venda têm nada.
                 Exibido com destaque para o entregador não errar a rota. */}
             {detalhe.forma_entrega === "motoboy" && (
               <div style={{
@@ -672,8 +701,11 @@ export default function EntregaDetalheDrawer({
                 {(detalhe.endereco_entrega || detalhe.endereco_entrega_bairro ||
                   detalhe.cliente_endereco || detalhe.cliente_bairro) ? (
                   (() => {
-                    // REGRA DE NEGÓCIO: prioriza endereço da venda. Se vazio,
-                    // usa o cadastro do cliente como fallback.
+                    // REGRA DE NEGÓCIO (BLOCO 4, P1): `detalhe.endereco_entrega*`
+                    // já é o conjunto RESOLVIDO pelo backend (entrega confirmada
+                    // OU venda — nunca misturado campo a campo). Cadastro do
+                    // cliente é só o último fallback, quando nem entrega nem
+                    // venda têm nenhum campo preenchido.
                     const rua = detalhe.endereco_entrega || detalhe.cliente_endereco;
                     const num = detalhe.endereco_entrega_numero || detalhe.cliente_numero;
                     const comp = detalhe.endereco_entrega_complemento || detalhe.cliente_complemento;
@@ -699,8 +731,12 @@ export default function EntregaDetalheDrawer({
                     );
                   })()
                 ) : (
+                  // BLOCO 4, P1: mensagem neutra — o endereço pode faltar na
+                  // entrega, na venda (ou não haver venda, caso avulso) ou no
+                  // cadastro do cliente; "não informado na venda" era enganoso
+                  // quando o avulso nem tem venda vinculada.
                   <div style={{ fontSize: 12, color: "#9A3412" }}>
-                    Endereço não informado na venda.
+                    Endereço não informado.
                   </div>
                 )}
               </div>
@@ -735,12 +771,17 @@ export default function EntregaDetalheDrawer({
                   }}
                 />
 
-                {/* Evento 1: Criação */}
+                {/* Evento 1: Criação — REGRA DE NEGÓCIO (04/08/2026, pedido do
+                    Jonathan — timeline fiel): título vira "Solicitada" quando
+                    a corrida passou (ou está passando) pelo pool de
+                    aprovadores — `situacao==='solicitada'` (ainda aguardando)
+                    OU `liberada_em` preenchido (já foi aprovada). Criação
+                    direta (sem aprovação) continua "Criada". */}
                 <TimelineItem
                   icon={<Clock size={12} />}
                   iconBg={C.esmeraldaLt}
                   iconColor={C.esmeralda}
-                  title="Criada"
+                  title={detalhe.situacao === "solicitada" || detalhe.liberada_em ? "Solicitada" : "Criada"}
                   date={fmtDtHr(detalhe.created_at)}
                   subtitle={
                     detalhe.criado_por_nome
@@ -749,6 +790,30 @@ export default function EntregaDetalheDrawer({
                   }
                   active
                 />
+
+                {/* Evento 1.5: Aprovada — REGRA DE NEGÓCIO (04/08/2026,
+                    pedido do Jonathan — timeline fiel): só aparece quando a
+                    corrida passou pelo pool de aprovadores (liberada_em
+                    preenchido). Conferido no banco (04/08/2026): quem aprova
+                    NUNCA é a mesma pessoa que solicitou — dado confiável.
+                    IMPACTO SE REMOVIDO: timeline volta a esconder quem
+                    liberou a solicitação, dando a entender que quem criou
+                    também aprovou. */}
+                {detalhe.liberada_em && (
+                  <TimelineItem
+                    icon={<CheckCircle size={12} />}
+                    iconBg={C.esmeraldaLt}
+                    iconColor={C.esmeralda}
+                    title="Aprovada"
+                    date={fmtDtHr(detalhe.liberada_em)}
+                    subtitle={
+                      detalhe.liberada_por_nome
+                        ? `por ${detalhe.liberada_por_nome}`
+                        : undefined
+                    }
+                    active
+                  />
+                )}
 
                 {/* Evento 2: Saída (motoboy retirou) */}
                 {detalhe.data_saida && (
@@ -1181,10 +1246,14 @@ export default function EntregaDetalheDrawer({
             </div>
             )}
 
-            {/* ── Foto de comprovação ───────────────────────────────────── */}
-            {/* REGRA DE NEGÓCIO: foto anexada na confirmação da entrega
-                como comprovante visual. Acessível via proxy autenticado. */}
-            {detalhe.foto_entrega_path && (
+            {/* ── Fotos de comprovação (migration 357 — várias) ─────────── */}
+            {/* REGRA DE NEGÓCIO: fotos anexadas (opcionalmente) na confirmação
+                da entrega, como comprovante visual pro relatório de pagamento
+                do motoboy. Lista já unificada pelo backend (buscarFotosEntrega
+                — cobre tanto confirmações novas, com várias fotos, quanto
+                antigas, com uma foto só na coluna congelada). Acessível via
+                proxy autenticado (getPublicUrl NUNCA gera signed URL nova). */}
+            {detalhe.fotos_entrega.length > 0 && (
               <div style={{ marginBottom: 20 }}>
                 <div
                   style={{
@@ -1197,18 +1266,52 @@ export default function EntregaDetalheDrawer({
                     gap: 5,
                   }}
                 >
-                  <Camera size={13} /> Foto da entrega
+                  <Camera size={13} />
+                  {detalhe.fotos_entrega.length > 1 ? `Fotos da entrega (${detalhe.fotos_entrega.length})` : "Foto da entrega"}
                 </div>
-                <img
-                  src={`/api/storage/pagamento-fotos/${detalhe.foto_entrega_path}`}
-                  alt="Foto da entrega"
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {detalhe.fotos_entrega.map((path, idx) => (
+                    <a
+                      key={idx}
+                      href={getPublicUrl("pagamento-fotos", path)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`Abrir foto ${idx + 1} em tamanho real`}
+                    >
+                      <img
+                        src={getPublicUrl("pagamento-fotos", path)}
+                        alt={`Foto ${idx + 1} da entrega`}
+                        style={{
+                          width: 110,
+                          height: 110,
+                          objectFit: "cover",
+                          borderRadius: 8,
+                          border: `1px solid ${C.cremeBorder}`,
+                        }}
+                      />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── Localização do motoboy na confirmação (03/08/2026) ────────── */}
+            {/* REGRA DE NEGÓCIO: só existe quando a confirmação passou pela
+                exigência de localização (motoboy no app) — corridas antigas
+                ou confirmadas pelo escritório não têm essas colunas. */}
+            {detalhe.latitude_entrega != null && detalhe.longitude_entrega != null && (
+              <div style={{ marginBottom: 20 }}>
+                <a
+                  href={`https://www.google.com/maps?q=${detalhe.latitude_entrega},${detalhe.longitude_entrega}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   style={{
-                    width: "100%",
-                    maxWidth: 320,
-                    borderRadius: 8,
-                    border: `1px solid ${C.cremeBorder}`,
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                    fontSize: 12, fontWeight: 600, color: C.esmeralda, textDecoration: "none",
                   }}
-                />
+                >
+                  <MapPin size={13} /> Ver localização da confirmação no mapa
+                </a>
               </div>
             )}
 
@@ -1424,7 +1527,7 @@ export default function EntregaDetalheDrawer({
               {/* Confirmar Entrega ao Cliente (via motoboy, após saída) */}
               {podeConfirmarEntregaCliente && (
                 <button
-                  onClick={() => abrirConfirmar("codigo_cliente")}
+                  onClick={() => abrirConfirmar("codigo_cliente", true)}
                   style={{
                     padding: "10px 12px",
                     background: C.verde,
@@ -1445,11 +1548,10 @@ export default function EntregaDetalheDrawer({
                 </button>
               )}
 
-              {/* Confirmar Corrida Avulsa (sem código) */}
+              {/* Confirmar Corrida Avulsa (sem código) — abre modal (fotos opcionais) */}
               {podeConfirmarAvulso && (
                 <button
                   onClick={handleConfirmarAvulso}
-                  disabled={confirmandoAvulso}
                   style={{
                     padding: "10px 12px",
                     background: C.verde,
@@ -1458,17 +1560,27 @@ export default function EntregaDetalheDrawer({
                     borderRadius: 8,
                     fontSize: 12,
                     fontWeight: 600,
-                    cursor: confirmandoAvulso ? "not-allowed" : "pointer",
+                    cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     gap: 6,
-                    opacity: confirmandoAvulso ? 0.6 : 1,
                   }}
                 >
                   <CheckCircle size={14} />
-                  {confirmandoAvulso ? "Confirmando..." : "Confirmar Entrega"}
+                  Confirmar Entrega
                 </button>
+              )}
+
+              {/* Corrida que o próprio entregador registrou: aguarda a loja */}
+              {isPendente && !!detalhe?.is_avulso && avulsoAutoCriadoDele && (
+                <div style={{
+                  padding: "10px 12px", background: "#FEF3C7", color: "#92400E",
+                  borderRadius: 8, fontSize: 12, fontWeight: 600,
+                  display: "flex", alignItems: "center", gap: 6,
+                }}>
+                  <Clock size={13} /> Aguardando confirmação da loja
+                </div>
               )}
 
               {/* Informar Correios */}
@@ -1544,6 +1656,17 @@ export default function EntregaDetalheDrawer({
             setModalConfirmar((prev) => ({ ...prev, aberto: false }))
           }
           onSuccess={handleRefresh}
+          exigirLocalizacaoEFoto={userRole === "entregador" && modalConfirmar.entregaAoClientePeloMotoboy}
+        />
+      )}
+
+      {modalFinalizarAvulso && entregaId && (
+        <FinalizarAvulsoModal
+          entregaId={entregaId}
+          isOpen={modalFinalizarAvulso}
+          onClose={() => setModalFinalizarAvulso(false)}
+          onSuccess={() => { setModalFinalizarAvulso(false); handleRefresh(); }}
+          exigirLocalizacaoEFoto={userRole === "entregador"}
         />
       )}
 

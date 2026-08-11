@@ -25,6 +25,13 @@ export interface EventoHistorico {
   qtd?: number;
   categoria_id?: number;
   peso_pedra?: number;
+  /**
+   * Peso em quilates gravado no apontamento. Serve de MARCADOR DE FLUXO para a
+   * tela: quando vem preenchido, o apontamento foi feito por PESO e `qtd` é a
+   * GRAMA da balança; quando vem vazio, é apontamento antigo e `qtd` é a
+   * quantidade de peças. Sem isso a tela não tem como saber e erra a conta.
+   */
+  peso_ct?: number;
   foto_balanca?: string | null;     // path no bucket apontamento-fotos
   deposito_nome?: string | null;
   criado_por_nome?: string | null;
@@ -57,12 +64,14 @@ export async function GET(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  // 1. Buscar PCP
+  // 1. Buscar PCP + foto da saída (se existir)
   const [pcp] = await sql`
-    SELECT id, ordem_id, etapas::text AS etapas,
-           peso_final, pmc, quebra, data_conclusao
-    FROM alissonerp.pcp
-    WHERE id = ${pcpId}
+    SELECT p.id, p.ordem_id, p.etapas::text AS etapas,
+           p.peso_final, p.pmc, p.quebra, p.data_conclusao,
+           so.foto_balanca
+    FROM alissonerp.pcp p
+    LEFT JOIN alissonerp.saidas_ordem so ON so.id = p.saida_ordem_id
+    WHERE p.id = ${pcpId}
     LIMIT 1
   `;
   if (!pcp) {
@@ -86,7 +95,7 @@ export async function GET(
   if (distOrdem?.distribuicao_id) {
     const aptsDist = await sql`
       SELECT
-        a.id, a.quantidade AS qtd, a.created_at, a.foto_balanca,
+        a.id, a.quantidade AS qtd, a.created_at, a.foto_balanca, a.peso_ct,
         ta.descricao  AS tipo_nome,
         i.nome        AS insumo_nome,
         i.categoria_id,
@@ -110,6 +119,7 @@ export async function GET(
         qtd:             Number(a.qtd),
         categoria_id:    Number(a.categoria_id),
         peso_pedra:      Number(a.peso_pedra) || undefined,
+        peso_ct:         Number(a.peso_ct) || undefined,
         foto_balanca:    a.foto_balanca as string | null,
         criado_por_nome: a.criado_por_nome as string | null,
         criado_por_foto: a.criado_por_foto as string | null,
@@ -132,7 +142,7 @@ export async function GET(
   // 5. Apontamentos PCP
   const aptsPcp = await sql`
     SELECT
-      a.id, a.quantidade AS qtd, a.created_at, a.foto_balanca,
+      a.id, a.quantidade AS qtd, a.created_at, a.foto_balanca, a.peso_ct,
       ta.descricao  AS tipo_nome,
       i.nome        AS insumo_nome,
       i.categoria_id,
@@ -158,6 +168,7 @@ export async function GET(
       qtd:             Number(a.qtd),
       categoria_id:    Number(a.categoria_id),
       peso_pedra:      Number(a.peso_pedra) || undefined,
+      peso_ct:         Number(a.peso_ct) || undefined,
       foto_balanca:    a.foto_balanca as string | null,
       deposito_nome:   a.deposito_nome as string | null,
       criado_por_nome: a.criado_por_nome as string | null,
@@ -193,11 +204,12 @@ export async function GET(
   // 7. Saída PCP (se concluído)
   if (pcp.etapas === "concluido" && pcp.data_conclusao) {
     eventos.push({
-      tipo:       "saida_pcp",
-      data:       pcp.data_conclusao as string,
-      peso_final: pcp.peso_final ? Number(pcp.peso_final) : undefined,
-      pmc:        pcp.pmc        ? Number(pcp.pmc)        : undefined,
-      quebra:     pcp.quebra !== null ? Number(pcp.quebra) : undefined,
+      tipo:         "saida_pcp",
+      data:         pcp.data_conclusao as string,
+      peso_final:   pcp.peso_final ? Number(pcp.peso_final) : undefined,
+      pmc:          pcp.pmc        ? Number(pcp.pmc)        : undefined,
+      quebra:       pcp.quebra !== null ? Number(pcp.quebra) : undefined,
+      foto_balanca: pcp.foto_balanca as string | null,
     });
   }
 

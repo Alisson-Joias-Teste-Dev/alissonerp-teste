@@ -11,7 +11,10 @@ import { getPublicUrl } from "@/lib/storage-url";
 
 const TIPOS_PROTOCOLO_DROPDOWN = [
   { tipo: "fabrica", label: "Fábrica", emoji: "🏭" },
-  { tipo: "service", label: "Service", emoji: "🔧" },
+  // Transferência de estoque: move produto entre locais (Loja, Fábrica,
+  // Reposição, Service...). Não passa pelo sub-menu Ordens/Sangria — o que ela
+  // carrega é peça de estoque, não ordem nem ouro.
+  { tipo: "transferencia", label: "Transferência de estoque", emoji: "📦" },
 ];
 
 /**
@@ -56,7 +59,23 @@ interface ProtocoloRow {
   concluido_por_nome: string | null;
   foto_criacao: string | null;
   foto_conclusao: string | null;
+  // Transferência de estoque (nulos nos demais tipos)
+  local_origem_nome?: string | null;
+  local_destino_nome?: string | null;
+  total_produtos?: number | null;
+  estado_transferencia?: string | null;
 }
+
+/**
+ * REGRA DE NEGÓCIO: o estado da transferência é DERIVADO do estoque (protocolo +
+ * transferências vinculadas), não é coluna. Aqui só damos rótulo e cor a ele.
+ */
+const ESTADO_TRANSFERENCIA: Record<string, { label: string; bg: string; color: string }> = {
+  solicitado: { label: "Solicitado", bg: "#FEF3C7", color: "#92400E" },
+  em_rota:    { label: "Em rota",    bg: "#DBEAFE", color: "#1E40AF" },
+  recebido:   { label: "Recebido",   bg: "#D1FAE5", color: "#065F46" },
+  cancelado:  { label: "Cancelado",  bg: "#F3F4F6", color: "#6B7280" },
+};
 
 interface AprovacaoRow {
   id: number;
@@ -111,6 +130,8 @@ interface Props {
   aprovacoes: AprovacaoRow[];
   entregas: EntregaRow[];
   tiposProtocoloPermitidos?: string[];
+  /** Quem esta marcado como transportador pode confirmar a coleta de uma transferencia. */
+  podeColetar?: boolean;
 }
 
 const TIPO_LABEL: Record<string, string> = {
@@ -123,7 +144,24 @@ const TIPO_LABEL: Record<string, string> = {
   servico_interno: "S. Interno",
 };
 
-function EtapaBadge({ etapa }: { etapa: string }) {
+/**
+ * REGRA DE NEGÓCIO: numa transferência de estoque o que interessa é ONDE a peça
+ * está (solicitado / em rota / recebido), e isso é derivado do estoque, não da
+ * coluna `etapas`. Quando o protocolo é de transferência, o estado derivado vence
+ * o rótulo genérico de etapa.
+ */
+function EtapaBadge({ etapa, estadoTransferencia }: { etapa: string; estadoTransferencia?: string | null }) {
+  if (estadoTransferencia) {
+    const e = ESTADO_TRANSFERENCIA[estadoTransferencia] ?? { label: estadoTransferencia, bg: "#F3F4F6", color: "#6B7280" };
+    const IconT = estadoTransferencia === "recebido" ? CheckCircle2 : Clock;
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold"
+        style={{ backgroundColor: e.bg, color: e.color }}>
+        <IconT size={10} />
+        {e.label}
+      </span>
+    );
+  }
   const cfg: Record<string, { label: string; bg: string; color: string }> = {
     concluido:    { label: "Concluído",    bg: "#ECFDF5", color: "#059669" },
     em_andamento: { label: "Em Andamento", bg: "#EFF6FF", color: "#2563EB" },
@@ -144,6 +182,14 @@ function EtapaBadge({ etapa }: { etapa: string }) {
 
 function TipoBadge({ tipo }: { tipo?: string | null }) {
   if (!tipo) return null;
+  if (tipo === "transferencia") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+        style={{ backgroundColor: "#EEF2FF", color: "#4338CA" }}>
+        📦 Estoque
+      </span>
+    );
+  }
   const isService = tipo === "service";
   return (
     <span
@@ -170,12 +216,12 @@ function destinoLabel(destino: string | null | undefined) {
   return destino ?? "—";
 }
 
-export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos = [] }: Props) {
+export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos = [], podeColetar = false }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("ida");
 
   // Modal state: which direcao + which tipo was selected from dropdown
-  const [modalAberto, setModalAberto] = useState<{ direcao: "ida" | "volta"; tipo: string; modo: "ordens" | "sangria" } | null>(null);
+  const [modalAberto, setModalAberto] = useState<{ direcao: "ida" | "volta"; tipo: string; modo: "ordens" | "sangria" | "transferencia" } | null>(null);
 
   /**
    * REGRA DE NEGÓCIO: após selecionar Fábrica/Service, exibe sub-menu Ordens/Sangria.
@@ -184,6 +230,7 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
   const [subSelecao, setSubSelecao] = useState<{ direcao: "ida" | "volta"; tipo: string } | null>(null);
 
   const [concluirProt, setConcluirProt] = useState<ProtocoloRow | null>(null);
+  const [acaoProt, setAcaoProt] = useState<"chegada" | "coleta">("chegada");
   const [isPending, startTransition] = useTransition();
   const [concluidos, setConcluidos] = useState<ProtocoloConcluido[] | null>(null);
   const [fotoModal, setFotoModal] = useState<{ url: string; titulo: string } | null>(null);
@@ -224,6 +271,16 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
   function selecionarTipo(direcao: "ida" | "volta", tipo: string) {
     setDropdownIdaAberto(false);
     setDropdownVoltaAberto(false);
+    /**
+     * REGRA DE NEGÓCIO: transferência de estoque não tem sub-opção Ordens/Sangria
+     * (não carrega ordem nem ouro, carrega peça), então abre o modal direto. Ela
+     * também é sempre gravada como 'ida' — o trajeto real são os locais de origem
+     * e destino escolhidos dentro do modal.
+     */
+    if (tipo === "transferencia") {
+      setModalAberto({ direcao: "ida", tipo, modo: "transferencia" });
+      return;
+    }
     setSubSelecao({ direcao, tipo });
   }
 
@@ -408,7 +465,9 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
         <ProtocoloTable
           rows={ida}
           direcao="ida"
-          onConcluir={(row) => setConcluirProt(row)}
+          onConcluir={(row) => { setAcaoProt("chegada"); setConcluirProt(row); }}
+          onColetar={(row) => { setAcaoProt("coleta"); setConcluirProt(row); }}
+          podeColetar={podeColetar}
           onAbrirFoto={abrirFotoModal}
           filtro={filtroIda}
           onFiltroChange={setFiltroIda}
@@ -420,7 +479,9 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
         <ProtocoloTable
           rows={volta}
           direcao="volta"
-          onConcluir={(row) => setConcluirProt(row)}
+          onConcluir={(row) => { setAcaoProt("chegada"); setConcluirProt(row); }}
+          onColetar={(row) => { setAcaoProt("coleta"); setConcluirProt(row); }}
+          podeColetar={podeColetar}
           onAbrirFoto={abrirFotoModal}
           filtro={filtroVolta}
           onFiltroChange={setFiltroVolta}
@@ -577,11 +638,13 @@ export default function ProtocoloClient({ ida, volta, tiposProtocoloPermitidos =
       {concluirProt && (
         <ConcluirProtocoloModal
           isOpen={true}
-          onClose={() => setConcluirProt(null)}
+          onClose={() => { setConcluirProt(null); setAcaoProt("chegada"); }}
           protocoloId={concluirProt.id}
           direcao={tab === "ida" ? "ida" : "volta"}
           totalOrdens={concluirProt.total_ordens}
-          onSuccess={() => { setConcluirProt(null); refresh(); }}
+          tipoProtocolo={concluirProt.tipo_protocolo}
+          acao={acaoProt}
+          onSuccess={() => { setConcluirProt(null); setAcaoProt("chegada"); refresh(); }}
         />
       )}
 
@@ -705,6 +768,8 @@ function ProtocoloTable({
   rows,
   direcao,
   onConcluir,
+  onColetar,
+  podeColetar,
   onAbrirFoto,
   filtro,
   onFiltroChange,
@@ -712,6 +777,8 @@ function ProtocoloTable({
   rows: ProtocoloRow[];
   direcao: "ida" | "volta";
   onConcluir: (row: ProtocoloRow) => void;
+  onColetar: (row: ProtocoloRow) => void;
+  podeColetar: boolean;
   onAbrirFoto: (url: string | null | undefined, titulo: string) => void;
   filtro: Filtro;
   onFiltroChange: (f: Filtro) => void;
@@ -767,13 +834,26 @@ function ProtocoloTable({
           <MobileCard
             key={r.id}
             titulo={`Protocolo #${r.id}`}
-            subtitulo={direcao === "ida" ? "Loja → Fábrica" : "Fábrica → Loja"}
-            badges={[
-              { label: r.etapas === "concluido" ? "Concluído" : r.etapas === "em_andamento" ? "Em Andamento" : "Pendente", cor: r.etapas === "concluido" ? "bg-green-100 text-green-700" : r.etapas === "em_andamento" ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-700" },
-              ...(r.tipo_protocolo ? [{ label: r.tipo_protocolo === "service" ? "🔧 Service" : "🏭 Fábrica", cor: r.tipo_protocolo === "service" ? "bg-amber-50 text-amber-700" : "bg-gray-100 text-gray-600" }] : []),
-            ]}
+            subtitulo={
+              r.tipo_protocolo === "transferencia"
+                ? `${r.local_origem_nome ?? "—"} → ${r.local_destino_nome ?? "—"}`
+                : direcao === "ida" ? "Loja → Fábrica" : "Fábrica → Loja"
+            }
+            badges={
+              r.tipo_protocolo === "transferencia"
+                ? [
+                    { label: ESTADO_TRANSFERENCIA[r.estado_transferencia ?? ""]?.label ?? "Solicitado", cor: r.estado_transferencia === "recebido" ? "bg-green-100 text-green-700" : r.estado_transferencia === "em_rota" ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-700" },
+                    { label: "📦 Estoque", cor: "bg-indigo-50 text-indigo-700" },
+                  ]
+                : [
+                    { label: r.etapas === "concluido" ? "Concluído" : r.etapas === "em_andamento" ? "Em Andamento" : "Pendente", cor: r.etapas === "concluido" ? "bg-green-100 text-green-700" : r.etapas === "em_andamento" ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-700" },
+                    ...(r.tipo_protocolo ? [{ label: r.tipo_protocolo === "service" ? "🔧 Service" : "🏭 Fábrica", cor: r.tipo_protocolo === "service" ? "bg-amber-50 text-amber-700" : "bg-gray-100 text-gray-600" }] : []),
+                  ]
+            }
             campos={[
-              { label: "Ordens", valor: String(r.total_ordens) },
+              r.tipo_protocolo === "transferencia"
+                ? { label: "Peças", valor: String(r.total_produtos ?? 0) }
+                : { label: "Ordens", valor: String(r.total_ordens) },
               { label: "Criado em", valor: fmt(r.created_at) },
               { label: "Concluído em", valor: fmt(r.data_conclusao) },
               ...(r.criado_por_nome ? [{ label: "Responsável", valor: r.criado_por_nome }] : []),
@@ -805,13 +885,21 @@ function ProtocoloTable({
                   </div>
                 ),
               }] : []),
-              { label: "Ação", valor: r.etapas === "pendente" ? (
+              { label: "Ação", valor: r.tipo_protocolo === "transferencia" && r.estado_transferencia === "solicitado" && podeColetar ? (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onColetar(r); }}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold"
+                  style={{ backgroundColor: "#EEF2FF", color: "#4338CA" }}
+                >
+                  <Package size={11} /> Coletar
+                </button>
+              ) : r.etapas === "pendente" ? (
                 <button
                   onClick={(e) => { e.stopPropagation(); onConcluir(r); }}
                   className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold"
                   style={{ backgroundColor: "#18403612", color: C.esmeralda }}
                 >
-                  <CheckCircle2 size={11} /> Concluir
+                  <CheckCircle2 size={11} /> {r.tipo_protocolo === "transferencia" ? "Chegou" : "Concluir"}
                 </button>
               ) : "—" },
             ]}
@@ -836,9 +924,18 @@ function ProtocoloTable({
             {rowsFiltrados.map((r, i) => (
               <tr key={r.id} style={{ borderTop: i > 0 ? "1px solid #F3EADA" : undefined }}>
                 <td className="px-4 py-3 font-mono text-[12px]" style={{ color: "#6B7280" }}>#{r.id}</td>
-                <td className="px-4 py-3"><TipoBadge tipo={r.tipo_protocolo} /></td>
-                <td className="px-4 py-3"><EtapaBadge etapa={r.etapas} /></td>
-                <td className="px-4 py-3 font-mono text-center" style={{ color: "#374151" }}>{r.total_ordens}</td>
+                <td className="px-4 py-3">
+                  <TipoBadge tipo={r.tipo_protocolo} />
+                  {r.tipo_protocolo === "transferencia" && (
+                    <p className="text-[11px] mt-0.5" style={{ color: "#9CA3AF" }}>
+                      {r.local_origem_nome ?? "—"} → {r.local_destino_nome ?? "—"}
+                    </p>
+                  )}
+                </td>
+                <td className="px-4 py-3"><EtapaBadge etapa={r.etapas} estadoTransferencia={r.estado_transferencia} /></td>
+                <td className="px-4 py-3 font-mono text-center" style={{ color: "#374151" }}>
+                  {r.tipo_protocolo === "transferencia" ? (r.total_produtos ?? 0) : r.total_ordens}
+                </td>
                 <td className="px-4 py-3 font-mono text-[11px]" style={{ color: "#9CA3AF" }}>{fmt(r.created_at)}</td>
                 <td className="px-4 py-3 font-mono text-[11px]" style={{ color: r.data_conclusao ? "#059669" : "#9CA3AF" }}>
                   {fmt(r.data_conclusao)}
@@ -872,13 +969,28 @@ function ProtocoloTable({
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  {r.etapas === "pendente" && (
+                  {/*
+                    REGRA DE NEGÓCIO: numa transferência, enquanto ninguém pegou
+                    as peças o botão é "Coletar" (e só aparece para quem está
+                    marcado como transportador — o motoboy faz isso pelo celular).
+                    Depois que saiu, o botão vira o de sempre: confirmar a chegada.
+                  */}
+                  {r.tipo_protocolo === "transferencia" && r.estado_transferencia === "solicitado" && podeColetar && (
+                    <button
+                      onClick={() => onColetar(r)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold ml-auto"
+                      style={{ backgroundColor: "#EEF2FF", color: "#4338CA" }}
+                    >
+                      <Package size={12} /> Coletar
+                    </button>
+                  )}
+                  {r.etapas === "pendente" && !(r.tipo_protocolo === "transferencia" && r.estado_transferencia === "solicitado" && podeColetar) && (
                     <button
                       onClick={() => onConcluir(r)}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold ml-auto"
                       style={{ backgroundColor: "#18403612", color: C.esmeralda }}
                     >
-                      <CheckCircle2 size={12} /> Concluir
+                      <CheckCircle2 size={12} /> {r.tipo_protocolo === "transferencia" ? "Chegou" : "Concluir"}
                     </button>
                   )}
                 </td>

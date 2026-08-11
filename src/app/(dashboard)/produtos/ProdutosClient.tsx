@@ -410,7 +410,7 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
               style={{ borderColor: "#7C3AED", color: "#184036" }}
               title="Cadastrar pedra avulsa (peso + custo USD + markup)"
             >
-              ✨ + Peça Avulsa
+              ✨ + Pedra Avulsa
             </button>
             <button
               onClick={() => setShowCadastro(true)}

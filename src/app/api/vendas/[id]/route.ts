@@ -9,7 +9,7 @@ import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payloa
 import { zodError, IdSchema } from "@/lib/schemas/common";
 import { internalError } from "@/lib/api-error";
 import { traduzErroOperacional } from "@/lib/erros-operacionais";
-import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { getDescontoThreshold, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
 import { approveVenda } from "@/lib/vendas-aprovar";
 import { isMasterAdmin } from "@/lib/master-admin";
 import { solicitarAprovacaoEntregaSemPagamento, vendaTemExcecaoEntregaAprovada } from "@/lib/entrega-sem-pagamento";
@@ -124,6 +124,13 @@ export async function GET(
       ive.preco_lista, ive.pct_desconto, ive.preco_unitario, ive.total_item,
       ive.pct_comissao, ive.valor_comissao, ive.markup_aplicado,
       ive.desconto_autorizado_por, ive.observacao, ive.peso_estimado, ive.personalizacao, ive.created_at,
+      -- ── Promoção: o que explica a comissão na tela ──────────────────────────
+      -- Sem isto a aba Produtos mostra "preço lista 599,00 · % Desc — · comissão
+      -- 0,50%" e não há como a consultora entender de onde saiu o 0,50%. O que
+      -- puxa a faixa é o desconto contra o preço CHEIO da campanha, e ele não
+      -- aparecia em lugar nenhum. Ver docs/regras-negocio/comercial.md §2.1.2.
+      ive.preco_lista_cheio,
+      promo.nome_campanha AS promocao_nome,
       -- Dados de upgrade (se existirem)
       iuv.peso_gramas      AS upgrade_peso_gramas,
       iuv.peso_liquido     AS upgrade_peso_liquido,
@@ -133,6 +140,20 @@ export async function GET(
       iuv.cofre_registrado AS upgrade_cofre_registrado
     FROM alissonerp.itens_venda_erp ive
     LEFT JOIN alissonerp.itens_venda_upgrade iuv ON iuv.item_venda_id = ive.id
+    -- ⚠️ LATERAL com LIMIT 1, nunca JOIN direto em promocao_itens: um produto
+    -- pode estar em DUAS campanhas sobrepostas na mesma data (AJ4895 em
+    -- 31/07/2026) e o join direto DUPLICA a linha do item na venda.
+    -- Mesmo desempate de vw_produto_preco_vigente (data_inicio DESC, id DESC).
+    LEFT JOIN LATERAL (
+      SELECT pp.nome_campanha
+      FROM alissonerp.promocao_itens pi
+      JOIN alissonerp.promocoes_produtos pp ON pp.id = pi.promocao_id
+      WHERE pi.produto_id = ive.produto_id
+        AND ${venda.data_venda}::date >= pp.data_inicio
+        AND ${venda.data_venda}::date <= pp.data_fim
+      ORDER BY pp.data_inicio DESC, pp.id DESC
+      LIMIT 1
+    ) promo ON true
     WHERE ive.venda_id = ${vendaId}
     ORDER BY ive.id
   `;
@@ -162,11 +183,30 @@ export async function GET(
   // anel 2 = ficha_tecnica_2_id. NAO altera preço/quantidade/comissão (só display).
   // IMPACTO SE REMOVIDO: a aliança volta a aparecer "tudo junto" numa linha só.
   const orcsAlianca = await sql`
-    SELECT id, quantidade, ficha_tecnica_id, ficha_tecnica_2_id
+    SELECT id, quantidade, ficha_tecnica_id, ficha_tecnica_2_id, tipo,
+           ordem_gerada_id, aro_confirmado_em
     FROM alissonerp.orcamentos
     WHERE venda_gerada_id = ${vendaId}
     ORDER BY id
   `;
+
+  /**
+   * REGRA DE NEGÓCIO (27/07/2026): venda de aliança aprovada e SEM ordem aberta.
+   *
+   * O QUE: sinaliza que falta confirmar o aro e abrir a ordem (a ordem de
+   * aliança não nasce mais junto com a aprovação da venda — ver migration 362 e
+   * criarOrdemDoOrcamento).
+   *
+   * POR QUE: tirar a criação automática resolveu a numeração errada na fábrica,
+   * mas cria um risco novo — venda fechada que ninguém manda produzir. A tela da
+   * venda precisa cobrar isso de quem abrir.
+   *
+   * IMPACTO SE REMOVIDO: a venda pode ficar esquecida sem chegar na fábrica, e
+   * ninguém percebe até o cliente cobrar a peça.
+   */
+  const aliancaSemOrdem = orcsAlianca.some(
+    (o) => o.tipo === "alianca" && o.ordem_gerada_id == null
+  ) && ["aprovado", "confirmado", "concluido", "em_rota", "entregue"].includes(String(venda.situacao));
   const fichaIds = orcsAlianca
     .flatMap((o) => [o.ficha_tecnica_id, o.ficha_tecnica_2_id])
     .filter((x): x is number => x != null);
@@ -256,6 +296,13 @@ export async function GET(
     venda.situacao === "entregue" && !!excecaoEntrega && saldoFinanceiroAberto > 0.01;
 
   const descontoThreshold = await getDescontoThreshold(vendaId);
+  // REGRA DE NEGÓCIO (Fase 5, fix 16/07): o limite do cartão vem da config
+  // (limite_desconto_cartao_pct, editável em Configurações › Aprovadores) —
+  // o front tinha `const LIMITE_DESCONTO_CARTAO = 20` cravado e ignorava a
+  // config, mostrando "acima de 20%" mesmo com a chave em 30.
+  // IMPACTO SE REMOVIDO: tela e servidor voltam a divergir (banner some/aparece
+  // no % errado; o gate real do POST /pagamentos já lê a config).
+  const limiteDescontoCartao = await buscarLimiteDescontoCartao();
 
   return NextResponse.json({
     ...venda,
@@ -292,6 +339,7 @@ export async function GET(
     saldo_financeiro_aberto: Number(saldoFinanceiroAberto.toFixed(2)),
     entregue_com_pendencia_financeira: entregueComPendenciaFinanceira,
     descontoThreshold,
+    limiteDescontoCartao,
     itens: itens.map((i) => ({
       ...i,
       quantidade:      Number(i.quantidade),
@@ -320,6 +368,7 @@ export async function GET(
     })),
     ordens,
     aliancaRings,
+    alianca_sem_ordem: aliancaSemOrdem,
   });
 }
 
@@ -370,8 +419,21 @@ export async function PATCH(
 
   // Gate financeiro por campo — vendedora/gerente abre solicitação ao tentar
   // alterar campos protegidos. Frontend usa flag `solicitar` pra abrir modal.
-  const CAMPOS_ADMIN_ONLY = ["cliente_id", "vendedor_id", "data_venda"];
+  //
+  // REGRA DE NEGÓCIO (cliente_id liberado para a loja — jul/2026):
+  //   - vendedor_id (afeta comissão) e data_venda: continuam SÓ admin/dev/diretor.
+  //   - cliente_id (trocar o cliente da venda): agora também pode ser alterado por
+  //     gerente_loja e consultora — mas SÓ em rascunho (o guard "Campos restritos
+  //     a rascunho" abaixo devolve 409 depois disso, para TODOS) e SÓ na venda da
+  //     própria consultora (requireVendaOwnership acima). Motivo: corrigir o
+  //     cliente de um rascunho é rotina da loja e não tem efeito financeiro antes
+  //     da aprovação — exigir aprovação do admin só pra isso travava o dia a dia.
+  //   IMPACTO SE ALTERADO: se cliente_id voltar pra CAMPOS_ADMIN_ONLY,
+  //   consultora/gerente_loja voltam a cair no modal de solicitação de alteração.
+  const CAMPOS_ADMIN_ONLY = ["vendedor_id", "data_venda"];
   const ROLES_FINANCEIRO = ["admin", "desenvolvedor", "diretor"];
+  // Quem pode trocar o cliente da venda (em rascunho): financeiro + loja.
+  const ROLES_TROCA_CLIENTE = [...ROLES_FINANCEIRO, "gerente_loja", "consultora"];
   if (!ROLES_FINANCEIRO.includes(usuario.role)) {
     for (const campo of CAMPOS_ADMIN_ONLY) {
       if ((rawBody as Record<string, unknown>)[campo] !== undefined) {
@@ -381,6 +443,16 @@ export async function PATCH(
         );
       }
     }
+  }
+  // cliente_id segue a mesma mecânica de "solicitar aprovação", porém com uma
+  // allow-list ampliada para a loja (gerente_loja/consultora). Só bloqueia quem
+  // está FORA da lista (ex.: gerente_fabrica), que continua abrindo solicitação.
+  if (!ROLES_TROCA_CLIENTE.includes(usuario.role) &&
+      (rawBody as Record<string, unknown>).cliente_id !== undefined) {
+    return NextResponse.json(
+      { error: `O campo "cliente_id" só pode ser alterado pela loja ou admin. Envie uma solicitação.`, solicitar: true },
+      { status: 403 },
+    );
   }
   // Cast pra preservar tipos legados (situacao mutavel etc).
   const body = parsedBody.data as {

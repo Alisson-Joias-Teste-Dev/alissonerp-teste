@@ -116,6 +116,7 @@ export async function confirmarPagamentoVenda(
       SET valor = ${options.valorEfetivo},
           status = 'confirmado',
           data_confirmacao = NOW(),
+          forma = ${options.formaRecebimento ?? null},
           gateway = ${options.formaRecebimento ?? options.gateway ?? null},
           ouro_peso = ${ouroPeso},
           ouro_valor_grama = ${ouroValorGrama},
@@ -123,14 +124,26 @@ export async function confirmarPagamentoVenda(
       WHERE id = ${pagamentoId}
     `;
   } else if (options.formaRecebimento || options.gateway) {
-    await sql`
-      UPDATE alissonerp.pagamentos_venda
-      SET valor = ${options.valorEfetivo},
-          status = 'confirmado',
-          data_confirmacao = NOW(),
-          gateway = ${options.formaRecebimento ?? options.gateway ?? null}
-      WHERE id = ${pagamentoId}
-    `;
+    if (options.formaRecebimento) {
+      await sql`
+        UPDATE alissonerp.pagamentos_venda
+        SET valor = ${options.valorEfetivo},
+            status = 'confirmado',
+            data_confirmacao = NOW(),
+            forma = ${options.formaRecebimento},
+            gateway = ${options.gateway ?? null}
+        WHERE id = ${pagamentoId}
+      `;
+    } else {
+      await sql`
+        UPDATE alissonerp.pagamentos_venda
+        SET valor = ${options.valorEfetivo},
+            status = 'confirmado',
+            data_confirmacao = NOW(),
+            gateway = ${options.gateway ?? null}
+        WHERE id = ${pagamentoId}
+      `;
+    }
   } else {
     await sql`
       UPDATE alissonerp.pagamentos_venda

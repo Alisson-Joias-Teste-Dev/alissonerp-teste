@@ -71,7 +71,7 @@ export default function TabPermissoes() {
 
   async function handleCriarRole() { const nome = novaRoleNome.trim().toLowerCase(); if (!nome) { setErroNovaRole("Nome obrigatório"); return; } setCriandoRole(true); setErroNovaRole(""); const res = await fetch("/api/configuracoes/roles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nome, descricao: novaRoleDesc.trim() || undefined }) }); const data = await res.json().catch(() => ({})) as { error?: string }; setCriandoRole(false); if (!res.ok) { setErroNovaRole(data.error ?? `Erro ${res.status}`); return; } setNovaRoleOpen(false); setNovaRoleNome(""); setNovaRoleDesc(""); await Promise.all([carregarRoles(), carregarPermissoes()]); }
 
-  async function handleDesativarRole(nome: string) { if (!confirm(`Desativar a role "${nome}"?`)) return; await fetch(`/api/configuracoes/roles/${encodeURIComponent(nome)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: false }) }); await carregarRoles(); }
+  async function handleDesativarRole(nome: string) { if (!confirm(`Desativar a role "${nome}"? Ela sumirá do grid e do dropdown de usuários.`)) return; await fetch(`/api/configuracoes/roles/${encodeURIComponent(nome)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: false }) }); await carregarRoles(); }
 
   async function handleSave() {
     setSaving(true); setErro(""); setSaved(false);

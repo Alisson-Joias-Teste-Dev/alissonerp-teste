@@ -19,6 +19,23 @@ import { gerarValeTroca } from "@/lib/vale-troca";
 import { estornarMP, criarContaPagarReembolso } from "@/lib/reembolso";
 import { criarNotificacao } from "@/lib/notificacoes";
 import { avaliarPrazoDevolucao } from "@/lib/prazo-devolucao";
+import { resolverAprovadores } from "@/lib/aprovacoes";
+import { debitarComissaoDevolucao } from "@/lib/comissao-lancamentos";
+
+/**
+ * Sinaliza um status HTTP específico a partir desta lib (que retorna objeto, não
+ * NextResponse) — mesmo padrão já usado em outras rotas do projeto (ex.:
+ * src/app/api/rfid/cadastrar/route.ts). Os endpoints que chamam solicitarAprovacao*
+ * checam `instanceof HttpError` ANTES do catch-all genérico, sem alterar o
+ * comportamento das demais mensagens de erro (contrato idêntico pros outros casos).
+ */
+export class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -275,40 +292,19 @@ export async function solicitarAprovacaoDevolucao(
     throw new Error(`Devolucao ja foi submetida (status=${dev.status})`);
   }
 
-  // Aprovador: se a devolução está FORA DO PRAZO (7 dias úteis a partir da entrega
-  // real ao cliente), usa o aprovador configurado ESPECIFICAMENTE para isso (lista
-  // aberta em Configurações). Dentro do prazo, mantém o comportamento atual
-  // (aprovadora_credito_gerente → fallback gerente/diretor/admin).
+  // REGRA DE NEGÓCIO (Fase 3e, 12/07 — decisão do Jonathan): 1 aprovador só
+  // (aprovador_devolucao) — a autoridade NÃO depende mais de dentro/fora do prazo
+  // de 7 dias úteis. O cálculo do prazo continua abaixo, só pro aviso "⚠️ FORA DO
+  // PRAZO" na descrição da tarefa (não influencia mais quem aprova). Sem
+  // ctx.solicitanteId: devolução não exclui quem solicitou. Sem fallback por
+  // cargo: sem aprovador configurado, a solicitação não nasce (política
+  // config-first — 03b-config-first-estrito.md).
   const prazo = await avaliarPrazoDevolucao(dev.venda_id);
-  const chaveAprovador = prazo.dentroPrazo
-    ? "aprovadora_credito_gerente"
-    : "aprovador_devolucao_fora_prazo";
-  let aprovadorId: string | undefined;
-  const [config] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado
-    WHERE chave = ${chaveAprovador}
-  `;
-  if (config?.valor) {
-    const [g] = await sql`
-      SELECT id FROM alissonerp.usuarios
-      WHERE id = ${config.valor}::uuid AND ativo = true
-    `;
-    if (g) aprovadorId = String(g.id);
+  const resol = await resolverAprovadores("devolucao");
+  if (resol.status === "nao_configurado") {
+    throw new HttpError(409, "Aprovador de devolução não configurado. Defina em Configurações › Aprovadores.");
   }
-  if (!aprovadorId) {
-    const [gerente] = await sql`
-      SELECT id FROM alissonerp.usuarios
-      WHERE role IN ('gerente_loja','diretor','admin','desenvolvedor') AND ativo = true
-      ORDER BY CASE role
-        WHEN 'gerente_loja' THEN 1
-        WHEN 'diretor'      THEN 2
-        WHEN 'admin'        THEN 3
-        ELSE 4
-      END LIMIT 1
-    `;
-    if (!gerente) throw new Error("Nenhum aprovador ativo encontrado");
-    aprovadorId = String(gerente.id);
-  }
+  const aprovadorId = resol.aprovadores[0]; // coluna aprovacoes_tarefa.aprovador_id é UUID único
 
   const [solicitante] = await sql`
     SELECT nome FROM alissonerp.usuarios WHERE id = ${userId}::uuid
@@ -473,31 +469,14 @@ export async function solicitarAprovacaoEstoqueDevolucao(
     throw new Error(`${pend.cnt} item(ns) ainda pendente(s) de inspecao`);
   }
 
-  // Aprovador do estoque: config -> fallback por cargo de fabrica/estoque.
-  let aprovadorId: string | undefined;
-  const [cfg] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'aprovador_devolucao_estoque'
-  `;
-  if (cfg?.valor) {
-    const [g] = await sql`
-      SELECT id FROM alissonerp.usuarios WHERE id = ${cfg.valor}::uuid AND ativo = true
-    `;
-    if (g) aprovadorId = String(g.id);
+  // REGRA DE NEGÓCIO (Fase 3e, 12/07): aprovador do estoque resolvido pela camada
+  // config-first (aprovador_devolucao_estoque) — sem fallback por cargo. Sem
+  // ctx.solicitanteId: devolução não exclui quem solicitou.
+  const resolEstoque = await resolverAprovadores("devolucao_estoque");
+  if (resolEstoque.status === "nao_configurado") {
+    throw new HttpError(409, "Aprovador de devolução do estoque não configurado. Defina em Configurações › Aprovadores.");
   }
-  if (!aprovadorId) {
-    const [g] = await sql`
-      SELECT id FROM alissonerp.usuarios
-      WHERE role IN ('gerente_fabrica','estoquista_fabrica','admin','desenvolvedor') AND ativo = true
-      ORDER BY CASE role
-        WHEN 'gerente_fabrica'     THEN 1
-        WHEN 'estoquista_fabrica'  THEN 2
-        WHEN 'admin'               THEN 3
-        ELSE 4
-      END LIMIT 1
-    `;
-    if (!g) throw new Error("Nenhum aprovador de estoque ativo encontrado");
-    aprovadorId = String(g.id);
-  }
+  const aprovadorId = resolEstoque.aprovadores[0]; // coluna aprovacoes_tarefa.aprovador_id é UUID único
 
   const [solicitante] = await sql`SELECT nome FROM alissonerp.usuarios WHERE id = ${userId}::uuid`;
   const valorComp = parseFloat(dev.valor_compensacao);
@@ -700,10 +679,33 @@ export async function concluirDevolucao(
     }
   }
 
+  // 1b. DEBITAR A COMISSÃO da consultora que vendeu (migration 363)
+  //
+  // O QUÊ: uma linha negativa no extrato de comissão dela, no valor da comissão
+  // dos itens que acabaram de voltar ao estoque, proporcional ao que o cliente
+  // já pagou da venda.
+  //
+  // O PORQUÊ: a peça saiu do "vendido", então a comissão dela sai junto. Roda
+  // AQUI, logo depois da entrada no estoque, porque o gatilho definido pelo
+  // Jonathan (22/07/2026) é a confirmação física da peça — descarte e garantia
+  // não passam por este ponto e, por construção, não mexem em comissão.
+  //
+  // O IMPACTO: sem este débito, o crédito do vale (vale-troca.ts) paga comissão
+  // pela segunda vez sobre o mesmo dinheiro. Os dois são uma coisa só.
+  const debitoComissao = await debitarComissaoDevolucao(id, userId);
+  if (debitoComissao && debitoComissao.valor_debito > 0) {
+    acoes.push(
+      `comissao debitada R$ ${debitoComissao.valor_debito.toFixed(2)} da consultora ${debitoComissao.consultora_id}`,
+    );
+  }
+
   // 2. Gerar compensacao
   if (valorCompensacao > 0) {
     if (dev.tipo_compensacao === "vale_troca") {
-      const vale = await gerarValeTroca(id, dev.cliente_id, valorCompensacao, userId);
+      // comissionaNoUso=true: o vale nasce de uma devolução que ACABOU de ser
+      // debitada acima. Se o débito deu R$0, é porque aquele dinheiro nunca
+      // comissionou. Nos dois casos usar o vale pode pagar comissão sem dobrar.
+      const vale = await gerarValeTroca(id, dev.cliente_id, valorCompensacao, userId, null, undefined, true);
       result.vale_troca_id = vale.id;
       result.vale_troca_numero = vale.numero;
       acoes.push(`vale-troca ${vale.numero} gerado (R$ ${valorCompensacao.toFixed(2)})`);

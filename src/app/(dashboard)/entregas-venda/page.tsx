@@ -22,13 +22,36 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
+import {
+  listarRelatoriosPagamentoMotoboy,
+  PAGE_SIZE_RELATORIOS_PAGAMENTO_MOTOBOY,
+  ROLES_PAGAMENTO_MOTOBOY,
+  type RelatorioPagamentoMotoboyListItem,
+} from "@/lib/pagamento-motoboy";
+import {
+  listarFechamentosFrete,
+  PAGE_SIZE_FECHAMENTOS_FRETE,
+  type FechamentoFreteListItem,
+} from "@/lib/frete-fechamento";
 import EntregasVendaClient from "./EntregasVendaClient";
 
 export const dynamic = "force-dynamic";
 
 // REGRA DE NEGÓCIO: papéis que podem acessar a listagem de entregas.
 // "consultora" tem visibilidade restrita (apenas entregas de suas vendas).
-const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_loja", "consultora"];
+//
+// BLOCO 5 (jul/2026) — `estoquista_loja` entrou aqui. O papel já podia CRIAR
+// frete avulso direto desde o BLOCO 3 (`podeCriarFreteAvulsoDireto`), mas não
+// tinha CAMINHO até a tela (403 neste gate — achado registrado em
+// docs/regras-negocio/entregas.md §8, resolvido agora). PEDIDO DO JONATHAN:
+// "o usuário do estoque tenha acesso às entregas avulsas... que toda entrega
+// chegue pra ele acompanhar". DECISÃO (mais simples e reversível, tomada sem
+// resposta a tempo do Jonathan — revisar se ele quiser recorte mais estrito):
+// como não existe filtro por tipo/ownership pra este papel (só `isConsultora`
+// filtra por vendedor, abaixo), `estoquista_loja` passa a ver TODAS as
+// entregas (avulsas e normais), não só as avulsas. IMPACTO SE REMOVIDO: volta
+// o 403 e o estoque perde visibilidade das corridas.
+const ROLES_PERMITIDOS = ["desenvolvedor", "admin", "gerente_loja", "consultora", "estoquista_loja"];
 
 // ── Tipos ──────────────────────────────────────────────────────────────────────
 
@@ -66,6 +89,36 @@ export interface ContagensEntregas {
   confirmada: number;
 }
 
+/**
+ * REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07 — mockup aprovado pelo
+ * Jonathan): a lista única com chips virou 3 ABAS, separando o que hoje se
+ * misturava na mesma tabela:
+ *   - `retirada`  -> forma_entrega='retirada' (colunas Motoboy/Frete e o
+ *     card de saldo de frete não se aplicam, ficam ocultos).
+ *   - `motoboy`   -> forma_entrega='motoboy' (colunas completas). `correios`
+ *     é uma REGIÃO (entregas_venda.regiao), não uma forma_entrega — uma
+ *     corrida "Correios" já é forma_entrega='motoboy' com regiao='correios',
+ *     então cai nesta aba naturalmente (nenhum registro fica sem aba).
+ *   - `pagamento` -> não lista entregas de venda (colunas normais ficam
+ *     ocultas); em vez disso, esta página faz SSR da LISTA PAGINADA de
+ *     relatórios de pagamento do motoboy já criados (21/07/2026 — relatórios
+ *     PERSISTIDOS, ver migration 358 e docs/regras-negocio/entregas.md
+ *     §12.8), reusando `page`/`limit` do MESMO jeito que as outras abas
+ *     (Paginacao/Link) — só a fonte muda
+ *     (`relatorios_pagamento_motoboy` em vez de `entregas_venda`).
+ *   - `fechamentos` -> BLOCO 5 (21/07/2026, ver docs/regras-negocio/
+ *     entregas.md §10.6): mesmo desenho de `pagamento` (não lista entregas;
+ *     SSR da LISTA PAGINADA, fonte = `fechamentos_frete`), mas READ-ONLY —
+ *     não tem formulário nenhum, só o relatório mês a mês. Restrita a quem
+ *     vê "Pagamento do motoboy" (`ROLES_PAGAMENTO_MOTOBOY`) — ver gate
+ *     abaixo (cai em 'retirada' se o papel não tiver acesso, mesmo por URL
+ *     direta).
+ * IMPACTO SE REMOVIDO: as abas "Retirada"/"Motoboy" voltam a mostrar tudo
+ * misturado; qualquer valor de aba diferente destes 4 cai no default
+ * ('retirada') — nunca em SQL livre.
+ */
+export type AbaEntrega = "retirada" | "motoboy" | "pagamento" | "fechamentos";
+
 // ── Props da página (searchParams do Next.js) ─────────────────────────────────
 interface PageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -84,6 +137,10 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     WHERE id = ${user.id}::uuid LIMIT 1
   `;
 
+  // REGRA DE NEGÓCIO (migration 353 — REVERTIDO na virada V2): o portão
+  // especial para o liberador de frete avulso (aba "Solicitações") foi
+  // removido junto com a aba — volta a ser role-only. A V3 recria o acesso
+  // à solicitação/decisão de outra forma (tarefa, não uma aba própria aqui).
   if (!usuario || !ROLES_PERMITIDOS.includes(usuario.role as string)) {
     redirect("/");
   }
@@ -91,12 +148,36 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
   // ── Parâmetros de URL ─────────────────────────────────────────────────────
   const params = await searchParams;
   const page = Math.max(1, Number(params.page) || 1);
-  const limit = 50;
+  // REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07 — mockup aprovado):
+  // paginação de 10 por página (era 50) — rodapé "1–10 de N" com navegação,
+  // sem rolagem infinita. IMPACTO SE ALTERADO: recarregar() em
+  // EntregasVendaClient.tsx usa este mesmo valor via prop `pageSize` — mudar
+  // aqui sem mudar lá desalinha a paginação client-side.
+  const limit = 10;
   const offset = (page - 1) * limit;
   const situacao = typeof params.situacao === "string" ? params.situacao : "";
   const busca = typeof params.busca === "string" ? params.busca : "";
   const dataInicio = typeof params.data_inicio === "string" ? params.data_inicio : "";
   const dataFim = typeof params.data_fim === "string" ? params.data_fim : "";
+  // REGRA DE NEGÓCIO (reforma da tela Entregas — 3 abas, ver AbaEntrega
+  // acima): valor inválido/ausente cai no default 'retirada'. Nunca usado em
+  // SQL livre — só decide qual filtro fixo de forma_entrega aplicar.
+  const abaParam = typeof params.aba === "string" ? params.aba : "";
+  const abaValida: AbaEntrega = (["retirada", "motoboy", "pagamento", "fechamentos"] as const).includes(abaParam as AbaEntrega)
+    ? (abaParam as AbaEntrega)
+    : "retirada";
+  // REGRA DE NEGÓCIO (BLOCO 5 — "Fechamentos de frete" é financeiro, não
+  // opera pra todo mundo que acessa a tela): mesmo gate de
+  // "Pagamento do motoboy" (`ROLES_PAGAMENTO_MOTOBOY`). Defesa em profundidade
+  // — o botão da aba já some no front pra quem não tem o papel (AbasEntrega),
+  // mas alguém digitando `?aba=fechamentos` na URL direto não deve ver os
+  // dados: cai silenciosamente em 'retirada' (mesmo comportamento de um valor
+  // de aba inválido, acima). IMPACTO SE REMOVIDO: qualquer papel com acesso à
+  // tela (consultora, estoquista_loja) passa a ver verba/saldo/conta a pagar
+  // da gerente só forçando a URL.
+  const aba: AbaEntrega = abaValida === "fechamentos" && !ROLES_PAGAMENTO_MOTOBOY.includes(usuario.role as string)
+    ? "retirada"
+    : abaValida;
 
   const isConsultora = usuario.role === "consultora";
   const vendedorId = usuario.vendedor_id as number | null;
@@ -108,9 +189,16 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     ? sql`AND ve.vendedor_id = ${vendedorId}`
     : sql``;
 
+  // REGRA DE NEGÓCIO (frete avulso): a lista operacional NÃO mostra
+  // 'cancelada' nem 'solicitada' por padrão — 'solicitada' é a etapa
+  // "aguardando liberação" do avulso e não é uma entrega operável ainda
+  // (fix do vazamento SSR mantido da virada V2 — mesmo sem a aba própria de
+  // solicitações, o default continua excluindo os dois).
+  // IMPACTO SE REMOVIDO: solicitações pendentes de liberação vazam para a
+  // lista principal e inflam a contagem "total" para todo mundo.
   const whereSituacao = situacao
     ? sql`AND ev.status = ${situacao}`
-    : sql``;
+    : sql`AND ev.status NOT IN ('cancelada', 'solicitada')`;
 
   // Filtro de busca: código de entrega ou número da venda (case-insensitive)
   const whereBusca = busca
@@ -127,11 +215,25 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     ? sql`AND ev.created_at < (${dataFim}::date + interval '1 day')`
     : sql``;
 
+  // REGRA DE NEGÓCIO (reforma da tela Entregas — abas): 'retirada' e
+  // 'motoboy' filtram por forma_entrega igual ao nome da aba; 'pagamento' e
+  // 'fechamentos' (BLOCO 5) não listam entregas (ver AbaEntrega acima) — as
+  // duas queries abaixo nem rodam nesses casos.
+  // IMPACTO SE REMOVIDO: as abas voltam a mostrar retirada+motoboy misturados.
+  const whereFormaEntrega = aba !== "pagamento" && aba !== "fechamentos"
+    ? sql`AND ev.forma_entrega = ${aba}`
+    : sql``;
+
   // ── Queries em paralelo: dados + contagens ─────────────────────────────────
   // REGRA DE NEGÓCIO: duas queries separadas em Promise.all para performance.
   // A contagem usa a mesma condição WHERE para consistência com os dados listados.
+  // Pulam inteiramente nas abas 'pagamento'/'fechamentos' — nenhuma das duas
+  // lista entregas (são relatórios próprios, via PagamentoMotoboyPainel /
+  // FechamentosFretePainel).
   // IMPACTO SE ALTERADO: se as condições divergirem, totalPages fica errado.
-  const [itemsResult, countResult] = await Promise.all([
+  const [itemsResult, countResult]: [Record<string, unknown>[], Record<string, unknown>[]] = (aba === "pagamento" || aba === "fechamentos")
+    ? [[], [{ total: 0, pendente: 0, em_andamento: 0, confirmada: 0 }]]
+    : await Promise.all([
     sql`
       SELECT
         ev.id,
@@ -163,6 +265,7 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
       LEFT JOIN alissonerp.motoboys mb ON mb.user_id = ev.motoboy_id
       WHERE 1=1
         ${whereVendedor}
+        ${whereFormaEntrega}
         ${whereSituacao}
         ${whereBusca}
         ${whereDataInicio}
@@ -182,6 +285,7 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = ev.venda_id
       WHERE 1=1
         ${whereVendedor}
+        ${whereFormaEntrega}
         ${whereSituacao}
         ${whereBusca}
         ${whereDataInicio}
@@ -196,7 +300,53 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     confirmada:   Number(countResult[0].confirmada ?? 0),
   };
 
-  const totalItems = contagens.total;
+  // ── Aba "pagamento": relatórios de pagamento do motoboy (SSR paginado) ────
+  // REGRA DE NEGÓCIO (21/07/2026 — relatórios PERSISTIDOS): reusa a MESMA
+  // função (`listarRelatoriosPagamentoMotoboy`) que a rota
+  // `GET /api/entregas-venda/motoboy/relatorio-pagamento` usa para o
+  // refresh client-side (após criar/confirmar), evitando duas cópias da
+  // consulta. `page`/`limit` são os MESMOS da URL — Paginacao (reusado,
+  // ver PagamentoMotoboyPainel.tsx) navega trocando `?page=N&aba=pagamento`
+  // exatamente como as outras abas.
+  const relatoriosPagamento: RelatorioPagamentoMotoboyListItem[] = [];
+  let relatoriosTotalItems = 0;
+  if (aba === "pagamento") {
+    const { items: itensRelatorios, total } = await listarRelatoriosPagamentoMotoboy(sql, {
+      page,
+      limit: PAGE_SIZE_RELATORIOS_PAGAMENTO_MOTOBOY,
+    });
+    relatoriosPagamento.push(...itensRelatorios);
+    relatoriosTotalItems = total;
+  }
+
+  // ── Aba "fechamentos": fechamentos mensais da verba de frete grátis (BLOCO 5,
+  // SSR paginado) ────────────────────────────────────────────────────────────
+  // REGRA DE NEGÓCIO (21/07/2026 — mockup aprovado pelo Jonathan, ver
+  // docs/regras-negocio/entregas.md §10.6): MESMO padrão da aba "pagamento"
+  // acima — reusa `listarFechamentosFrete` (a MESMA função que
+  // `GET /api/entregas-venda/fechamentos` usa) para não duplicar a consulta.
+  // 100% read-only: não há criação/edição nesta aba, só leitura.
+  const fechamentosFrete: FechamentoFreteListItem[] = [];
+  let fechamentosTotalItems = 0;
+  if (aba === "fechamentos") {
+    const { items: itensFechamentos, total } = await listarFechamentosFrete(sql, {
+      page,
+      limit: PAGE_SIZE_FECHAMENTOS_FRETE,
+    });
+    fechamentosFrete.push(...itensFechamentos);
+    fechamentosTotalItems = total;
+  }
+
+  // REGRA DE NEGÓCIO: `totalItems`/`totalPages` alimentam o `Paginacao`
+  // renderizado na aba ativa — na aba "pagamento" eles descrevem a lista de
+  // RELATÓRIOS (não entregas); na aba "fechamentos" descrevem a lista de
+  // FECHAMENTOS mensais; nas demais abas, continuam descrevendo
+  // `contagens.total` (entregas), como sempre.
+  const totalItems = aba === "pagamento"
+    ? relatoriosTotalItems
+    : aba === "fechamentos"
+    ? fechamentosTotalItems
+    : contagens.total;
   const totalPages = Math.ceil(totalItems / limit);
 
   // ── Serialização ───────────────────────────────────────────────────────────
@@ -241,6 +391,9 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
       dataInicioFiltro={dataInicio}
       dataFimFiltro={dataFim}
       userRole={usuario.role as string}
+      aba={aba}
+      relatoriosPagamento={relatoriosPagamento}
+      fechamentosFrete={fechamentosFrete}
     />
   );
 }

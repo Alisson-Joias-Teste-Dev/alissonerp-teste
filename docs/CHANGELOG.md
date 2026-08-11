@@ -1,6 +1,6 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 19/06/2026 — Versão: v2.68.4 <!-- Revisado 19/06/2026 -->
+> 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
 
 ## Pente-fino do front — limpeza de código morto validada em cópia isolada (v2.84.0 a v2.84.6)
 
@@ -53,6 +53,826 @@ par de alianças com pedra (ORC-0000191) — confirmado, via rede, que a busca n
 mais ao reabrir, e o valor da pedra continua batendo com o histórico salvo. Bug 2 conferido por
 leitura de código (troca de variável simples, sem parte assíncrona) — não testado clicando na tela
 porque o usuário de teste usado não tem permissão de desconto.
+
+
+## fix(orcamento): reabrir rascunho com pedra não troca mais o preço sozinho + desconto do par gravado corretamente (v2.83.9)
+
+**Bug 1 — preço da pedra mudava ao reabrir rascunho:** o efeito de auto-busca do preço atual da
+pedra no catálogo (`OrcamentoClient.tsx`, anel 1 e anel 2) rodava mesmo ao carregar um rascunho já
+salvo, e como a busca é assíncrona, sobrescrevia a pedra restaurada de `pedras_detalhadas` com o
+preço ATUAL do catálogo — mudando o valor combinado com o cliente sem nenhuma ação da vendedora.
+Uma primeira tentativa usando a trava `isHydratingRef` (igual aos efeitos vizinhos) não resolveu:
+testado ao vivo, a trava libera ANTES da busca assíncrona ter chance de rodar de novo — timing não é
+confiável pra esse caso. Fix real: `aplicarOrcamento` marca uma flag (`skipPedraLookupRef`, uma por
+anel) quando restaura uma pedra com preço já salvo; o efeito de busca consome essa flag (não busca)
+na primeira vez que roda com os dados já carregados, e o efeito que reconstrói a entrada da pedra
+(`stoneEntries`) respeita a mesma flag pra não recalcular com a pedra ainda vazia antes da hora.
+Qualquer troca de tipo/tamanho feita pela vendedora depois disso busca normalmente.
+
+**Bug 2 — desconto do par gravado não batia com o cobrado:** no par de alianças, o valor cobrado
+usa `Math.max(desconto anel 1, desconto anel 2)`, mas o campo `desconto_pct` salvo usava só o
+desconto do anel 1 — escondendo o desconto real e calculando a faixa de comissão da vendedora
+errada (`api/orcamento/[id]/route.ts`, cálculo de comissão por faixa). Fix: `pricingTotal` passou a
+expor `descontoEfetivo` (a mesma fórmula usada no cálculo do valor) e o save (`handleSave`) usa esse
+valor em vez de `params.discountPercent` — elimina a duplicação da fórmula que causou a divergência.
+
+**Não mexe em:** schema, migrations, aparência da tela. Achados via auditoria completa do módulo de
+orçamentos (mais 3 itens pendentes de aprovação: aprovar orçamento rejeitado sem trava no backend,
+funções de pedra manual sem botão na tela, `pecaPricing` com desconto errado/variável não usada).
+
+**Testado:** `tsc --noEmit` zero erros. Bug 1 testado ao vivo (homolog local) num rascunho real de
+par de alianças com pedra (ORC-0000191) — confirmado, via rede, que a busca no catálogo não dispara
+mais ao reabrir, e o valor da pedra continua batendo com o histórico salvo. Bug 2 conferido por
+leitura de código (troca de variável simples, sem parte assíncrona) — não testado clicando na tela
+porque o usuário de teste usado não tem permissão de desconto.
+
+## fix(inventario): cartao Excesso soma os "fora do inventario" (v2.83.6)
+
+**O que faz:** no detalhe do inventario, o cartao **Excesso** passa a somar TUDO que sobrou —
+pecas contadas a mais de itens da lista **+** pecas "fora do inventario" (etiqueta lida pelo app
+RFID de produto que nem estava na lista). E clicar no cartao passa a mostrar as duas listas.
+
+**Por que:** ficou igual ao cartao **Faltando**, que ja soma "contadas a menos + nunca contadas".
+Separado, o placar do topo do inventario #83 dizia **"1 peca a mais"** enquanto havia **4 chips
+fora da lista** na loja — quem le o topo primeiro (que e todo mundo) subestimava a sobra.
+
+**Onde estava o bug do filtro:** `mostraForaInventario` (linha ~1299 de
+`src/app/(dashboard)/estoque-comercial/inventario/[id]/page.tsx`) so aceitava filtro nulo ou
+`"fora"`. Os proprios comentarios do arquivo (calculo e render) ja diziam "filtro nulo, Excesso
+ou Fora do invent." — o `"excesso"` ficou de fora do codigo. Clicar em Excesso **escondia** os
+fora do inventario em vez de traze-los junto.
+
+**A correcao (so front, nada de banco/API):**
+1. `foraPecas` = soma das quantidades dos itens fora do inventario.
+2. `excessoPecas` += `foraPecas` e `excessoSkus` += `foraCount`.
+3. `mostraForaInventario` aceita tambem `filtroStatus === "excesso"`.
+4. Texto do "!" (STATUS_EXPLICACAO) atualizado.
+
+Os chips **"Sem contagem"** e **"Fora do invent."** continuam como **recorte** de cada cartao —
+servem para isolar o subconjunto, nao para contar em paralelo.
+
+Doc: `docs/regras-negocio/comercial.md` §7.
+
+---
+
+## fix(crediario): webhook do MP fecha a parcela paga pelo QR (v2.83.5)
+
+**O que faz:** quando o cliente paga a parcela do crediario pelo QR Pix / maquininha gerados na
+tela do Crediario, o webhook do Mercado Pago passa a FECHAR a parcela — antes ele so confirmava o
+pagamento e deixava a parcela aberta.
+
+**Por que:** `src/lib/crediario-baixa-automatica.ts` (`fecharContaReceberAposPagamentoMp`) existia
+desde o redesenho do crediario e **NUNCA foi chamada por rota nenhuma** — codigo morto. Os
+comentarios de `cobrar-pix/route.ts`, `cobrar-cartao/route.ts` e do `CrediarioClient.tsx` afirmam
+que "o webhook fecha a conta"; a fiacao nunca existiu.
+
+Em producao: o cliente pagava, o dinheiro entrava, o pagamento era confirmado e **a parcela ficava
+pendente para sempre** — o cron seguia cobrando quem ja tinha pago.
+
+- **15769** — R$ 100,00 pagos em 18/07 (MP aprovado). Cobranca "vence em breve" enviada em 03/08.
+- **15312** — R$ 347,20 pagos em 03/08 (MP aprovado, liquido 345,12). Cobranca **de atraso**
+  enviada em 04/08.
+
+As duas contas foram fechadas na mao em 06/08/2026 (log 402, assinado). Este commit corrige o
+CODIGO.
+
+**A correcao (3 pontos):**
+1. `webhooks/mercado-pago/route.ts`: chama a lib nos **dois** caminhos que confirmam pagamento
+   (`merchant_order` e `payment`), dentro da MESMA transacao.
+2. A lib passa a fechar a **parcela que a cobranca mirava**
+   (`gateway_payload.conta_receber_id`, gravado pelo cobrar-pix/cobrar-cartao); sem essa
+   referencia, segue fechando a mais antiga em aberto. Importa em crediario parcelado — o cliente
+   pode pagar o QR da parcela 2 antes da 1.
+3. A lib passa a **dividir o "A Receber"** quando o crediario e parcelado: o QR cobra UMA parcela,
+   mas o webhook confirmava o pagamento INTEIRO — era o mesmo bug de comissao corrigido nas baixas
+   manuais na v2.83.3, so que pelo caminho do gateway. Reduz o confirmado ANTES de inserir o
+   pendente (senao o trigger da mig 333 derruba a transacao do webhook).
+
+**Atomico de proposito:** erro no fechamento derruba a transacao inteira e o MP reenvia o webhook.
+Melhor reprocessar do que confirmar o dinheiro e deixar a parcela aberta — foi esse "meio caminho"
+que gerou o passivo. Excecao: sem `mp_system_user_id` configurado, a parcela nao fecha (a
+auditoria nao teria autor), o pagamento vale e o log grita pedindo baixa manual.
+
+**Custo zero no caminho comum:** venda a vista sai da funcao antes de qualquer consulta (so age
+quando a forma confirmada e 'A Receber').
+
+**Sem migration.** 8 testes novos da lib (parcela certa · split do parcelado · ordem
+reduzir-antes-de-inserir · 1 parcela sem split · no-op · saldo do gerente). Suite com as mesmas
+118 falhas PRE-EXISTENTES do main.
+
+Regra: `docs/regras-negocio/crediario.md` §6.
+
+## fix(crediario): consultora da baixa na venda DELA — matriz de permissao fechada (v2.83.4)
+
+**O que faz:** a consultora passa a poder registrar o recebimento do crediario, mas **so nas
+vendas dela**. Quem garante isso e a trava de dono (ownership), nao a lista de cargos.
+
+**Por que:** a matriz estava incoerente e o buraco era o pior caminho possivel. A tela do
+crediario mostrava o painel de baixa pra consultora (`podeBaixar` ja incluia ela), mas:
+- `registrar-pagamento` (Dinheiro, Pix, Ouro, Vale-Troca...) **nao aceitava** consultora -> 403;
+- `verificar-mp` ("Manual (MP)") **aceitava** -> ela conseguia baixar por ali;
+- `receber-cascata` nao aceitava e **nao tinha trava de dono** — por isso o botao
+  "+ Receber pagamento" ficava escondido dela de proposito.
+
+Resultado pratico: o unico caminho aberto pra consultora era o "Manual (MP)".
+
+**A correcao:**
+1. `registrar-pagamento`: + `consultora` na lista + `requireCrediarioOwnership` (mesma trava que
+   o `verificar-mp` ja usava).
+2. `receber-cascata`: + `consultora` + `requireVendaOwnership` (aqui a chave e a VENDA, porque a
+   cascata quita varias parcelas de uma vez).
+3. Front (`CrediarioClient.tsx`): `podeCascata` volta a seguir o `podeBaixar` — com a trava na
+   rota, o botao "+ Receber pagamento" pode aparecer pra ela.
+
+**NAO mudou:** `cobrar-pix`/`cobrar-cartao` seguem liberados pra qualquer usuario valido (gerar
+cobranca nao move dinheiro — quem confirma e o gateway). `verificar-pagbank` fica como esta: a
+integracao com o PagBank ainda nao existe.
+
+**Sem migration.** 3 testes novos (consultora na venda dela = 200; na venda de colega = 403;
+conta inexistente = 404). Suite com as mesmas 118 falhas PRE-EXISTENTES do main.
+
+Regra e matriz completa: `docs/regras-negocio/crediario.md` §6.
+
+## fix(crediario): baixar 1 parcela nao confirma o crediario inteiro (v2.83.3)
+
+**O que faz:** ao dar baixa numa parcela de um crediario PARCELADO, o sistema passa a confirmar
+só o valor que entrou e deixa o restante pendente, em vez de carimbar o crediario inteiro como
+recebido.
+
+**Por que:** um crediario de N parcelas gera N linhas em `contas_receber` mas UMA só linha
+`'A Receber'` em `pagamentos_venda` (mig 317). A baixa perguntava *"o cliente pagou a parcela
+inteira?"* e, como pagou, confirmava o `'A Receber'` INTEIRO. A venda ficava 100% paga com
+parcelas em aberto e a **comissao (regime de caixa) saía sobre a venda toda**.
+
+Caso real — **venda 15678** (Germana, 30/06/2026): R$ 45.000, Pix R$ 9.000 + A Receber
+R$ 36.000 em 4x. Baixaram a parcela 1/4 (R$ 9.000) em 29/07 e o sistema lançou **R$ 279,00** de
+comissao em vez de **R$ 111,60** — R$ 167,40 a mais. O dado foi corrigido em producao em
+04/08/2026 (log 399); este commit corrige o CODIGO.
+
+**A correcao:** a pergunta virou *"sobra 'A Receber' depois deste recebimento?"* (`precisaSplit`).
+Sobrando, o pagamento e dividido — reduz o confirmado para o valor recebido e abre um
+`'A Receber'` pendente com o resto. E o mesmo desenho que a rota da cascata
+(`receber-cascata`) ja usava certo.
+
+**Dois efeitos colaterais do mesmo defeito, corrigidos junto:**
+1. A **2a parcela quebrava com 500 PAGAMENTO_EXCEDE_TOTAL** — sem `'A Receber'` pendente, a rota
+   caía no fallback e criava uma linha nova por cima do total da venda.
+2. Um **pagamento parcial DE UMA PARCELA** sumia com o resto do crediario: o pendente nascia com
+   o resto da parcela (R$ 4.000) em vez do resto do crediario (R$ 31.000).
+
+⚠️ **A ordem importa:** reduzir o pagamento confirmado ANTES de inserir o pendente. Ao contrario,
+a soma passa do `total_venda` e o trigger `fn_pagamento_nao_exceder_total` (mig 333) derruba a
+baixa.
+
+**Arquivos:** `src/app/api/crediario/[id]/registrar-pagamento/route.ts` e
+`src/app/api/crediario/[id]/verificar-mp/route.ts`. **Sem migration.** Cascata, drawer, as 9
+formas de recebimento, `cobrar-pix` e `cobrar-cartao` **nao foram tocados**.
+
+**Escala:** 608 vendas com crediario nos ultimos 4 meses — 584 de 1 parcela (comportamento
+IDENTICO ao de antes) e 24 parceladas. Em producao, 3 vendas estavam na mira (15860, 15763,
+15853).
+
+**Testado:** venda 15678 no banco local, pelo navegador — parcela 1/4 baixada em Dinheiro
+dividiu o A Receber em 9.000 confirmado + 27.000 pendente, comissao de R$ 55,80 (nao 223,20);
+parcela 2/4 em seguida devolveu 200 OK (sem PAGAMENTO_EXCEDE_TOTAL); `SUM(pagamentos_venda)` =
+`total_venda` = R$ 45.000 nos dois passos; venda 15777 (1 parcela) sem nenhuma mudanca de
+comportamento. 9 testes novos (5 em `crediario-registrar-pagamento.test.ts`, 4 no arquivo novo
+`crediario-verificar-mp-parcelado.test.ts`, este com o Mercado Pago mockado porque a API do MP
+nao existe no ambiente local). Suite: 118 falhas PRE-EXISTENTES, iguais a baseline do main.
+
+**Pendencia sinalizada, NAO feita:** `verificar-pagbank/route.ts` tem o MESMO defeito (confirma
+o `'A Receber'` sem olhar o valor). Fora do escopo autorizado — tarefa separada.
+
+Regra: `docs/regras-negocio/comercial.md` §2 e `docs/regras-negocio/crediario.md` §6.
+
+## fix(vendas): trava de saldo nao declarado — versao BLINDADA (v2.83.2)
+
+**O que faz:** ao aprovar uma venda, confere se tudo que foi lancado de pagamento fecha o total.
+Sobrando saldo, recusa: *"Falta R$ X sem forma de pagamento. Lance o valor que falta (ou declare
+como 'A Receber') antes de aprovar a venda."*
+
+**Por que:** a venda 15861 (28/07) foi aprovada com R$ 2.000 de Pix num total de R$ 20.524. O
+gatilho `fn_venda_gerar_conta_receber` caiu no ELSE generico e INVENTOU um crediario vencendo na
+data de entrega. O furo era o botao "Solicitar aprovacao"
+(`POST /api/vendas/[id]/solicitar-aprovacao`), que aprovava direto sem olhar saldo.
+
+**🔴 Esta e a 2a tentativa.** A 1a (PR #142) derrubou producao em 06/08/2026 — loop de reinicio com
+`UNDEFINED_VALUE` e erro no handler de socket do driver. A causa **nunca foi provada** (log
+irrecuperavel; nao reproduziu em build de producao local). A versao atual foi reprojetada para nao
+ser capaz de derrubar nada:
+
+1. **So le.** Zero escrita no banco. A 1a versao gravava em `webhook_log` copiando o formato do
+   guard de desconto acima — e aquele INSERT tem interpolacao DENTRO de aspas, mandando 2
+   parametros para uma query que usa 1 (recusado no meio do protocolo; pode inutilizar a conexao
+   do pool).
+2. **Uma query, um parametro, validado como inteiro finito** antes de chegar ao driver.
+3. **Falha aberta.** Qualquer erro inesperado dentro da trava deixa a venda aprovar e registra no
+   log.
+4. **Chave de desligar sem deploy:** `configuracoes_sistema.chave='trava_saldo_nao_declarado'`
+   com valor `false`. Ausente = ligada.
+
+**Testado com BUILD DE PRODUCAO** (`node .next/standalone/server.js`), nao so com `npm run dev` —
+foi essa a lacuna da 1a tentativa. 4 cenarios: bloqueio, desligar pela config, religar, e venda
+inexistente. Servidor de pe em todos.
+
+**Nao mudou:** aprovacao de desconto/cartao/credito; pagamento `pendente` continua valendo como
+declarado; o ELSE do gatilho continua existindo (atende ~429 vendas/trimestre). Sem migration.
+
+Regra e blindagem em `docs/regras-negocio/comercial.md` §6.1.
+
+## feat(comissao): comissão vira EXTRATO — débito de devolução + crédito de vale (migration 363)
+
+**O quê:** a comissão passou a funcionar como extrato bancário. Cada fato vira uma linha datada
+no mês em que aconteceu e o saldo rola pro mês seguinte, podendo ficar negativo. Três coisas que
+não existiam passaram a existir:
+
+1. **Devolução debita a comissão.** Quando a peça é confirmada de volta no estoque, sai da
+   consultora a comissão daquele item, proporcional ao que o cliente já tinha pagado da venda.
+   Descarte e garantia não mexem em nada.
+2. **Vale-troca usado paga comissão.** O `comissionavel=false` cravado no pagamento de Vale-Troca
+   virou espelho de `vale_troca.comissiona_no_uso`. Quem recebe é quem fez a venda nova — o
+   crédito é da cliente, não da consultora.
+3. **Tela de extrato** (aba Comissões → Extrato): lançamentos por mês, saldo rolando e bloco
+   "comissões a receber" (crediário não pago) FORA do saldo, separando a vencer de atrasado.
+
+**Por quê:** a comissão ficava presa na venda desfeita e a venda que de fato ficou de pé não
+pagava ninguém. Regra-mãe: **cada real recebido gera comissão exatamente uma vez**.
+
+**Banco (migration 363):** `vale_troca.comissiona_no_uso`; `fechamento_comissao_itens.fechamento_id`
+passa a aceitar nulo (o lançamento nasce no dia do fato e o fechamento adota depois);
+`fechamento_comissao_itens.devolucao_id` + índice único anti-duplicidade; índices do extrato.
+
+**Acerto de julho/2026 em prod** (log 331): −R$640,60 de débito em 15 devoluções
+(Debora 423,58 / Loja Alisson 127,20 / Germana 85,82 / Cristiane 4,00), 14 vales marcados,
+11 pagamentos de vale liberados (R$22.755,50), fechamento parcial da Germana substituído.
+
+**⚠️ Armadilha achada:** no PostgreSQL `LEAST` **ignora NULL** — `LEAST(NULL,1)` = 1. Um
+`COALESCE(LEAST(recebido/total,1),0)` lê venda sem pagamento como 100% recebida. Inflava o
+débito de R$640,60 para R$666,96. Usar `CASE WHEN total > 0 THEN ... ELSE 0 END`.
+
+**Não toca** a dashboard comercial nem a meta (usam `forma` e `valor_vale_troca`).
+A tela `dashboard-comercial/analise-comissoes` passa a divergir do fechamento — alinhar é
+tarefa separada. Regras completas em `docs/regras-negocio/comercial.md §2.1`.
+
+---
+
+## fix(comissao): aprovação de crédito não zera mais a comissão da consultora (vX.Y.Z a definir no merge)
+
+**O quê:** a aprovação de crédito (gerente ou diretor) deixou de mexer na comissão da
+consultora. Antes, quando o **diretor** aprovava um crediário acima do saldo, a comissão da
+venda inteira era **zerada** na aprovação — inclusive a parte já paga em dinheiro/cartão/Pix.
+
+**Por quê:** era injusto (a consultora perdia comissão sobre dinheiro real que já entrou) e
+obrigava a restaurar as vendas 1 a 1 na mão todo mês (22 vendas de julho/2026 restauradas antes
+desta correção). A comissão deve **seguir o dinheiro recebido**.
+
+**O que mudou:**
+- Removido o bloco de zeramento em `src/lib/vendas-credito-aprovar.ts` (era o único ponto —
+  código e banco — que zerava comissão por crédito).
+- A comissão passa a ser apurada só no **fechamento**, que já paga proporcional ao pagamento
+  confirmado (à vista comissiona já; crediário só quando a parcela é paga). Sem mudança no banco.
+- Textos da tarefa/notificação que diziam "zera a comissão" ajustados; regra atualizada em
+  `docs/regras-negocio/comercial.md` §2.
+- A aprovação do diretor continua servindo pra **liberar** a venda acima do limite — só não
+  penaliza mais a comissão.
+
+## feat(vendas): ordem de aliança só nasce com o aro confirmado (vX.Y.Z (a definir no merge))
+
+**O quê:** a ordem de fabricação de **orçamento de aliança** deixou de ser criada automaticamente
+na aprovação da venda. Agora a venda aprova sem ordem e alguém abre a ordem à mão, confirmando o
+**aro de cada aliança** — botão "Confirmar aro e abrir ordem" no detalhe da venda.
+
+**Por quê:** o aro é obrigatório no orçamento, mas o cliente muitas vezes ainda não sabe o tamanho
+do dedo quando a venda é fechada. A consultora digitava qualquer número para conseguir passar a
+venda e, como a ordem nascia dentro da aprovação, **a fábrica recebia a numeração chutada** e
+produzia no tamanho errado.
+
+**O que mudou:**
+- `criarOrdemDoOrcamento` (`src/lib/vendas-aprovar.ts`) só cria ordem de aliança com
+  `opts.aroConfirmado` — flag passada **exclusivamente** por `POST /api/vendas/[id]/abrir-ordem`.
+  Peça personalizada continua automática.
+- Nova tela de confirmação (`AbrirOrdemAliancaModal`): um cartão por aliança, com a **gravação em
+  destaque** para não confundir qual é qual, e escolha explícita de aro (manter ou trocar). Aro é
+  lista fechada 1–36.
+- Trocar o aro **recalcula o peso** (`src/lib/orcamento-aro-peso.ts`, por delta) e a ordem sai com a
+  soma das fichas em `peso_metal_negociado`. **O valor negociado com o cliente não muda.**
+- Visibilidade da fila: faixa "Aliança sem ordem na fábrica" no detalhe da venda + filtro
+  **"Aliança sem ordem"** na lista `/vendas` (`?alianca_sem_ordem=1`).
+- Migration **362**: `orcamentos.aro_confirmado_por` / `aro_confirmado_em` + índice parcial da fila.
+
+**Regra completa:** `docs/regras-negocio/comercial.md` §12.
+
+## fix(compras): compra comercial aprovada cria a config de estoque do produto (vX.Y.Z (a definir no merge))
+
+**O quê:** produto novo comprado via compra comercial entrava no estoque (movimentação efetivada)
+mas ficava **invisível** na tela de estoque — a `vw_saldo_estoque_comercial_v2` só mostra produto
+com linha ativa em `estoque_comercial_config`, e a aprovação da compra não criava essa linha.
+
+**O que mudou:** na aprovação da compra comercial (`/api/tarefas/[id]/aprovacao`), cada item agora
+ganha também a config (`INSERT ... ON CONFLICT (produto_id) DO NOTHING`) na mesma transação da
+entrada de estoque.
+
+**Retroativo:** 16 produtos com saldo escondido em prod (SKUs 1846, 1852-16, 1856-15, 1859-11,
+1860-13, 1861-18, 1862-15, 1863-13, AJ5286, AJ5288–AJ5294) receberam a config via SQL assinado
+(log 290, 27/07/2026).
+
+## feat(ordens): aprovação da consultora conclui a ordem — fim do passo "preparação de entrega" (vX.Y.Z (a definir no merge))
+
+**O quê:** quando a consultora aprova a peça, a ordem **já sai concluída**. Antes a aprovação
+criava uma "preparação de entrega" pendente e a ordem só fechava se alguém abrisse a tela
+`/entrega` e clicasse concluir — o que ninguém fazia. Resultado: **480 preparações pendentes**
+e **48 ordens presas** em andamento com todos os passos da timeline verdes.
+
+**O que mudou:** `fn_aprovacao_para_entrega` (migration 361) cria a preparação **já concluída**
+e encerra a ordem (`status='concluido'`) no mesmo instante da aprovação. O passo 8 da
+`vw_timeline_ordem` continua existindo e a tela `/entrega` continua no menu — vira histórico.
+
+**Retroativo:** as 480 preparações pendentes foram fechadas e as 48 ordens concluídas, herdando
+a `data_conclusao` da própria aprovação (não "hoje"). Ordens canceladas ficaram de fora.
+
+**Não mexe em estoque:** a entrada da peça acontece no protocolo de volta
+(`fn_reposicao_entrada_estoque`), antes da aprovação. Nenhum gatilho de `ordens` reage a
+`status='concluido'`.
+
+**Menu:** o item "Entrega" (`/entrega`, passo da ORDEM) virou **"Preparação de Entrega"** para
+parar de ser confundido com "Entregas" (`/entregas-venda`, entrega da VENDA ao cliente). O `href`
+não mudou — a permissão é ligada à rota.
+
+**Arquivos:** `supabase/migrations/361_ordem_conclui_na_aprovacao_consultora.sql`,
+`src/lib/auth/permissions.ts`, `docs/regras-negocio/ordens.md` §6.
+
+---
+
+## feat(estoque): baixa por perda / extravio — a única baixa manual do ERP, exclusiva do dono (vX.Y.Z (a definir no merge))
+
+**O quê:** peça que sumiu (não localizada, quebrada, extraviada) agora **sai do estoque de verdade**.
+Botão "Perda / extravio" no detalhe do produto em `/estoque-comercial/[produtoId]`, com modal que mostra
+o **histórico de faltas em inventário** daquela peça antes de confirmar. A linha aparece marcada com badge
+vermelho "Perda / extravio" no extrato de movimentações, com motivo, autor e data.
+
+**Quem pode:** SÓ o master admin (o dono — `parametros_sistema.MASTER_ADMIN_USER_ID`). O gate é por
+**identidade** (`isMasterAdmin(user.id)`), não por cargo: nem admin, nem desenvolvedor, nem gerente.
+Havia 7 admins e 3 devs na base — permissão por role daria a chave para 10 pessoas.
+
+**Como:**
+- Endpoint novo e separado `GET|POST /api/estoque-comercial/perda`. A trava da v2.81.3 em
+  `/api/estoque-comercial/movimentos` (403 em qualquer saída manual) **continua intacta** — perda é
+  exceção nomeada e auditada, não buraco na trava.
+- Dois freios: histórico de faltas na tela + palavra `PERDA` digitada. Motivo escrito é opcional.
+- Baixa limitada ao **disponível** (físico − reservado), nunca ao físico — 409 se exceder, para não
+  sumir com peça já prometida a uma venda.
+- Estorno de movimento `perda_extravio` também restrito ao master (senão a trava vazaria pelo outro lado);
+  os demais estornos seguem admin/dev.
+- `logAudit` dentro da mesma transação do INSERT.
+- **Migration 354:** `chk_voucher_type_valid` passa a aceitar `voucher_type='perda'` e o trigger
+  `fn_mirror_movimento_to_sle` traduz `perda_extravio` → `perda`. Sem isso o motivo caía no `ELSE 'manual'`
+  e `chk_voucher_for_outgoing` **rejeitava a baixa no banco** (descoberto testando no banco local).
+- Constantes compartilhadas em `src/lib/perda-extravio.ts` (`MOTIVO_PERDA`, `CONFIRMACAO_PERDA`).
+
+**Limpeza junto:** o botão "Baixa Manual" saiu do detalhe do produto — a API já recusava qualquer
+saída manual (403 desde a v2.81.3), então ele só servia para dar erro. Ficou só a Entrada Manual.
+
+**Não muda:** o desfecho `perda` do **inventário** continua só registro, SEM baixa (§7 de comercial.md).
+Não há tela consolidada de perdas — decisão explícita do Jonathan.
+
+**Regras:** `docs/regras-negocio/comercial.md` §11.
+
+## feat(frete-avulso): solicitação da venda vira tarefa, pool de aprovadores e pool de motoboy (vX.Y.Z (a definir no merge))
+
+**O quê:** frete avulso (corrida de motoboy sem itens vinculados) ganha um passo de **solicitação**: a
+consultora pede a corrida **de dentro da própria venda** (`VendaDetalheClient`, visível só com a venda em
+`aprovado`/`em_rota`/`entregue`), herdando cliente/endereço, sem escolher motoboy nem responsável, e sem
+lançar custo. A solicitação vira uma **tarefa de aprovação** (tipo `frete_avulso`) para o **pool** configurado
+em Configurações › Aprovadores (chave `aprovadores_frete_avulso`) — **qualquer** um da lista decide pela
+tela de Tarefas: aprova (libera a corrida e só aí lança o saldo de frete na gerente) ou rejeita (exige
+motivo, sem custo). Corrida liberada cai num **pool sem dono** (`motoboy_id NULL`) e **qualquer** entregador
+ativo pode aceitar — o aceite é um claim atômico no banco (evita dois motoboys donos da mesma corrida).
+
+**Como:**
+- Novo estado `solicitada` no enum `enum_entrega_situacao` (antes de `pendente`).
+- Colunas novas em `entregas_venda`: `endereco_entrega`, `liberada_por`, `liberada_em`, `motivo_recusa`,
+  `tarefa_aprovacao_id` (vínculo com a tarefa criada na solicitação).
+- `chk_entrega_origem` recriada para aceitar `venda_id` em avulso (antes só entrega normal aceitava).
+- **Sem tabela própria de liberadores** — reusa a engrenagem existente do módulo Tarefas
+  (`tarefas` + `aprovacoes_tarefa`) e a chave de config MULTI `aprovadores_frete_avulso`
+  (`GET/PATCH /api/configuracoes/aprovadores`), mesmo padrão de `aprovadores_devolver_peca`.
+  **Decisão plugada na camada central de aprovações** (`src/lib/aprovacoes/` — merge com a
+  main, 20/07): evento `frete_avulso` no `CATALOGO`, mapeado em `eventoDaTarefa` e autorizado
+  por `podeDecidir` (política config-first estrita — só quem está em `aprovadores_frete_avulso`
+  decide, nem admin) no `PATCH /api/tarefas/[id]/aprovacao`; visibilidade na fila via a mesma
+  cláusula genérica `multiAprovadorCond` de `GET /api/tarefas`. Substituiu o pool "na unha"
+  (`isPoolFreteAvulso`/flag `pode_decidir_pool`) que a feature tinha antes do merge — mesmo
+  comportamento, menos código duplicado, herda os testes do módulo central. `criarFreteAvulso`
+  continua sendo a fonte única pra ESCOLHER o `responsavel_id` da tarefa e notificar o pool na
+  criação (`listarAprovadoresFreteAvulso`, uso legítimo — não é autorização).
+- Rotas: `POST /api/entregas-venda/frete-avulso` (criação/solicitação), `/[id]/aceitar-avulso`,
+  `/[id]/confirmar-avulso`. Decisão (aprovar/rejeitar) passa por `PATCH /api/tarefas/[id]/aprovacao`,
+  não por rota própria.
+- Tela de entregas **não ganha aba própria** — a decisão acontece em `/tarefas`, como qualquer outra
+  aprovação do sistema.
+- Blindagem: a listagem/contagem SSR de `/entregas-venda` (sem filtro), `GET /api/entregas-venda` e o
+  app do motoboy (`GET /motoboy/minhas`) **excluem `cancelada` e `solicitada`** por padrão — solicitações
+  pendentes de decisão não vazam para a lista operacional nem inflam o card "Total". O pagamento em lote
+  do motoboy (`motoboy/pagar`) só seleciona `situacao='confirmada'`, e uma corrida de pool (`motoboy_id
+  NULL`) nunca chega em `confirmada` sem antes passar pelo claim atômico do aceite (que sempre grava o
+  dono) — estrutural, não depende de filtro.
+- Blindagem (janela de entrega): o gate do botão "Solicitar frete avulso" existia só no client
+  (`aprovado`/`em_rota`/`entregue`); `criarFreteAvulso` passou a **revalidar a mesma janela no servidor**
+  quando é solicitação, fechando o bypass de chamar a API direto com a venda fora da janela.
+
+**Débitos técnicos conhecidos (ver `docs/regras-negocio/entregas.md` §8):** pool sem gating de
+região/loja (decisão de produto); card "Pendentes" não conta o pool separadamente; cancelar um avulso
+liberado não estorna o saldo já lançado; entregador aceita/registra sem exigir cadastro prévio em
+`alissonerp.motoboys`; diretor fora da lista de config não decide a tarefa (limitação pré-existente de
+todos os tipos de aprovação no dispatcher, não específica de frete avulso). **Achado no merge (20/07):**
+o 2º+ aprovador configurado no pool (que não seja o `aprovador_id` gravado na criação da tarefa) toma
+403 tentando ABRIR a tarefa (`GET /api/tarefas/[id]`, aba Comentários) e não vê o botão Aprovar/Rejeitar
+no `TarefaDrawer` — ele CONSEGUE decidir via API (`podeDecidir` autoriza certo), só falta acesso pela UI.
+Mesma limitação já existe hoje pra TODOS os outros tipos multi-aprovador (`compra_comercial`,
+`conversao_reversa`, `garantia_fora_prazo` etc.) — não é regressão específica de frete avulso, é gap
+pré-existente da camada central que precisa de decisão do Jonathan se/quando for endereçado.
+
+**Status:** migration 353 **já aplicada em homolog**. Produção ainda pendente. Ver
+`docs/regras-negocio/entregas.md` para o fluxo completo e a matriz de permissão a testar.
+
+## feat(garantia): regras de abertura de ordem de garantia
+
+**O quê (regras aprovadas pelo Jonathan em 17/07/2026 — `docs/regras-negocio/ordens.md`):**
+- Só é possível abrir garantia de venda com situação `entregue` (trava seca, sem aprovação).
+- `Acabamento e polimento` tem garantia **vitalícia** (sem prazo).
+- Demais serviços: **7 dias úteis** desde a entrega; fora disso, exige **aprovação**.
+- Garantia com serviços misturados: o mais restritivo vence (basta um não-vitalício).
+- A aprovação de fora do prazo é **uso único** (uma aprovação = uma garantia).
+
+**Como (reaproveitando o que já existe):**
+- Regra em `src/lib/garantia/prazo-garantia.ts` (`avaliarGarantia`), reusando
+  `src/lib/dias-uteis.ts` (o mesmo cálculo de 7 dias úteis + feriados de Fortaleza da devolução).
+- Data da entrega: entrega real → transição para `entregue` → `data_entrega` do PDV (com
+  sanidade contra datas futuras/absurdas). Sem data confiável, não bloqueia por prazo.
+- Trava no servidor em `POST /api/ordens` (dentro da transação, junto do guard de rascunho);
+  o modal só antecipa o aviso via `POST /api/garantia/avaliar`.
+- Aprovação pela camada config-first: evento `garantia_fora_prazo`, chave
+  `aprovadores_garantia_fora_prazo` em Configurações › Aprovadores. A tarefa libera a
+  **venda**; a ordem só nasce ao abrir a garantia, que consome a aprovação
+  (`tarefas.ordem_id`, `UPDATE ... WHERE ordem_id IS NULL` na mesma transação = uso único).
+- Migration `348_garantia_vitalicia.sql`: coluna `tipos_servico.garantia_vitalicia`
+  (marca `Acabamento e polimento`). A chave de config não tem migration — criar via `/dba`.
+
+## feat(movimentacao-interna): multiplas fotos por passo + observacao na devolucao (v2.87.0)
+
+**O que:** os usuarios pediram (1) poder anexar mais de uma foto em cada passo fisico
+e (2) um campo de observacao na volta ao estoque.
+
+- **Ate 5 fotos por passo** (entrega, recebimento, devolucao), em vez de uma so.
+- **Observacao opcional** na confirmacao da devolucao, pro estoque anotar o estado da
+  peca na volta ("voltou com risco perto do fecho").
+
+**Como (blindado, sem quebrar o que existe):**
+- Migration **349**: tabela filha `solicitacao_peca_fotos` (uma linha por foto, com
+  `etapa` + CHECK), copia as fotos que ja existiam (idempotente), e coluna
+  `obs_devolucao`. As colunas antigas `foto_*` ficam CONGELADAS (nao removidas) — a
+  fonte de verdade das fotos passou a ser a tabela filha.
+- `PATCH /api/solicitacao-peca/[id]`: aceita `foto_paths[]` (1..5) — mantem `foto_path`
+  singular por compatibilidade — e `obs`. Status + insert das fotos numa transacao
+  (atomico). Passo com foto exige pelo menos 1.
+- Front: `AcaoSolicitacaoModal` com grade de fotos (adicionar/remover, teto de 5) e
+  textarea de observacao so na devolucao; lista e historico mostram todas as fotos e a
+  observacao. Upload client-side (1 chamada por foto), mesmo padrao provado.
+- Docs: `comercial.md` §10 atualizada.
+
+**Testado no homolog:** query agregando arrays por etapa, observacao gravada, CHECK de
+etapa invalida rejeitado, cascade (apagar a solicitacao apaga as fotos). tsc limpo.
+
+## feat(movimentacao-interna): cancelar solicitação de peça (v2.86.0)
+
+**O quê:** a consultora que solicita uma peça e desiste agora consegue **cancelar** a
+solicitação. Antes não havia saída: a solicitação ficava presa em "Solicitado" pra
+sempre, sujando o filtro "Em aberto" e mentindo sobre o que estava pendente no estoque
+(havia **5 solicitações presas** em prod na data desta mudança).
+
+**Regra (o porquê dos limites):**
+- **Só cancela a partir de `solicitado`** — enquanto a peça ainda está fisicamente no
+  estoque e nada aconteceu. A partir de `entregue` a peça saiu, e o desfecho honesto é a
+  **devolução** (com foto) ou "cliente levou"; cancelar ali apagaria o rastro de que
+  alguém está com a peça. API devolve **409** e aponta pra devolução.
+- **Motivo obrigatório** — é o que dá visibilidade de por que as consultoras desistem.
+  Travado em dois níveis: API (400) e banco (CHECK `chk_solic_peca_cancelado_motivo`).
+- **Cancelada não conta como "em aberto"** — o filtro deixou de ser `!= finalizado` e
+  passou a excluir também `cancelado`, que é o propósito da feature. Chip "Canceladas".
+- **Não movimenta estoque** — coerente com o módulo, que só registra posse (nunca saldo).
+  Nada é estornado: a peça nunca saiu.
+
+**Como:**
+- Migration **347**: estado `cancelado` no CHECK de status (superset — nenhuma linha
+  existente viola) + colunas `cancelado_por_id`, `cancelado_em`, `motivo_cancelamento`
+  + CHECK `NOT VALID` exigindo motivo quando cancelado.
+- `PATCH /api/solicitacao-peca/[id]`: nova action `cancelar` (motivo obrigatório, guarda
+  de estado, `logAudit` com o motivo).
+- Front: `AcaoSolicitacaoModal` **estendido** (não duplicado) com suporte a motivo/aviso/
+  perigo; botão "Cancelar" vermelho só em `solicitado`; badge "Cancelada"; chip de filtro;
+  motivo visível na lista e na linha do tempo do histórico. No modal de cancelamento o
+  botão de sair virou **"Voltar"** — dois "Cancelar" na mesma barra fariam a consultora
+  encerrar a solicitação achando que estava desistindo.
+- Docs: `docs/regras-negocio/comercial.md` §10 (seção nova — o módulo não tinha).
+
+## feat(produtos): localização física no cadastro e na edição de produtos (v2.85.0)
+
+**O quê:** o campo **Localização** (prateleira/gaveta), já disponível no Estoque Comercial
+(v2.84.0), passa a aparecer também no **cadastro** e na **edição** do produto — mesmo
+padrão do campo Fornecedor (que vive na mesma tabela `erp_produtos`).
+
+**Como (reaproveitando o padrão existente):**
+- `POST /api/produtos` (criação): aceita `localizacao` opcional, grava no pai e replica
+  pras variações (mesmo fluxo do `fornecedor`).
+- `PATCH /api/produtos/[id]` (edição): lê/grava `localizacao` no drawer do produto.
+  A replicação pras variações quando o pai muda é **automática** — o mecanismo já existente
+  (`erpRepl`) copia qualquer campo alterado de `erpUpdate`, sem precisar de código novo.
+- Frontend: campo no `CadastroProdutoModal.tsx` (ao lado do Fornecedor, sempre visível —
+  não dentro da seção colapsável "Ficha Técnica") e no `ProdutoDrawer.tsx` (nas duas
+  variantes de produto: pedra e joia/normal).
+
+**Não mexe em:** banco (coluna já existe — migration 336, v2.84.0), views, triggers.
+
+**Testado:** query exata do PATCH validada no homolog (grava e reverte limpo). `tsc` zero
+erros. Testado no front pelo Jonathan (homolog).
+
+## feat(estoque-comercial): localização das peças + ferramenta de importação (v2.84.0)
+
+**O quê:** o Estoque Comercial passa a ter a **localização física** de cada peça (prateleira/gaveta).
+Aparece numa coluna nova na lista e num campo editável no detalhe. Uma ferramenta admin
+(`/estoque-comercial/importar-localizacao`) faz a **carga inicial** a partir do cadastro externo
+das peças (uso único), com **teste de 1 peça** antes da migração completa.
+
+**Como (reaproveitando o que existe):**
+- Coluna `alissonerp.erp_produtos.localizacao` (migration 336 — só `ADD COLUMN IF NOT EXISTS`).
+- `src/lib/importar-localizacao.ts`: a migração lê a localização da **lista paginada** de produtos
+  (mesmo dado do endpoint de estoque, porém ~157 chamadas em vez de ~15,6 mil). Casa por
+  `id_api_produto`. Respeita o limite da fonte (blocos de 10 páginas). O teste de 1 peça usa o
+  endpoint de **estoque** (`/estoque/{id}`).
+- Rotas: `POST .../importar-localizacao` (bloco), `.../importar-localizacao/testar` (1 peça),
+  `PATCH .../[produtoId]/localizacao` (edição manual — o ERP é o dono do dado após a carga).
+- Lista e detalhe ganham a localização via `LEFT JOIN alissonerp.erp_produtos` (sem alterar views).
+- Nome "Tiny" não aparece na tela — só no código (é a fonte).
+
+**Fix junto:** `estoque-comercial/sync-tiny` usava `p.id_api_tiny` (coluna inexistente) →
+corrigido para `id_api_produto` (a rota quebrava em runtime).
+
+**Não mexe em:** saldo de estoque, reservas nem financeiro — a coluna é só informativa.
+
+**Testado (homolog):** 1 peça (AJ4785 → localização composta) via endpoint de estoque grava e confere;
+teste de 1 peça validado no front pelo Jonathan. `tsc` zero erros nos arquivos da feature.
+
+## fix(conversao): aprovação ia para admin errado (email adivinhado) (v2.83.1)
+
+**Sintoma (conversão C-2567):** a tarefa de aprovação não chegava ao Alisson.
+**Causa:** os gatilhos fn_processar_conversao (mig 242) e
+fn_processar_conversao_sku (mig 253) endereçavam a tarefa a `role='admin' AND
+email LIKE '%alisson%'` (um L); o email real tem DOIS L ('allisson...') → não
+casava → caía no primeiro admin arbitrário.
+
+- Migration 340: recria as 2 funções (CREATE OR REPLACE, sem DROP; fora das
+  zonas no-touch) resolvendo o aprovador por `configuracoes_sistema.
+  aprovador_conversao` (config central), com fallback tolerante (ILIKE
+  '%aliss%' pega 1 ou 2 L) e, por último, o primeiro admin ATIVO.
+- Script de produção também reendereça as tarefas de conversão PENDENTES que
+  ficaram no admin errado para o aprovador configurado.
+
+## feat(inventario): role operador_inventario com edição via aprovação (v2.83.0)
+
+**Pedido do Jonathan:** Ytalo e Geovana (operadores do inventário) veem tudo do
+estoque e contam via leitor RFID, mas NÃO editam nada direto — qualquer ação
+vira pedido que só executa com a aprovação dele. (Auditoria manual é outra
+frente, separada.)
+
+- **Role nova `operador_inventario`** (src/lib/roles.ts): entra em
+  ROLES_INVENTARIO_CONTAR (vê telas + leituras RFID + contagem), fora de
+  GERENTES e ESTOQUE_MOVIMENTAR.
+- **Migration 339**: tabela `solicitacoes_inventario` (pedido de
+  abrir/concluir/cancelar com payload, status pendente→executada/rejeitada/erro,
+  tarefa vinculada). Aprovador em configuracoes_sistema.aprovador_inventario.
+- **Mesma engrenagem de aprovação de compra comercial/desconto**: pedido cria
+  tarefa 'inventario_solicitacao' + aprovacoes_tarefa + notificação; o PATCH
+  /tarefas/[id]/aprovacao executa a ação ao aprovar (rejeitou = nada muda).
+- **Execução centralizada** em src/lib/inventario-acoes.ts (abrir/concluir/
+  cancelar) — rota direta (gerência) e aprovação executam o MESMO código.
+  Snapshot de abertura agora usa condPecaPronta() (fim da cópia inline).
+- UI: telas mostram "Pedido enviado para aprovação do administrador" (202).
+- scripts/aplicar_339_producao.sql: tabela + role das 2 operadoras + aprovador.
+
+## fix(inventario): "Chips fora do inventário" não respeitava filtro nenhum (v2.82.1)
+
+**Bug reportado pelo Jonathan:** a seção "Chips fora do inventário" (etiquetas
+lidas pelo app RFID de produto que não está na lista do inventário) ficava
+fixa na tela não importa qual cartão/categoria fosse clicado — porque essa
+lista nunca tinha sido ligada a filtro nenhum, era renderizada sempre.
+
+- Novo cartão **"Fora do invent."** (roxo), com filtro próprio — clicável
+  como os outros, some quando Faltando/OK/Sem contagem estão ativos.
+- Passa a respeitar categoria e busca (API agora expõe `categoria_produto`
+  também nesses itens).
+- `excessoCount` do cartão "Excesso" não soma mais esses itens (evita
+  contagem duplicada agora que existe cartão próprio).
+
+## feat(inventario): filtros por categoria/status, paginação e Detetive em lote (v2.82.0)
+
+**Pedido do Jonathan:** filtro por categoria, paginação de verdade (a tela só
+rolava infinita) e o Detetive já mostrando as possíveis pendências/conciliações
+sem precisar abrir item por item.
+
+- **Filtro por categoria:** chips com as categorias que EXISTEM no inventário
+  (com contagem), combinável com status/pendência/busca.
+- **Cartões OK/Faltando/Excesso/Sem contagem viraram filtro clicável**, com
+  botão "!" que explica o significado de cada um.
+- **Paginação real:** cada seção mostra 50 por vez, com "Mostrar mais 50";
+  bloco "Conferidos OK" (normalmente a maioria dos itens) vem recolhido.
+- **Detetive em lote** (`GET /inventario/[id]/investigar-lote`, só leitura):
+  investiga TODOS os itens divergentes numa chamada só e mostra o resultado
+  direto na linha (💡 conciliação encontrada / 🔍 pistas) — o detalhe completo
+  (reservas/transferências/devoluções) continua vindo de `/investigar` ao
+  expandir o item.
+- GET do inventário passa a expor `categoria_produto` de cada item.
+
+## fix(inventario): teste/lixo, ouro-insumo e serviços fora da auditoria (v2.81.5)
+
+**Pedido do Jonathan:** produto de teste (TESTE-2026-A) é lixo, Ouro 18k é insumo
+e AS1001-2 é serviço — nada disso entra em contagem de estoque na auditoria.
+
+- `condPecaPronta()` (e o snapshot de abertura) agora excluem também:
+  produtos de teste (sku/nome começando com "teste"), ouro-insumo (nome
+  começando com "ouro" — joia começa pelo tipo: Anel/Brinco/...), prefixos
+  de SKU IS/PD/AS/PZ (insumo/pedra/serviço/personalização — mesma convenção
+  de oportunidades-fabricacao) e categoria "Serviços". Ouro/metal-insumo
+  cobre também sku "ouro%", nome "metal%" e categoria "Metal%" (caso real:
+  sku ouro18k, nome "Metal Ouro 18K", que escapava do prefixo "ouro" no nome).
+- Continua tudo na LEITURA: nada apagado, nada baixado; vale para inventário
+  já aberto.
+
+## fix(inventario): regra de peça pronta vale para inventário JÁ ABERTO (v2.81.4)
+
+**Pedido do Jonathan:** aplicar a regra (pedra solta e personalizada não entram em
+contagem de estoque na auditoria) no inventário já feito — sem dar baixa manual em
+nada e sem apagar nada.
+
+- Filtro central `condPecaPronta()` em `src/lib/inventario-peca-pronta.ts`
+  (espelho SQL de `ehPedraSolta()` + personalização ativa), aplicado NA LEITURA:
+  GET do inventário (lista/placar/CSV/progresso), trava de conclusão (`/concluir`
+  não conta mais itens excluídos como "sem contagem"), app RFID (lista e contadores)
+  e `/contar` (recusa contagem de pedra/personalizada mesmo por API direta).
+- Nenhum dado alterado: os itens antigos continuam no banco, só deixam de
+  aparecer e de contar. Snapshot de inventário novo já nascia filtrado (v2.81.0).
+
+## fix(estoque): baixa manual NÃO EXISTE — movimento só por CONCILIAÇÃO (v2.81.3)
+
+**Regra do Jonathan:** nem admin nem desenvolvedor dão baixa manual. Estoque só se
+move casado com um documento que o sistema confere (conciliação) — e isso é
+TEMPORÁRIO até o sistema se organizar; depois divergência não deve mais acontecer.
+
+- `/estoque-comercial/movimentos`: saída manual BLOQUEADA para todos (403).
+  Endpoint passa a registrar apenas ENTRADA manual (gerência/estoquista).
+- Desfecho `perda`: NÃO gera mais baixa — vira só registro (sem documento não
+  há conciliação; o saldo fica divergente até resolução).
+- Desfecho `excedente_confirmado` virou CONCILIAÇÃO com devolução/vale-troca:
+  exige nº da devolução; valida (existe, aprovada/concluída, tem o produto com
+  retorno aprovado, entrada ainda não aconteceu, quantidade cobre a sobra) e
+  gera ENTRADA amarrada à devolução (motivo pendencia_devolucao_sem_entrada).
+- `venda_sem_baixa` (já era conciliação) e `excedente_confirmado` exigem dupla
+  confirmação (`confirmar_baixa`) e seguem exclusivos de admin/desenvolvedor.
+- Detetive agora investiga SOBRAS: acha devoluções com retorno aprovado sem
+  entrada no saldo e sugere "usar esta devolução no desfecho".
+
+## fix(inventario): baixa manual só admin + detetive automático + link das vendas (v2.81.2)
+
+**Pedido do Jonathan:** (1) NINGUÉM dá baixa manual no estoque, somente ele em
+casos excepcionais; (2) a investigação da falta deve rodar sozinha ao final de
+cada contagem; (3) o nº da venda deve abrir a venda para conferência.
+
+- `ROLES_BAIXA_MANUAL` = admin/desenvolvedor (src/lib/roles.ts). Valem para:
+  saída manual em `/estoque-comercial/movimentos`, estorno em `/estornar` e os
+  desfechos de pendência que geram movimento (venda_sem_baixa, perda,
+  excedente_confirmado). Gerência segue respondendo 'localizada'/'outro'
+  (sem movimento); entrada manual segue gerência+estoquista.
+- Detetive AUTOMÁTICO: painel de item faltando investiga sozinho ao abrir
+  (useEffect); botão vira "Investigar de novo".
+- Nº da venda vira LINK (`/vendas/[id]`, nova aba) nos achados do Detetive e
+  na venda vinculada ao desfecho (GET agora expõe pendencia_desfecho_venda_id).
+
+## fix(seguranca): rotas de estoque aceitavam QUALQUER usuário logado (v2.81.1)
+
+**Falha grave reportada pelo Jonathan:** qualquer pessoa logada (vendedora, motoboy...)
+conseguia mudar o estoque. Auditoria completa das rotas que escrevem movimentação:
+
+1. `POST /api/rfid/scan` (ação `entrada_estoque`): gerava ENTRADA (+1 por chamada,
+   repetível à vontade) sem checar função — fechado com `ROLES_ESTOQUE_MOVIMENTAR`.
+2. `POST /api/estoque-comercial/transferir/[id]/concluir`: qualquer logado confirmava
+   recebimento (ENTRADA no destino) — fechado com `ROLES_ESTOQUE_MOVIMENTAR`.
+3. `POST /api/rfid/inventario`: qualquer logado "informava quantidade" mandando lista
+   de etiquetas (envenenava a contagem) — fechado com `ROLES_INVENTARIO_CONTAR`.
+
+Constante nova `ROLES_ESTOQUE_MOVIMENTAR` em `src/lib/roles.ts` (gerência + estoquistas).
+Conferidos e já protegidos: /movimentos, /transferir (criar/cancelar), /estornar,
+/converter, /auditoria/*, /inventario/* (contar/concluir/cancelar/finalizar/pendencia),
+ai-chat (só leitura), /vendas/[id]/rfid (ownership).
+
+## feat(inventario): peça pronta + Detetive + desfecho blindado com baixa (v2.81.0)
+
+**Pedido do Jonathan:** (1) inventário é de PEÇA PRONTA — pedra solta (moissanite,
+diamante, zircônia...) e personalizada sob encomenda não entram na contagem;
+(2) investigar sozinho POR QUE a peça falta (ex.: venda não marcada como entregue),
+sem confusão, só com certeza e sempre com o nº da venda; (3) fechar pendência tem
+que ter motivo e dar a baixa certa no estoque.
+
+**1. Snapshot só de peça pronta** (`POST /inventario`): exclui pedra solta (espelho
+SQL de `ehPedraSolta()`: categoria 'Pedras%', produto_pedra_extras, nome começa com
+nome de pedra) e personalizada ativa (`produto_personalizacao.ativo`). Inventário já
+aberto mantém a foto antiga — cancelar e reabrir aplica a regra.
+
+**2. Detetive** (`GET /inventario/[id]/investigar?produto_id=` — 100% leitura):
+cruza reservas ATIVAS (venda sem entrega confirmada), transferências PENDENTES e
+movimentações pós-abertura. Só AFIRMA causa quando a conta bate exatamente
+(reserva == falta, nada mais no radar); senão devolve como pistas. Na tela:
+botão "Investigar falta" no painel da pendência + "usar esta venda no desfecho".
+
+**3. Desfecho blindado (migration 338 — criada, NÃO executada):** fechar pendência
+como resolvida EXIGE `desfecho_tipo`:
+- `venda_sem_baixa`: exige nº da venda; valida DE VERDADE (existe, não é rascunho/
+  cancelada, contém o produto); gera SAÍDA amarrada à venda e EFETIVA a reserva
+  ativa (senão o disponível cairia em dobro).
+- `perda`: dupla confirmação; nunca deixa saldo abaixo do reservado de outras vendas.
+- `localizada`: zera a falta (contada = sistema) como decisão gerencial auditada.
+- `excedente_confirmado`: gera ENTRADA.
+- `outro`: só registro (obs obrigatória).
+Blindagens: quantidade SEMPRE do servidor (|diferenca|); movimento + resposta na
+mesma transação; desfecho com movimento NÃO se desfaz num clique (409 — exige
+estorno); só gerência; logAudit completo. Motivos de movimento novos:
+`pendencia_venda_sem_baixa`, `pendencia_perda`, `pendencia_excedente`.
+
+## feat(inventario): placar de pendências vira filtro clicável (v2.80.1)
+
+**Pedido do Jonathan:** pendência de item que voltava a ficar OK "sumia" da tela
+(o item desce para o bloco "Conferidos OK" no fim da página, enterrado entre os itens OK).
+
+- Os chips do placar ("aguardando resposta" / "resolvida(s)" / "não resolvida(s)") agora
+  são botões: clicar filtra a lista pelo tipo de pendência (clicar de novo limpa).
+- Faixa "Mostrando só itens com pendência X — limpar filtro" fica visível enquanto o
+  filtro está ativo (usuário nunca fica preso na lista filtrada).
+- Filtro combina com a busca por SKU/nome. Só tela — nada muda no banco/API.
+
+## feat(inventario): pendências por item + blindagem de segurança do inventário comercial (v2.80.0)
+
+**Pedido do Jonathan:** na tela `/estoque-comercial/inventario/[id]`, explicar cada pendência
+com um campo para descrever o que ela é, salvar, e perguntar se foi resolvida ou não — além de
+caçar bugs e fechar brechas de segurança (estoque de milhões).
+
+**Banco (migration 336 — criada, NÃO executada ainda):**
+- `itens_inventario_comercial`: `pendencia_obs`, `pendencia_registrada_por/em`,
+  `pendencia_resolvida` (NULL=sem resposta), `pendencia_resolucao_obs`, `pendencia_resolvida_por/em`.
+- `inventarios_comercial`: `cancelado_por`, `motivo_cancelamento`.
+- Blindagem: DO block garante que `diferenca` é coluna GERADA (com backup antes de converter).
+
+**Bugs corrigidos:**
+1. Checkbox "conferido" em item sem contagem gravava `quantidade_contada = quantidade_sistema`
+   (contagem falsa — item virava OK sem ninguém contar). Agora exige digitar a quantidade real.
+2. Flag `conferido` nunca era persistido (`/contar` descartava o campo) — agora grava
+   `conferido`/`conferido_em` e o front atualiza estado só após resposta OK.
+3. `/contar` escrevia na coluna gerada `diferenca` (erro silencioso de banco) — removido.
+4. Falhas de fetch eram silenciosas no front — toda falha agora aparece na faixa de mensagem.
+5. Guard do botão Concluir usava a lista FILTRADA pela busca (burlável) — trava movida
+   para o servidor: 409 + `{forcar:true}` com dupla confirmação.
+6. `/finalizar` (app RFID) aceitava inventário CANCELADO e o "ressuscitava" como concluído — bloqueado.
+7. Mensagem de conclusão prometia "ajustes gerados" que nunca existiam — texto honesto
+   (inventário é auditoria, não ajusta estoque). Card "Lidos" mostrava no máx. 200 — agora usa COUNT real.
+
+**Segurança:**
+- GET (lista e detalhe) restritos a `ROLES_INVENTARIO_VER` (antes qualquer usuário logado via tudo).
+- `logAudit` em abrir/contar/concluir/cancelar/finalizar/pendência (dentro das transações).
+- Cancelamento exige motivo e grava autor; app RFID valida role + usuário `ativo` (Bearer).
+- Contagens e snapshot de abertura em transação única; roles centralizados em `src/lib/roles.ts`.
+
+**UI:** painel expansível por item divergente ("Qual é a pendência?" → salvar → "Foi resolvida?"
+Sim/Não + obs, com autor/data), badges de pendência (aberta/resolvida/não resolvida), placar de
+pendências, barra de progresso da contagem, modal de cancelamento com motivo, faixa de cancelado
+com autor/motivo, CSV com colunas de pendência.
+
+**Docs:** `docs/regras-negocio/comercial.md §7` (regras do inventário). Rota nova:
+`PATCH /api/estoque-comercial/inventario/[id]/pendencia` (padrão `defineRoute`).
+
+## fix(vendas): destrava venda em rascunho após reeditar desconto já aprovado (REAPLICADO)
+
+**O quê:** reeditar/adicionar item acima do limite numa venda `rascunho` invalidava a
+aprovação de desconto (`desconto_aprovado_por` = NULL) mas deixava
+`aprovacao_desconto_tarefa_id` apontando para a tarefa antiga (já `aprovada`). Isso escondia
+TANTO o botão "Solicitar Aprovação de Desconto" (o front exige o campo NULL) QUANTO o banner
+de "aguardando aprovação" → a venda travava em rascunho sem como reaprovar (beco sem saída).
+
+**Como:** `POST` e `PATCH /api/vendas/[id]/itens` agora (1) zeram também
+`aprovacao_desconto_tarefa_id` ao invalidar a aprovação e (2) cancelam a tarefa vinculada
+mirando pelo **ID** e só se ainda estava pendente (o filtro por tag `aprovacao_desconto`
+antigo nunca batia — a tag real é `aprov_desconto_acima`).
+
+**Histórico:** o fix original (commit `6ea83e1c`, 25/06) foi **revertido** pelo merge de base
+velha `0ae5e160`. Esta entrada é a **reaplicação** sobre a main atual. Vendas destravadas em
+produção por update assinado: 15628 (log #91) e 15399 (log #102). Doc: comercial.md §6.
+
 
 ## feat(crediario): painel de parcelamento/sinal também no detalhe da venda (v2.70.0)
 

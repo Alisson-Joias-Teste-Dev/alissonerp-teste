@@ -10,17 +10,34 @@
  *
  * IMPACTO SE ALTERADO: esta rota é exclusiva para is_avulso=true.
  * Entregas normais continuam usando /confirmar com código de verificação.
+ *
+ * FOTOS (migration 357 — decisão Jonathan 21/07): body aceita fotos_base64
+ * OPCIONAL (várias, até MAX_FOTOS_ENTREGA) — comprovante da corrida avulsa,
+ * mesmo padrão de /confirmar. Nunca bloqueia a finalização.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createServerSupabase } from "@/lib/supabase/server";
 import sql from "@/lib/db";
-import { confirmarFreteAvulso } from "@/lib/entrega-venda";
+import { confirmarFreteAvulso, MAX_FOTOS_ENTREGA } from "@/lib/entrega-venda";
+import { zodError } from "@/lib/schemas/common";
+import { LIMITS, checkArrayLength, checkBase64Length, payloadTooLargeResponse } from "@/lib/payload-limits";
+
+// REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026): latitude/longitude
+// OPCIONAIS no schema (admin/gerente confirmando pelo escritório nunca
+// manda) — a obrigatoriedade real (só para o motoboy, role 'entregador') é
+// decidida dentro de confirmarFreteAvulso(), não aqui.
+const ConfirmarAvulsoSchema = z.object({
+  fotos_base64: z.array(z.string().max(LIMITS.IMAGE_BASE64_MAX)).max(MAX_FOTOS_ENTREGA).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+});
 
 // REGRA: motoboy só confirma a própria corrida; admin/gerente confirma qualquer uma
 const ROLES_ADMIN = ["desenvolvedor", "admin", "gerente_loja"];
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const supabase = await createServerSupabase();
@@ -51,7 +68,7 @@ export async function POST(
   // Motoboy só pode confirmar a própria corrida
   if (isMotoboy) {
     const [entrega] = await sql`
-      SELECT motoboy_id, is_avulso
+      SELECT motoboy_id, is_avulso, created_by
       FROM alissonerp.entregas_venda
       WHERE id = ${entregaId} LIMIT 1
     `;
@@ -60,10 +77,42 @@ export async function POST(
     if (String(entrega.motoboy_id) !== user.id) {
       return NextResponse.json({ error: "Você não é o motoboy desta entrega" }, { status: 403 });
     }
+    // REGRA DE NEGÓCIO (anti-fraude): corrida que o PRÓPRIO motoboy registrou
+    // fica pendente de confirmação da LOJA — ele não confirma o próprio
+    // lançamento. Avulso criado pela loja e atribuído a ele segue confirmável
+    // por ele no app (created_by != motoboy).
+    if (String(entrega.created_by) === user.id) {
+      return NextResponse.json(
+        { error: "Corrida registrada por você aguarda confirmação da loja." },
+        { status: 403 },
+      );
+    }
+  }
+
+  // Body opcional — fotos_base64 (comprovante). Corpo vazio/ausente é válido
+  // (nada obrigatório aqui; a checagem de estado da corrida é feita na lib).
+  const raw = await req.json().catch(() => ({}));
+  const parsed = ConfirmarAvulsoSchema.safeParse(raw);
+  if (!parsed.success) return zodError(parsed.error);
+  const { fotos_base64, latitude, longitude } = parsed.data;
+
+  if (fotos_base64) {
+    try {
+      checkArrayLength("fotos_base64", fotos_base64, MAX_FOTOS_ENTREGA);
+      fotos_base64.forEach((f, i) => checkBase64Length(`fotos_base64[${i}]`, f, LIMITS.IMAGE_BASE64_MAX));
+    } catch (e) {
+      const r = payloadTooLargeResponse(e);
+      if (r) return r;
+      throw e;
+    }
   }
 
   try {
-    await confirmarFreteAvulso(entregaId, user.id);
+    await confirmarFreteAvulso(entregaId, user.id, fotos_base64, {
+      usuarioRole: usuario.role as string,
+      latitude,
+      longitude,
+    });
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erro ao confirmar";

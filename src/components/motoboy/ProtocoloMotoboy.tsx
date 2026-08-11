@@ -25,6 +25,19 @@ interface Protocolo {
   etapas: string;
   created_at: string;
   total_ordens?: number;
+  // Transferência de estoque (nulos nos demais tipos)
+  tipo_protocolo?: string | null;
+  total_produtos?: number;
+  local_origem_nome?: string | null;
+  local_destino_nome?: string | null;
+}
+
+/** Peça de um protocolo de transferência, como o motoboy vê antes de recolher. */
+interface ItemTransferencia {
+  produto_id: number;
+  sku: string | null;
+  nome_produto: string | null;
+  quantidade: number;
 }
 
 interface OrdemItem {
@@ -197,10 +210,17 @@ function ProtocoloCard({ protocolo: p, onClick }: { protocolo: Protocolo; onClic
       {/* Card body */}
       <div className="flex items-center justify-between px-4 pb-3.5">
         <span className="text-xs" style={{ color: C.muted }}>
-          {p.direcao === "ida" ? "📤 Loja → Fábrica" : "📥 Fábrica → Loja"}
+          {p.tipo_protocolo === "transferencia"
+            ? `📦 ${p.local_origem_nome ?? "—"} → ${p.local_destino_nome ?? "—"}`
+            : p.direcao === "ida" ? "📤 Loja → Fábrica" : "📥 Fábrica → Loja"}
         </span>
         <div className="flex items-center gap-3">
-          {p.total_ordens != null && (
+          {p.tipo_protocolo === "transferencia" ? (
+            <span className="flex items-center gap-1 text-xs" style={{ color: C.muted }}>
+              <Package size={11} />
+              {p.total_produtos ?? 0} peça{(p.total_produtos ?? 0) !== 1 ? "s" : ""}
+            </span>
+          ) : p.total_ordens != null && (
             <span className="flex items-center gap-1 text-xs" style={{ color: C.muted }}>
               <Package size={11} />
               {p.total_ordens} ordem{p.total_ordens !== 1 ? "s" : ""}
@@ -225,6 +245,11 @@ export default function ProtocoloMotoboy() {
   const [protocolos,   setProtocolos]   = useState<Protocolo[]>([]);
   const [selected,     setSelected]     = useState<Protocolo | null>(null);
   const [ordens,       setOrdens]       = useState<OrdemItem[]>([]);
+  const [itensTransf,  setItensTransf]  = useState<ItemTransferencia[]>([]);
+  const [enviandoColeta, setEnviandoColeta] = useState(false);
+  const [erroColeta,   setErroColeta]   = useState("");
+  // "criar" = foto de um protocolo novo; "coleta" = foto da retirada das peças
+  const [cameraAlvo,   setCameraAlvo]   = useState<"criar" | "coleta">("criar");
   const [loadingLista, setLoadingLista] = useState(true);
   const [loadingOrdens,setLoadingOrdens]= useState(false);
 
@@ -291,10 +316,62 @@ export default function ProtocoloMotoboy() {
     setSelected(p);
     setView("detalhe");
     setLoadingOrdens(true);
+    setItensTransf([]);
+    setErroColeta("");
+
+    /**
+     * REGRA DE NEGÓCIO: protocolo de transferência carrega PEÇA, não ordem — a
+     * lista vem de /produtos. É o que o motoboy confere antes de dar o "peguei".
+     */
+    if (p.tipo_protocolo === "transferencia") {
+      const res = await fetch(`/api/protocolo/${p.id}/produtos`);
+      const data = await res.json().catch(() => null);
+      setItensTransf(Array.isArray(data?.itens) ? data.itens : []);
+      setOrdens([]);
+      setLoadingOrdens(false);
+      return;
+    }
+
     const res  = await fetch(`/api/protocolo/${p.id}`);
     const data: OrdemItem[] = await res.json().catch(() => []);
     setOrdens(data);
     setLoadingOrdens(false);
+  }
+
+  /**
+   * Passo 2 da transferência: o motoboy confirma com foto que pegou as peças.
+   * É aqui que o estoque SAI do local de origem (a API cria a transferência) e a
+   * reserva da solicitação é efetivada. Ele não conclui o protocolo — quem
+   * confirma a chegada é o responsável do destino.
+   */
+  async function confirmarColeta(file: File) {
+    if (!selected) return;
+    setErroColeta("");
+    setEnviandoColeta(true);
+    try {
+      const fotoPath = `coleta/${selected.id}/${Date.now()}.jpg`;
+      const { error: upErr } = await supabase.storage
+        .from("protocolo-fotos")
+        .upload(fotoPath, file, { contentType: file.type || "image/jpeg", upsert: false });
+      if (upErr) throw new Error(`Upload foto: ${upErr.message}`);
+
+      const res = await fetch(`/api/protocolo/${selected.id}/coleta`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ foto_path: fotoPath }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`);
+
+      setView("lista");
+      setSelected(null);
+      loadLista();
+    } catch (e: unknown) {
+      setErroColeta(e instanceof Error ? e.message : "Erro ao confirmar coleta");
+      setView("detalhe");
+    } finally {
+      setEnviandoColeta(false);
+    }
   }
 
   // ── Abrir criação ────────────────────────────────────────────────────────────
@@ -393,6 +470,16 @@ export default function ProtocoloMotoboy() {
   // VIEW: CÂMERA
   // ════════════════════════════════════════════════════════════════════════════
   if (view === "camera") {
+    // A mesma câmera serve os dois momentos: foto do protocolo novo e foto da
+    // coleta das peças. `cameraAlvo` decide para onde a foto vai.
+    if (cameraAlvo === "coleta") {
+      return (
+        <CameraTela
+          onCapture={(file) => { confirmarColeta(file); }}
+          onCancel={() => setView("detalhe")}
+        />
+      );
+    }
     return (
       <CameraTela
         onCapture={(file, preview) => { setFotoFile(file); setFotoPreview(preview); setView("criar"); }}
@@ -433,8 +520,8 @@ export default function ProtocoloMotoboy() {
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5 pb-32">
 
-          <div className="grid grid-cols-2 gap-2">
-            {(["fabrica", "service"] as const)
+          <div className="grid grid-cols-1 gap-2">
+            {(["fabrica"] as const)
               .filter((t) => tiposPermitidos.length === 0 || tiposPermitidos.includes(t))
               .map((t) => {
                 const ativo = tipoProtocoloCriar === t;
@@ -685,14 +772,67 @@ export default function ProtocoloMotoboy() {
               Protocolo #{selected.id}
             </h2>
             <p className="text-xs" style={{ color: C.muted }}>
-              {selected.direcao === "ida" ? "📤 Loja → Fábrica" : "📥 Fábrica → Loja"}
+              {selected.tipo_protocolo === "transferencia"
+                ? `📦 ${selected.local_origem_nome ?? "—"} → ${selected.local_destino_nome ?? "—"}`
+                : selected.direcao === "ida" ? "📤 Loja → Fábrica" : "📥 Fábrica → Loja"}
             </p>
           </div>
           <EtapaBadge etapa={selected.etapas} />
         </div>
 
+        {/* Transferência de estoque: conferir peças e confirmar a coleta */}
+        {selected.tipo_protocolo === "transferencia" && (
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: C.muted }}>
+              Peças ({itensTransf.length})
+            </p>
+            {loadingOrdens ? (
+              <div className="flex justify-center py-10">
+                <Loader2 size={24} className="animate-spin" style={{ color: C.muted }} />
+              </div>
+            ) : itensTransf.length === 0 ? (
+              <p className="text-sm text-center py-8" style={{ color: C.muted }}>Sem peças vinculadas</p>
+            ) : (
+              itensTransf.map((it) => (
+                <div
+                  key={it.produto_id}
+                  className="flex items-center gap-3 rounded-xl px-4 py-3.5"
+                  style={{ backgroundColor: C.cremeBg, border: `1px solid ${C.cremeBorder}` }}
+                >
+                  <Package size={16} style={{ color: C.muted }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate" style={{ color: C.esmeralda }}>{it.sku ?? `#${it.produto_id}`}</p>
+                    <p className="text-xs truncate" style={{ color: C.muted }}>{it.nome_produto ?? "—"}</p>
+                  </div>
+                  <span className="text-sm font-semibold" style={{ color: "#374151" }}>{it.quantidade}x</span>
+                </div>
+              ))
+            )}
+
+            {erroColeta && (
+              <p className="text-sm px-4 py-3 rounded-xl" style={{ backgroundColor: "#FEF2F2", color: "#DC2626" }}>{erroColeta}</p>
+            )}
+
+            {selected.etapas === "pendente" && itensTransf.length > 0 && (
+              <button
+                onClick={() => { setCameraAlvo("coleta"); setView("camera"); }}
+                disabled={enviandoColeta}
+                className="w-full flex items-center justify-center gap-2 rounded-xl py-4 font-semibold text-sm disabled:opacity-50"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}
+              >
+                {enviandoColeta
+                  ? <><Loader2 size={16} className="animate-spin" />Enviando...</>
+                  : <><Camera size={16} />Confirmar coleta com foto</>}
+              </button>
+            )}
+            <p className="text-[11px] text-center" style={{ color: C.muted }}>
+              Ao confirmar, as peças saem do estoque de {selected.local_origem_nome ?? "origem"} e ficam com você até a chegada.
+            </p>
+          </div>
+        )}
+
         {/* Lista de ordens */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <div className={`flex-1 overflow-y-auto px-4 py-4 space-y-3${selected.tipo_protocolo === "transferencia" ? " hidden" : ""}`}>
           <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: C.muted }}>
             Ordens ({ordens.length})
           </p>

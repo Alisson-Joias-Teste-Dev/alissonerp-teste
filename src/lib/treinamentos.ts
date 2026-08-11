@@ -1,0 +1,63 @@
+import { PackageOpen, Gem, Bike, type LucideIcon } from "lucide-react";
+
+/**
+ * REGISTRO DOS TREINAMENTOS — fonte única da Central de Treinamentos.
+ *
+ * REGRA DE NEGÓCIO: cada módulo que o Jonathan finaliza ou refina ganha um
+ * treinamento no formato padrão (player passo a passo). Este arquivo é a lista
+ * que a Central (/treinamentos) mostra.
+ *
+ * PRA ADICIONAR UM TREINAMENTO NOVO:
+ *   1. Crie a página em src/app/(dashboard)/treinamentos/<key>/ (page.tsx + <X>Treino.tsx)
+ *      — copie do de movimentacao-interna, que é o exemplo de referência.
+ *   2. Acrescente uma entrada em TREINAMENTOS aqui e tire o nome de EM_BREVE.
+ *   Receita completa (como escrever os passos): `.claude/commands/treinamento.md`
+ *
+ * IMPACTO SE ALTERADO: muda o que aparece na Central de Treinamentos.
+ */
+export interface TreinamentoMeta {
+  /** Chave do treinamento. Vale pro upload do vídeo (treinamento_key) e pra pasta da rota. */
+  key: string;
+  href: string;
+  titulo: string;
+  /** O que a pessoa vai aprender, em português de loja. */
+  desc: string;
+  /** Pra quem é (aparece como etiqueta no card). */
+  publico: string;
+  Icon: LucideIcon;
+}
+
+export const TREINAMENTOS: TreinamentoMeta[] = [
+  {
+    key: "movimentacao-interna",
+    href: "/treinamentos/movimentacao-interna",
+    titulo: "Movimentação Interna",
+    desc: "Como solicitar uma peça, entregar, receber e finalizar (cliente levou ou voltou ao estoque).",
+    publico: "Consultoras e estoque",
+    Icon: PackageOpen,
+  },
+  {
+    key: "conversao-reversa",
+    href: "/treinamentos/conversao-reversa",
+    titulo: "Conversão Reversa",
+    desc: "Como transformar um ouro que está no cofre em uma joia no estoque da Loja — com foto do peso e aprovação.",
+    publico: "Estoque, gerência e aprovadores",
+    Icon: Gem,
+  },
+  {
+    key: "frete-avulso",
+    href: "/treinamentos/frete-avulso",
+    titulo: "Frete Avulso (solicitação)",
+    desc: "Como a consultora solicita um motoboy avulso de dentro da venda — liberação por tarefa (pool de aprovadores) e aceite pelo pool de motoboys.",
+    publico: "Consultoras, liberadores e motoboys",
+    Icon: Bike,
+  },
+];
+
+/** Módulos que ainda não têm treinamento — aparecem como "Em breve". */
+export const EM_BREVE = [
+  "Crediário",
+  "Vendas / PDV",
+  "Protocolo (Loja ↔ Fábrica)",
+  "Conferência",
+];

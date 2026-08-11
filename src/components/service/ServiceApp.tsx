@@ -128,12 +128,23 @@ interface ServicoDetalhe extends ServicoConcluido {
 }
 
 interface ApontoInsumo {
-  insumo_id:   number;
-  insumo_nome: string;
-  sku:         string | null;
-  unidade:     string;
-  saldo:       number;
+  insumo_id:    number;
+  insumo_nome:  string;
+  sku:          string | null;
+  unidade:      string;
+  categoria_id: number | null;
+  saldo:        number;
 }
+
+/**
+ * Pedra (categoria 2) é pesada na BALANÇA em grama, mas o estoque dela é
+ * controlado em QUILATE (1 ct = 0,2 g). Toda tela que pede peso de pedra digita
+ * grama e converte — igual à tela de apontamento do PCP.
+ * IMPACTO se ignorar: o operador digita grama e o sistema entende quilate.
+ */
+const CATEGORIA_PEDRA = 2;
+const gramasParaCt = (g: number) => parseFloat((g / 0.2).toFixed(4));
+const ctParaGramas = (ct: number) => parseFloat((ct * 0.2).toFixed(4));
 
 type View     = "meus" | "receber" | "concluidos" | "concluir" | "devolver" | "transferir" | "transferir-fabrica" | "camera" | "apontar" | "transferir-insumo";
 type CameraCtx = "receber" | "peca" | "fio" | "aponto" | "transf-ins";
@@ -340,6 +351,17 @@ export default function ServiceApp() {
   const [transfInsFotoPreview,setTransfInsFotoPreview]= useState<string | null>(null);
   const [loadingTransfIns,    setLoadingTransfIns]    = useState(false);
   const [salvandoTransfIns,   setSalvandoTransfIns]   = useState(false);
+
+  /**
+   * Quantidade digitada convertida para a unidade do ESTOQUE: ct quando é pedra,
+   * grama no resto. É esse número que tem que ser comparado com o saldo — o campo
+   * digitado é grama e o saldo de pedra vem em quilate.
+   */
+  const qtdTransfEstoque = transfInsSel && transfInsQtd
+    ? (transfInsSel.categoria_id === CATEGORIA_PEDRA
+        ? gramasParaCt(parseFloat(transfInsQtd) || 0)
+        : (parseFloat(transfInsQtd) || 0))
+    : 0;
 
   // ── Apontamento intermediário ────────────────────────────────────────────
   const [servicoApontando,    setServicoApontando]    = useState<ServicoMeu | null>(null);
@@ -1203,13 +1225,15 @@ export default function ServiceApp() {
                 <p className="text-xs" style={{ color: S.textMuted }}>Material selecionado</p>
                 <p className="text-sm font-semibold" style={{ color: S.gold }}>{transfInsSel.insumo_nome}</p>
                 <p className="text-xs" style={{ color: S.textMuted }}>
-                  Disponível: {transfInsSel.saldo.toFixed(4)} {transfInsSel.unidade}
+                  {transfInsSel.categoria_id === CATEGORIA_PEDRA
+                    ? `Disponível: ${transfInsSel.saldo.toFixed(4)} ct (${ctParaGramas(transfInsSel.saldo).toFixed(4)} g)`
+                    : `Disponível: ${transfInsSel.saldo.toFixed(4)} ${transfInsSel.unidade}`}
                 </p>
               </div>
 
               <div className="space-y-1.5">
                 <label className="text-xs font-medium" style={{ color: S.textMuted }}>
-                  Quantidade a transferir ({transfInsSel.unidade})
+                  Quantidade a transferir ({transfInsSel.categoria_id === CATEGORIA_PEDRA ? "g" : transfInsSel.unidade})
                 </label>
                 <input
                   type="number"
@@ -1220,7 +1244,13 @@ export default function ServiceApp() {
                   className="w-full rounded-xl px-4 py-3 text-sm font-semibold outline-none"
                   style={{ backgroundColor: S.cardBg, border: `1px solid ${S.border}`, color: S.text }}
                 />
-                {transfInsQtd && parseFloat(transfInsQtd) > transfInsSel.saldo && (
+                {/* Pedra: mostra o quilate na hora, que é o que vai pro estoque. */}
+                {transfInsSel.categoria_id === CATEGORIA_PEDRA && transfInsQtd && parseFloat(transfInsQtd) > 0 && (
+                  <p className="text-xs" style={{ color: S.textMuted }}>
+                    = {gramasParaCt(parseFloat(transfInsQtd)).toFixed(4)} ct
+                  </p>
+                )}
+                {transfInsQtd && qtdTransfEstoque > transfInsSel.saldo && (
                   <p className="text-xs" style={{ color: "#EF4444" }}>
                     Quantidade excede o saldo disponível
                   </p>
@@ -1236,7 +1266,7 @@ export default function ServiceApp() {
                   Voltar
                 </button>
                 <button
-                  disabled={!transfInsQtd || parseFloat(transfInsQtd) <= 0 || parseFloat(transfInsQtd) > transfInsSel.saldo}
+                  disabled={!transfInsQtd || parseFloat(transfInsQtd) <= 0 || qtdTransfEstoque > transfInsSel.saldo}
                   onClick={() => setTransfInsStep(4)}
                   className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
                   style={{ backgroundColor: S.btnBlue, color: "#fff" }}
@@ -1257,7 +1287,11 @@ export default function ServiceApp() {
                 </div>
                 <div className="flex justify-between text-xs">
                   <span style={{ color: S.textMuted }}>Quantidade</span>
-                  <span className="font-semibold" style={{ color: S.text }}>{transfInsQtd} {transfInsSel.unidade}</span>
+                  <span className="font-semibold" style={{ color: S.text }}>
+                    {transfInsSel.categoria_id === CATEGORIA_PEDRA
+                      ? `${transfInsQtd} g = ${qtdTransfEstoque.toFixed(4)} ct`
+                      : `${transfInsQtd} ${transfInsSel.unidade}`}
+                  </span>
                 </div>
                 <div className="flex justify-between text-xs">
                   <span style={{ color: S.textMuted }}>Para</span>

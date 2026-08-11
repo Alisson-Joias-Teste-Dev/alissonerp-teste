@@ -6,6 +6,8 @@ import OrcamentoDetalheClient from "./OrcamentoDetalheClient";
 import { loadOrcamentoConfig } from "@/lib/orcamento-config";
 import { normalizeConfigRow, normalizeCategoriaRow, type CurvaConfig, type CurvaCategoriaInput } from "@/lib/curva-precificacao";
 import { ROLES_ORCAMENTO } from "@/lib/orcamento-shared";
+import { calcularTetoDesconto, FULL_ACCESS_ROLES_DESCONTO } from "@/lib/desconto/precificar-item";
+import { buscarFallbackDescontoSemCadastro } from "@/lib/aprovacao-regras";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +83,19 @@ export default async function OrcamentoDetalhePage({ params }: { params: Promise
 
   const canManageConfig = isFullAccess(role) || role === "gerente_loja";
 
+  // REGRA DE NEGÓCIO (Fase 5, 15/07): FONTE ÚNICA — antes era
+  // `Number(caller.mx_desconto_permitido ?? 0)` sem NENHUM fallback de cargo,
+  // travando admin sem cadastro em 0% no slider. Agora usa calcularTetoDesconto
+  // (mesma função do gate real em aprovacao-regras.ts), com admin/desenvolvedor
+  // full-access = 100% e fallback configurável pra quem não tem cadastro.
+  const fallbackDesconto = await buscarFallbackDescontoSemCadastro();
+  const maxDesconto = calcularTetoDesconto(
+    caller.mx_desconto_permitido != null ? Number(caller.mx_desconto_permitido) : null,
+    role,
+    FULL_ACCESS_ROLES_DESCONTO,
+    fallbackDesconto,
+  );
+
   let curvaConfig: CurvaConfig | null = null;
   let curvaCategorias: CurvaCategoriaInput[] = [];
   try {
@@ -101,7 +116,7 @@ export default async function OrcamentoDetalhePage({ params }: { params: Promise
       userName={String(caller.nome ?? "")}
       userId={user.id}
       vendedorId={caller.id_vendedor ? Number(caller.id_vendedor) : null}
-      maxDesconto={Number(caller.mx_desconto_permitido ?? 0)}
+      maxDesconto={maxDesconto}
       curvaConfig={curvaConfig}
       curvaCategorias={curvaCategorias}
     />

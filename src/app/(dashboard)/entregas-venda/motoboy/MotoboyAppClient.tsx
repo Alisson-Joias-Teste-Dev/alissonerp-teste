@@ -11,10 +11,12 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Bike, Clock, Truck, CheckCircle, DollarSign,
-  Loader2,
+  Loader2, Plus, X,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiFetch";
 import EntregaDetalheDrawer from "@/components/entregas/EntregaDetalheDrawer";
+import FinalizarAvulsoModal from "@/components/entregas/FinalizarAvulsoModal";
+import { useErrorStore } from "@/stores/errorStore";
 
 const C = {
   esmeralda: "#184036",
@@ -50,7 +52,20 @@ interface EntregaMotoboy {
   foi_pago: boolean;
   is_avulso: boolean;
   descricao_avulso: string | null;
+  auto_criado: boolean;
+  /** REGRA DE NEGÓCIO (modelo POOL — migration 353): endereço de entrega da
+   * solicitação de frete avulso (herdado da venda no momento da solicitação).
+   * Exibido no card pro motoboy saber pra onde ir. */
+  endereco_entrega: string | null;
+  observacoes: string | null;
 }
+
+// REGRA DE NEGÓCIO: valor da corrida avulsa é FIXO pela região (espelha
+// calcularValorMotoboy no backend). O motoboy não digita valor.
+const VALOR_REGIAO: Record<"fortaleza" | "fora_fortaleza", number> = {
+  fortaleza: 20,
+  fora_fortaleza: 50,
+};
 
 interface Cards {
   pendentes: number;
@@ -68,6 +83,20 @@ interface Props {
 function fmtBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
+
+// REGRA DE NEGÓCIO: chave única para reativar o auto-registro de corrida pelo
+// motoboy (PR #75).
+// O QUÊ: controla se o botão "Nova corrida" e o modal de registro aparecem
+//   nesta tela. Com false, ambos ficam ocultos — o motoboy só vê/aceita/
+//   confirma corridas já criadas pela loja/pool (modelo POOL, migration 353).
+// POR QUÊ: decisão do Jonathan (21/07) — a corrida deve nascer na loja/pool,
+//   não no motoboy. O backend (rota /api/entregas-venda/frete-avulso,
+//   FreteAvulsoMotoboySchema) e as corridas auto-registradas já existentes em
+//   produção continuam funcionando normalmente (guard auto_criado inalterado).
+// IMPACTO: para reativar o auto-registro na tela, basta trocar para true —
+//   nada além disso precisa mudar. NÃO remover o estado/handlers do modal:
+//   o objetivo é manter a reversão trivial.
+const MOTOBOY_PODE_REGISTRAR_CORRIDA = false;
 
 function statusBadge(situacao: string) {
   switch (situacao) {
@@ -88,8 +117,22 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
   // Drawer de detalhe
   const [selectedEntregaId, setSelectedEntregaId] = useState<number | null>(null);
 
-  // Confirmação de avulso
-  const [confirmandoAvulso, setConfirmandoAvulso] = useState<number | null>(null);
+  // REGRA DE NEGÓCIO (migration 357): finalizar corrida avulsa abre um modal
+  // perguntando se quer anexar fotos (opcional) antes de chamar
+  // /confirmar-avulso — antes era um clique direto sem nenhuma pergunta.
+  const [finalizandoAvulsoId, setFinalizandoAvulsoId] = useState<number | null>(null);
+  // REGRA DE NEGÓCIO (modelo POOL — migration 353): "Aceitar corrida" é o
+  // passo novo entre a liberação (situacao='pendente') e a finalização —
+  // chama /aceitar-avulso (pendente → em_rota), antes de abrir o modal de
+  // finalização acima.
+  const [aceitandoAvulso, setAceitandoAvulso] = useState<number | null>(null);
+
+  // Nova corrida avulsa (registrada pelo próprio motoboy → nasce pendente p/ loja)
+  const [novaOpen, setNovaOpen] = useState(false);
+  const [novaRegiao, setNovaRegiao] = useState<"fortaleza" | "fora_fortaleza">("fortaleza");
+  const [novaDescricao, setNovaDescricao] = useState("");
+  const [novaSalvando, setNovaSalvando] = useState(false);
+  const [novaErro, setNovaErro] = useState("");
 
   // Filtro de período
   const [periodo, setPeriodo] = useState("");
@@ -149,6 +192,26 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
     carregar();
   }
 
+  async function registrarCorrida() {
+    if (!novaDescricao.trim()) { setNovaErro("Descreva a corrida (ex: bairro / o que foi)."); return; }
+    setNovaSalvando(true);
+    setNovaErro("");
+    try {
+      await apiFetch("/api/entregas-venda/frete-avulso", {
+        method: "POST",
+        body: JSON.stringify({ regiao: novaRegiao, descricaoAvulso: novaDescricao.trim() }),
+      });
+      setNovaOpen(false);
+      setNovaDescricao("");
+      setNovaRegiao("fortaleza");
+      await carregar();
+    } catch (e) {
+      setNovaErro(e instanceof Error ? e.message : "Erro ao registrar corrida");
+    } finally {
+      setNovaSalvando(false);
+    }
+  }
+
   const situacoes = [
     { value: "", label: "Todas" },
     { value: "pendente", label: "Pendentes" },
@@ -186,6 +249,21 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
               {motoboyNome}
             </p>
           </div>
+          {/* Botão "Nova corrida" (auto-registro do motoboy) — oculto por
+              decisão do Jonathan, ver MOTOBOY_PODE_REGISTRAR_CORRIDA acima. */}
+          {MOTOBOY_PODE_REGISTRAR_CORRIDA && (
+            <button
+              onClick={() => { setNovaErro(""); setNovaOpen(true); }}
+              style={{
+                marginLeft: "auto", padding: "9px 14px", borderRadius: 10,
+                background: C.esmeralda, color: "#fff", border: "none",
+                fontSize: 13, fontWeight: 700, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+              }}
+            >
+              <Plus size={16} /> Nova corrida
+            </button>
+          )}
         </div>
 
         {/* Cards */}
@@ -366,21 +444,45 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                     </span>
                   </div>
 
-                  {/* Botão confirmar avulso (só para pendentes avulsas) */}
-                  {item.is_avulso && item.situacao === "pendente" && (
+                  {/* Endereço/observações da corrida avulsa (herdados da venda
+                      quando a solicitação veio da consultora — modelo POOL) */}
+                  {item.is_avulso && (item.endereco_entrega || item.observacoes) && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: C.cinza }}>
+                      {item.endereco_entrega && <div>📍 {item.endereco_entrega}</div>}
+                      {item.observacoes && <div>{item.observacoes}</div>}
+                    </div>
+                  )}
+
+                  {/* Caso 1: corrida que o próprio motoboy registrou — aguarda a loja confirmar (inalterado) */}
+                  {item.is_avulso && item.situacao === "pendente" && item.auto_criado && (
+                    <div style={{
+                      marginTop: 10, padding: "8px 10px", borderRadius: 8,
+                      background: C.ambarLt, color: "#92400E", fontSize: 12,
+                      display: "flex", alignItems: "center", gap: 6,
+                    }}>
+                      <Clock size={13} /> Aguardando confirmação da loja
+                    </div>
+                  )}
+
+                  {/* Caso 2: corrida atribuída (não auto-criada) parada em 'pendente'
+                      — o motoboy precisa ACEITAR antes de sair para rota
+                      (POST /aceitar-avulso: 'pendente' -> 'em_rota'). */}
+                  {item.is_avulso && item.situacao === "pendente" && !item.auto_criado && (
                     <div style={{ marginTop: 10 }} onClick={e => e.stopPropagation()}>
                       <button
-                        disabled={confirmandoAvulso === item.id}
+                        disabled={aceitandoAvulso === item.id}
                         onClick={async () => {
-                          setConfirmandoAvulso(item.id);
+                          setAceitandoAvulso(item.id);
                           try {
                             const { apiFetch } = await import("@/lib/apiFetch");
-                            await apiFetch(`/api/entregas-venda/${item.id}/confirmar-avulso`, { method: "POST" });
+                            await apiFetch(`/api/entregas-venda/${item.id}/aceitar-avulso`, { method: "POST" });
                             await carregar();
                           } catch (e) {
-                            alert(e instanceof Error ? e.message : "Erro ao confirmar");
+                            // Pitfall §3 (CLAUDE.md): nada de alert() nativo — o resto do
+                            // sistema usa o toast global do useErrorStore.
+                            useErrorStore.getState().push(e instanceof Error ? e.message : "Erro ao aceitar corrida");
                           } finally {
-                            setConfirmandoAvulso(null);
+                            setAceitandoAvulso(null);
                           }
                         }}
                         style={{
@@ -389,14 +491,35 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
                           border: "none", borderRadius: 8,
                           fontSize: 13, fontWeight: 700, cursor: "pointer",
                           display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                          opacity: confirmandoAvulso === item.id ? 0.6 : 1,
+                          opacity: aceitandoAvulso === item.id ? 0.6 : 1,
                         }}
                       >
-                        {confirmandoAvulso === item.id
+                        {aceitandoAvulso === item.id
                           ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
-                          : <CheckCircle size={14} />
+                          : <Bike size={14} />
                         }
-                        Confirmar Entrega
+                        Aceitar corrida
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Caso 3: corrida já em rota (motoboy aceitou) — abre o modal
+                      que pergunta se quer anexar fotos (opcional) antes de
+                      finalizar (POST /confirmar-avulso: 'em_rota' -> 'confirmada'). */}
+                  {item.is_avulso && item.situacao === "em_rota" && (
+                    <div style={{ marginTop: 10 }} onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={() => setFinalizandoAvulsoId(item.id)}
+                        style={{
+                          width: "100%", padding: "8px 0",
+                          background: C.esmeralda, color: "#fff",
+                          border: "none", borderRadius: 8,
+                          fontSize: 13, fontWeight: 700, cursor: "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                        }}
+                      >
+                        <CheckCircle size={14} />
+                        Finalizar entrega
                       </button>
                     </div>
                   )}
@@ -416,6 +539,129 @@ export default function MotoboyAppClient({ motoboyNome }: Props) {
           onClose={() => { setSelectedEntregaId(null); carregar(); }}
           userRole="entregador"
         />
+      )}
+
+      {/* ── Modal: finalizar corrida avulsa (pergunta opcional de fotos) ─────── */}
+      {finalizandoAvulsoId !== null && (
+        <FinalizarAvulsoModal
+          entregaId={finalizandoAvulsoId}
+          isOpen={finalizandoAvulsoId !== null}
+          onClose={() => setFinalizandoAvulsoId(null)}
+          onSuccess={() => { setFinalizandoAvulsoId(null); carregar(); }}
+          exigirLocalizacaoEFoto
+        />
+      )}
+
+      {/* ── Modal: nova corrida avulsa (registrada pelo motoboy) ─────────────── */}
+      {/* Oculto junto com o botão — ver MOTOBOY_PODE_REGISTRAR_CORRIDA acima. */}
+      {MOTOBOY_PODE_REGISTRAR_CORRIDA && novaOpen && (
+        <div
+          onClick={() => { if (!novaSalvando) setNovaOpen(false); }}
+          style={{
+            position: "fixed", inset: 0, zIndex: 60,
+            background: "rgba(0,0,0,0.45)",
+            display: "flex", alignItems: "flex-end", justifyContent: "center",
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: "#fff", width: "100%", maxWidth: 460,
+              borderRadius: "16px 16px 0 0", padding: 20,
+              maxHeight: "90vh", overflowY: "auto",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: C.esmeralda }}>
+                Registrar corrida
+              </h2>
+              <button
+                onClick={() => { if (!novaSalvando) setNovaOpen(false); }}
+                aria-label="Fechar"
+                style={{ background: "none", border: "none", cursor: "pointer", color: C.cinza, padding: 4 }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <label style={{ fontSize: 12, fontWeight: 600, color: C.cinza }}>Descrição</label>
+            <textarea
+              value={novaDescricao}
+              onChange={e => { setNovaDescricao(e.target.value); if (novaErro) setNovaErro(""); }}
+              placeholder="Ex: entrega de conserto — bairro Aldeota"
+              rows={2}
+              maxLength={500}
+              style={{
+                width: "100%", marginTop: 6, marginBottom: 16, padding: "10px 12px",
+                borderRadius: 10, border: `1px solid ${C.cremeBorder}`, fontSize: 14,
+                resize: "vertical", boxSizing: "border-box", color: "#1f2937",
+              }}
+            />
+
+            <label style={{ fontSize: 12, fontWeight: 600, color: C.cinza }}>Região</label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, margin: "6px 0 16px" }}>
+              {([
+                { val: "fortaleza" as const, label: "Fortaleza" },
+                { val: "fora_fortaleza" as const, label: "Fora de Fortaleza" },
+              ]).map(r => {
+                const sel = novaRegiao === r.val;
+                return (
+                  <button key={r.val}
+                    onClick={() => setNovaRegiao(r.val)}
+                    style={{
+                      padding: "10px 8px", borderRadius: 10, cursor: "pointer",
+                      border: `1.5px solid ${sel ? C.esmeralda : C.cremeBorder}`,
+                      background: sel ? C.esmeraldaLt : "#fff", textAlign: "center",
+                    }}
+                  >
+                    <div style={{ fontSize: 13, fontWeight: 700, color: sel ? C.esmeralda : "#1f2937" }}>{r.label}</div>
+                    <div style={{ fontSize: 12, color: sel ? C.esmeralda : C.cinza }}>{fmtBRL(VALOR_REGIAO[r.val])}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "10px 12px", borderRadius: 10, background: C.cremeBg, marginBottom: 12,
+            }}>
+              <span style={{ fontSize: 13, color: C.cinza }}>Você recebe</span>
+              <span style={{ fontSize: 18, fontWeight: 700, color: C.esmeralda }}>{fmtBRL(VALOR_REGIAO[novaRegiao])}</span>
+            </div>
+
+            <div style={{
+              display: "flex", gap: 8, alignItems: "flex-start",
+              padding: "8px 12px", borderRadius: 8, background: C.ambarLt, marginBottom: 16,
+            }}>
+              <Clock size={14} color="#92400E" style={{ marginTop: 2, flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: "#92400E" }}>
+                A corrida fica <b>pendente</b> — a loja confirma no acerto.
+              </span>
+            </div>
+
+            {novaErro && (
+              <div style={{ padding: 10, borderRadius: 8, background: C.vermelhoLt, color: C.vermelho, fontSize: 13, marginBottom: 12 }}>
+                {novaErro}
+              </div>
+            )}
+
+            <button
+              onClick={registrarCorrida}
+              disabled={novaSalvando}
+              style={{
+                width: "100%", padding: "12px 0", borderRadius: 10, border: "none",
+                background: C.esmeralda, color: "#fff", fontSize: 14, fontWeight: 700,
+                cursor: novaSalvando ? "default" : "pointer", opacity: novaSalvando ? 0.6 : 1,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}
+            >
+              {novaSalvando
+                ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+                : <CheckCircle size={16} />}
+              Registrar corrida
+            </button>
+          </div>
+        </div>
       )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

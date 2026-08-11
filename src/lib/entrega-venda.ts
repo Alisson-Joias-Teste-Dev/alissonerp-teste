@@ -30,6 +30,7 @@ import { logAudit } from "@/lib/audit";
 import { vendaEntregaDevendo, vendaTemExcecaoEntregaAprovada } from "@/lib/entrega-sem-pagamento";
 import { enviarCodigoWhatsAppDetalhado, enviarCodigoClienteEmRota, enviarConfirmacaoEntregaConcluida, enviarAvisoDesenvolvedor } from "@/lib/whatsapp";
 import { uploadFile } from "@/lib/storage";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 // O client transacional do pacote postgres não expõe call signature adequada
 // para o TypeScript neste projeto; as rotas existentes usam o mesmo padrão.
@@ -58,6 +59,14 @@ export interface CriarEntregaParams {
   regiao?: "fortaleza" | "fora_fortaleza" | "longe" | "correios";
   motoboyId?: string; // UUID
   freteCobrado?: number;
+  /**
+   * Valor pago ao motoboy informado pelo usuário (31/07, pedido do Jonathan:
+   * campo editável no MarcarEntregaModal). Quando ausente, mantém o cálculo
+   * automático pela região (calcularValorMotoboy) — comportamento de sempre.
+   * Necessário para "longe"/"correios", cujo valor de tabela é 0 e só era
+   * ajustável DEPOIS, pela edição da entrega (atualizarEntrega).
+   */
+  freteMotoboy?: number;
   observacoes?: string;
 }
 
@@ -148,6 +157,147 @@ function money(v: unknown): number {
 
 function fmBRL(v: number): string {
   return `R$ ${v.toFixed(2)}`;
+}
+
+// ─── Fotos da confirmação de entrega (migration 357) ─────────────────────────
+
+/**
+ * REGRA DE NEGÓCIO (migration 357, decisão Jonathan 21/07): "sempre que o
+ * motoboy tiver uma corrida ele pode anexar fotos antes de finalizar — não é
+ * obrigatório". Vale pra TODA entrega dele: avulsa (confirmarFreteAvulso) e
+ * de pedido (confirmarEntrega). Limite de quantidade por confirmação — mesmo
+ * valor usado no padrão já existente do projeto (solicitação de peça,
+ * migration 349) para não inventar um número novo sem motivo.
+ */
+export const MAX_FOTOS_ENTREGA = 5;
+
+/**
+ * Insere as fotos de UMA confirmação de entrega na tabela filha
+ * entregas_venda_fotos, dentro da MESMA transação que já mudou a situação da
+ * entrega (atômico — se o INSERT falhar, quem chama decide se aborta ou
+ * segue: ver o try/catch em confirmarEntrega/confirmarFreteAvulso).
+ *
+ * IMPACTO SE ALTERADO: duplicar este INSERT em vez de reusar esta função
+ * arrisca as duas rotas (confirmar e confirmar-avulso) gravarem a foto de
+ * jeitos diferentes (campos, nulos) — mesmo motivo de `inserirFotos` no
+ * módulo de Movimentação Interna (src/app/api/solicitacao-peca/[id]/route.ts).
+ */
+function inserirFotosEntrega(
+  tx: DbSql,
+  entregaId: number,
+  paths: string[],
+  usuarioId: string,
+): Promise<unknown> {
+  if (paths.length === 0) return Promise.resolve();
+  const rows = paths.map((foto_path) => ({
+    entrega_id: entregaId,
+    foto_path,
+    criado_por_id: usuarioId,
+  }));
+  return tx`INSERT INTO alissonerp.entregas_venda_fotos ${tx(rows)}`;
+}
+
+/**
+ * Devolve a lista de fotos (paths, mais antiga → mais nova) de UMA entrega,
+ * unificando as duas fontes possíveis:
+ *   - entregas_venda_fotos (migration 357): 1+ fotos, confirmações NOVAS.
+ *   - entregas_venda.foto_entrega_path (migration 287, CONGELADA): 1 foto,
+ *     confirmações ANTIGAS (antes desta migration entrar em produção).
+ *
+ * REGRA DE NEGÓCIO: helper ÚNICO de leitura — a tela de detalhe (drawer) e
+ * qualquer relatório futuro (ex.: pagamento do motoboy) chamam ESTA função em
+ * vez de reimplementar o fallback. Mesmo padrão já usado no módulo
+ * Movimentação Interna (COALESCE com array_agg + fallback pra coluna antiga,
+ * ver src/app/(dashboard)/movimentacao-interna/page.tsx).
+ *
+ * IMPACTO SE REMOVIDO (ou se cada tela reimplementar por conta própria): fotos
+ * de entregas confirmadas ANTES da migration 357 (só na coluna antiga)
+ * ficariam invisíveis nas telas que só olharem a tabela nova.
+ */
+export async function buscarFotosEntrega(entregaId: number): Promise<string[]> {
+  const rows = await sql`
+    SELECT COALESCE(
+      (SELECT array_agg(foto_path ORDER BY criado_em, id)
+       FROM alissonerp.entregas_venda_fotos WHERE entrega_id = ${entregaId}),
+      (SELECT CASE WHEN NULLIF(btrim(foto_entrega_path), '') IS NOT NULL
+              THEN ARRAY[foto_entrega_path] ELSE '{}'::text[] END
+       FROM alissonerp.entregas_venda WHERE id = ${entregaId})
+    ) AS fotos
+  `;
+  return (rows[0]?.fotos ?? []) as string[];
+}
+
+/**
+ * Versão EM LOTE de `buscarFotosEntrega` — mesma unificação (tabela nova +
+ * fallback pra `foto_entrega_path`), mas para N entregas em UMA única
+ * consulta (`WHERE ev.id = ANY(...)`), em vez de uma consulta por entrega.
+ *
+ * REGRA DE NEGÓCIO: usada pelo relatório de pagamento do motoboy (aba
+ * "Pagamento do motoboy" — ver docs/regras-negocio/entregas.md §11 e
+ * `src/app/api/entregas-venda/motoboy/relatorio-pagamento/route.ts`), que
+ * lista dezenas de corridas de uma vez — chamar `buscarFotosEntrega` em loop
+ * (N+1) faria uma query por linha do relatório.
+ *
+ * IMPACTO SE REMOVIDO (voltar a chamar `buscarFotosEntrega` em loop): a rota
+ * do relatório passaria a fazer 1 query de fotos POR corrida do período,
+ * degradando com o volume (o requisito explícito da task é "sem N+1").
+ */
+export async function buscarFotosEntregaEmLote(
+  entregaIds: number[],
+): Promise<Map<number, string[]>> {
+  const mapa = new Map<number, string[]>();
+  if (entregaIds.length === 0) return mapa;
+
+  const rows = await sql`
+    SELECT
+      ev.id AS entrega_id,
+      COALESCE(
+        (SELECT array_agg(fev.foto_path ORDER BY fev.criado_em, fev.id)
+         FROM alissonerp.entregas_venda_fotos fev WHERE fev.entrega_id = ev.id),
+        (SELECT CASE WHEN NULLIF(btrim(ev.foto_entrega_path), '') IS NOT NULL
+                THEN ARRAY[ev.foto_entrega_path] ELSE '{}'::text[] END)
+      ) AS fotos
+    FROM alissonerp.entregas_venda ev
+    WHERE ev.id = ANY(${entregaIds})
+  `;
+
+  for (const r of rows as Record<string, unknown>[]) {
+    mapa.set(Number(r.entrega_id), (r.fotos ?? []) as string[]);
+  }
+  return mapa;
+}
+
+/**
+ * Faz upload de N fotos (base64) pro bucket pagamento-fotos, best-effort.
+ *
+ * REGRA DE NEGÓCIO: fotos são OPCIONAIS e NUNCA podem bloquear a finalização
+ * da entrega (decisão Jonathan) — por isso, ao contrário do comprovante
+ * obrigatório do frete avulso pago pelo cliente (criarFreteAvulso, que falha
+ * cedo/fail-fast se o Storage falhar), aqui uma falha de upload é logada e a
+ * foto problemática é apenas descartada; as demais (se houver) e a
+ * confirmação em si seguem normalmente.
+ *
+ * IMPACTO SE ALTERADO PARA FAIL-FAST: uma instabilidade do Storage passaria a
+ * derrubar a confirmação da entrega inteira por causa de um anexo opcional —
+ * o motoboy ficaria impedido de finalizar a corrida à toa.
+ */
+async function uploadFotosEntrega(
+  entregaId: number,
+  fotosBase64: string[],
+): Promise<string[]> {
+  const paths: string[] = [];
+  const timestamp = Date.now();
+  for (let i = 0; i < fotosBase64.length; i++) {
+    try {
+      const fotoPath = `entregas/${entregaId}/${timestamp}-${i}.jpg`;
+      const upload = await uploadFile("pagamento-fotos", fotoPath, fotosBase64[i], "image/jpeg");
+      if ("url" in upload) paths.push(upload.path);
+      else console.error(`[entrega-venda] Falha ao enviar foto ${i} da entrega ${entregaId}:`, upload.error);
+    } catch (err) {
+      console.error(`[entrega-venda] Erro ao enviar foto ${i} da entrega ${entregaId}:`, err);
+    }
+  }
+  return paths;
 }
 
 /**
@@ -557,6 +707,58 @@ export async function calcularBloqueioReposicao(
   };
 }
 
+/**
+ * Verifica se algum dos itens informados já está numa entrega ABERTA
+ * (situação `pendente` ou `em_rota` — ainda não confirmada nem cancelada).
+ *
+ * REGRA DE NEGÓCIO (bug pré-existente, fix 21/07 — "Marcar Entrega duplica
+ * linha"): `criarEntrega` grava a linha `entregas_venda` já em `pendente` no
+ * momento do clique — a confirmação (código A/B) acontece DEPOIS. Só que
+ * `vw_entregas_pendentes` (migration 285) desconta apenas entregas
+ * `situacao='confirmada'`. Resultado: enquanto a 1ª entrega não é confirmada
+ * (ou cancelada), o saldo pendente do item continua aparecendo CHEIO — se o
+ * operador abrir "Marcar Entrega" de novo para os MESMOS itens, o sistema
+ * deixa criar uma 2ª linha `entregas_venda` pendente para o mesmo item
+ * (evidência: venda 15500 em homolog, entregas 101/102, mesmos itens, ambas
+ * pendentes). Este guard fecha esse buraco.
+ *
+ * GRANULARIDADE — por ITEM (`item_venda_id`), não por venda inteira: uma
+ * venda pode ter uma entrega aberta para o item A e, ao mesmo tempo, montar
+ * uma entrega NOVA só com o item B (saldo de B ainda intocado) — isso é
+ * entrega PARCIAL legítima e não pode ser barrada. Barrar por venda inteira
+ * impediria exatamente esse fluxo (ex.: itens prontos saem hoje, o item em
+ * reposição sai depois — ver calcularBloqueioReposicao, mesmo princípio).
+ *
+ * ESCOPO — só entrega NORMAL: só existe linha em `entregas_venda_itens` para
+ * entregas criadas por `criarEntrega` (frete avulso — `criarFreteAvulso` —
+ * nunca insere itens, é outra função, ver docs/regras-negocio/entregas.md
+ * §7 chk_entrega_origem). Este guard não precisa (e não deve) filtrar
+ * `is_avulso` — a própria tabela de itens já restringe o universo.
+ *
+ * IMPACTO SE REMOVIDO: volta o bug — "Marcar Entrega" 2x nos mesmos itens
+ * sem confirmar/cancelar a 1ª cria uma 2ª linha pendente para o mesmo item
+ * (código de verificação e corrida duplicados para a mesma mercadoria).
+ */
+async function buscarItemJaEmEntregaAberta(
+  db: DbSql,
+  itemVendaIds: number[],
+): Promise<{ itemVendaId: number; codigoEntrega: string } | null> {
+  if (itemVendaIds.length === 0) return null;
+  const [row] = await db`
+    SELECT evi.item_venda_id, ev.codigo_entrega
+    FROM alissonerp.entregas_venda_itens evi
+    JOIN alissonerp.entregas_venda ev ON ev.id = evi.entrega_id
+    WHERE evi.item_venda_id = ANY(${itemVendaIds})
+      AND ev.situacao IN ('pendente', 'em_rota')
+    LIMIT 1
+  `;
+  if (!row) return null;
+  return {
+    itemVendaId: Number(row.item_venda_id),
+    codigoEntrega: String(row.codigo_entrega),
+  };
+}
+
 // ─── 4. Criação de Entrega ────────────────────────────────────────────────────
 
 /**
@@ -778,11 +980,31 @@ export async function criarEntrega(
   // (O bloqueio de reposição por item já foi aplicado acima, junto com a
   //  validação de saldo dos itens e da entrega 'total'.)
 
-  // 7. Cálculo do frete
+  // 6. Trava de entrega duplicada em aberto (fix 21/07 — checagem "amigável",
+  // FORA da transação, para devolver o erro cedo com o código da entrega
+  // aberta. Não é a barreira final: dois cliques quase simultâneos passam
+  // os dois por aqui (sem lock) — a barreira que garante atomicidade de
+  // verdade é o re-check DENTRO da transação, com FOR UPDATE, logo abaixo.
+  // Ver buscarItemJaEmEntregaAberta para a regra de negócio completa.
+  const itemIds = params.itens.map((i) => i.itemVendaId);
+  const duplicadoAntesDaTx = await buscarItemJaEmEntregaAberta(sql, itemIds);
+  if (duplicadoAntesDaTx) {
+    throw new Error(
+      `Já existe uma entrega em aberto (${duplicadoAntesDaTx.codigoEntrega}) para esta venda. ` +
+        "Confirme ou cancele a entrega em aberto antes de criar outra.",
+    );
+  }
+
+  // 7. Cálculo do frete — o valor informado pelo usuário (freteMotoboy) tem
+  // precedência sobre a tabela por região; a regra de aprovação e o saldo de
+  // frete grátis abaixo usam o mesmo valor, seja ele qual for.
   const regiao = params.regiao ?? null;
-  const freteMotoboyCalculado = regiao
-    ? calcularValorMotoboy(regiao)
-    : 0;
+  const freteMotoboyCalculado =
+    params.freteMotoboy != null
+      ? money(params.freteMotoboy)
+      : regiao
+        ? calcularValorMotoboy(regiao)
+        : 0;
   const freteCobrado = money(params.freteCobrado ?? 0);
   const aprovacaoFreteNecessaria =
     params.formaEntrega === "motoboy" &&
@@ -791,6 +1013,38 @@ export async function criarEntrega(
   // ─── Transação atômica ────────────────────────────────────────────────────
 
   const entregaBase = await sql.begin(async (tx: DbSql) => {
+    // TRAVA ATÔMICA de entrega duplicada (fix 21/07 — fecha a corrida do
+    // duplo-clique que a checagem "amigável" acima não fecha sozinha):
+    // bloqueia (FOR UPDATE) as linhas dos itens da venda ANTES de reconferir
+    // se algum já está em entrega aberta. Duas requisições quase
+    // simultâneas para o MESMO item serializam aqui — a 2ª só adquire o lock
+    // depois que a 1ª confirma (COMMIT) ou desiste (ROLLBACK) a própria
+    // transação; quando a 2ª finalmente lê, já enxerga a linha
+    // entregas_venda_itens que a 1ª acabou de gravar (READ COMMITTED: cada
+    // comando dentro da transação vê o estado já commitado mais recente) e
+    // aborta. Mesmo princípio do CLAIM atômico de aceitarFreteAvulso (UPDATE
+    // condicional dentro da tx) — aqui não há linha para UPDATE ainda (a
+    // entrega nem existe), então o lock recai sobre o recurso que TODAS as
+    // tentativas concorrentes para o mesmo item têm em comum: a própria
+    // linha do item vendido.
+    // IMPACTO SE REMOVIDO: a checagem de fora da transação sozinha permite
+    // que duas requisições simultâneas passem as duas (nenhuma vê a linha da
+    // outra ainda, porque nenhuma foi commitada) e criem 2 entregas abertas
+    // para o mesmo item — exatamente o bug original, só que via duplo-clique
+    // em vez de reabrir o modal depois.
+    await tx`
+      SELECT id FROM alissonerp.itens_venda_erp
+      WHERE id = ANY(${itemIds})
+      FOR UPDATE
+    `;
+    const duplicadoNaTx = await buscarItemJaEmEntregaAberta(tx, itemIds);
+    if (duplicadoNaTx) {
+      throw new Error(
+        `Já existe uma entrega em aberto (${duplicadoNaTx.codigoEntrega}) para esta venda. ` +
+          "Confirme ou cancele a entrega em aberto antes de criar outra.",
+      );
+    }
+
     // Gerar códigos dentro da transação para atomicidade
     const codigoEntrega = await gerarCodigoEntrega(tx);
     const codigoCliente = await gerarCodigoVerificacao(tx);
@@ -1309,12 +1563,29 @@ async function tentarEnviarWhatsAppConclusao(vendaId: number): Promise<void> {
  * IMPACTO SE ALTERADO: a baixa de estoque (baixa_estoque_realizada = true)
  * é o gatilho para dedução do estoque físico. Alterar este fluxo pode
  * causar estoque inconsistente ou dupla baixa.
+ *
+ * FOTOS (migration 357 — decisão Jonathan 21/07): `fotosBase64` é OPCIONAL e
+ * aceita várias (até MAX_FOTOS_ENTREGA). ⚠️ ORDEM INVIOLÁVEL (alerta
+ * Jonathan): o código A/B é validado ANTES de qualquer coisa (guards acima,
+ * antes até de abrir a transação) — a foto NUNCA é condição pra aprovar o
+ * código, nunca antecipa nem substitui essa checagem. Só depois do código
+ * aprovado (já dentro da transação) é que as fotos são enviadas ao Storage e
+ * gravadas; se o código for inválido, a função já retornou erro bem antes —
+ * nenhum arquivo é sequer tentado. Upload é best-effort (não fail-fast): ver
+ * uploadFotosEntrega — falha de Storage não derruba a confirmação.
  */
 export async function confirmarEntrega(
   entregaId: number,
   codigo: string,
   usuarioId: string,
-  fotoBase64?: string,
+  fotosBase64?: string[],
+  // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — localização/foto
+  // obrigatórias no app do motoboy): opcional em TODOS os campos para não
+  // quebrar chamador nenhum (inclusive os testes existentes, que nunca
+  // passam este parâmetro). `usuarioRole` só é usado para decidir SE a
+  // exigência abaixo se aplica — quem confirma pelo escritório (admin/
+  // gerente) continua exatamente como antes, foto/localização opcionais.
+  opts?: { usuarioRole?: string; latitude?: number; longitude?: number },
 ): Promise<ConfirmacaoResult> {
   // Carregar entrega
   const [entrega] = await sql`
@@ -1394,6 +1665,28 @@ export async function confirmarEntrega(
     }
     const restantes = MAX_TENTATIVAS_CODIGO - Number(tent?.tentativas_codigo ?? 0);
     throw new Error(`Código inválido. ${restantes} tentativa(s) restante(s) antes do bloqueio.`);
+  }
+
+  // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — localização/foto
+  // obrigatórias no app do motoboy): roda DEPOIS do código já validado acima
+  // (ORDEM INVIOLÁVEL — não muda: foto/localização nunca antecipam nem
+  // substituem a checagem do código, só se somam a ela quando o código já é
+  // válido). Vale SÓ para o motoboy (role 'entregador') confirmando ENTREGA
+  // AO CLIENTE (código A, forma_entrega='motoboy') — não vale pra retirada
+  // na loja pelo motoboy (código B) nem pra cliente retirando na loja
+  // (forma_entrega='retirada'), e não vale quando quem confirma é
+  // admin/gerente pelo escritório (ex.: motoboy sem celular, cliente ligou
+  // passando o código) — aí continua tudo opcional, como sempre foi.
+  // IMPACTO SE REMOVIDO: motoboy volta a poder finalizar a entrega ao
+  // cliente sem provar hora/local/foto — motivo original deste bloco.
+  const ehEntregaAoClientePeloMotoboy = !matchMotoboy && String(entrega.forma_entrega) !== "retirada";
+  if (opts?.usuarioRole === "entregador" && ehEntregaAoClientePeloMotoboy) {
+    if (!fotosBase64 || fotosBase64.length === 0) {
+      throw new Error("Anexe ao menos 1 foto para confirmar a entrega ao cliente.");
+    }
+    if (opts.latitude == null || opts.longitude == null) {
+      throw new Error("Não foi possível obter sua localização. Ative o GPS e tente novamente.");
+    }
   }
 
   // ── Pré-validação: reposição POR ITEM ─────────────────────────────────────
@@ -1512,6 +1805,8 @@ export async function confirmarEntrega(
             data_entrega_realizada = now(),
             status = 'confirmada',
             confirmado_por_motoboy_entrega = ${usuarioId}::uuid,
+            latitude_entrega = ${opts?.latitude ?? null},
+            longitude_entrega = ${opts?.longitude ?? null},
             updated_at = now()
           WHERE id = ${entregaId}
         `;
@@ -1553,20 +1848,19 @@ export async function confirmarEntrega(
     // se falhar, a confirmação continua válida sem foto.
     // POR QUE: auditoria visual de quem retirou/recebeu a mercadoria.
     // IMPACTO SE REMOVIDO: perde-se comprovação fotográfica da entrega.
-    if (fotoBase64) {
-      try {
-        const timestamp = Date.now();
-        const fotoPath = `entregas/${entregaId}/${timestamp}.jpg`;
-        const upload = await uploadFile("pagamento-fotos", fotoPath, fotoBase64, "image/jpeg");
-        if ("url" in upload) {
-          await tx`
-            UPDATE alissonerp.entregas_venda
-            SET foto_entrega_path = ${upload.path}
-            WHERE id = ${entregaId}
-          `;
+    // MULTIFOTO (migration 357): coluna foto_entrega_path fica CONGELADA (não
+    // é mais escrita — mesmo padrão da migration 349 no módulo Movimentação
+    // Interna); fotos novas vão para entregas_venda_fotos via inserirFotosEntrega.
+    // Upload best-effort (uploadFotosEntrega) — nunca lança, então uma falha
+    // de Storage não derruba a confirmação já validada por código.
+    if (fotosBase64 && fotosBase64.length > 0) {
+      const paths = await uploadFotosEntrega(entregaId, fotosBase64);
+      if (paths.length > 0) {
+        try {
+          await inserirFotosEntrega(tx, entregaId, paths, usuarioId);
+        } catch (fotoErr) {
+          console.error("[entrega-venda] Erro ao registrar fotos da entrega:", fotoErr);
         }
-      } catch (fotoErr) {
-        console.error("[entrega-venda] Erro ao salvar foto da entrega:", fotoErr);
       }
     }
 
@@ -1618,7 +1912,8 @@ export async function confirmarEntrega(
  * Entregas já confirmadas ou já canceladas não podem ser alteradas.
  * O cancelamento libera o saldo pendente dos itens para novas entregas.
  *
- * O QUE: atualiza situacao para 'cancelada', registra auditoria.
+ * O QUE: atualiza situacao para 'cancelada', ESTORNA o lançamento de frete
+ * grátis da gerente (ver comentário dentro da transação) e registra auditoria.
  *
  * POR QUE: permite corrigir erros operacionais (ex: entrega criada com
  * itens errados) sem perder rastreabilidade — o registro permanece
@@ -1655,6 +1950,60 @@ export async function cancelarEntrega(
       SET status = 'cancelada', updated_at = now()
       WHERE id = ${entregaId}
     `;
+
+    /**
+     * REGRA DE NEGÓCIO: cancelar a entrega DESFAZ o lançamento de frete grátis
+     * que a criação gerou na conta da gerente.
+     *
+     * O QUE: soma o líquido (créditos − débitos) dos lançamentos desta entrega
+     * em `saldo_frete_gratis` e grava um CONTRA-LANÇAMENTO de sinal oposto.
+     *
+     * POR QUE: `criarEntrega` lança crédito/débito na hora em que a entrega
+     * NASCE, em cima da PREVISÃO de frete (cobrado × motoboy) — antes de se
+     * saber se a entrega vai acontecer. Sem estorno, toda entrega cancelada
+     * deixa dinheiro fantasma no saldo da gerente. Em 31/07/2026 havia 14
+     * lançamentos órfãos de entregas canceladas (R$ 82,00 líquidos a mais na
+     * conta dela) — que iriam direto para o fechamento mensal e para a conta a
+     * pagar dela.
+     *
+     * COMO: contra-lançamento, NUNCA apagar/editar o lançamento original — o
+     * extrato é histórico e auditável (mesmo padrão do fechamento mensal em
+     * `src/lib/frete-fechamento.ts`). Como o estorno zera o líquido DA ENTREGA,
+     * rodar de novo não tem efeito (líquido 0 = nada a estornar).
+     *
+     * IMPACTO SE REMOVIDO: volta o bug — o saldo da gerente infla/desinfla com
+     * entregas que nunca saíram, e o fechamento do mês cobra (ou perdoa) valor
+     * errado.
+     */
+    const [saldoEntrega] = await tx`
+      SELECT gerente_id,
+             MAX(venda_id) AS venda_id,
+             COALESCE(SUM(CASE WHEN tipo = 'credito' THEN valor ELSE 0 END), 0)
+           - COALESCE(SUM(CASE WHEN tipo = 'debito'  THEN valor ELSE 0 END), 0) AS liquido
+      FROM alissonerp.saldo_frete_gratis
+      WHERE entrega_id = ${entregaId}
+      GROUP BY gerente_id
+    `;
+
+    const liquido = money(saldoEntrega?.liquido);
+    if (saldoEntrega && liquido !== 0) {
+      const gerenteId = saldoEntrega.gerente_id;
+      const saldoAntes = await obterSaldoFreteGerenteNoTx(tx, gerenteId);
+      await tx`
+        INSERT INTO alissonerp.saldo_frete_gratis
+          (gerente_id, tipo, valor, saldo_antes, saldo_depois, entrega_id, venda_id, descricao, created_by)
+        VALUES
+          (${gerenteId}::uuid,
+           ${liquido > 0 ? "debito" : "credito"},
+           ${Math.abs(liquido)},
+           ${saldoAntes},
+           ${money(saldoAntes - liquido)},
+           ${entregaId},
+           ${saldoEntrega.venda_id ?? null},
+           ${`Estorno — entrega ${entrega.codigo_entrega} cancelada`},
+           ${usuarioId}::uuid)
+      `;
+    }
 
     await logAudit(tx, {
       tabela: "entregas_venda",
@@ -1887,7 +2236,66 @@ export interface MovimentacaoFrete {
   createdAt: string;
 }
 
-async function obterSaldoFreteGerenteNoTx(tx: DbSql, gerenteId: string): Promise<number> {
+/**
+ * Resolve o id da gerente dona do saldo de frete grátis do FRETE AVULSO —
+ * FONTE ÚNICA de leitura, usada por `lancarSaldoFreteAvulsoNoTx` (grava o
+ * saldo) E por GET /api/entregas-venda/saldo-frete (consulta o saldo).
+ *
+ * O QUE: lê a chave de config `gerente_frete_gratis` (UUID único, tela
+ * Config › Aprovadores — mesmo padrão de aprovador_limpeza/metal_aprovador_id).
+ *
+ * POR QUE: antes a gerente era escolhida por
+ * `WHERE role='gerente_loja' AND ativo=true ORDER BY created_at LIMIT 1` —
+ * arbitrário (o primeiro gerente_loja cadastrado, sem relação com quem de
+ * fato é a gerente configurada para receber a verba). Virou bug latente em
+ * produção com múltiplas gerentes ativas.
+ *
+ * ⚠️ FALLBACK OBRIGATÓRIO: com a chave VAZIA (ninguém configurou ainda),
+ * mantém EXATAMENTE o comportamento antigo (`ORDER BY created_at LIMIT 1`) —
+ * zero impacto em produção até o Jonathan configurar `gerente_frete_gratis`.
+ *
+ * IMPACTO SE DUPLICADA (função copiada em vez de importada): os 2 pontos
+ * (lançamento do saldo e consulta do saldo) podem divergir sobre QUEM é a
+ * gerente — saldo gravado para uma pessoa, exibido para outra.
+ *
+ * NÃO usada por `criarEntrega` (entrega normal, não-avulso) — aquele fluxo
+ * tem sua PRÓPRIA busca arbitrária de gerente_loja (linha ~878 deste
+ * arquivo), fora do escopo desta mudança (reportado ao Jonathan, não
+ * alterado).
+ */
+export async function resolverGerenteFreteGratisId(db: DbSql, fallbackUserId: string): Promise<string> {
+  const [config] = await db`
+    SELECT valor FROM alissonerp.configuracoes_unificado
+    WHERE chave = 'gerente_frete_gratis'
+  `;
+  const configurado = typeof config?.valor === "string" ? config.valor.trim() : "";
+  if (configurado) return configurado;
+
+  // Fallback antigo (arbitrário, mantido por compatibilidade — ver comentário acima).
+  const [gerente] = await db`
+    SELECT id FROM alissonerp.usuarios
+    WHERE role = 'gerente_loja' AND ativo = true
+    ORDER BY created_at LIMIT 1
+  `;
+  return (gerente?.id as string | undefined) ?? fallbackUserId;
+}
+
+/**
+ * REGRA DE NEGÓCIO: saldo ATUAL (running total) do frete grátis da gerente —
+ * soma TODOS os lançamentos de saldo_frete_gratis (créditos − débitos), sem
+ * filtrar por fechamento_id. Isso é intencional: um fechamento mensal nunca
+ * apaga/estorna lançamentos antigos, ele só GRAVA um contra-lançamento novo
+ * (mesma tabela, fechamento_id preenchido) que zera o saldo — então a soma de
+ * TUDO já reflete o histórico de fechamentos corretamente (telescópico).
+ *
+ * EXPORTADA (BLOCO 4, 21/07) para reuso por `src/lib/frete-fechamento.ts`
+ * (rotina automática do dia 01) — a apuração do saldo a fechar usa esta MESMA
+ * função (dentro da própria transação do fechamento, passando `tx`) em vez de
+ * duplicar a soma credito−debito.
+ * IMPACTO SE DUPLICADA: uma 2ª soma de saldo que pode divergir desta (ex.: um
+ * dos dois lados esquecer de contar um tipo de lançamento novo no futuro).
+ */
+export async function obterSaldoFreteGerenteNoTx(tx: DbSql, gerenteId: string): Promise<number> {
   const [row] = await tx`
     SELECT
       COALESCE(SUM(CASE WHEN tipo = 'credito' THEN valor ELSE 0 END), 0)
@@ -1970,19 +2378,216 @@ function montarMovimentacao(r: any): MovimentacaoFrete {
 // ─── 10. Frete Avulso ─────────────────────────────────────────────────────────
 
 /**
+ * Lê o pool de aprovadores de frete avulso (chave MULTI `aprovadores_frete_avulso`,
+ * Config › Aprovadores, UUIDs separados por vírgula).
+ *
+ * REGRA DE NEGÓCIO (V3 — consolidação): FONTE ÚNICA da lista do pool. Antes
+ * a mesma query (SELECT + split(",") + trim + filter(Boolean)) estava
+ * duplicada em 4 lugares (criarFreteAvulso, o antigo podeGerenciarSolicitacoesAvulso,
+ * GET /api/tarefas e PATCH /api/tarefas/[id]/aprovacao) — quem AUTORIZA (decide
+ * a tarefa) e quem CRIA a tarefa (responsavel_id) têm que ver exatamente a
+ * mesma lista, senão a tela mostra a solicitação para alguém que a API depois
+ * nega (ou vice-versa).
+ *
+ * IMPACTO SE ALTERADO: divergência entre os consumidores volta a acontecer —
+ * cada um lendo a config de um jeito ligeiramente diferente.
+ */
+export async function listarAprovadoresFreteAvulso(): Promise<string[]> {
+  const [cfg] = await sql`
+    SELECT valor FROM alissonerp.configuracoes_unificado
+    WHERE chave = 'aprovadores_frete_avulso'
+  `;
+  return String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Lê o pool de aprovadores do frete avulso pago pela LOJA (chave MULTI
+ * `aprovadores_frete_avulso_loja`, Config › Aprovadores).
+ *
+ * REGRA DE NEGÓCIO (migration 359, 21/07 — "quem paga"): irmã de
+ * listarAprovadoresFreteAvulso — mesma FONTE ÚNICA da lista, só que para o
+ * pool que autoriza o CUSTO quando a solicitação é paga pela loja (pagante
+ * ='loja'), não o que acompanha a corrida já paga pelo cliente.
+ *
+ * IMPACTO SE ALTERADO: divergência entre criação (responsavel_id/notificação)
+ * e decisão (podeDecidir) para as solicitações pagas pela loja.
+ */
+export async function listarAprovadoresFreteAvulsoLoja(): Promise<string[]> {
+  const [cfg] = await sql`
+    SELECT valor FROM alissonerp.configuracoes_unificado
+    WHERE chave = 'aprovadores_frete_avulso_loja'
+  `;
+  return String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Monta uma string legível de endereço a partir dos campos estruturados de
+ * entregas_venda (endereco_entrega = logradouro + colunas endereco_entrega_*
+ * da migration 355 — número/complemento/bairro/cidade/CEP/UF).
+ *
+ * O QUE: concatena logradouro, nº, complemento, bairro, cidade, UF e CEP no
+ * MESMO formato usado no resto do módulo de vendas (ex.: montarEndereco() em
+ * FreteAvulsoModal.tsx, gerarPdf() em VendaDetalheClient.tsx).
+ *
+ * POR QUE: FONTE ÚNICA da concatenação para quem precisa exibir texto legível
+ * a partir do endereço estruturado do frete avulso — hoje usado pela
+ * descrição da tarefa de aprovação (criarFreteAvulso, logo abaixo), por
+ * GET /api/entregas-venda/motoboy/minhas (card do motoboy) e por
+ * GET /api/entregas-venda (listagem/aba Solicitações).
+ *
+ * IMPACTO SE DUPLICADO: cada tela formatando o endereço à sua maneira — uma
+ * mudança de formato (ex.: trocar vírgula por quebra de linha) exigiria achar
+ * e editar N lugares em vez de um só.
+ */
+export function formatarEnderecoEntregaAvulso(row: {
+  endereco_entrega?: string | null;
+  endereco_entrega_numero?: string | null;
+  endereco_entrega_complemento?: string | null;
+  endereco_entrega_bairro?: string | null;
+  endereco_entrega_cidade?: string | null;
+  endereco_entrega_cep?: string | null;
+  endereco_entrega_uf?: string | null;
+}): string | null {
+  const partes = [
+    row.endereco_entrega,
+    row.endereco_entrega_numero ? `nº ${row.endereco_entrega_numero}` : null,
+    row.endereco_entrega_complemento,
+    row.endereco_entrega_bairro,
+    row.endereco_entrega_cidade,
+    row.endereco_entrega_uf,
+    row.endereco_entrega_cep,
+  ].filter((p): p is string => !!p && p.trim() !== "");
+  return partes.length > 0 ? partes.join(", ") : null;
+}
+
+/** Conjunto de colunas estruturadas de endereço (mesmo shape em entregas_venda e vendas_erp). */
+export interface EnderecoEntregaCampos {
+  endereco_entrega: string | null;
+  endereco_entrega_numero: string | null;
+  endereco_entrega_complemento: string | null;
+  endereco_entrega_bairro: string | null;
+  endereco_entrega_cidade: string | null;
+  endereco_entrega_cep: string | null;
+  endereco_entrega_uf: string | null;
+}
+
+/** Algum campo do conjunto está preenchido (não-nulo e não-string-vazia)? */
+function enderecoTemAlgumCampo(c: EnderecoEntregaCampos): boolean {
+  return Object.values(c).some((v) => v != null && String(v).trim() !== "");
+}
+
+/**
+ * BLOCO 4 (jul/2026), P1 — decide qual dos DOIS conjuntos de endereço vale
+ * pro drawer de detalhe da entrega (GET /api/entregas-venda/[id]): o
+ * gravado em `entregas_venda` (endereço estruturado da migration 355 — o
+ * que a consultora CONFIRMOU na solicitação de frete avulso) ou o de
+ * `vendas_erp` (o cadastrado na venda em si).
+ *
+ * O QUE: se a ENTREGA tem QUALQUER campo de endereço próprio preenchido,
+ *   usa o conjunto DELA INTEIRO — nunca mistura com o da venda. Só cai
+ *   pro conjunto da VENDA quando a entrega não tem NENHUM campo de
+ *   endereço preenchido (entrega normal, não-avulsa, que nunca grava
+ *   endereço próprio — só a venda tem).
+ * POR QUE (whole-set, não COALESCE campo a campo): endereço é uma unidade
+ *   — logradouro e bairro têm que vir do MESMO lugar. Um COALESCE campo a
+ *   campo geraria endereço "Frankenstein" (ex.: logradouro da ENTREGA +
+ *   bairro da VENDA) sempre que um dos dois lados tiver só PARTE do
+ *   endereço preenchida — caso comum de solicitação com endereço mínimo
+ *   (logradouro + número + cidade, ver migration 355) vinculada a uma
+ *   venda que tem endereço completo cadastrado.
+ * IMPACTO SE ALTERADO/REMOVIDO: GET /api/entregas-venda/[id] volta a
+ *   sempre expor o endereço da VENDA (bug original do BLOCO 4) — loja e
+ *   motoboy voltam a ver endereços DIFERENTES pra frete avulso com
+ *   endereço próprio, e o caso "sem venda vinculada" volta a aparecer
+ *   como "Endereço não informado na venda" mesmo com o endereço da
+ *   entrega gravado.
+ */
+export function resolverEnderecoEntrega(
+  enderecoEntrega: EnderecoEntregaCampos,
+  enderecoVenda: EnderecoEntregaCampos,
+): EnderecoEntregaCampos {
+  return enderecoTemAlgumCampo(enderecoEntrega) ? enderecoEntrega : enderecoVenda;
+}
+
+/**
  * Parâmetros para criação de frete avulso (corrida sem venda vinculada).
  * REGRA DE NEGÓCIO: avulso não tem venda, itens ou código de verificação.
  * Motoboy e frete_cobrado são obrigatórios. Cliente e descrição são opcionais.
  * IMPACTO SE ALTERADO: avulso sem motoboy não pode ser confirmado depois.
  */
 export interface CriarFreteAvulsoParams {
-  motoboyId: string; // UUID — obrigatório
+  // REGRA DE NEGÓCIO (pool de motoboy — patch A2): motoboyId é OPCIONAL.
+  // Solicitação da consultora e criação direta SEM motoboy caem no POOL (a
+  // corrida nasce sem dono, motoboy_id NULL, e o 1º motoboy que aceitar
+  // assume — ver aceitarFreteAvulso). Quando informado (criação direta com
+  // motoboy escolhido, ou auto-registro do entregador do PR#75), a corrida já
+  // nasce com dono.
+  motoboyId?: string; // UUID
   regiao: "fortaleza" | "fora_fortaleza" | "longe" | "correios";
   freteCobrado: number;
   freteMotoboyOverride?: number; // usado em longe/correios onde frete=0 e valor é negociado
   descricaoAvulso?: string;
   contatoId?: number;
   observacoes?: string;
+  // REGRA DE NEGÓCIO (solicitação da consultora — migration 353, modelo POOL;
+  // fix 21/07 — venda deixa de ser obrigatória): quando modoSolicitacao=true,
+  // o avulso nasce 'solicitada' (sem lançar saldo) até que QUALQUER aprovador
+  // do pool (chave de config aprovadores_frete_avulso) ou admin/dev/diretor
+  // libere ou recuse — não há mais responsável designado. vendaId é OPCIONAL
+  // nesse modo: a corrida por natureza pode não partir de uma venda (ex.:
+  // "levar material à loja", "buscar peça") — quando informado, herda
+  // cliente/endereço e passa pelas checagens de ownership/janela/duplicata
+  // (ver criarFreteAvulso); só o endereço estruturado continua obrigatório
+  // (validado em criarFreteAvulso()).
+  // IMPACTO SE VOLTAR A EXIGIR: reabre o erro original — bloqueia corridas
+  // avulsas legítimas sem venda.
+  vendaId?: number;
+  // REGRA DE NEGÓCIO (migration 355 — endereço estruturado, 21/07): antes um
+  // único campo de texto livre (`enderecoEntrega`, concatenado no client) —
+  // agora campo a campo, espelhando os nomes de vendas_erp.endereco_entrega_*.
+  // `enderecoEntregaLogradouro` grava na MESMA coluna `endereco_entrega` que
+  // já existia (migration 353) — reaproveitada como "logradouro" (ver
+  // migration 355 para a justificativa completa). Mínimo exigido no modo
+  // solicitação: logradouro + número + cidade (validado abaixo e no front).
+  // IMPACTO SE ALTERADO: motoboy/minhas e a listagem de solicitações
+  // (GET /api/entregas-venda) dependem destes nomes para montar o endereço
+  // legível via formatarEnderecoEntregaAvulso() acima.
+  enderecoEntregaLogradouro?: string;
+  enderecoEntregaNumero?: string;
+  enderecoEntregaComplemento?: string;
+  enderecoEntregaBairro?: string;
+  enderecoEntregaCidade?: string;
+  enderecoEntregaCep?: string;
+  enderecoEntregaUf?: string;
+  modoSolicitacao?: boolean;
+  // REGRA DE NEGÓCIO (migration 359, 21/07 — "quem paga"; estendido na
+  // reforma da tela Entregas para o modo DIRETO com formulário completo):
+  // obrigatório sempre que `usaFormularioCompleto` for true (modoSolicitacao=
+  // true OU o caller mandou este campo — ver `usaFormularioCompleto` em
+  // criarFreteAvulso). Decide o comprovante SEMPRE; decide o aprovador SÓ no
+  // modo solicitação (criação direta não tem pool/tarefa, mas continua
+  // gravando `pagante` para fins de acompanhamento/relatório):
+  //   'cliente' -> exige comprovanteBase64; no modo solicitação, aprovador =
+  //     aprovadores_frete_avulso (evento 'frete_avulso' — lista serve para
+  //     ACOMPANHAR, dinheiro já com a loja).
+  //   'loja'    -> comprovante NÃO exigido; no modo solicitação, aprovador =
+  //     aprovadores_frete_avulso_loja (evento 'frete_avulso_loja' — autoriza
+  //     o CUSTO assumido pela loja).
+  // Sempre UMA etapa de aprovação (só na solicitação) — só muda quem decide
+  // (ver eventoDaTarefa). No modo direto não há aprovação nenhuma; `pagante`
+  // só registra quem bancou o custo.
+  // IMPACTO SE REMOVIDO: sem saber quem paga não dá para escolher comprovante
+  // obrigatório nem (na solicitação) o pool certo de aprovadores.
+  pagante?: "loja" | "cliente";
+  // REGRA DE NEGÓCIO (migration 359): comprovante de pagamento do frete,
+  // OBRIGATÓRIO quando pagante='cliente'. Base64 (data URL ou puro — uploadFile
+  // remove o prefixo data:...;base64, se existir). Reusa o bucket
+  // `pagamento-fotos` (mesmo de foto_entrega_path e compras de metal) — coluna
+  // própria (comprovante_pagante_path) porque é um momento diferente do
+  // ciclo de vida (solicitação, não confirmação de entrega).
+  // IMPACTO SE REMOVIDO: solicitação paga pelo cliente ficaria sem
+  // comprovante, quebrando a exigência de auditoria do pagamento.
+  comprovanteBase64?: string;
 }
 
 /** Resultado da criação de frete avulso */
@@ -1991,7 +2596,9 @@ export interface FreteAvulso {
   codigoEntrega: string;
   situacao: string;
   regiao: string;
-  motoboyId: string;
+  // REGRA DE NEGÓCIO (pool — patch A2): null enquanto a corrida está no pool
+  // sem dono (ver CriarFreteAvulsoParams.motoboyId).
+  motoboyId: string | null;
   freteCobrado: number;
   freteMotoboy: number;
   descricaoAvulso: string | null;
@@ -2001,6 +2608,69 @@ export interface FreteAvulso {
   createdAt: string;
   motoboyNome: string | null;
   motoboyTelefone: string | null;
+  vendaId: number | null;
+  enderecoEntrega: string | null;
+  // migration 359 — "quem paga" a solicitação (null nas criações diretas, que
+  // continuam sem esse campo — ver criarFreteAvulso).
+  pagante: "loja" | "cliente" | null;
+}
+
+/**
+ * Lança a diferença entre frete cobrado e frete do motoboy no saldo_frete_gratis
+ * (conta-corrente da gerente) para um frete avulso.
+ *
+ * O QUE: resolve a gerente via resolverGerenteFreteGratisId (config
+ * `gerente_frete_gratis`, com fallback ao antigo gerente_loja mais antigo —
+ * ver BLOCO 1, 21/07), calcula saldo antes/depois e insere crédito (cobrado
+ * > motoboy) ou débito (cobrado < motoboy) vinculado à entrega.
+ *
+ * POR QUE: avulso é sempre custo da loja — o frete_motoboy sai do saldo da
+ * gerente, e o que foi cobrado a mais do cliente volta como crédito.
+ *
+ * IMPACTO SE ALTERADO: é o ÚNICO ponto que grava saldo_frete_gratis para
+ * avulso — chamado tanto na CRIAÇÃO direta (roles de loja/admin/motoboy)
+ * quanto na LIBERAÇÃO de uma solicitação da consultora (liberarFreteAvulso).
+ * Duplicar esta lógica em outro lugar gera lançamento dobrado no saldo da gerente.
+ */
+async function lancarSaldoFreteAvulsoNoTx(
+  tx: DbSql,
+  entregaId: number,
+  freteCobrado: number,
+  freteMotoboy: number,
+  userId: string,
+): Promise<void> {
+  if (!(freteMotoboy > 0 || freteCobrado > 0)) return;
+  const diff = money(freteCobrado - freteMotoboy);
+  if (diff === 0) return;
+
+  // BLOCO 1 (gerente configurável, 21/07): fonte única — ver comentário
+  // completo em resolverGerenteFreteGratisId. Fallback idêntico ao antigo
+  // ORDER BY created_at quando a chave gerente_frete_gratis está vazia.
+  const gerenteId = await resolverGerenteFreteGratisId(tx, userId);
+  const saldoAntes = await obterSaldoFreteGerenteNoTx(tx, gerenteId);
+
+  if (diff > 0) {
+    await tx`
+      INSERT INTO alissonerp.saldo_frete_gratis
+        (gerente_id, tipo, valor, saldo_antes, saldo_depois, entrega_id, venda_id, descricao, created_by)
+      VALUES
+        (${gerenteId}::uuid, 'credito', ${diff}, ${saldoAntes}, ${money(saldoAntes + diff)},
+         ${entregaId}, NULL,
+         ${`Frete avulso cobrado ${fmBRL(freteCobrado)} > motoboy ${fmBRL(freteMotoboy)}`},
+         ${userId}::uuid)
+    `;
+  } else {
+    const debito = Math.abs(diff);
+    await tx`
+      INSERT INTO alissonerp.saldo_frete_gratis
+        (gerente_id, tipo, valor, saldo_antes, saldo_depois, entrega_id, venda_id, descricao, created_by)
+      VALUES
+        (${gerenteId}::uuid, 'debito', ${debito}, ${saldoAntes}, ${money(saldoAntes - debito)},
+         ${entregaId}, NULL,
+         ${`Frete avulso cobrado ${fmBRL(freteCobrado)} < motoboy ${fmBRL(freteMotoboy)}`},
+         ${userId}::uuid)
+    `;
+  }
 }
 
 /**
@@ -2024,19 +2694,242 @@ export async function criarFreteAvulso(
   params: CriarFreteAvulsoParams,
   userId: string,
 ): Promise<FreteAvulso> {
-  if (!params.motoboyId) {
-    throw new Error("Motoboy é obrigatório para frete avulso.");
-  }
+  // REGRA DE NEGÓCIO (reforma da tela Entregas, 21/07 — decisão do Jonathan:
+  // "mesmo formulário da tarefa, mas criação DIRETA"): o botão "Frete Avulso"
+  // da tela de Entregas passou a usar o MESMO formulário completo da
+  // solicitação (venda opcional, endereço estruturado, quem paga +
+  // comprovante, valor cobrado, região, observação) — só que sem enviar
+  // `solicitar`, então continua nascendo 'pendente' (sem tarefa/pool). O QUE:
+  // `usaFormularioCompleto` é `true` tanto na solicitação real
+  // (`modoSolicitacao=true`) quanto nesse novo modo direto-com-formulário-
+  // completo (detectado pela PRESENÇA de `pagante` no payload — só o
+  // formulário completo manda esse campo; o formulário enxuto antigo, o
+  // auto-registro do entregador e chamadas legadas nunca mandam `pagante`).
+  // POR QUE: as validações de endereço/pagante/comprovante (abaixo) e a
+  // gravação de `pagante`/comprovante no INSERT fazem sentido nos dois casos
+  // — a única coisa que distingue solicitação de direto é `situacaoInicial`
+  // (sempre ligado a `modoSolicitacao`, nunca a `usaFormularioCompleto`) e a
+  // criação (ou não) da tarefa de aprovação.
+  // IMPACTO SE REMOVIDO: o modo direto completo voltaria a descartar
+  // pagante/comprovante (como antes desta reforma) mesmo o front exigindo e
+  // enviando os dois campos — perda silenciosa de dado.
+  const usaFormularioCompleto = params.modoSolicitacao === true || params.pagante !== undefined;
+
+  // REGRA DE NEGÓCIO (pool de motoboy — patch A2): motoboy é OPCIONAL aqui.
+  // Solicitação da consultora e criação direta sem motoboy caem no POOL (a
+  // corrida nasce sem dono); quando informado (criação direta com motoboy, ou
+  // auto-registro do entregador PR#75), a corrida já nasce com dono.
+  // IMPACTO SE REMOVIDO: volta a travar toda solicitação/criação sem motoboy
+  // já escolhido, impedindo o modelo de pool.
   if (params.freteCobrado < 0) {
     throw new Error("Valor do frete não pode ser negativo.");
+  }
+
+  // REGRA DE NEGÓCIO (BLOCO 3 — invariante, não mais preso ao modo; fix 21/07
+  // — venda deixa de ser obrigatória): frete avulso É POR NATUREZA uma
+  // corrida que pode não ter venda (ex.: "levar material à loja", "buscar
+  // peça"). ANTES desta janela/duplicata só rodavam com modoSolicitacao=true
+  // — a criação DIRETA (modoSolicitacao=false) gravava venda_id sem checar
+  // NADA disso, e como o endpoint aceita vendaId nos dois modos, dava pra
+  // mandar `vendaId` de venda de OUTRA pessoa, em QUALQUER situação (rascunho,
+  // cancelada, virou_credito), sem limite de duplicatas — a entrega ficava
+  // pendurada na venda alheia (ownership é checado à parte, no route.ts, mas
+  // tinha o MESMO problema). Agora janela + duplicata (COM venda) valem
+  // SEMPRE que `vendaId` vier, independente do modo — não há caso de uso real
+  // (direto ou solicitação) em que uma venda rascunho/cancelada/virou_credito
+  // devesse ganhar uma entrega avulsa vinculada.
+  // IMPACTO SE VOLTAR A SÓ modoSolicitacao: reabre o bypass — criação direta
+  // (ou uso futuro da API) grava frete avulso em venda de outra pessoa, fora
+  // da janela de entrega, sem limite de duplicatas.
+  let numeroVendaVinculada: string | null = null;
+  if (params.vendaId) {
+    const [venda] = await sql`
+      SELECT id, numero_venda, situacao FROM alissonerp.vendas_erp WHERE id = ${params.vendaId} LIMIT 1
+    `;
+    if (!venda) {
+      throw new Error(`Venda ${params.vendaId} não encontrada.`);
+    }
+    numeroVendaVinculada = venda.numero_venda ? String(venda.numero_venda) : null;
+
+    // REGRA DE NEGÓCIO (blindagem V4 — janela de entrega, decisão Jonathan no
+    // commit 291b029a — BLOCO 3: virou invariante): a janela vale para
+    // QUALQUER frete avulso vinculado a uma venda, solicitado ou direto — não
+    // existe cenário legítimo (nem solicitação, nem criação direta) de amarrar
+    // uma corrida a uma venda ainda rascunho, já cancelada ou virou_credito.
+    // Espelha a MESMA lista usada no front (VendaDetalheClient), que é só a
+    // primeira camada — esta aqui é a autoridade real.
+    // IMPACTO SE REMOVIDO: reabre o bypass — frete avulso (direto ou
+    // solicitado) para venda fora da janela de entrega.
+    const JANELA_FRETE_AVULSO_COM_VENDA = ["aprovado", "em_rota", "entregue"];
+    if (!JANELA_FRETE_AVULSO_COM_VENDA.includes(String(venda.situacao))) {
+      throw new Error(
+        `Venda ${numeroVendaVinculada ?? params.vendaId} não está numa situação que permite frete avulso vinculado (situação atual: ${venda.situacao}).`,
+      );
+    }
+
+    // REGRA DE NEGÓCIO (guard de duplicata COM venda — V3, BLOCO 3: virou
+    // invariante): espelha o guard de src/lib/inventario-solicitacoes.ts
+    // (criarSolicitacaoInventario) — não deixa abrir uma 2ª solicitação de
+    // frete avulso para a MESMA venda enquanto a 1ª ainda está 'solicitada'
+    // (aguardando decisão do pool). Roda SEMPRE que há venda (não só em modo
+    // solicitação) — fecha o desvio de criar um avulso DIRETO para uma venda
+    // que já tem solicitação pendente, contornando o pool.
+    // IMPACTO SE REMOVIDO: 2ª solicitação (ou criação direta por cima) duplica
+    // a corrida para a mesma venda, confundindo o pool/financeiro.
+    const [jaSolicitada] = await sql`
+      SELECT id FROM alissonerp.entregas_venda
+      WHERE is_avulso = true AND venda_id = ${params.vendaId} AND situacao = 'solicitada'
+      LIMIT 1
+    `;
+    if (jaSolicitada) {
+      throw new Error(
+        "Já existe uma solicitação de frete avulso aguardando decisão para esta venda.",
+      );
+    }
+  } else {
+    // REGRA DE NEGÓCIO (guard de duplicata SEM venda — BLOCO 3/P2): o guard
+    // acima (por venda_id) não serve pra corrida sem venda (o caso comum hoje
+    // — Tarefas › Solicitações com busca de venda OPCIONAL, e a criação direta
+    // do próprio motoboy/loja). Sem isto, duplo-clique ou reenvio (rede lenta,
+    // usuário impaciente) cria 2 corridas + 2 tarefas (modo solicitação) ou 2
+    // lançamentos de saldo (modo direto) — frete pago em dobro. Critério:
+    // mesmo autor (created_by) + mesma descrição (descricao_avulso, campo
+    // OBRIGATÓRIO no schema) + situação ainda aberta ('solicitada' ou
+    // 'pendente') + criada nos últimos 5 minutos — janela curta o bastante pra
+    // pegar duplo-clique/reenvio real sem barrar 2 corridas avulsas
+    // legítimas e diferentes no mesmo dia (não usa só created_by, usa também
+    // a descrição — corridas de propósitos diferentes não colidem).
+    // IMPACTO SE REMOVIDO: reabre o duplo-lançamento de frete avulso sem venda.
+    const [duplicataSemVenda] = await sql`
+      SELECT id FROM alissonerp.entregas_venda
+      WHERE is_avulso = true
+        AND venda_id IS NULL
+        AND created_by = ${userId}::uuid
+        AND descricao_avulso = ${params.descricaoAvulso ?? null}
+        AND situacao IN ('solicitada', 'pendente')
+        AND created_at > now() - interval '5 minutes'
+      LIMIT 1
+    `;
+    if (duplicataSemVenda) {
+      throw new Error(
+        "Já existe uma corrida avulsa igual (mesma descrição) criada por você há poucos minutos. Confira antes de tentar de novo.",
+      );
+    }
+  }
+
+  if (usaFormularioCompleto) {
+    // REGRA DE NEGÓCIO (migration 359, 21/07 — "quem paga"; estendido na
+    // reforma da tela Entregas para o modo DIRETO com formulário completo):
+    // obrigatório sempre que `usaFormularioCompleto`, COM ou SEM venda, e
+    // independente de `modoSolicitacao` — o campo é o mesmo formulário nos
+    // dois casos. Decide comprovante (cliente) e, SÓ no modo solicitação,
+    // também decide o pool de aprovador (ver bloco de listaAprovadoresFrete
+    // logo abaixo, que continua checando `params.modoSolicitacao`). Validado
+    // no SERVIDOR (não só no front) — mesma autoridade real de sempre.
+    // IMPACTO SE REMOVIDO: reabre o caminho de solicitar/criar direto com
+    // formulário completo sem informar quem paga, e a exigência de
+    // comprovante para 'cliente' não teria como ser aplicada.
+    if (params.pagante !== "loja" && params.pagante !== "cliente") {
+      throw new Error("Informe quem paga o frete avulso: loja ou cliente.");
+    }
+    if (params.pagante === "cliente" && !params.comprovanteBase64) {
+      throw new Error("Comprovante de pagamento é obrigatório quando o frete é pago pelo cliente.");
+    }
+
+    // REGRA DE NEGÓCIO (migration 355 — endereço estruturado; estendido para
+    // o modo DIRETO com formulário completo): mínimo para o motoboy
+    // conseguir localizar o endereço: logradouro + número + cidade.
+    // Complemento/bairro/UF/CEP ajudam mas não bloqueiam. Validado no
+    // SERVIDOR (defesa em profundidade, mesmo padrão do campo `pagante`
+    // acima) além do front (FreteAvulsoModal + EnderecoForm). CONTINUA
+    // obrigatório COM ou SEM venda — é o endereço quem diz para onde ir
+    // quando não há venda para herdar o endereço de entrega dela.
+    // IMPACTO SE REMOVIDO: reabre o caminho de criar frete avulso (solicitado
+    // ou direto, com formulário completo) sem endereço utilizável — motoboy
+    // recebe a corrida sem saber pra onde ir.
+    if (
+      !params.enderecoEntregaLogradouro?.trim() ||
+      !params.enderecoEntregaNumero?.trim() ||
+      !params.enderecoEntregaCidade?.trim()
+    ) {
+      throw new Error("Informe ao menos logradouro, número e cidade do endereço de entrega.");
+    }
+
+    // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — "obrigatório o nome
+    // do cliente" na tela de Solicitar Frete Avulso): validado no SERVIDOR
+    // (defesa em profundidade, mesmo padrão do campo `pagante`/endereço
+    // acima) além do front (FreteAvulsoModal + ClienteSelector). Vale nos
+    // dois casos de `usaFormularioCompleto` — a migration 365 já documentou o
+    // problema de fundo ("frete avulso não tem cliente"): sem contatoId,
+    // nenhuma corrida avulsa tem como saber de quem ela é.
+    // IMPACTO SE REMOVIDO: reabre a lacuna que forçou a gambiarra da
+    // migration 365 (lista manual de exceção pra sumir do relatório).
+    if (!params.contatoId) {
+      throw new Error("Selecione o cliente da corrida.");
+    }
+  }
+
+  // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL — migration 359
+  // acrescenta o split por "quem paga"): a solicitação vira TAREFA DE
+  // APROVAÇÃO para o pool configurado — mesma engrenagem de compra comercial e
+  // solicitações de inventário (ver src/lib/inventario-solicitacoes.ts).
+  // QUAL pool depende de pagante: 'cliente' -> aprovadores_frete_avulso
+  // (acompanha a entrega, já paga); 'loja' -> aprovadores_frete_avulso_loja
+  // (autoriza o custo). Lê a config (fonte única: listarAprovadoresFreteAvulso/
+  // listarAprovadoresFreteAvulsoLoja) e falha cedo (ANTES de abrir a
+  // transação) se ninguém estiver configurado — igual ao padrão de
+  // criarSolicitacaoInventario.
+  // IMPACTO SE REMOVIDO: a solicitação ficaria 'solicitada' para sempre, sem
+  // tarefa e sem ninguém no pool para decidir.
+  let listaAprovadoresFrete: string[] = [];
+  if (params.modoSolicitacao) {
+    const ehPagoPelaLoja = params.pagante === "loja";
+    listaAprovadoresFrete = ehPagoPelaLoja
+      ? await listarAprovadoresFreteAvulsoLoja()
+      : await listarAprovadoresFreteAvulso();
+    if (listaAprovadoresFrete.length === 0) {
+      throw new Error(
+        ehPagoPelaLoja
+          ? "Nenhum aprovador de frete avulso (loja) configurado (Config › Aprovadores — chave aprovadores_frete_avulso_loja)."
+          : "Nenhum aprovador de frete avulso configurado (Config › Aprovadores — chave aprovadores_frete_avulso).",
+      );
+    }
+  }
+
+  // REGRA DE NEGÓCIO (migration 359; estendido para o modo DIRETO com
+  // formulário completo): upload do comprovante ANTES de abrir a transação —
+  // se o Storage falhar, nada é gravado no banco (fail-fast, sem linha órfã
+  // sem comprovante, seja 'solicitada' ou 'pendente'). Reusa o bucket
+  // `pagamento-fotos` (mesmo de foto_entrega_path e compras de metal) via o
+  // helper server-side padrão (src/lib/storage.ts) — NÃO é upload direto do
+  // client.
+  // IMPACTO SE ALTERADO: fazer o upload depois do INSERT arrisca deixar uma
+  // entrega (solicitada OU pendente) sem comprovante se o Storage falhar no meio.
+  let comprovantePath: string | null = null;
+  if (usaFormularioCompleto && params.pagante === "cliente") {
+    const caminho = `frete-avulso/comprovantes/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const upload = await uploadFile("pagamento-fotos", caminho, params.comprovanteBase64!, "image/jpeg");
+    if (!("url" in upload)) {
+      throw new Error("Falha ao enviar o comprovante de pagamento. Tente novamente.");
+    }
+    comprovantePath = upload.path;
   }
 
   const freteBase = calcularValorMotoboy(params.regiao);
   const freteMotoboy = freteBase > 0 ? freteBase : money(params.freteMotoboyOverride ?? 0);
   const freteCobrado = money(params.freteCobrado);
 
+  // Capturada dentro da transação (modoSolicitacao) para notificar o pool
+  // depois que a tarefa/aprovação forem gravadas com sucesso.
+  let tarefaCriadaId: number | null = null;
+
   const resultado = await sql.begin(async (tx: DbSql) => {
     const codigoEntrega = await gerarCodigoEntrega(tx);
+
+    // REGRA DE NEGÓCIO: situacao nasce 'solicitada' (aguarda liberação) quando
+    // modoSolicitacao=true; do contrário nasce 'pendente' como sempre foi
+    // (estoquista/admin/gerente/entregador continuam criando já liberado).
+    const situacaoInicial = params.modoSolicitacao ? "solicitada" : "pendente";
 
     const [row] = await tx`
       INSERT INTO alissonerp.entregas_venda (
@@ -2046,14 +2939,23 @@ export async function criarFreteAvulso(
         tipo, forma_entrega, status, regiao,
         motoboy_id, frete_cobrado, frete_motoboy,
         aprovacao_frete_necessaria, observacoes,
+        endereco_entrega, endereco_entrega_numero, endereco_entrega_complemento,
+        endereco_entrega_bairro, endereco_entrega_cidade, endereco_entrega_cep,
+        endereco_entrega_uf,
+        pagante, comprovante_pagante_path,
         created_by
       ) VALUES (
-        true, NULL,
+        true, ${params.vendaId ?? null},
         ${params.contatoId ?? null}, ${params.descricaoAvulso ?? null},
         ${codigoEntrega}, NULL, NULL,
-        'total', 'motoboy', 'pendente', ${params.regiao},
-        ${params.motoboyId}::uuid, ${freteCobrado}, ${freteMotoboy},
+        'total', 'motoboy', ${situacaoInicial}, ${params.regiao},
+        ${params.motoboyId ?? null}::uuid, ${freteCobrado}, ${freteMotoboy},
         false, ${params.observacoes ?? null},
+        ${params.enderecoEntregaLogradouro ?? null}, ${params.enderecoEntregaNumero ?? null},
+        ${params.enderecoEntregaComplemento ?? null}, ${params.enderecoEntregaBairro ?? null},
+        ${params.enderecoEntregaCidade ?? null}, ${params.enderecoEntregaCep ?? null},
+        ${params.enderecoEntregaUf ?? null},
+        ${params.pagante ?? null}, ${comprovantePath},
         ${userId}::uuid
       )
       RETURNING *
@@ -2061,44 +2963,90 @@ export async function criarFreteAvulso(
 
     const entregaId = Number(row.id);
 
-    // REGRA DE NEGÓCIO: saldo de frete da gerente também se aplica a avulsas.
-    // Avulso sempre consome saldo (o frete_motoboy é custo da loja).
-    // Se frete_cobrado > frete_motoboy: crédito (sobra).
-    // Se frete_cobrado < frete_motoboy: débito (déficit).
-    if (freteMotoboy > 0 || freteCobrado > 0) {
-      const diff = money(freteCobrado - freteMotoboy);
-      if (diff !== 0) {
-        const [gerente] = await tx`
-          SELECT id FROM alissonerp.usuarios
-          WHERE role = 'gerente_loja' AND ativo = true
-          ORDER BY created_at LIMIT 1
-        `;
-        const gerenteId = (gerente?.id as string) ?? userId;
-        const saldoAntes = await obterSaldoFreteGerenteNoTx(tx, gerenteId);
+    // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL): grava a solicitação
+    // como tarefa de aprovação, na MESMA transação da entrega — espelha
+    // criarSolicitacaoInventario (src/lib/inventario-solicitacoes.ts):
+    // INSERT tarefas -> INSERT aprovacoes_tarefa -> UPDATE do domínio com o
+    // tarefa_aprovacao_id. responsavel_id leva o PRIMEIRO da lista só para
+    // preencher a coluna (não-nula por convenção do módulo Tarefas); QUALQUER
+    // um da lista pode decidir — ver extensão de pool no dispatcher/listagem.
+    // IMPACTO SE ALTERADO: sem isto a entrega nasceria 'solicitada' órfã, sem
+    // tarefa e sem ninguém notificado para decidir.
+    if (params.modoSolicitacao) {
+      const responsavelPrincipal = listaAprovadoresFrete[0];
+      const tituloTarefa = numeroVendaVinculada
+        ? `Frete avulso solicitado — venda ${numeroVendaVinculada}`
+        : `Frete avulso solicitado — entrega ${codigoEntrega}`;
+      // REGRA DE NEGÓCIO (migration 355): a descrição da tarefa mostra o
+      // endereço em texto legível — monta a partir dos campos estruturados
+      // via formatarEnderecoEntregaAvulso() (fonte única, ver comentário
+      // dela). É só uma STRING gravada na tarefa (snapshot no momento da
+      // solicitação); não muda se o endereço da entrega for editado depois.
+      const enderecoLegivel = formatarEnderecoEntregaAvulso({
+        endereco_entrega: params.enderecoEntregaLogradouro ?? null,
+        endereco_entrega_numero: params.enderecoEntregaNumero ?? null,
+        endereco_entrega_complemento: params.enderecoEntregaComplemento ?? null,
+        endereco_entrega_bairro: params.enderecoEntregaBairro ?? null,
+        endereco_entrega_cidade: params.enderecoEntregaCidade ?? null,
+        endereco_entrega_cep: params.enderecoEntregaCep ?? null,
+        endereco_entrega_uf: params.enderecoEntregaUf ?? null,
+      });
+      const descricaoTarefa = [
+        `Corrida ${codigoEntrega} (${params.regiao}).`,
+        enderecoLegivel ? `Endereço: ${enderecoLegivel}.` : null,
+        params.descricaoAvulso ? `Obs: ${params.descricaoAvulso}.` : null,
+      ].filter(Boolean).join(" ");
 
-        if (diff > 0) {
-          await tx`
-            INSERT INTO alissonerp.saldo_frete_gratis
-              (gerente_id, tipo, valor, saldo_antes, saldo_depois, entrega_id, venda_id, descricao, created_by)
-            VALUES
-              (${gerenteId}::uuid, 'credito', ${diff}, ${saldoAntes}, ${money(saldoAntes + diff)},
-               ${entregaId}, NULL,
-               ${`Frete avulso cobrado ${fmBRL(freteCobrado)} > motoboy ${fmBRL(freteMotoboy)}`},
-               ${userId}::uuid)
-          `;
-        } else {
-          const debito = Math.abs(diff);
-          await tx`
-            INSERT INTO alissonerp.saldo_frete_gratis
-              (gerente_id, tipo, valor, saldo_antes, saldo_depois, entrega_id, venda_id, descricao, created_by)
-            VALUES
-              (${gerenteId}::uuid, 'debito', ${debito}, ${saldoAntes}, ${money(saldoAntes - debito)},
-               ${entregaId}, NULL,
-               ${`Frete avulso cobrado ${fmBRL(freteCobrado)} < motoboy ${fmBRL(freteMotoboy)}`},
-               ${userId}::uuid)
-          `;
-        }
-      }
+      // REGRA DE NEGÓCIO (migration 359, 21/07 — "quem paga"): a tag
+      // `frete_pagante:loja` é o que eventoDaTarefa (src/lib/aprovacoes/
+      // evento-da-tarefa.ts) lê para escolher entre os eventos 'frete_avulso'
+      // (cliente, sem tag) e 'frete_avulso_loja' (loja, com tag) — mesma tarefa
+      // (tipo='frete_avulso'), aprovador diferente. Espelhado também em
+      // multiAprovadorCond (src/app/api/tarefas/route.ts).
+      // IMPACTO SE REMOVIDO: toda solicitação pagante='loja' cairia no evento
+      // 'frete_avulso' (chave errada) — quem está só na lista nova não veria
+      // nem poderia decidir a tarefa.
+      const tagsTarefa = params.pagante === "loja"
+        ? ["aprovacao_frete_avulso", `frete_avulso:${entregaId}`, "frete_pagante:loja"]
+        : ["aprovacao_frete_avulso", `frete_avulso:${entregaId}`];
+
+      const [tarefa] = await tx`
+        INSERT INTO alissonerp.tarefas
+          (titulo, descricao, responsavel_id, criado_por, prioridade, status, tipo, venda_id, tags)
+        VALUES (
+          ${tituloTarefa},
+          ${descricaoTarefa},
+          ${responsavelPrincipal}::uuid,
+          ${userId}::uuid,
+          'alta',
+          'aguardando_aprovacao',
+          'frete_avulso',
+          ${params.vendaId ?? null},
+          ${tx.array(tagsTarefa)}
+        )
+        RETURNING id
+      `;
+      const tarefaId = Number(tarefa.id);
+      tarefaCriadaId = tarefaId;
+
+      await tx`
+        INSERT INTO alissonerp.aprovacoes_tarefa (tarefa_id, solicitante_id, aprovador_id, status)
+        VALUES (${tarefaId}, ${userId}::uuid, ${responsavelPrincipal}::uuid, 'pendente')
+      `;
+
+      await tx`
+        UPDATE alissonerp.entregas_venda
+        SET tarefa_aprovacao_id = ${tarefaId}
+        WHERE id = ${entregaId}
+      `;
+    }
+
+    // REGRA DE NEGÓCIO: solicitação (consultora) NÃO lança saldo na criação —
+    // o custo só é assumido quando o responsável LIBERA a corrida (ver
+    // liberarFreteAvulso). Avulso direto (não-solicitação) continua lançando
+    // na criação, como sempre foi.
+    if (!params.modoSolicitacao) {
+      await lancarSaldoFreteAvulsoNoTx(tx, entregaId, freteCobrado, freteMotoboy, userId);
     }
 
     await logAudit(tx, {
@@ -2109,22 +3057,53 @@ export async function criarFreteAvulso(
       dados_depois: {
         is_avulso: true,
         codigo_entrega: codigoEntrega,
-        motoboy_id: params.motoboyId,
+        motoboy_id: params.motoboyId ?? null,
         regiao: params.regiao,
         frete_cobrado: freteCobrado,
         frete_motoboy: freteMotoboy,
         descricao_avulso: params.descricaoAvulso ?? null,
+        situacao: situacaoInicial,
+        venda_id: params.vendaId ?? null,
+        pagante: params.pagante ?? null,
       },
     });
 
     return row;
   }) as Record<string, unknown>;
 
-  // Buscar nome/telefone do motoboy para retornar na resposta
-  const [motoboy] = await sql`
-    SELECT nome, telefone FROM alissonerp.motoboys
-    WHERE user_id = ${params.motoboyId}::uuid AND ativo = true LIMIT 1
-  `;
+  // REGRA DE NEGÓCIO (migration 353, modelo TAREFA/POOL): notifica TODOS os
+  // aprovadores da lista (não só o responsavel_id da tarefa) — qualquer um
+  // pode decidir, então todos precisam saber que há uma solicitação nova.
+  // Espelha criarSolicitacaoInventario; roda FORA da transação (best-effort —
+  // falha de notificação não desfaz a solicitação já gravada).
+  if (params.modoSolicitacao && tarefaCriadaId) {
+    const tarefaIdNotif = tarefaCriadaId;
+    await Promise.all(listaAprovadoresFrete.map((aprovadorId) =>
+      criarNotificacao({
+        usuarioId: aprovadorId,
+        tipo: "aprovacao",
+        titulo: "Frete avulso solicitado",
+        mensagem: numeroVendaVinculada
+          ? `Solicitação de frete avulso da venda ${numeroVendaVinculada} aguardando decisão.`
+          : "Solicitação de frete avulso aguardando decisão.",
+        remetenteId: userId,
+        link: `/tarefas?abrir=${tarefaIdNotif}`,
+      }).catch(() => {})
+    ));
+  }
+
+  // Buscar nome/telefone do motoboy para retornar na resposta.
+  // REGRA DE NEGÓCIO (pool — patch A2): corrida de pool nasce SEM motoboy
+  // (params.motoboyId undefined) — pula a consulta e retorna null; o driver
+  // postgres.js lança "Undefined values are not allowed" se um parâmetro
+  // undefined for interpolado na query (${undefined}::uuid), então NÃO dá
+  // pra rodar esta SELECT sem o guard quando não há motoboy.
+  const [motoboy] = params.motoboyId
+    ? await sql`
+        SELECT nome, telefone FROM alissonerp.motoboys
+        WHERE user_id = ${params.motoboyId}::uuid AND ativo = true LIMIT 1
+      `
+    : [];
 
   // Buscar nome do contato se informado
   let clienteNome: string | null = null;
@@ -2140,7 +3119,7 @@ export async function criarFreteAvulso(
     codigoEntrega: String(resultado.codigo_entrega),
     situacao: String(resultado.status),
     regiao: String(resultado.regiao),
-    motoboyId: String(resultado.motoboy_id),
+    motoboyId: resultado.motoboy_id ? String(resultado.motoboy_id) : null,
     freteCobrado: money(resultado.frete_cobrado),
     freteMotoboy: money(resultado.frete_motoboy),
     descricaoAvulso: resultado.descricao_avulso ? String(resultado.descricao_avulso) : null,
@@ -2150,7 +3129,290 @@ export async function criarFreteAvulso(
     createdAt: String(resultado.created_at),
     motoboyNome: motoboy?.nome ? String(motoboy.nome) : null,
     motoboyTelefone: motoboy?.telefone ? String(motoboy.telefone) : null,
+    vendaId: resultado.venda_id != null ? Number(resultado.venda_id) : null,
+    // REGRA DE NEGÓCIO (migration 355): monta o texto legível a partir das
+    // colunas estruturadas que acabaram de ser gravadas (RETURNING * já traz
+    // todas) — mesmo helper usado pela descrição da tarefa acima e pelas APIs
+    // de listagem/motoboy, para não formatar diferente em cada lugar.
+    enderecoEntrega: formatarEnderecoEntregaAvulso({
+      endereco_entrega: resultado.endereco_entrega as string | null,
+      endereco_entrega_numero: resultado.endereco_entrega_numero as string | null,
+      endereco_entrega_complemento: resultado.endereco_entrega_complemento as string | null,
+      endereco_entrega_bairro: resultado.endereco_entrega_bairro as string | null,
+      endereco_entrega_cidade: resultado.endereco_entrega_cidade as string | null,
+      endereco_entrega_cep: resultado.endereco_entrega_cep as string | null,
+      endereco_entrega_uf: resultado.endereco_entrega_uf as string | null,
+    }),
+    pagante: (resultado.pagante as "loja" | "cliente" | null) ?? null,
   };
+}
+
+/**
+ * Libera um frete avulso SOLICITADO pela consultora ('solicitada' -> 'pendente')
+ * — variante que RECEBE a transação de fora (`tx`).
+ *
+ * REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — atomicidade da decisão da tarefa): esta
+ * função existe para que o dispatcher de aprovação
+ * (PATCH /api/tarefas/[id]/aprovacao) rode a liberação DENTRO da MESMA
+ * transação que grava aprovacoes_tarefa/tarefas — se a liberação falhar, a tx
+ * inteira reverte e a tarefa CONTINUA aguardando_aprovacao (não fica "aprovada"
+ * com a entrega ainda 'solicitada', estado hoje invisível — nenhuma tela lista
+ * entregas is_avulso='solicitada'). `liberarFreteAvulso` (abaixo) é a casca
+ * fina para quem precisar chamar fora de uma transação existente — NÃO abrir
+ * um `sql.begin` aninhado aqui: postgres.js não dá erro, mas o begin interno
+ * pega OUTRA conexão do pool e vira uma transação separada — quebra a
+ * atomicidade que este bloco existe para garantir.
+ *
+ * O QUE: tranca a linha (FOR UPDATE) dentro da transação recebida para evitar
+ * liberar a mesma solicitação duas vezes em cliques concorrentes, atualiza
+ * situacao/liberada_por/liberada_em e lança o saldo (lancarSaldoFreteAvulsoNoTx).
+ * A checagem de QUEM pode liberar (modelo TAREFA/POOL: qualquer aprovador da
+ * chave de config aprovadores_frete_avulso — ou admin/dev/diretor) fica no
+ * dispatcher; esta função só valida o ESTADO da entrega.
+ *
+ * IMPACTO SE ALTERADO: sem o FOR UPDATE, dois cliques quase simultâneos no
+ * botão "Liberar" lançariam o saldo em dobro no conta-corrente da gerente.
+ */
+export async function liberarFreteAvulsoNoTx(
+  tx: DbSql,
+  entregaId: number,
+  usuarioId: string,
+): Promise<void> {
+  const [entrega] = await tx`
+    SELECT id, situacao, codigo_entrega, is_avulso
+    FROM alissonerp.entregas_venda
+    WHERE id = ${entregaId}
+  `;
+
+  if (!entrega) {
+    throw new Error(`Entrega ${entregaId} não encontrada.`);
+  }
+  if (!entrega.is_avulso) {
+    throw new Error("Esta rota é exclusiva para fretes avulsos.");
+  }
+  if (entrega.situacao !== "solicitada") {
+    throw new Error(
+      `Entrega ${entrega.codigo_entrega} não está aguardando liberação (situação atual: ${entrega.situacao}).`,
+    );
+  }
+
+  // REGRA: FOR UPDATE trava a linha até o fim da transação — reconfirma o
+  // estado 'solicitada' já com a trava, para não liberar (e lançar saldo)
+  // duas vezes em corrida.
+  const [locked] = await tx`
+    SELECT id, situacao, frete_cobrado, frete_motoboy
+    FROM alissonerp.entregas_venda
+    WHERE id = ${entregaId}
+    FOR UPDATE
+  `;
+  if (locked.situacao !== "solicitada") {
+    throw new Error(
+      `Entrega ${entrega.codigo_entrega} não está mais aguardando liberação (situação atual: ${locked.situacao}).`,
+    );
+  }
+
+  await tx`
+    UPDATE alissonerp.entregas_venda
+    SET
+      situacao = 'pendente',
+      liberada_por = ${usuarioId}::uuid,
+      liberada_em = now(),
+      updated_at = now()
+    WHERE id = ${entregaId}
+  `;
+
+  await lancarSaldoFreteAvulsoNoTx(
+    tx,
+    entregaId,
+    money(locked.frete_cobrado),
+    money(locked.frete_motoboy),
+    usuarioId,
+  );
+
+  await logAudit(tx, {
+    tabela: "entregas_venda",
+    operacao: "UPDATE",
+    registro_id: entregaId,
+    usuario_id: usuarioId,
+    dados_antes: { situacao: "solicitada" },
+    dados_depois: { situacao: "pendente", liberada_por: usuarioId },
+  });
+}
+
+/**
+ * Libera um frete avulso SOLICITADO pela consultora ('solicitada' -> 'pendente').
+ *
+ * Casca fina: abre a própria transação e delega para `liberarFreteAvulsoNoTx`
+ * (mesma lógica, sem duplicação — ver comentário lá para a regra de negócio
+ * completa). Usar esta função só quando NÃO houver uma transação em andamento
+ * para participar; o dispatcher de aprovação usa a variante NoTx diretamente.
+ */
+export async function liberarFreteAvulso(entregaId: number, usuarioId: string): Promise<void> {
+  await sql.begin(async (tx: DbSql) => {
+    await liberarFreteAvulsoNoTx(tx, entregaId, usuarioId);
+  });
+}
+
+/**
+ * Recusa um frete avulso SOLICITADO pela consultora ('solicitada' -> 'cancelada')
+ * — variante que RECEBE a transação de fora (`tx`). Ver comentário de
+ * `liberarFreteAvulsoNoTx` acima para o porquê desta variante existir
+ * (atomicidade com o dispatcher de aprovação, BLOCO 1 jul/2026).
+ *
+ * REGRA DE NEGÓCIO: exige motivo (rastreabilidade — a consultora precisa saber
+ * por que o responsável recusou para poder corrigir e refazer o pedido).
+ * Recusa NUNCA lança saldo — a corrida nem chegou a acontecer, nenhum custo
+ * foi assumido pela loja.
+ *
+ * IMPACTO SE ALTERADO: sem o motivo obrigatório, a recusa vira uma caixa preta
+ * para a consultora.
+ */
+export async function recusarFreteAvulsoNoTx(
+  tx: DbSql,
+  entregaId: number,
+  usuarioId: string,
+  motivo: string,
+): Promise<void> {
+  const motivoLimpo = motivo.trim();
+  if (!motivoLimpo) {
+    throw new Error("Motivo da recusa é obrigatório.");
+  }
+
+  const [entrega] = await tx`
+    SELECT id, situacao, codigo_entrega, is_avulso
+    FROM alissonerp.entregas_venda
+    WHERE id = ${entregaId}
+  `;
+  if (!entrega) {
+    throw new Error(`Entrega ${entregaId} não encontrada.`);
+  }
+  if (!entrega.is_avulso) {
+    throw new Error("Esta rota é exclusiva para fretes avulsos.");
+  }
+  if (entrega.situacao !== "solicitada") {
+    throw new Error(
+      `Entrega ${entrega.codigo_entrega} não está aguardando liberação (situação atual: ${entrega.situacao}).`,
+    );
+  }
+
+  // SEM lançamento de saldo: recusa nunca toca saldo_frete_gratis (comentário
+  // acima explica o porquê). WHERE situacao='solicitada' de novo aqui evita
+  // recusar uma solicitação que já foi liberada/recusada em corrida.
+  await tx`
+    UPDATE alissonerp.entregas_venda
+    SET
+      situacao = 'cancelada',
+      motivo_recusa = ${motivoLimpo},
+      updated_at = now()
+    WHERE id = ${entregaId} AND situacao = 'solicitada'
+  `;
+
+  await logAudit(tx, {
+    tabela: "entregas_venda",
+    operacao: "UPDATE",
+    registro_id: entregaId,
+    usuario_id: usuarioId,
+    dados_antes: { situacao: "solicitada" },
+    dados_depois: { situacao: "cancelada", motivo_recusa: motivoLimpo },
+  });
+}
+
+/**
+ * Recusa um frete avulso SOLICITADO pela consultora ('solicitada' -> 'cancelada').
+ *
+ * Casca fina: abre a própria transação e delega para `recusarFreteAvulsoNoTx`
+ * (mesma lógica, sem duplicação). Usar só fora de uma transação existente; o
+ * dispatcher de aprovação usa a variante NoTx diretamente.
+ */
+export async function recusarFreteAvulso(
+  entregaId: number,
+  usuarioId: string,
+  motivo: string,
+): Promise<void> {
+  await sql.begin(async (tx: DbSql) => {
+    await recusarFreteAvulsoNoTx(tx, entregaId, usuarioId, motivo);
+  });
+}
+
+/**
+ * Motoboy ACEITA uma corrida avulsa do POOL ('pendente' -> 'em_rota').
+ *
+ * REGRA DE NEGÓCIO (pool de motoboy — patch A2): a corrida liberada nasce SEM
+ * dono (motoboy_id NULL) e aparece pra TODOS os entregadores ativos. O
+ * PRIMEIRO que aceitar carimba motoboy_id nele — não existe mais "atribuição"
+ * prévia a um motoboy específico. O aceite marca a saída física (data_saida)
+ * e quem retirou (confirmado_por_motoboy_retirada), igual ao fluxo de
+ * retirada das entregas normais. Corrida AUTO-REGISTRADA pelo próprio
+ * motoboy (created_by == motoboy_id) NÃO passa por aqui — ela já aconteceu
+ * fisicamente e vai direto para confirmarFreteAvulso.
+ *
+ * O QUE: valida o estado com um SELECT de guarda (mensagens de erro
+ * amigáveis) e então faz o CLAIM em um único UPDATE atômico dentro da
+ * transação — o WHERE reconfirma situacao='pendente' E (sem dono OU já é
+ * deste motoboy) no mesmo comando. Se `res.count === 0`, é porque outro
+ * motoboy venceu a corrida entre o SELECT de guarda e este UPDATE.
+ *
+ * POR QUE: em um pool, vários motoboys podem tocar "aceitar" quase ao mesmo
+ * tempo para a MESMA corrida — um SELECT-depois-UPDATE ingênuo permitiria que
+ * os dois lessem 'pendente' e os dois escrevessem, dando dois donos. O
+ * UPDATE condicional resolve isso no próprio banco: apenas o primeiro comando
+ * a chegar encontra a linha no estado esperado e a modifica; o segundo não
+ * encontra mais nada para atualizar (0 linhas afetadas).
+ *
+ * IMPACTO SE ALTERADO: sem o claim atômico, duas corridas concorrentes podem
+ * carimbar motoboy_id de motoboys diferentes na mesma entrega (a última
+ * escrita vence silenciosamente) — dois entregadores acham que são donos da
+ * mesma corrida, gerando confusão de rota e de acerto financeiro.
+ */
+export async function aceitarFreteAvulso(entregaId: number, usuarioId: string): Promise<void> {
+  const [entrega] = await sql`
+    SELECT id, situacao, codigo_entrega, is_avulso
+    FROM alissonerp.entregas_venda
+    WHERE id = ${entregaId}
+  `;
+  if (!entrega) {
+    throw new Error(`Entrega ${entregaId} não encontrada.`);
+  }
+  if (!entrega.is_avulso) {
+    throw new Error("Esta rota é exclusiva para fretes avulsos.");
+  }
+  if (entrega.situacao !== "pendente") {
+    throw new Error(
+      `Entrega ${entrega.codigo_entrega} não está pendente de aceite (situação atual: ${entrega.situacao}).`,
+    );
+  }
+
+  await sql.begin(async (tx: DbSql) => {
+    // CLAIM atômico do pool: só atualiza se ainda está 'pendente' E (sem dono
+    // OU o dono já é este mesmo motoboy — reenvio idempotente). res.count é o
+    // número de linhas afetadas pelo UPDATE (driver postgres.js — mesmo campo
+    // usado em src/lib/importar-localizacao.ts:141, `r.count`).
+    const res = await tx`
+      UPDATE alissonerp.entregas_venda
+      SET motoboy_id = ${usuarioId}::uuid,
+          situacao = 'em_rota',
+          data_saida = now(),
+          confirmado_por_motoboy_retirada = ${usuarioId}::uuid,
+          updated_at = now()
+      WHERE id = ${entregaId}
+        AND is_avulso = true
+        AND situacao = 'pendente'
+        AND (motoboy_id IS NULL OR motoboy_id = ${usuarioId}::uuid)
+    `;
+
+    if (res.count === 0) {
+      throw new Error("Corrida já foi aceita por outro motoboy.");
+    }
+
+    await logAudit(tx, {
+      tabela: "entregas_venda",
+      operacao: "UPDATE",
+      registro_id: entregaId,
+      usuario_id: usuarioId,
+      dados_antes: { situacao: "pendente" },
+      dados_depois: { situacao: "em_rota", motoboy_id: usuarioId },
+    });
+  });
 }
 
 /**
@@ -2160,18 +3422,40 @@ export async function criarFreteAvulso(
  * no app e isso encerra a corrida. Apenas o motoboy dono da entrega ou
  * admin/gerente podem confirmar.
  *
- * O QUE: valida que a entrega é avulsa e está pendente, depois atualiza
+ * O QUE: valida que a entrega é avulsa e está confirmável, depois atualiza
  * situacao='confirmada' e data_entrega_realizada=now().
  *
- * IMPACTO SE ALTERADO: entrega confirmada entra no acerto do motoboy.
- * Não duplicar confirmação (guard situacao='pendente').
+ * REGRA DE NEGÓCIO (solicitação/liberação — migration 353): corrida
+ * AUTO-REGISTRADA pelo próprio motoboy (created_by === motoboy_id) já
+ * aconteceu fisicamente — a loja confirma direto do estado 'pendente', sem
+ * passar por aceite (isso preserva o comportamento do PR #75). Corrida
+ * atribuída pela loja (ou liberada de uma solicitação da consultora) exige
+ * que o motoboy ACEITE primeiro (aceitarFreteAvulso: 'pendente' -> 'em_rota')
+ * antes de poder ser confirmada.
+ *
+ * IMPACTO SE ALTERADO: entrega confirmada entra no acerto do motoboy. Não
+ * duplicar confirmação (guard situacao já tratada) e não permitir confirmar
+ * uma corrida atribuída que o motoboy nunca aceitou/retirou fisicamente.
+ *
+ * FOTOS (migration 357 — decisão Jonathan 21/07): `fotosBase64` é OPCIONAL
+ * (até MAX_FOTOS_ENTREGA). Mesma regra de confirmarEntrega: os guards de
+ * estado acima (existe / é avulso / não confirmada / não cancelada / pode
+ * confirmar) já rodaram e já podem ter lançado ANTES daqui — a foto só é
+ * processada depois de toda essa validação passar, dentro da transação, e de
+ * forma best-effort (nunca bloqueia a finalização da corrida).
  */
 export async function confirmarFreteAvulso(
   entregaId: number,
   usuarioId: string,
+  fotosBase64?: string[],
+  // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — localização/foto
+  // obrigatórias no app do motoboy): opcional para não quebrar chamador
+  // nenhum (inclusive os testes existentes). `usuarioRole` só decide SE a
+  // exigência abaixo se aplica.
+  opts?: { usuarioRole?: string; latitude?: number; longitude?: number },
 ): Promise<void> {
   const [entrega] = await sql`
-    SELECT id, status AS situacao, codigo_entrega, is_avulso, motoboy_id
+    SELECT id, status AS situacao, codigo_entrega, is_avulso, motoboy_id, created_by
     FROM alissonerp.entregas_venda
     WHERE id = ${entregaId}
   `;
@@ -2192,6 +3476,42 @@ export async function confirmarFreteAvulso(
     throw new Error(`Entrega ${entrega.codigo_entrega} está cancelada.`);
   }
 
+  const autoRegistrada = String(entrega.created_by) === String(entrega.motoboy_id);
+  const podeConfirmar =
+    entrega.situacao === "em_rota" || (entrega.situacao === "pendente" && autoRegistrada);
+
+  if (!podeConfirmar) {
+    throw new Error(
+      `Entrega ${entrega.codigo_entrega} ainda não saiu para rota. O motoboy precisa aceitar a corrida antes de finalizar.`,
+    );
+  }
+
+  // REGRA DE NEGÓCIO (pedido do Jonathan, 03/08/2026 — localização/foto
+  // obrigatórias no app do motoboy): roda DEPOIS dos guards de estado acima
+  // (existe / é avulso / não confirmada / não cancelada / pode confirmar) —
+  // mesmo padrão de confirmarEntrega. Vale só para role 'entregador' (o
+  // motoboy usando o próprio app); admin/gerente confirmando pelo escritório
+  // continua opcional, como sempre foi.
+  // IMPACTO SE REMOVIDO: motoboy volta a poder finalizar corrida avulsa sem
+  // provar hora/local/foto — motivo original deste bloco.
+  if (opts?.usuarioRole === "entregador") {
+    if (!fotosBase64 || fotosBase64.length === 0) {
+      throw new Error("Anexe ao menos 1 foto para finalizar a corrida.");
+    }
+    if (opts.latitude == null || opts.longitude == null) {
+      throw new Error("Não foi possível obter sua localização. Ative o GPS e tente novamente.");
+    }
+  }
+
+  // Upload best-effort ANTES de abrir a transação: como é best-effort (nunca
+  // lança — ver uploadFotosEntrega), não há risco de deixar a corrida
+  // travada por causa do Storage; e ao rodar aqui (fora do tx), os guards de
+  // estado acima já garantiram que a corrida É confirmável antes de qualquer
+  // I/O de foto.
+  const fotosPaths = fotosBase64 && fotosBase64.length > 0
+    ? await uploadFotosEntrega(entregaId, fotosBase64)
+    : [];
+
   await sql.begin(async (tx: DbSql) => {
     await tx`
       UPDATE alissonerp.entregas_venda
@@ -2199,9 +3519,19 @@ export async function confirmarFreteAvulso(
         status = 'confirmada',
         data_entrega_realizada = now(),
         confirmado_por_motoboy_entrega = ${usuarioId}::uuid,
+        latitude_entrega = ${opts?.latitude ?? null},
+        longitude_entrega = ${opts?.longitude ?? null},
         updated_at = now()
       WHERE id = ${entregaId}
     `;
+
+    if (fotosPaths.length > 0) {
+      try {
+        await inserirFotosEntrega(tx, entregaId, fotosPaths, usuarioId);
+      } catch (fotoErr) {
+        console.error("[entrega-venda] Erro ao registrar fotos da corrida avulsa:", fotoErr);
+      }
+    }
 
     await logAudit(tx, {
       tabela: "entregas_venda",

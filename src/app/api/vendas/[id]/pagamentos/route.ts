@@ -6,7 +6,8 @@ import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
-import { getDescontoThreshold } from "@/lib/aprovacao-regras";
+import { getDescontoThreshold, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
+import { ehFormaCartao } from "@/lib/desconto/precificar-item";
 import { confirmarCodigoVale } from "@/lib/vale-troca-codigo";
 import { logAudit } from "@/lib/audit";
 import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
@@ -170,17 +171,28 @@ export async function POST(
   if (body.forma !== "Ouro" && (!body.valor || body.valor <= 0))
     return NextResponse.json({ error: "valor inválido" }, { status: 400 });
 
-  // ── Guard: Cartão de Crédito com desconto >20% sem aprovação ────────────
-  if (body.forma === "Cartão de Crédito") {
+  // ── Guard: Cartão de Crédito com desconto acima do limite sem aprovação ──
+  // REGRA DE NEGÓCIO (Fase 5, 15/07): limite do cartão vem de
+  // configuracoes_sistema.limite_desconto_cartao_pct (fallback 20% no código
+  // se a chave ainda não existir) — antes era o literal 20 hardcoded aqui.
+  // Gate do CARTÃO: quem está na lista é decidido por ehFormaCartao
+  // (src/lib/desconto/precificar-item.ts) — hoje só "Cartão de Crédito". As
+  // manuais entraram em 16/07 e saíram em 17/07 quando o seletor passou a
+  // escondê-las de não-admin (PR #99); o histórico e o trade-off estão no
+  // comentário de FORMAS_PAGAMENTO_CARTAO. As demais formas (Dinheiro/Pix/
+  // Ouro/Vale/A Receber/Manual) seguem livres — a trava que pega TODAS é a do
+  // desconto (tem_desconto_alto), logo acima, e é outra regra.
+  if (ehFormaCartao(body.forma)) {
+    const limiteCartao = await buscarLimiteDescontoCartao();
     const [temDescontoCartao] = await sql`
       SELECT EXISTS(
         SELECT 1 FROM alissonerp.itens_venda_erp
-        WHERE venda_id = ${vendaId} AND pct_desconto > 20
+        WHERE venda_id = ${vendaId} AND pct_desconto > ${limiteCartao}
       ) AS tem
     `;
     if (temDescontoCartao?.tem && !venda.desconto_cartao_aprovado_por) {
       return NextResponse.json(
-        { error: "Esta venda tem itens com desconto acima de 20%. Para pagar no cartão de crédito, solicite aprovação." },
+        { error: `Esta venda tem itens com desconto acima de ${limiteCartao}%. Para pagar em ${body.forma}, solicite aprovação. As outras formas seguem liberadas.` },
         { status: 409 }
       );
     }
@@ -260,12 +272,25 @@ export async function POST(
         if (restante <= 0.01) throw new Error("VALE_VENDA_PAGA");
         const valorUsarVale = Math.min(body.valor, Math.round(restante * 100) / 100);
         const aplic = await aplicarValeTroca(valeNum, vendaId, valorUsarVale, user.id, tx);
+        // comissionavel: ANTES era `false` cravado — vale-troca NUNCA comissionava.
+        //
+        // O PORQUÊ da mudança (migration 363, regra do Jonathan em 03/08/2026):
+        // o `false` fixo existia porque a devolução não debitava a comissão da
+        // venda desfeita; comissionar o vale pagaria em dobro. Agora a devolução
+        // debita (ver src/lib/comissao-lancamentos.ts), então o vale nascido dela
+        // PODE comissionar — e quem recebe é quem fez a venda nova, porque o
+        // crédito é da cliente, não da consultora.
+        //
+        // O IMPACTO: voltar para `false` fixo faz a venda paga com vale não pagar
+        // ninguém, mesmo com o débito já lançado — a consultora perde. Trocar por
+        // `true` fixo paga em dobro nos vales antigos, que nunca foram debitados.
+        // A verdade é o `comissiona_no_uso` do vale, e só ele.
         const [novoPg] = await tx`
           INSERT INTO alissonerp.pagamentos_venda (
-            venda_id, forma, gateway, valor, parcelas, status, vale_troca_id, data_confirmacao
+            venda_id, forma, gateway, valor, parcelas, status, vale_troca_id, data_confirmacao, comissionavel
           ) VALUES (
             ${vendaId}, 'Vale-Troca', NULL, ${aplic.valor_aplicado}, 1,
-            'confirmado', ${aplic.vale_aplicado_id}, now()
+            'confirmado', ${aplic.vale_aplicado_id}, now(), ${aplic.comissiona_no_uso}
           )
           RETURNING id
         `;

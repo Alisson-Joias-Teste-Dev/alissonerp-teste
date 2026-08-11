@@ -575,6 +575,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
   const [larguraAro, setLarguraAro] = useState("");
   const [alturaAro, setAlturaAro] = useState("");
   const [base, setBase] = useState("");
+  const [localizacao, setLocalizacao] = useState("");
   const [fotoFichaTecnica, setFotoFichaTecnica] = useState<string | null>(null);
   const fichaTecnicaInputRef = useRef<HTMLInputElement>(null);
 
@@ -863,6 +864,7 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
         categoria_geral: categoriaGeral || null,
         tem_pedra_preciosa: temPedraAuto,
         fornecedor: fornecedor.trim() || null,
+        localizacao: localizacao.trim() || null,
         foto_base64: foto,
         medidas: {
           largura_aro: larguraAro ? parseFloat(larguraAro) : null,
@@ -1437,6 +1439,21 @@ export default function CadastroProdutoModal({ open, onClose, onCreated }: Props
                         <option key={f} value={f} />
                       ))}
                     </datalist>
+                  </div>
+
+                  {/* Localização física — prateleira/gaveta. Opcional: normalmente só é
+                      definida depois, quando a peça chega no estoque. */}
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-widest mb-1">
+                      Localização
+                    </label>
+                    <input
+                      type="text"
+                      value={localizacao}
+                      onChange={(e) => setLocalizacao(e.target.value)}
+                      placeholder="ex: LJ-ET04 (opcional)"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 bg-white font-mono focus:outline-none focus:border-[#184036] transition-colors"
+                    />
                   </div>
 
                   {/* Foto do produto — obrigatória */}

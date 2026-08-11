@@ -4,15 +4,15 @@
  * Rejeita uma alteração de markup pendente.
  * NÃO altera markup nem preços — apenas registra o status e o motivo.
  *
- * Permissão: somente admin e desenvolvedor (isFullAccess)
+ * Permissão: mesma autoridade do "aprovar" — aprovador_precificacao (config-first).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { authOr401 } from "@/lib/auth-server";
-import { isFullAccess } from "@/lib/roles";
 import sql from "@/lib/db";
 import { zodError } from "@/lib/schemas/common";
+import { podeDecidir } from "@/lib/aprovacoes";
 
 const RejeitarPostSchema = z.object({
   alteracao_id: z.coerce.number().int().positive(),
@@ -22,7 +22,9 @@ const RejeitarPostSchema = z.object({
 export async function POST(req: NextRequest) {
   const [user, errRes] = await authOr401(req);
   if (errRes) return errRes;
-  if (!isFullAccess(user.role)) {
+  // REGRA DE NEGÓCIO: mesma autoridade do "aprovar" — aprovador_precificacao.
+  const decisao = await podeDecidir({ id: user.id, role: user.role }, "precificacao");
+  if (!decisao.pode) {
     return NextResponse.json({ error: "Sem permissão — apenas admin e desenvolvedor podem rejeitar" }, { status: 403 });
   }
 
