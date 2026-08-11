@@ -2284,7 +2284,17 @@ export default function PrecificacaoClient({ faixasPedrasInicial, configInicial,
           />
         )}
         {tab === "markup-pedras" && (
-          <RegrasPedrasTab />
+          <div className="space-y-8">
+            <RegrasPedrasTab />
+            {/* Cadastro em lote — botao "Pedras" saiu de /produtos com a promessa de
+                "mudou pra ca" (ver ProdutosClient.tsx) mas a aba so ganhou as regras
+                de precificacao acima; a tela de cadastro ficou sem nenhum botao no
+                sistema inteiro. Restaura o modal inline aqui, como estava previsto. */}
+            <div className="pt-6 border-t" style={{ borderColor: P.border }}>
+              <h3 className="font-semibold mb-4" style={{ color: P.text }}>Cadastrar Pedras em Lote</h3>
+              <GerenciarPedrasModal open onClose={() => {}} inline />
+            </div>
+          </div>
         )}
         {tab === "cotacoes"      && <TabCotacoes cotacao={cotacaoInicial} />}
         {tab === "regras"        && <TabRegras configInicial={configInicial} />}
