@@ -3,6 +3,30 @@
 // - Por que: evita duplicidade de regra entre front, API e outros fluxos de compra.
 // - Impacto se alterado/removido: cada tela pode calcular diferente, gerando divergencia operacional e financeira.
 
+// 1 ct = 0,2 g. Constante nomeada porque o 0.2 solto espalhado pelo codigo foi
+// justamente o que permitiu comparar grama contra quilate sem ninguem notar.
+export const GRAMAS_POR_CT = 0.2;
+
+/**
+ * REGRA DE NEGOCIO:
+ * - O que faz: converte o saldo de pedra da vw_saldo_estoque (que vem em GRAMAS) para quilates.
+ * - Por que: `movimentacoes_estoque` guarda o peso de pedra em grama, e quem le esse saldo deriva
+ *   o ct dividindo por 0,2 — e a trava de saldo do apontamento precisa ler igual a todos os outros.
+ *   As duas outras leituras da MESMA coluna, que esta funcao passa a espelhar:
+ *     - migration 122 (a mais nova a definir a view): ROUND((SUM(entrada) - SUM(saida)) / 0.2, 4) AS saldo_ct
+ *     - EstoqueClient.tsx:394: formatPesoCt(Number(s.total_entrada) / 0.2)
+ * - Por que arredondar em 4 casas: para bater exatamente com o ROUND(..., 4) da view. Sem isso,
+ *   0.414 / 0.2 da 2.0699999999999998 em ponto flutuante e um saldo EXATAMENTE igual ao pedido
+ *   (2.0700 ct) seria recusado como insuficiente — o defeito real do PCP #1130 / PD1019.
+ * - Impacto se alterado/removido: a trava volta a comparar unidades diferentes e recusa (ou libera)
+ *   apontamento de pedra com o estoque errado por um fator de 5.
+ */
+export function saldoGramasParaCt(saldoGramas: number | null | undefined): number {
+  const g = Number(saldoGramas ?? 0);
+  if (!Number.isFinite(g)) return 0;
+  return Number((g / GRAMAS_POR_CT).toFixed(4));
+}
+
 /**
  * REGRA DE NEGOCIO:
  * - O que faz: calcula custo por ct a partir de ct total e custo total da compra de pedra.

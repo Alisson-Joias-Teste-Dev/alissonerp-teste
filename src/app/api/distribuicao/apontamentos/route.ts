@@ -5,6 +5,7 @@ import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { zodError } from "@/lib/schemas/common";
+import { saldoGramasParaCt } from "@/lib/compras-pedras";
 
 /**
  * Schema de entrada do apontamento de Distribuição.
@@ -105,12 +106,13 @@ export async function POST(req: NextRequest) {
    * Validação de estoque no Almoxarifado Central — tipos 1 (Aditivo),
    * 2 (Entrada Metal) e 3 (Entrada Pedra) saem de lá.
    *
-   * Para pedra a comparação é em QUILATES: o gatilho grava a movimentação em ct
-   * (migration 098), então o saldo da view já está em ct. Antes daqui a rota
-   * comparava o saldo contra `qtd` — que no fluxo por peso é o peso em GRAMAS,
-   * 5x menor que o ct — e ainda rotulava a mensagem como "UN".
-   * Mesma regra e mesma conta de /api/pcp/apontamentos: as duas telas precisam
-   * enxergar o mesmo saldo, senão divergem.
+   * 🔴 Para pedra, o saldo da vw_saldo_estoque vem em GRAMAS e precisa ser
+   * convertido antes de comparar com peso_ct_final (em ct) — a versão anterior
+   * comparava grama contra quilate e recusava apontamento legítimo. O porquê
+   * completo, com as duas outras leituras que esta conta espelha e o limite
+   * conhecido do gatilho da migration 098, está em /api/pcp/apontamentos.
+   * Mesma regra e mesma conta de lá: as duas telas precisam enxergar o mesmo
+   * saldo, senão divergem.
    */
   if ((tipo_apontamento_id === 1 || tipo_apontamento_id === 2 || tipo_apontamento_id === 3) && insumo_id) {
     const saldo = await sql`
@@ -119,13 +121,17 @@ export async function POST(req: NextRequest) {
     `;
     const saldoAtual = Number(saldo[0]?.saldo ?? 0);
     const ehPedraCt = tipo_apontamento_id === 3 && peso_ct_final != null;
+    // Pedra: saldo vem em grama → converter para ct antes de comparar com o pedido em ct.
+    const disponivel = ehPedraCt ? saldoGramasParaCt(saldoAtual) : saldoAtual;
     const solicitado = ehPedraCt ? peso_ct_final! : qtd;
-    if (saldoAtual < solicitado) {
+    if (disponivel < solicitado) {
       const unidade = ehPedraCt ? "ct" : tipo_apontamento_id === 3 ? "UN" : "g";
       const fmt = (v: number) =>
         ehPedraCt ? v.toFixed(4) : tipo_apontamento_id === 3 ? Math.round(v).toString() : v.toFixed(2);
+      // Para pedra, mostra também a grama — é a unidade em que o operador pesou.
+      const emGramas = ehPedraCt ? ` (${saldoAtual.toFixed(4)}g disponíveis)` : "";
       return NextResponse.json(
-        { error: `Saldo insuficiente no Almoxarifado Central. Disponível: ${fmt(saldoAtual)}${unidade}, solicitado: ${fmt(solicitado)}${unidade}.` },
+        { error: `Saldo insuficiente no Almoxarifado Central. Disponível: ${fmt(disponivel)}${unidade}, solicitado: ${fmt(solicitado)}${unidade}.${emGramas}` },
         { status: 422 },
       );
     }

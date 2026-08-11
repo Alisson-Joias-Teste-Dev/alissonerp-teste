@@ -7,13 +7,26 @@
  * `qtd`, então TODO apontamento de pedra morria com "Dados invalidos" antes de
  * chegar em qualquer regra — desde 17/05/2026 (v2.58.0), quando o zod entrou.
  *
+ * O SEGUNDO BUG, ACHADO EM 11/08/2026 (PCP #1130, PD1019):
+ * a trava de saldo comparava GRAMA contra QUILATE. O saldo da vw_saldo_estoque vem
+ * em grama para pedra (é assim que a migration 122 e a EstoqueClient.tsx o leem,
+ * dividindo por 0,2 para exibir ct), mas a trava comparava esse número cru contra
+ * `peso_ct_final`, que está em ct. Resultado: 5x mais restritiva, recusando
+ * "Disponível: 0.4140ct, solicitado: 2.0700ct" com o estoque inteiro disponível.
+ *
+ * ⚠️ ESTES TESTES JÁ TRANCARAM A REGRA ERRADA. Antes de 11/08 eles afirmavam que o
+ * saldo vinha em ct ("saldo exatamente igual ao pedido (12,15 ct) → passa") e por
+ * isso deram luz verde ao defeito. Ao mexer aqui: `saldoDisponivel` é GRAMA.
+ *
  * Cobre, nas duas rotas:
  *  1. Pedra por peso, sem `qtd`        → 201, grava peso em g e o ct convertido
  *  2. Insumo comum sem `qtd`           → 400 (REGRESSÃO: a trava não pode cair junto)
  *  3. Pedra sem peso e sem `qtd`       → 400
- *  4. Pedra sem saldo em ct            → 422 com a mensagem em ct (não em "UN")
+ *  4. Pedra sem saldo                  → 422 com a mensagem em ct (não em "UN")
+ *  5. Saldo em grama EXATAMENTE igual ao pedido em ct → 201 (armadilha de ponto flutuante)
+ *  6. O caso real do PD1019            → 201, e o negativo dele → 422
  *
- * Regra de conversão: 1 ct = 0,2 g. 2,43 g → 12,15 ct.
+ * Regra de conversão: 1 ct = 0,2 g. 2,43 g → 12,15 ct. 0,414 g → 2,07 ct.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -22,7 +35,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 type SqlCall = { text: string; values: unknown[] };
 const sqlCalls: SqlCall[] = [];
 
-// Saldo devolvido pela vw_saldo_estoque — em ct quando o insumo é pedra.
+// Saldo devolvido pela vw_saldo_estoque — SEMPRE EM GRAMAS, inclusive para pedra.
+// (era comentado como "em ct" e essa suposição errada é o que deixou o bug passar)
 let saldoDisponivel = 1000;
 
 /**
@@ -134,10 +148,13 @@ describe("POST /api/pcp/apontamentos — pedra por peso", () => {
   });
 
   it("pedra sem saldo → 422 com a mensagem em ct", async () => {
-    saldoDisponivel = 5; // menos que os 12,15 ct pedidos
+    saldoDisponivel = 1; // 1 g = 5 ct, menos que os 12,15 ct pedidos
     const res = await postPcp(req(pedraPcp));
     expect(res.status).toBe(422);
-    expect((await res.json()).error).toContain("ct");
+    const { error } = await res.json();
+    expect(error).toContain("ct");
+    expect(error).toContain("5.0000ct");   // o disponível sai convertido para ct
+    expect(error).toContain("1.0000g");    // e a grama pesada aparece junto
     expect(sqlCalls.some((c) => c.text.includes("INSERT INTO"))).toBe(false);
   });
 
@@ -149,13 +166,32 @@ describe("POST /api/pcp/apontamentos — pedra por peso", () => {
     expect(insertDe("apontamentos_pcp").values[5]).toBe(4.5);
   });
 
-  it("saldo exatamente igual ao pedido (12,15 ct) → passa", async () => {
-    // Confirma que a comparação é ct contra ct. Se comparasse o peso em gramas
-    // (2,43) contra o saldo, este teste passaria por acidente — por isso o par
-    // com o teste de saldo=5 acima, que só barra se a conta estiver em ct.
-    saldoDisponivel = 12.15;
+  it("saldo em grama EXATAMENTE igual ao pedido em ct → passa", async () => {
+    // 2,43 g de saldo = 12,15 ct, exatamente o que o apontamento pede.
+    // ARMADILHA que este teste tranca: sem arredondar em 4 casas, 2.43 / 0.2 dá
+    // 12.149999999999999 em ponto flutuante e a trava recusaria por um fio.
+    saldoDisponivel = 2.43;
     const res = await postPcp(req(pedraPcp));
     expect(res.status).toBe(201);
+  });
+
+  it("CASO REAL PD1019 / PCP #1130: saldo 0,414 g e pedido 0,414 g (2,07 ct) → passa", async () => {
+    // O apontamento que estava sendo recusado com "Disponível: 0.4140ct,
+    // solicitado: 2.0700ct" enquanto o estoque inteiro (20 pedras) estava lá.
+    saldoDisponivel = 0.414;
+    const res = await postPcp(req({ ...pedraPcp, peso_g_pedra: 0.414, peso_ct: 2.07 }));
+    expect(res.status).toBe(201);
+    expect(insertDe("apontamentos_pcp").values[7]).toBe(2.07); // peso_ct = 0,414 / 0,2
+  });
+
+  it("NEGATIVO do PD1019: saldo 0,4 g (2,00 ct) < 2,07 ct pedidos → 422", async () => {
+    // Prova que a trava continua barrando de verdade. Sem este par, o teste de
+    // cima passaria mesmo com a trava desligada.
+    saldoDisponivel = 0.4;
+    const res = await postPcp(req({ ...pedraPcp, peso_g_pedra: 0.414, peso_ct: 2.07 }));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toContain("2.0000ct");
+    expect(sqlCalls.some((c) => c.text.includes("INSERT INTO"))).toBe(false);
   });
 });
 
@@ -193,17 +229,26 @@ describe("POST /api/distribuicao/apontamentos — pedra por peso", () => {
   });
 
   it("pedra sem saldo → 422 em ct (antes comparava peso contra contagem de peças)", async () => {
-    saldoDisponivel = 5;
+    saldoDisponivel = 1; // 1 g = 5 ct, menos que os 12,15 ct pedidos
     const res = await postDist(req(pedraDist));
     expect(res.status).toBe(422);
-    expect((await res.json()).error).toContain("ct");
+    const { error } = await res.json();
+    expect(error).toContain("5.0000ct");
+    expect(error).toContain("1.0000g");
     expect(sqlCalls.some((c) => c.text.includes("INSERT INTO"))).toBe(false);
   });
 
-  it("saldo exatamente igual ao pedido (12,15 ct) → passa", async () => {
-    saldoDisponivel = 12.15;
+  it("saldo em grama EXATAMENTE igual ao pedido em ct → passa", async () => {
+    saldoDisponivel = 2.43; // = 12,15 ct
     const res = await postDist(req(pedraDist));
     expect(res.status).toBe(201);
+  });
+
+  it("NEGATIVO: saldo 2,42 g (12,10 ct) < 12,15 ct pedidos → 422", async () => {
+    saldoDisponivel = 2.42;
+    const res = await postDist(req(pedraDist));
+    expect(res.status).toBe(422);
+    expect(sqlCalls.some((c) => c.text.includes("INSERT INTO"))).toBe(false);
   });
 });
 

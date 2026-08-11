@@ -6,6 +6,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
 import { logAudit } from "@/lib/audit";
 import { zodError } from "@/lib/schemas/common";
+import { saldoGramasParaCt } from "@/lib/compras-pedras";
 
 /**
  * Schema de entrada do apontamento de PCP.
@@ -143,15 +144,29 @@ export async function POST(req: NextRequest) {
    * O QUE FAZ: barra o apontamento quando o Almoxarifado Central não tem o
    * insumo em estoque. Vale para os tipos que SAEM do almoxarifado (1, 2, 3, 8).
    *
-   * O PORQUÊ da unidade: a vw_saldo_estoque soma as movimentações como elas
-   * foram gravadas. Para pedra, o gatilho fn_processar_apontamento_pcp grava a
-   * movimentação JÁ EM QUILATES (fn_criar_par_movimentacao(insumo, peso_ct),
-   * migration 098) — então o saldo da view já está em ct e a comparação certa é
-   * contra peso_ct_final, não contra o peso em gramas nem contra contagem de peças.
+   * 🔴 O PORQUÊ da unidade — ESTA TRAVA JÁ ESTEVE ERRADA, não mexer sem ler:
+   * a vw_saldo_estoque devolve a soma crua das movimentações e, para pedra, essa
+   * coluna está em GRAMAS. Quem mais lê o mesmo número lê como grama:
+   *   - migration 122 (a mais nova a definir a view): ROUND((entrada - saida) / 0.2, 4) AS saldo_ct
+   *   - EstoqueClient.tsx:394: formatPesoCt(Number(s.total_entrada) / 0.2)
+   * Portanto, para comparar contra peso_ct_final (que está em ct), o saldo tem que
+   * ser convertido primeiro — é o que saldoGramasParaCt faz, com a mesma fórmula e
+   * o mesmo arredondamento da view, para trava e tela nunca mais divergirem.
    *
-   * IMPACTO se comparar com `qtd` aqui: para pedra, `qtd` é o peso em GRAMAS —
-   * 5x menor que o ct correspondente. A trava deixaria passar apontamento sem
-   * lastro e o saldo de pedra do almoxarifado ficaria negativo.
+   * O BUG QUE ISSO CONSERTA (PCP #1130, PD1019, 11/08/2026): a versão anterior
+   * comparava o saldo cru (0,414, em grama) contra peso_ct_final (2,07, em ct) e
+   * recusava com "Disponível: 0.4140ct, solicitado: 2.0700ct" — 5x mais restritiva,
+   * barrando apontamento com o estoque inteiro disponível.
+   *
+   * IMPACTO se comparar o saldo cru com peso_ct_final de novo: volta a recusar
+   * apontamento de pedra legítimo. Se comparar sem o arredondamento de 4 casas:
+   * 0.414 / 0.2 = 2.0699999999999998 e um saldo EXATAMENTE igual ao pedido é
+   * recusado por erro de ponto flutuante.
+   *
+   * ⚠️ LIMITE CONHECIDO: o gatilho fn_processar_apontamento_pcp (migration 098)
+   * grava as movimentações de pedra dele em QUILATE, não em grama. Para as linhas
+   * escritas por ele, esta conversão superestima o saldo em 5x. Só uma normalização
+   * do razão numa unidade única resolve — decisão pendente com o Alisson.
    *
    * NÃO consultar movimentacoes_estoque.peso_ct: essa coluna NÃO EXISTE (nenhuma
    * migration cria). Uma versão anterior desta trava fazia isso e derrubava a
@@ -164,14 +179,18 @@ export async function POST(req: NextRequest) {
     `;
     const saldoAtual = Number(saldo[0]?.saldo ?? 0);
     const ehPedraCt = tipo_apontamento_id === 3 && peso_ct_final != null;
+    // Pedra: saldo vem em grama → converter para ct antes de comparar com o pedido em ct.
+    const disponivel = ehPedraCt ? saldoGramasParaCt(saldoAtual) : saldoAtual;
     const solicitado = ehPedraCt ? peso_ct_final! : qtd;
-    if (saldoAtual < solicitado) {
+    if (disponivel < solicitado) {
       // ct para pedra pesada; "UN" no caminho antigo (pedra apontada por peça); g no resto.
       const unidade = ehPedraCt ? "ct" : tipo_apontamento_id === 3 ? "UN" : "g";
       const fmt = (v: number) =>
         ehPedraCt ? v.toFixed(4) : tipo_apontamento_id === 3 ? Math.round(v).toString() : v.toFixed(2);
+      // Para pedra, mostra também a grama — é a unidade em que o operador pesou.
+      const emGramas = ehPedraCt ? ` (${saldoAtual.toFixed(4)}g disponíveis)` : "";
       return NextResponse.json(
-        { error: `Saldo insuficiente no Almoxarifado Central. Disponível: ${fmt(saldoAtual)}${unidade}, solicitado: ${fmt(solicitado)}${unidade}.` },
+        { error: `Saldo insuficiente no Almoxarifado Central. Disponível: ${fmt(disponivel)}${unidade}, solicitado: ${fmt(solicitado)}${unidade}.${emGramas}` },
         { status: 422 }
       );
     }
