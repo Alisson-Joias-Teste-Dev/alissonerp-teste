@@ -162,9 +162,11 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
 
   async function handleSubmit() {
     setError("");
-    const pesoNum = parseFloat(peso);
+    // Pedra: manda o ct digitado (`pesoCT`), não o grama derivado (`peso`) —
+    // ver comentário no `body` abaixo.
+    const pesoNum = isPedra ? parseFloat(pesoCT) : parseFloat(peso);
     if (!insumoId)                           { setError("Selecione o insumo.");         return; }
-    if (isNaN(pesoNum) || pesoNum <= 0)      { setError("Informe o peso/quantidade.");  return; }
+    if (isNaN(pesoNum) || pesoNum <= 0)      { setError(isPedra ? "Informe o peso em ct." : "Informe o peso/quantidade."); return; }
     if (!isSangria && !depositoId)           { setError("Selecione o depósito.");       return; }
     if (isTransferencia && !depositoDestinoId) { setError("Selecione o depósito de destino."); return; }
     if (isTransferencia && depositoId === depositoDestinoId) {
@@ -176,6 +178,16 @@ export default function LancamentoAvulsoModal({ isOpen, onClose, onSuccess }: Pr
     const body: Record<string, unknown> = {
       tipo_lancamento: tipo,
       insumo_id:       insumoId,
+      /**
+       * O PORQUÊ de mandar `pesoNum` (ct pra pedra) e não o `peso` em grama:
+       * `movimentacoes_estoque` grava pedra em QUILATE (regra do Alisson,
+       * 07/08/2026) — é essa coluna que `vw_saldo_estoque` soma e que a trava
+       * de saldo do apontamento do PCP compara. Mandar o grama aqui grava um
+       * número 5x menor rotulado como se fosse ct: a tela de Estoque ainda
+       * mostra o ct certo (ela reconverte pra exibir), mas o próximo
+       * apontamento dessa pedra recusa por "saldo insuficiente" mesmo
+       * sobrando estoque de verdade. Bug real, achado 11/08/2026 no PD1019.
+       */
       peso:            pesoNum,
       obs:             obs || null,
       local_estoque_id: localEstoqueId,
