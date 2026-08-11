@@ -624,6 +624,7 @@ Estrutura com Route Groups (Next.js 16):
 | `ServiceWorkerRegister.tsx`                          | `src/components/ServiceWorkerRegister.tsx`                | Registro do Service Worker via componente React (incluído em layout.tsx) |
 | `PurificacaoClient.tsx`                              | `app/(dashboard)/purificacao/PurificacaoClient.tsx`      | Purificação 18k→24k com aba dedicada |
 | `LigacaoTab.tsx`                                     | `app/(dashboard)/purificacao/LigacaoTab.tsx`             | Aba Ligação 24k→18k dentro de Purificação |
+| `_shared/` (purificação)                             | `app/(dashboard)/purificacao/_shared/`                   | Compartilhado entre Purificação/Ligação (etapa 5 do plano de consolidação): `estilos`/`formatadores`/`ui` (paleta, Section/Row/Overlay/ModalBox), `useFotoBalancaIA`+`FotoBalancaIACampo` (foto+validação IA), `resultadoProcesso`+`ResultadoProcessoBox` (caixa Perda/Ganho) |
 | `ConferenciaClient.tsx`                              | `app/(dashboard)/conferencia/ConferenciaClient.tsx`      | Conferência de ordens por consultora |
 | `EntregaClient.tsx`                                  | `app/(dashboard)/entrega/EntregaClient.tsx`              | Controle de entregas |
 | `InsumoEditDrawer.tsx`                               | `src/components/insumos/InsumoEditDrawer.tsx`            | Drawer de edição de insumo (foto, fornecedor, peso_pedra, ativo) |

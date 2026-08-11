@@ -28,7 +28,7 @@
 | **2** | ✅ **FEITO 10/08** — `SUM(saldo)` → `src/lib/estoque-saldo.ts::buscarSaldoEstoque()`, aplicado em 8 dos 10 call sites (distribuição, PCP, purificação/ligação ×4, relatórios, service ×2) | P/M | baixo | 2 call sites ficaram DE FORA de propósito por serem diferentes de verdade: `purificacao/liga-tipos` (subquery correlacionada por linha) e `service/transferir-insumo` linha 133 (GROUP BY em 2 depósitos numa query só). `tsc` limpo, testes = baseline exato, jscpd caiu de 17.795 para 13.572 linhas duplicadas. |
 | **3** | ✅ **FEITO 10/08** — Modais "Nova Ordem": **3a** extrai a busca de produto compartilhada (Rep.Loja × Serv.Interno) pra `_shared/ProdutoBuscaOrdem.tsx`; **3b** cria `NovaOrdemVendaBaseModal.tsx` (molde novo, não o `NovaOrdemServicoBaseModal` — são famílias diferentes, ver nota abaixo) e migra Fabricação/Rep.Venda pra wrappers finos | M | médio | Ao ler o código de verdade, a suposição original ("já existe base pronta") estava errada — corrigido com o Alisson antes de mexer (ver nota). `tsc` limpo, testes = baseline exato, testado AO VIVO no navegador com dado real (Kenia Costa Lopes/#15926) nos dois tipos. |
 | **4** | ✅ **FEITO 10/08** — Modais de apontamento: `ApontamentoDistModal` × `ApontamentoPCPModal` — extraídos `useValidacaoIABalanca` (hook) + `FotoBalancaCampo` + `InsumoPedraAutocomplete` pra `_shared/` | M | médio | Fluxo de ouro, só a TELA — rotinas protegidas do banco não tocadas. Achado real: o tipo "8 — Outros" significa coisas DIFERENTES nas duas telas (Dist=form simples, PCP=foto+IA completa) — NÃO unificado, ficou como estava. `tsc` limpo, testes = baseline exato, testado AO VIVO no PCP com dado real. 1576→1138 linhas somadas. |
-| **5** | **Purificação** — `LigacaoTab` × `PurificacaoClient` (457 linhas iguais, mesmo módulo) → componentes compartilhados | M | médio | Maior cluster interno de um módulo só. |
+| **5** | ✅ **FEITO 10/08** — `LigacaoTab` × `PurificacaoClient`: paleta/formatação/rótulos de status, pedaços de tela repetidos (Section/Row/Overlay/ModalBox/estilos), o campo "foto da balança + validação por IA" (4 cópias) e a caixa "Perda/Ganho" ao concluir (2 cópias) → `purificacao/_shared/` | M | médio | Maior cluster interno de um módulo só. |
 | **6a** | **Reviver os testes de pagamento** (pré-requisito da 6b) | M | — | As 13 suítes que falham hoje são quase todas da área de pagamento (checar-point, criar-pix, webhook-mp, confirmar-pagamento…). Sem essa rede de proteção, NÃO se mexe em código de dinheiro. |
 | **6b** | **Pagamentos** — `CartaoInline` × `MercadoPagoCobranca` (163) + rotas criar-link/criar-pix duplicadas entre PagBank e Mercado Pago (151+123) → núcleo de cobrança único | M/G | **ALTO (dinheiro)** | Só depois da 6a. Teste manual até a beira da cobrança (sem cobrar de verdade); cobrança real só em homolog com valor simbólico se o Alisson autorizar. |
 | **7** | **Compras × Compras-Comercial** — módulos gêmeos inteiros (rotas 60–87% idênticas; clients 1.629 + 1.049 linhas) | G | alto | Por último e com DECISÃO DE NEGÓCIO antes: os dois módulos vão continuar divergindo de propósito (fábrica ≠ comercial) ou deviam convergir? Falar com Jonathan. Só depois desenhar o núcleo comum com bandeira. |
@@ -82,6 +82,41 @@ byte-a-byte idêntico (só formatação), então só essas duas partes foram ext
 Verificação ao vivo: abri o apontamento de uma ordem PCP real (#1668), troquei pro tipo "Entrada de
 Pedra", busquei e selecionei um insumo real ("Diamante 1,3mm/PD1073") e confirmei que o texto
 exclusivo do PCP ("Câmera ou galeria") apareceu certinho no campo de foto.
+
+## Nota de verificação — Etapa 5
+
+Lidos os 3 arquivos inteiros (`PurificacaoClient.tsx`, `LigacaoTab.tsx`, `LimpezaTab.tsx`) antes de
+decidir qualquer coisa, como manda a regra 2. Confirmado por leitura direta (não suposição): o
+campo "foto + validação por IA" já existente em `src/components/forms/_shared` (etapa 4, usado no
+apontamento PCP/Distribuição) **não é a mesma peça** — guarda a foto como link temporário (blob) e
+tem outra aparência (Tailwind); aqui a foto precisa ir em base64 dentro do JSON salvo e a aparência é
+outra (estilo inline já existente da Purificação/Ligação). Usar a peça de lá mudaria a cara da tela —
+proibido pela regra 1. Por isso a extração desta etapa criou peças NOVAS, só para este módulo, em
+`purificacao/_shared/`: paleta e formatação (`estilos.ts`, `formatadores.ts` — confirmado que também
+NÃO são os mesmos formatadores de `src/lib/formatters.ts`, que devolvem outro formato de saída),
+pedaços de tela repetidos (`ui.tsx`), o campo de foto+IA (`useFotoBalancaIA.ts` +
+`FotoBalancaIACampo.tsx`, com rótulo e texto de "selecionado" mantidos por tela — cada uma usava uma
+frase levemente diferente) e a caixa de Perda/Ganho ao concluir (`resultadoProcesso.ts` +
+`ResultadoProcessoBox.tsx`, com os rótulos "Retornado"/"Produzido" e "Perda processo"/"Perda"
+mantidos por tela). Achada também uma divergência real de comportamento entre as duas telas (não
+unificada, de propósito): ao editar o peso já com foto validada, o modal de Ligação limpa a validação
+da IA (força revalidar), mas o de Purificação não limpava — mantido exatamente como estava em cada
+tela.
+
+`LimpezaTab.tsx` confirmado como uma terceira coisa separada (fluxo de metal sujo, cards e modais
+próprios) — só reaproveitou as 3 funçõezinhas de formatação idênticas, resto intocado.
+
+`tsc` limpo, testes = baseline exato (613 passaram / 80 falharam / 1 pulado). Duplicação nos 2
+arquivos principais caiu de 1.235+1.240=2.475 linhas para 937+910=1.847 linhas (mais 426 linhas nas
+peças novas reaproveitáveis).
+
+Verificação ao vivo: aberta a tela de Purificação/Ligação real (banco de teste, usuário Robson) —
+aba Ligação com os 10 lotes reais renderizando certo, cálculo em tempo real do "Nova Ligação"
+correto (10g→14.49g 18k esperado), foto+IA chamando a API de verdade e mostrando "IA leu... ✅ OK"
+com o texto exato de antes, botão de salvar liberando na hora certa. No "Concluir Purificação"
+(purif #5 real), testados os dois caminhos: retornado 3.50g → "Ganho de teor +0.46g (+15.13%)"; e
+retornado 2.50g → "Perda processo 0.54g (17.76%)" com o alerta de perda alta — os dois com o rótulo
+exato de cada tela. Nenhum dos dois modais foi de fato submetido (fechados com Cancelar).
 
 ## Ritmo e paradas
 
