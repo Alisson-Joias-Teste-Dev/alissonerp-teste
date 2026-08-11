@@ -3,6 +3,10 @@
 // - Por que: evita duplicidade de regra entre front, API e outros fluxos de compra.
 // - Impacto se alterado/removido: cada tela pode calcular diferente, gerando divergencia operacional e financeira.
 
+// A unidade do ESTOQUE de pedra (grama <-> ct) NAO mora aqui: ver `pedra-unidade-estoque.ts`.
+// Este arquivo e so sobre COMPRA de pedra — e compra NAO e por onde a pedra entra no estoque
+// (confirmado pelo Jonathan em 11/08/2026: a entrada e por Lancamento Avulso > Entrada Avulsa).
+
 /**
  * REGRA DE NEGOCIO:
  * - O que faz: calcula custo por ct a partir de ct total e custo total da compra de pedra.
