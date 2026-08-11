@@ -114,11 +114,15 @@ export async function POST(req: NextRequest) {
       // Pega próximo SKU numérico considerando AMBAS as tabelas.
       // erp_produtos pode ter SKUs órfãos de DELETEs parciais anteriores,
       // causando colisão com a UNIQUE erp_produtos_sku_key se olhássemos só public.
+      // FIX: ignora SKUs >= 90000000 (produtos "(saldo inicial)" da migração,
+      // placeholders — não SKUs reais). Sem esse filtro o próximo SKU saía gigante
+      // (ex: 90000056) em vez de seguir a sequência normal da loja (mesmo bug já
+      // corrigido em peca-avulsa; achado no lote de Moissanita 2.6–5.0mm).
       const [skuRow] = await tx<{ next: number }[]>`
         SELECT (COALESCE(
           GREATEST(
-            (SELECT MAX(sku::integer) FROM public.produtos         WHERE sku ~ '^[0-9]+$'),
-            (SELECT MAX(sku::integer) FROM alissonerp.erp_produtos WHERE sku ~ '^[0-9]+$')
+            (SELECT MAX(sku::integer) FROM public.produtos         WHERE sku ~ '^[0-9]+$' AND sku::bigint < 90000000),
+            (SELECT MAX(sku::integer) FROM alissonerp.erp_produtos WHERE sku ~ '^[0-9]+$' AND sku::bigint < 90000000)
           ),
           1603
         ) + 1)::int AS next
@@ -192,6 +196,18 @@ export async function POST(req: NextRequest) {
              ${pesoG}, 1, 1,
              ${null}, 'Pedras', true,
              ${precoTiny}, false, false)
+        `;
+
+        // Marca 'insumo' - sem ela a pedra NAO entra na vw_pedras_preco (some da
+        // vitrine/orcamento) nem fica com o mesmo comportamento de estoque das
+        // outras pedras do catalogo (mesma regra do peca-avulsa).
+        await tx`
+          INSERT INTO alissonerp.produto_tipo_item (produto_id, tipo_item)
+          SELECT ${paiId}, 'insumo'
+          WHERE NOT EXISTS (
+            SELECT 1 FROM alissonerp.produto_tipo_item
+            WHERE produto_id = ${paiId} AND tipo_item = 'insumo'
+          )
         `;
 
         // Peso real (em ct) — public.produtos.peso_precificado é arredondado
