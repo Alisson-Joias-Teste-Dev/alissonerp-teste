@@ -177,26 +177,21 @@ export async function POST(req: NextRequest) {
         `;
         const paiId = Number(seq.id);
 
-        // INSERT alissonerp.erp_produtos
+        // FIX: antes eram DOIS INSERT no mesmo produto_id (o 2o violava o indice
+        // UNIQUE de produto_id em erp_produtos) -> transacao inteira cancelava e
+        // NENHUMA pedra do lote era criada (mesmo bug ja corrigido em peca-avulsa).
+        // Agora 1 INSERT so, com todas as colunas.
         await tx`
           INSERT INTO alissonerp.erp_produtos
             (produto_id, sku, nome, tipo_metal, situacao,
              peso_precificado, markup, fator,
              categoria_precificacao, categoria, tem_pedra_preciosa,
-             preco_tiny)
+             preco_tiny, eh_pai, eh_variacao)
           VALUES
             (${paiId}, ${sku}, ${nome}, ${null}, 'A',
              ${pesoG}, 1, 1,
              ${null}, 'Pedras', true,
-             ${precoTiny})
-        `;
-
-        // INSERT alissonerp.erp_produtos (produto simples, sem variações)
-        await tx`
-          INSERT INTO alissonerp.erp_produtos
-            (produto_id, sku, nome, eh_pai, eh_variacao)
-          VALUES
-            (${paiId}, ${sku}, ${nome}, false, false)
+             ${precoTiny}, false, false)
         `;
 
         // Peso real (em ct) — public.produtos.peso_precificado é arredondado
