@@ -3391,7 +3391,7 @@ export default function OrcamentoClient({
       <div style={{ display: "flex", gap: "12px", height: orcDesignRowHeight, overflow: "hidden" }}>
 
         {/* ── Painel de controles (ESQUERDA — 360px fixo, scroll) ─────── */}
-        <div style={{ width: "360px", minWidth: "360px", overflowY: "hidden" }} className="space-y-1">
+        <div style={{ width: "360px", minWidth: "360px", overflowY: "auto" }} className="space-y-1">
 
           {/* Tabs Aliança 1 / Aliança 2 (quando par) */}
           {allianceMode === "par" && (

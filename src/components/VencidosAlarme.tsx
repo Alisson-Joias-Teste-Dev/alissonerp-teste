@@ -70,7 +70,7 @@ export default function VencidosAlarme() {
 
   return (
     <div
-      className="fixed top-14 md:top-0 left-0 md:left-56 right-0 z-[53] shadow-md"
+      className="fixed top-14 md:top-[77px] left-0 md:left-56 right-0 z-[53] shadow-md"
       style={{ background: "#dc2626", color: "#fff" }}
       role="alert"
       aria-live="polite"
