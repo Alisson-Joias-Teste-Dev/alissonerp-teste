@@ -28,6 +28,10 @@ import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } fro
 import { liberarFreteAvulsoNoTx, recusarFreteAvulsoNoTx } from "@/lib/entrega-venda";
 import { aprovarFechamentoFreteNoTx, recusarFechamentoFreteNoTx } from "@/lib/frete-fechamento";
 import { podeDecidir, eventoDaTarefa } from "@/lib/aprovacoes";
+// REGRA DE NEGOCIO: comissao por faixa de desconto centralizada em src/lib/comissao.ts
+// (unificacao 11/08/2026) — antes esta rota reescrevia a MESMA regra em SQL puro
+// (CASE WHEN desconto > 30 THEN 0.5), podendo divergir de getComissao() sem avisar.
+import { getComissao, type FaixaComissao } from "@/lib/comissao";
 
 /**
  * REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — guard de idempotência): sinaliza que o
@@ -938,33 +942,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         //    0% e joga na faixa cheia de 4%) e no item com preço digitado à mão.
         //    `preco_lista_cheio` (migration 366) é o preço da campanha.
         //    COALESCE com preco_lista cobre linha antiga com a coluna nula.
-        await sql`
-          UPDATE alissonerp.itens_venda_erp iv
-          SET pct_comissao   = calc.pct_comissao,
-              valor_comissao = ROUND(iv.total_item * calc.pct_comissao / 100, 2)
-          FROM (
-            SELECT i.id,
-                   CASE
-                     WHEN d.desconto > 30 THEN 0.5
-                     ELSE COALESCE(fc.comissao_pct, 0)
-                   END AS pct_comissao
-            FROM alissonerp.itens_venda_erp i
-            CROSS JOIN LATERAL (
-              SELECT CASE WHEN COALESCE(i.preco_lista_cheio, i.preco_lista) > 0
-                          THEN GREATEST(ROUND((
-                                 (COALESCE(i.preco_lista_cheio, i.preco_lista) - i.preco_unitario)
-                                 / COALESCE(i.preco_lista_cheio, i.preco_lista)
-                               ) * 100, 2), 0)
-                          ELSE 0 END AS desconto
-            ) d
-            LEFT JOIN alissonerp.faixas_comissao fc
-              ON fc.desconto_pct = ROUND(d.desconto) AND fc.ativo = true
-            WHERE i.venda_id = ${tarefaInfo.venda_id}
-              AND i.produto_id IS NOT NULL
-          ) calc
-          WHERE iv.id = calc.id
+        //
+        // UNIFICAÇÃO (11/08/2026): o mapeamento desconto→comissão (faixa ou piso
+        // de 0,5% acima de 30%) NÃO é mais recalculado aqui em SQL — vem de
+        // getComissao(), a MESMA função usada ao criar a venda. O SQL abaixo só
+        // calcula o desconto real de cada item (aritmética, não regra de negócio).
+        const itensParaRecalcular = await sql`
+          SELECT i.id, i.total_item,
+                 CASE WHEN COALESCE(i.preco_lista_cheio, i.preco_lista) > 0
+                      THEN GREATEST(ROUND((
+                             (COALESCE(i.preco_lista_cheio, i.preco_lista) - i.preco_unitario)
+                             / COALESCE(i.preco_lista_cheio, i.preco_lista)
+                           ) * 100, 2), 0)
+                      ELSE 0 END AS desconto
+          FROM alissonerp.itens_venda_erp i
+          WHERE i.venda_id = ${tarefaInfo.venda_id}
+            AND i.produto_id IS NOT NULL
         `;
-        console.log(`[desconto] itens_venda_erp: comissão recalculada pela tabela de faixas`);
+        const faixasAtivas = (await sql`
+          SELECT desconto_pct, comissao_pct FROM alissonerp.faixas_comissao WHERE ativo = true
+        `).map((f) => ({ desconto_pct: Number(f.desconto_pct), comissao_pct: Number(f.comissao_pct) })) as FaixaComissao[];
+        for (const item of itensParaRecalcular) {
+          const pctComissao = getComissao(Number(item.desconto), faixasAtivas);
+          await sql`
+            UPDATE alissonerp.itens_venda_erp
+            SET pct_comissao   = ${pctComissao},
+                valor_comissao = ROUND(${item.total_item}::numeric * ${pctComissao} / 100, 2)
+            WHERE id = ${item.id}
+          `;
+        }
+        console.log(`[desconto] itens_venda_erp: comissão recalculada via getComissao() (fonte única)`, { itens: itensParaRecalcular.length });
       } else {
         await sql`
           UPDATE alissonerp.vendas_erp
