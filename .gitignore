@@ -92,3 +92,9 @@ Thumbs.db
 
 # Python virtual env
 .venv/
+
+# playwright (robo de teste de tela)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
