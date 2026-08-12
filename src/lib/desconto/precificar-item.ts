@@ -39,6 +39,13 @@
  *   + Pedra leva desconto proporcional (a tela passa a mostrar o que é cobrado).
  */
 
+// REGRA DE NEGOCIO: comissao por faixa de desconto centralizada em src/lib/comissao.ts
+// (unificacao 11/08/2026) — comissaoDaFaixa() abaixo so delega pra getComissao(),
+// nao reimplementa a regra. Antes das duas versoes divergirem, era possivel mudar
+// o piso/teto num lugar e o outro (usado ao criar/editar item de venda) ficar
+// com o valor antigo, sem ninguem notar.
+import { getComissao } from "@/lib/comissao";
+
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 /** Faixa de comissão (tabela alissonerp.faixas_comissao). */
@@ -182,16 +189,15 @@ export function arredondarMoeda(x: number): number {
 }
 
 /**
- * Comissão a partir do % de desconto, espelhando getComissao de NovaVendaClientV2:
- *  - desconto > 30% → 0,5% (fixo)
- *  - senão, faixa cujo desconto_pct == round(pct); se não houver, 0%.
+ * Comissão a partir do % de desconto. Delega pra getComissao() (src/lib/comissao.ts,
+ * FONTE ÚNICA da regra — usada na criação da venda, na prévia do front e na
+ * aprovação de desconto). Este wrapper existe só pra não obrigar os ~4 callers
+ * deste arquivo (resolverItemComissao, calcularItemComDesconto) a trocar de import.
  * IMPACTO: é a fórmula promo-aware oficial — usar a MESMA em venda nova, detalhe,
  *   dashboard e análise acaba com o "4% chumbado" e a comissão errada ao editar.
  */
 export function comissaoDaFaixa(pctDesconto: number, faixas: FaixaComissao[] = []): number {
-  if (pctDesconto > 30) return 0.5;
-  const faixa = faixas.find((f) => f.desconto_pct === Math.round(pctDesconto));
-  return faixa ? faixa.comissao_pct : 0;
+  return getComissao(pctDesconto, faixas);
 }
 
 /**
