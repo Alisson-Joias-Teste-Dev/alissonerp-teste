@@ -342,12 +342,9 @@ function SimuladorInterativo() {
   );
 }
 
-interface TreinoProps { videoUrl: string | null; isDev: boolean; treinamentoKey: string }
-
-export default function MovimentacaoInternaTreino(props: TreinoProps) {
+export default function MovimentacaoInternaTreino() {
   return (
     <TreinamentoLayout
-      {...props}
       titulo="Movimentação Interna"
       subtitulo="Registra quem está com cada peça dentro da loja — do estoque até voltar (ou o cliente levar). Cada troca de mão fica com foto, quem, data e hora."
       regraDeOuro={<>foto em toda troca de mão (entrega, recebimento, devolução). Nada é apagado — tudo grava quem fez, a data e a hora.</>}
