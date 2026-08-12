@@ -194,6 +194,16 @@ export async function POST(req: NextRequest) {
         )
       `;
 
+      // Pedra solta = insumo: NAO usa o controle de estoque comercial (reserva/baixa
+      // de venda) — saldo proprio em public.estoque. Sem essa linha, o padrao
+      // (COALESCE true) mostra "controla estoque" errado pra pedra recem-criada
+      // (mesmo achado do cadastro em lote, 11/08).
+      await tx`
+        INSERT INTO alissonerp.estoque_comercial_config (produto_id, controla_estoque, ativo)
+        VALUES (${idProduto}, false, true)
+        ON CONFLICT (produto_id) DO NOTHING
+      `;
+
       await tx`
         INSERT INTO alissonerp.produto_pedra_extras (produto_id, peso_ct)
         VALUES (${idProduto}, ${Number(input.peso_ct.toFixed(4))})

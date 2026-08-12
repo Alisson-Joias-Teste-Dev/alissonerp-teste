@@ -185,6 +185,10 @@ export async function POST(req: NextRequest) {
         // UNIQUE de produto_id em erp_produtos) -> transacao inteira cancelava e
         // NENHUMA pedra do lote era criada (mesmo bug ja corrigido em peca-avulsa).
         // Agora 1 INSERT so, com todas as colunas.
+        // tem_pedra_preciosa=false: esse campo marca JOIA que tem pedra engastada,
+        // nao a pedra solta em si (regra em src/lib/compras-pedras.ts, ehPedraSolta()).
+        // Com true (bug antigo) a pedra ganhava o badge "Tem pedra preciosa" nela mesma,
+        // sem sentido (achado 11/08, mesmo dia do controla_estoque).
         await tx`
           INSERT INTO alissonerp.erp_produtos
             (produto_id, sku, nome, tipo_metal, situacao,
@@ -194,7 +198,7 @@ export async function POST(req: NextRequest) {
           VALUES
             (${paiId}, ${sku}, ${nome}, ${null}, 'A',
              ${pesoG}, 1, 1,
-             ${null}, 'Pedras', true,
+             ${null}, 'Pedras', false,
              ${precoTiny}, false, false)
         `;
 
@@ -208,6 +212,16 @@ export async function POST(req: NextRequest) {
             SELECT 1 FROM alissonerp.produto_tipo_item
             WHERE produto_id = ${paiId} AND tipo_item = 'insumo'
           )
+        `;
+
+        // Pedra solta = insumo: NAO usa o controle de estoque comercial (reserva/baixa
+        // de venda) — saldo proprio em public.estoque. Sem essa linha, o padrao
+        // (COALESCE true) mostra "controla estoque" errado pra pedra recem-criada,
+        // diferente das irmas do catalogo (achado 11/08, lote Moissanita 2.6-4.9mm).
+        await tx`
+          INSERT INTO alissonerp.estoque_comercial_config (produto_id, controla_estoque, ativo)
+          VALUES (${paiId}, false, true)
+          ON CONFLICT (produto_id) DO NOTHING
         `;
 
         // Peso real (em ct) — public.produtos.peso_precificado é arredondado

@@ -169,7 +169,8 @@ export async function GET(req: NextRequest) {
       AND pp.ativo = true
   )`;
   const wSemCat   = sql`(p.categoria IS NULL OR TRIM(p.categoria) = '')`;
-  const wSemMetal = sql`(p.tipo_metal IS NULL OR TRIM(p.tipo_metal) = '')`;
+  // Pedra solta nunca tem metal (peso e cravado, nao tem liga) - nao e pendencia pra ela.
+  const wSemMetal = sql`(p.tipo_metal IS NULL OR TRIM(p.tipo_metal) = '') AND p.categoria NOT ILIKE 'Pedras%'`;
   const wSemPeso  = sql`(p.peso_precificado IS NULL OR p.peso_precificado = 0)
                     AND ${wNaoPersonalizado}`;
   // "Sem preço" = TODOS os preços são nulos ou zero (comparação numérica).
