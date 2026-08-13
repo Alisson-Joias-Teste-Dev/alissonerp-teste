@@ -120,3 +120,6 @@ Thumbs.db
 /ESTRUTURA_ATUAL.md
 /SESSAO_*.md
 /task-*.md
+
+# pente fino: dumps de banco gerados (recriaveis via scripts/_db_mapping_*.mjs)
+/docs/db-mapping/_raw/
