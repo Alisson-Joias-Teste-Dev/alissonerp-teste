@@ -49,7 +49,7 @@ export async function executarAbrirInventario(params: {
   const inv = await sql.begin(async (tx: any) => {
     const [novo] = await tx`
       INSERT INTO alissonerp.inventarios_comercial
-        (local_estoque_id, observacao, categoria, created_by)
+        (local_estoque_id, obs, categoria, created_by)
       VALUES
         (${local_estoque_id}, ${obs ?? null}, ${cat}, ${userId})
       RETURNING id, created_at

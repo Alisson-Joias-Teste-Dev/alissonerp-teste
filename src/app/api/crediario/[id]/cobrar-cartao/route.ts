@@ -46,7 +46,7 @@ export async function POST(
 
   // ── Conta a receber ────────────────────────────────────────────────────────
   const [conta] = await sql`
-    SELECT id, status AS situacao, valor, venda_erp_id
+    SELECT id, situacao, valor, venda_erp_id
     FROM alissonerp.contas_receber
     WHERE id = ${contaId} AND categoria = 'venda'
   `;

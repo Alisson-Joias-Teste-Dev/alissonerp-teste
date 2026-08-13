@@ -2,7 +2,7 @@
 // TASK-003: Configurações do módulo Metal
 //
 // REGRA DE NEGÓCIO: As configurações do módulo metal são armazenadas em
-// alissonerp.configuracoes_unificado. Se não existirem, usa-se os defaults
+// alissonerp.configuracoes_sistema. Se não existirem, usa-se os defaults
 // (80-85% para compra, 95-100% para recebimento, 50% para comissão).
 //
 // IMPACTO SE REMOVIDO: Módulo metal não consegue ler cotação do ouro
@@ -13,12 +13,12 @@ import sql from "@/lib/db";
 import { DEFAULT_METAL_CONFIG, type MetalConfig } from "./types";
 
 /**
- * Lê as configurações do módulo metal de alissonerp.configuracoes_unificado.
+ * Lê as configurações do módulo metal de alissonerp.configuracoes_sistema.
  * Se alguma chave não existir no banco, usa o valor DEFAULT como fallback.
  */
 export async function getModuloConfig(): Promise<MetalConfig> {
   const rows = await sql<{ chave: string; valor: string }[]>`
-    SELECT chave, valor FROM alissonerp.configuracoes_unificado
+    SELECT chave, valor FROM alissonerp.configuracoes_sistema
     WHERE chave IN (
       'compra_metal_min_pct', 'compra_metal_max_pct', 'compra_metal_comm_pct',
       'receb_metal_min_pct', 'receb_metal_max_pct', 'metal_aprovador_id',
@@ -74,9 +74,9 @@ export async function updateModuloConfig(
       ? JSON.stringify(valor)
       : String(valor);
     await sql`
-      INSERT INTO alissonerp.configuracoes_unificado (chave, valor, descricao)
+      INSERT INTO alissonerp.configuracoes_sistema (chave, valor, descricao)
       VALUES (${chave}, ${valorStr}, 'Módulo Metal — atualizado via API')
-      ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor, atualizado_em = now()
+      ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor, updated_at = now()
     `;
   }
 

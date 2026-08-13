@@ -206,7 +206,7 @@ export const PATCH = defineRoute({
         }
         // Venda validada DE VERDADE: existe, não é rascunho/cancelada e tem o produto
         const vendas = await sql`
-          SELECT id, numero_venda, status AS situacao FROM alissonerp.vendas_erp
+          SELECT id, numero_venda, situacao FROM alissonerp.vendas_erp
           WHERE numero_venda = ${body.numero_venda}
           LIMIT 2
         `;

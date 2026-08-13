@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import {
   Search, RefreshCw, Loader2, Plus, TrendingUp,
   ShoppingBag, DollarSign, ChevronRight, Trophy,
-  ChevronLeft, Wallet, History,
+  ChevronLeft, Wallet, Receipt, FileCheck, History,
 } from "lucide-react";
+import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
 import LegacySaleModal from "@/components/vendas/LegacySaleModal";
 import Link from "next/link";
 import { useErrorStore } from "@/stores/errorStore";
@@ -66,6 +67,9 @@ interface VendaERP {
   bloqueado:          boolean;
   qtd_itens:          number;
   total_pago:         number;
+  nota_fiscal_id:     number | null;
+  nfce_chave_44:      string | null;
+  empresa_emitente_id: number | null;
   entrega_sem_pagamento_aprovada?: boolean;
   saldo_financeiro_aberto?: number;
   entregue_com_pendencia_financeira?: boolean;
@@ -162,6 +166,7 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
   const [totalPaginas, setTotalPaginas] = useState(1);
 
   // NFC-e modal
+  const [vendaNfce, setVendaNfce] = useState<VendaERP | null>(null);
   // Legacy sale modal
   const [showLegacyModal, setShowLegacyModal] = useState(false);
 
@@ -625,12 +630,21 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          {/* MERGE: botão de emissão de NFC-e da produção (origin/main) removido
-                              de propósito — módulo de NF-e abandonado por decisão do dono
-                              (ver docs/migracao/LIVRO-DE-REGRAS-migracao-erp-novo.md §4.1/§10.1:
-                              vendas_erp.nota_fiscal_id e .empresa_emitente_id foram apagadas,
-                              sempre vazias, 0 uso real). `setVendaNfce` não existe em nenhum
-                              outro ponto deste arquivo. */}
+                          {v.nota_fiscal_id ? (
+                            <span title="NFC-e emitida" className="p-1 inline-flex">
+                              <FileCheck size={14} className="text-emerald-600" />
+                            </span>
+                          ) : v.empresa_emitente_id && v.situacao !== "rascunho" ? (
+                            // Emitir NFC-e escondido em rascunho: nota fiscal só pode ser emitida de venda firmada
+                            <button
+                              title="Emitir NFC-e"
+                              onClick={e => { e.stopPropagation(); setVendaNfce(v); }}
+                              className="p-1 rounded hover:bg-stone-100 transition-colors inline-flex"
+                              style={{ color: "#9CA3AF" }}
+                            >
+                              <Receipt size={14} />
+                            </button>
+                          ) : null}
                           <Link
                             href={`/vendas/${v.id}`}
                             className="p-1 rounded hover:bg-gray-100 transition-colors inline-flex"
@@ -685,6 +699,14 @@ export default function VendasClient({ role, vendedorId, nomeUsuario }: Props) {
           </div>
         )}
       </div>
+
+      {vendaNfce && (
+        <EmitirNfceModal
+          venda={vendaNfce}
+          onClose={() => setVendaNfce(null)}
+          onSuccess={() => { fetchVendas(inicio, fim, pagina); }}
+        />
+      )}
 
       {showLegacyModal && (
         <LegacySaleModal

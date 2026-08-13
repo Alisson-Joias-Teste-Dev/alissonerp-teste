@@ -21,9 +21,6 @@ import { createClient } from "@/lib/supabase/client";
 // REGRA DE NEGOCIO: helpers de rodio centralizados em src/lib/servico-rodio.ts
 // Frente B do Plano de Acao (30/05/2026) — nao duplicar estas funcoes nos frontends.
 import { isServicoRodioProduto, descricaoItemComBaseRodio, calcularPreviewRodioPorSkuBase, getPctRodio, round2, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
-// REGRA DE NEGOCIO: comissao por faixa de desconto centralizada em src/lib/comissao.ts
-// (pente-fino 10/08/2026, etapa 1) — nao duplicar getComissao() nos frontends.
-import { getComissao as getComissaoBase, type FaixaComissao } from "@/lib/comissao";
 import { useErrorStore } from "@/stores/errorStore";
 // Formas que contam como cartão pro gate de desconto (fonte única, espelha o servidor).
 import { ehFormaCartao } from "@/lib/desconto/precificar-item";
@@ -78,6 +75,11 @@ interface Produto {
   /** Percentual do servico automatico sobre joia base (ex: 0.30 = 30% para rodio).
    *  NULL = usa PCT_RODIO_DEFAULT. Frente C do Plano de Acao (30/05/2026). */
   pct_calculo_servico?: number | null;
+}
+
+interface FaixaComissao {
+  desconto_pct: number;
+  comissao_pct: number;
 }
 
 
@@ -1082,7 +1084,10 @@ export default function NovaVendaClientV2({ role, vendedorId, vendedorNome, maxD
 
   // ─── Comissão ─────────────────────────────────────────────────────────────
   function getComissao(pct: number): number {
-    return getComissaoBase(pct, faixas);
+    if (pct > 30) return 0.5;
+    const faixa = faixas.find(f => f.desconto_pct === Math.round(pct));
+    if (!faixa) return 0;
+    return faixa.comissao_pct;
   }
 
   /**

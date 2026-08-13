@@ -22,6 +22,8 @@ import PagamentoForm, { type PagamentoEntry, fmt as fmtPagamento } from "@/compo
 import PainelCrediario from "@/components/vendas/PainelCrediario";
 import { calcularCrediPreview, type CrediTipo } from "@/lib/credi-preview";
 import UpgradeItemFields from "@/components/vendas/UpgradeItemFields";
+import EmitirNfceModal from "@/components/fiscal/EmitirNfceModal";
+import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 // REGRA DE NEGÓCIO: modal de entrega (parcial/total) da venda
 import MarcarEntregaModal from "@/components/entregas/MarcarEntregaModal";
 import AbrirOrdemAliancaModal from "@/components/vendas/AbrirOrdemAliancaModal";
@@ -38,9 +40,6 @@ import { useErrorStore } from "@/stores/errorStore";
 import { getPublicUrl } from "@/lib/storage-url";
 // REGRA DE NEGOCIO: helpers de rodio (Frente A — 30/05/2026)
 import { isServicoRodioProduto, calcularPreviewRodioPorSkuBase, getPctRodio, round2, SKU_RODIO_CANONICO } from "@/lib/servico-rodio";
-// REGRA DE NEGOCIO: comissao por faixa de desconto centralizada em src/lib/comissao.ts
-// (pente-fino 10/08/2026, etapa 1) — nao duplicar getComissao() nos frontends.
-import { getComissao as getComissaoBase, type FaixaComissao } from "@/lib/comissao";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -66,6 +65,7 @@ interface Produto {
    *  NULL = usa PCT_RODIO_DEFAULT. Frente C do Plano de Acao (30/05/2026). */
   pct_calculo_servico?: number | null;
 }
+interface FaixaComissao { desconto_pct: number; comissao_pct: number; }
 interface ItemVenda {
   id?: number; _key: string; produto_id: number | null; nome_produto: string; sku: string;
   quantidade: number; preco_lista: number; pct_desconto: number;
@@ -185,6 +185,8 @@ interface Venda {
     valorPedra: number | null;
     pedras: Array<{ tipo: string | null; corte: string | null; tamanho_mm: number | null; qtd: number | null; ct_total: number | null; preco_total_rs: number | null }>;
   }>;
+  empresa_emitente_id?: number | null;
+  nota_fiscal_id?: number | null;
   descontoThreshold?: number | null;
   /** Limite (%) de desconto acima do qual o Cartão de Crédito exige aprovação.
    *  Vem da config `limite_desconto_cartao_pct` (Configurações › Aprovadores). */
@@ -687,6 +689,8 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
   const [clienteSyncMsg, setClienteSyncMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
+  const [abrirNfce, setAbrirNfce] = useState(false);
+  const [verNotaId, setVerNotaId] = useState<number | null>(null);
   // REGRA DE NEGÓCIO: controla a abertura do modal de Marcar Entrega — permite
   // registrar entregas parciais ou totais dos itens da venda aprovada.
   const [showMarcarEntrega, setShowMarcarEntrega] = useState(false);
@@ -949,7 +953,10 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
 
   // ── Commission lookup ───────────────────────────────────────────────────────
   function getComissao(pct: number): number {
-    return getComissaoBase(pct, faixas);
+    if (pct > 30) return 0.5;
+    const faixa = faixas.find(f => f.desconto_pct === Math.round(pct));
+    if (!faixa) return 0;
+    return faixa.comissao_pct;
   }
 
   function calcItem(produto: Produto, q: number, pct: number) {
@@ -2417,12 +2424,22 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           </div>
         </div>
         <div className="flex items-center gap-1">
-          {/* MERGE: botões de NFC-e da produção (origin/main) removidos de propósito —
-              módulo de NF-e abandonado por decisão do dono (ver
-              docs/migracao/LIVRO-DE-REGRAS-migracao-erp-novo.md §4.1/§10.1:
-              vendas_erp.nota_fiscal_id foi apagada, sempre vazia, 0 uso real).
-              `setVerNotaId`/`setAbrirNfce` não existem em nenhum outro ponto deste
-              arquivo. */}
+          {venda && venda.nota_fiscal_id ? (
+            <button onClick={() => setVerNotaId(venda.nota_fiscal_id!)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
+              style={{ borderColor: "#6EE7B7", color: "#065F46" }}
+              title="Ver NFC-e emitida">
+              <FileText size={13} /> NFC-e
+            </button>
+          ) : venda && venda.situacao !== "rascunho" ? (
+            // Emitir NFC-e escondido em rascunho: nota fiscal só pode ser emitida de venda firmada
+            <button onClick={() => setAbrirNfce(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
+              style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+              title="Emitir NFC-e">
+              <FileText size={13} /> NFC-e
+            </button>
+          ) : null}
           <button onClick={gerarPdf} disabled={gerandoPdf}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 hover:bg-gray-50"
             style={{ borderColor: C.cremeBorder, color: C.esmeralda }}>
@@ -4722,6 +4739,16 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
 
       </div>
     </div>
+    {abrirNfce && venda && (
+      <EmitirNfceModal
+        venda={{ id: venda.id, numero_venda: venda.numero_venda, total_venda: venda.total_venda, cliente_id: venda.cliente_id }}
+        onClose={() => setAbrirNfce(false)}
+        onSuccess={() => { load(); }}
+      />
+    )}
+    {verNotaId && (
+      <NotaFiscalDetalheModal notaId={verNotaId} onClose={() => setVerNotaId(null)} />
+    )}
     {solicitarPayload && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
         <div className="w-full max-w-md rounded-xl bg-white shadow-xl border" style={{ borderColor: C.cremeBorder }}>

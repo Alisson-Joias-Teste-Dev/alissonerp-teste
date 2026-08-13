@@ -19,7 +19,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
   }
 
   const [compra] = await sql`
-    SELECT id, status AS situacao, bloqueado FROM alissonerp.compras WHERE id = ${compraId} LIMIT 1
+    SELECT id, situacao, bloqueado FROM alissonerp.compras WHERE id = ${compraId} LIMIT 1
   `;
 
   if (!compra) {
@@ -44,7 +44,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Params }) {
   const [updated] = await sql`
     UPDATE alissonerp.compras
     SET
-      status            = 'rascunho',
+      situacao         = 'rascunho',
       data_recebimento = NULL,
       recebido_por     = NULL
     WHERE id = ${compraId}

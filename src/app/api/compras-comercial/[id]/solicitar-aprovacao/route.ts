@@ -30,7 +30,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
   void req;
 
   const [compra] = await sql`
-    SELECT c.id, c.status AS situacao, c.bloqueado, c.fornecedor_id, c.local_estoque_id, c.qtd_parcelas, c.primeiro_vencimento,
+    SELECT c.id, c.situacao, c.bloqueado, c.fornecedor_id, c.local_estoque_id, c.qtd_parcelas, c.primeiro_vencimento,
       ct.nome AS fornecedor_nome
     FROM alissonerp.compras_comercial c
     LEFT JOIN public.contatos ct ON ct.id_contato = c.fornecedor_id
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
   await sql`
     UPDATE alissonerp.compras_comercial
     SET
-      status = 'aguardando_aprovacao',
+      situacao = 'aguardando_aprovacao',
       bloqueado = true,
       aprovador_id = ${aprovadorId}::uuid,
       tarefa_aprovacao_id = ${tarefa.id},

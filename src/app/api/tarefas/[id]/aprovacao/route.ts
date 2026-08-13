@@ -28,10 +28,6 @@ import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } fro
 import { liberarFreteAvulsoNoTx, recusarFreteAvulsoNoTx } from "@/lib/entrega-venda";
 import { aprovarFechamentoFreteNoTx, recusarFechamentoFreteNoTx } from "@/lib/frete-fechamento";
 import { podeDecidir, eventoDaTarefa } from "@/lib/aprovacoes";
-// REGRA DE NEGOCIO: comissao por faixa de desconto centralizada em src/lib/comissao.ts
-// (unificacao 11/08/2026) — antes esta rota reescrevia a MESMA regra em SQL puro
-// (CASE WHEN desconto > 30 THEN 0.5), podendo divergir de getComissao() sem avisar.
-import { getComissao, type FaixaComissao } from "@/lib/comissao";
 
 /**
  * REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — guard de idempotência): sinaliza que o
@@ -123,7 +119,7 @@ async function processarAprovacaoCompraComercial(
   // - Por que: pagamento operacional ocorre via contas a pagar e só após aprovação formal.
   // - Impacto se alterado/removido: compra pode ficar aprovada sem reflexo em estoque/financeiro.
   const [compra] = await sql`
-    SELECT id, fornecedor_id, local_estoque_id, qtd_parcelas, primeiro_vencimento, created_by, status, bloqueado, tarefa_aprovacao_id
+    SELECT id, fornecedor_id, local_estoque_id, qtd_parcelas, primeiro_vencimento, created_by, situacao, bloqueado, tarefa_aprovacao_id
     FROM alissonerp.compras_comercial
     WHERE tarefa_aprovacao_id = ${tarefaId}
     LIMIT 1
@@ -135,7 +131,7 @@ async function processarAprovacaoCompraComercial(
     await sql`
       UPDATE alissonerp.compras_comercial
       SET
-        status = 'rejeitado',
+        situacao = 'rejeitado',
         bloqueado = false,
         aprovado_por = ${aprovadorId}::uuid,
         data_decisao = NOW(),
@@ -146,7 +142,7 @@ async function processarAprovacaoCompraComercial(
   }
 
   const itens = await sql`
-    SELECT produto_id, quantidade AS qtd, valor_total
+    SELECT produto_id, qtd, valor_total
     FROM alissonerp.itens_compra_comercial
     WHERE compra_comercial_id = ${compra.id}
     ORDER BY id
@@ -253,7 +249,7 @@ async function processarAprovacaoCompraComercial(
       const valorParcela = i === parcelas ? Math.round((base + diff) * 100) / 100 : base;
       await tx`
         INSERT INTO alissonerp.contas_pagar
-          (descricao, fornecedor_id, fornecedor_nome, compra_comercial_id, valor, data_vencimento, status, categoria, created_by, observacao)
+          (descricao, fornecedor_id, fornecedor_nome, compra_comercial_id, valor, data_vencimento, situacao, categoria, created_by, obs)
         VALUES
           (
             ${`Compra Comercial #${compra.id} - Parcela ${i}/${parcelas}`},
@@ -273,7 +269,7 @@ async function processarAprovacaoCompraComercial(
     await tx`
       UPDATE alissonerp.compras_comercial
       SET
-        status = 'aprovado',
+        situacao = 'aprovado',
         bloqueado = true,
         total = ${totalCompra},
         aprovado_por = ${aprovadorId}::uuid,
@@ -476,7 +472,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const [tarefaInfo] = await sql`
     SELECT t.venda_id, t.tags, t.tipo,
            ve.aprovacao_credito_tipo,
-           ve.status AS venda_situacao,
+           ve.situacao AS venda_situacao,
            evfa.pagante AS frete_pagante,
            fmf.gerente_id AS fechamento_gerente_id
     FROM alissonerp.tarefas t
@@ -942,36 +938,33 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         //    0% e joga na faixa cheia de 4%) e no item com preço digitado à mão.
         //    `preco_lista_cheio` (migration 366) é o preço da campanha.
         //    COALESCE com preco_lista cobre linha antiga com a coluna nula.
-        //
-        // UNIFICAÇÃO (11/08/2026): o mapeamento desconto→comissão (faixa ou piso
-        // de 0,5% acima de 30%) NÃO é mais recalculado aqui em SQL — vem de
-        // getComissao(), a MESMA função usada ao criar a venda. O SQL abaixo só
-        // calcula o desconto real de cada item (aritmética, não regra de negócio).
-        const itensParaRecalcular = await sql`
-          SELECT i.id, i.total_item,
-                 CASE WHEN COALESCE(i.preco_lista_cheio, i.preco_lista) > 0
-                      THEN GREATEST(ROUND((
-                             (COALESCE(i.preco_lista_cheio, i.preco_lista) - i.preco_unitario)
-                             / COALESCE(i.preco_lista_cheio, i.preco_lista)
-                           ) * 100, 2), 0)
-                      ELSE 0 END AS desconto
-          FROM alissonerp.itens_venda_erp i
-          WHERE i.venda_id = ${tarefaInfo.venda_id}
-            AND i.produto_id IS NOT NULL
+        await sql`
+          UPDATE alissonerp.itens_venda_erp iv
+          SET pct_comissao   = calc.pct_comissao,
+              valor_comissao = ROUND(iv.total_item * calc.pct_comissao / 100, 2)
+          FROM (
+            SELECT i.id,
+                   CASE
+                     WHEN d.desconto > 30 THEN 0.5
+                     ELSE COALESCE(fc.comissao_pct, 0)
+                   END AS pct_comissao
+            FROM alissonerp.itens_venda_erp i
+            CROSS JOIN LATERAL (
+              SELECT CASE WHEN COALESCE(i.preco_lista_cheio, i.preco_lista) > 0
+                          THEN GREATEST(ROUND((
+                                 (COALESCE(i.preco_lista_cheio, i.preco_lista) - i.preco_unitario)
+                                 / COALESCE(i.preco_lista_cheio, i.preco_lista)
+                               ) * 100, 2), 0)
+                          ELSE 0 END AS desconto
+            ) d
+            LEFT JOIN alissonerp.faixas_comissao fc
+              ON fc.desconto_pct = ROUND(d.desconto) AND fc.ativo = true
+            WHERE i.venda_id = ${tarefaInfo.venda_id}
+              AND i.produto_id IS NOT NULL
+          ) calc
+          WHERE iv.id = calc.id
         `;
-        const faixasAtivas = (await sql`
-          SELECT desconto_pct, comissao_pct FROM alissonerp.faixas_comissao WHERE ativo = true
-        `).map((f) => ({ desconto_pct: Number(f.desconto_pct), comissao_pct: Number(f.comissao_pct) })) as FaixaComissao[];
-        for (const item of itensParaRecalcular) {
-          const pctComissao = getComissao(Number(item.desconto), faixasAtivas);
-          await sql`
-            UPDATE alissonerp.itens_venda_erp
-            SET pct_comissao   = ${pctComissao},
-                valor_comissao = ROUND(${item.total_item}::numeric * ${pctComissao} / 100, 2)
-            WHERE id = ${item.id}
-          `;
-        }
-        console.log(`[desconto] itens_venda_erp: comissão recalculada via getComissao() (fonte única)`, { itens: itensParaRecalcular.length });
+        console.log(`[desconto] itens_venda_erp: comissão recalculada pela tabela de faixas`);
       } else {
         await sql`
           UPDATE alissonerp.vendas_erp

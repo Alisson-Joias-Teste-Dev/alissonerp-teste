@@ -235,7 +235,7 @@ export async function processarAprovacaoCredito(
   // 1. Buscar tarefa e venda vinculada
   const [tarefa] = await sql`
     SELECT t.id, t.venda_id, t.tipo AS tipo_tarefa, t.criado_por,
-           v.id AS vid, v.numero_venda, v.status AS situacao, v.aprovacao_credito_tipo,
+           v.id AS vid, v.numero_venda, v.situacao, v.aprovacao_credito_tipo,
            v.total_comissao, v.data_venda::text AS data_venda
     FROM alissonerp.tarefas t
     JOIN alissonerp.vendas_erp v ON v.id = t.venda_id

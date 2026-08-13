@@ -244,7 +244,7 @@ describe("POST /api/financeiro/inter/sync", () => {
 
     expect(sqlText).toMatch(/FROM\s+alissonerp\.contas_pagar/i);
     expect(sqlText).toMatch(/inter_pagamento_id\s+IS\s+NOT\s+NULL/i);
-    expect(sqlText).toMatch(/status\s*=\s*'pendente'/i);
+    expect(sqlText).toMatch(/situacao\s*=\s*'pendente'/i);
     expect(sqlText).toMatch(/inter_status\s+IS\s+NULL\s+OR\s+inter_status\s+NOT\s+IN/i);
     expect(sqlText).toMatch(/'PAGO'/);
     expect(sqlText).toMatch(/'EXECUTADO'/);
@@ -308,7 +308,7 @@ describe("POST /api/financeiro/inter/sync", () => {
     const updateCall = sqlMock.mock.calls[1];
     const sqlText = (updateCall[0] as string[]).join(" ");
     const values = updateCall.slice(1) as unknown[];
-    expect(sqlText).toMatch(/status\s*=\s*'pago'/i);
+    expect(sqlText).toMatch(/situacao\s*=\s*'pago'/i);
     expect(sqlText).toMatch(/data_pagamento/i);
     expect(values).toContain("2026-04-20");
     expect(values).toContain("PAGO");
@@ -353,7 +353,7 @@ describe("POST /api/financeiro/inter/sync", () => {
 
     const updateCall = sqlMock.mock.calls[1];
     const sqlText = (updateCall[0] as string[]).join(" ");
-    expect(sqlText).toMatch(/status\s*=\s*'pago'/i);
+    expect(sqlText).toMatch(/situacao\s*=\s*'pago'/i);
   });
 
   // ── Loop: status mudou mas NÃO é pago ────────────────────────────────────
@@ -446,14 +446,12 @@ describe("POST /api/financeiro/inter/sync", () => {
     const data = await res.json();
     expect(data.processados).toBe(2);
     expect(data.atualizados).toBe(1);
-    // A resposta usa mensagem genérica (o erro real vai só pro console.error,
-    // "ver log do servidor" — não tem coluna própria pra guardar por conta).
     expect(data.erros).toHaveLength(1);
-    expect(data.erros[0]).toEqual({ id: 1, erro: "Falha ao sincronizar (ver log do servidor)" });
+    expect(data.erros[0]).toEqual({ id: 1, erro: "Inter offline" });
     expect(mockGetPagamento).toHaveBeenCalledTimes(2);
   });
 
-  it("erro não-Error (string lançada): não derruba a rota, cai no mesmo catch genérico", async () => {
+  it("erro não-Error (string): converte com String(e)", async () => {
     const conta: ContaPendente = { ...contaBase };
     sqlMock.mockResolvedValueOnce([conta]);
 
@@ -461,10 +459,9 @@ describe("POST /api/financeiro/inter/sync", () => {
 
     const res = await POST(makeRequest({ "x-cron-secret": CRON_SECRET_DB }));
 
-    expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.erros).toHaveLength(1);
-    expect(data.erros[0]).toEqual({ id: conta.id, erro: "Falha ao sincronizar (ver log do servidor)" });
+    expect(data.erros[0]).toEqual({ id: conta.id, erro: "falha-string" });
   });
 
   // ── Múltiplas contas mistas ──────────────────────────────────────────────

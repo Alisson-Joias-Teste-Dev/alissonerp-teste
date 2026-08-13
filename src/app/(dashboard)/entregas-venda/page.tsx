@@ -197,8 +197,8 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
   // IMPACTO SE REMOVIDO: solicitações pendentes de liberação vazam para a
   // lista principal e inflam a contagem "total" para todo mundo.
   const whereSituacao = situacao
-    ? sql`AND ev.status = ${situacao}`
-    : sql`AND ev.status NOT IN ('cancelada', 'solicitada')`;
+    ? sql`AND ev.situacao = ${situacao}`
+    : sql`AND ev.situacao NOT IN ('cancelada', 'solicitada')`;
 
   // Filtro de busca: código de entrega ou número da venda (case-insensitive)
   const whereBusca = busca
@@ -240,7 +240,7 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
         ev.venda_id,
         ev.codigo_entrega,
         ev.tipo,
-        ev.status AS situacao,
+        ev.situacao,
         ev.forma_entrega,
         ev.regiao,
         ev.motoboy_id,
@@ -276,11 +276,11 @@ export default async function EntregasVendaPage({ searchParams }: PageProps) {
     sql`
       SELECT
         COUNT(*)::integer                                       AS total,
-        COUNT(*) FILTER (WHERE ev.status = 'pendente')::integer AS pendente,
+        COUNT(*) FILTER (WHERE ev.situacao = 'pendente')::integer AS pendente,
         COUNT(*) FILTER (WHERE ev.data_saida IS NOT NULL
                          AND ev.data_entrega_realizada IS NULL
-                         AND ev.status != 'cancelada')::integer  AS em_andamento,
-        COUNT(*) FILTER (WHERE ev.status = 'confirmada')::integer AS confirmada
+                         AND ev.situacao != 'cancelada')::integer  AS em_andamento,
+        COUNT(*) FILTER (WHERE ev.situacao = 'confirmada')::integer AS confirmada
       FROM alissonerp.entregas_venda ev
       LEFT JOIN alissonerp.vendas_erp ve ON ve.id = ev.venda_id
       WHERE 1=1

@@ -4,9 +4,6 @@ import sql from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
-// REGRA DE NEGOCIO: saldo de estoque centralizado em src/lib/estoque-saldo.ts
-// (pente-fino 10/08/2026, etapa 2) — nao reimplementar SUM(saldo) aqui.
-import { buscarSaldoEstoque } from "@/lib/estoque-saldo";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 
@@ -95,7 +92,13 @@ export async function POST(
     }
 
     // ── 2. Verificar saldo do insumo ──────────────────────────────────────────
-    const saldoAtual = await buscarSaldoEstoque(sql, operadorId, insumoId);
+    const saldoRows = await sql`
+      SELECT COALESCE(SUM(saldo), 0) AS saldo
+      FROM alissonerp.vw_saldo_estoque
+      WHERE deposito_id = ${operadorId}
+        AND insumo_id   = ${insumoId}
+    `;
+    const saldoAtual = parseFloat(String(saldoRows[0]?.saldo ?? 0));
     if (saldoAtual < quantidade) {
       return NextResponse.json(
         { error: `Saldo insuficiente. Disponível: ${saldoAtual.toFixed(4)}, solicitado: ${quantidade.toFixed(4)}` },
@@ -129,7 +132,7 @@ export async function POST(
       // Saída Avulsa do estoque do operador
       const [mov] = await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, observacao, data_hora)
+          (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, obs, data_hora)
         VALUES (
           ${insumoId},
           ${operadorId},
@@ -146,7 +149,7 @@ export async function POST(
       // Registro do apontamento
       const [aponto] = await tx`
         INSERT INTO alissonerp.apontamentos_servico
-          (servico_id, operador_id, operador_nome, insumo_id, insumo_nome, quantidade, movimentacao_id, foto_url, observacao)
+          (servico_id, operador_id, operador_nome, insumo_id, insumo_nome, quantidade, movimentacao_id, foto_url, obs)
         VALUES (
           ${servicoId},
           ${operadorId},
@@ -165,7 +168,13 @@ export async function POST(
     });
 
     // ── 6. Saldo atualizado ───────────────────────────────────────────────────
-    const novoSaldo = parseFloat((await buscarSaldoEstoque(sql, operadorId, insumoId)).toFixed(4));
+    const novoSaldoRows = await sql`
+      SELECT COALESCE(SUM(saldo), 0) AS saldo
+      FROM alissonerp.vw_saldo_estoque
+      WHERE deposito_id = ${operadorId}
+        AND insumo_id   = ${insumoId}
+    `;
+    const novoSaldo = parseFloat(parseFloat(String(novoSaldoRows[0]?.saldo ?? 0)).toFixed(4));
 
     return NextResponse.json({
       success:        true,

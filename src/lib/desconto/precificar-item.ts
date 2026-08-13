@@ -39,13 +39,6 @@
  *   + Pedra leva desconto proporcional (a tela passa a mostrar o que é cobrado).
  */
 
-// REGRA DE NEGOCIO: comissao por faixa de desconto centralizada em src/lib/comissao.ts
-// (unificacao 11/08/2026) — comissaoDaFaixa() abaixo so delega pra getComissao(),
-// nao reimplementa a regra. Antes das duas versoes divergirem, era possivel mudar
-// o piso/teto num lugar e o outro (usado ao criar/editar item de venda) ficar
-// com o valor antigo, sem ninguem notar.
-import { getComissao } from "@/lib/comissao";
-
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 /** Faixa de comissão (tabela alissonerp.faixas_comissao). */
@@ -134,7 +127,7 @@ export const FULL_ACCESS_ROLES_DESCONTO = ["desenvolvedor", "admin"] as const;
 /** Teto quando o cadastro do usuário está vazio/0 (decisão Jonathan 23/06: 0% —
  *  sem cadastro, nada de desconto sem aprovação).
  *  FASE 5 (15/07): este valor é só o SEED/fallback-do-fallback — o valor REAL
- *  vem de `alissonerp.configuracoes_unificado` (chave `desconto_fallback_sem_cadastro_pct`),
+ *  vem de `alissonerp.configuracoes_sistema` (chave `desconto_fallback_sem_cadastro_pct`),
  *  lido pelos callers (ex.: `getDescontoThreshold` em aprovacao-regras.ts) ANTES de
  *  chamar `calcularTetoDesconto(tetoUsuario, role, fullAccessRoles, valorDaConfig)`.
  *  Se a chave ainda não existir no banco (sera criada via /dba), cai neste valor. */
@@ -142,7 +135,7 @@ export const FALLBACK_TETO_DESCONTO_PCT = 0;
 
 /** Limite padrão de desconto no CARTÃO.
  *  FASE 5 (15/07): este valor é só o SEED — o valor REAL vem de
- *  `alissonerp.configuracoes_unificado` (chave `limite_desconto_cartao_pct`), lido
+ *  `alissonerp.configuracoes_sistema` (chave `limite_desconto_cartao_pct`), lido
  *  pelos 4 gates de cartão (solicitar-aprovacao, vendas-aprovar, pagamentos) via
  *  helper compartilhado `buscarLimiteDescontoCartao` (aprovacao-regras.ts). Se a
  *  chave ainda não existir no banco, cai neste valor.
@@ -189,15 +182,16 @@ export function arredondarMoeda(x: number): number {
 }
 
 /**
- * Comissão a partir do % de desconto. Delega pra getComissao() (src/lib/comissao.ts,
- * FONTE ÚNICA da regra — usada na criação da venda, na prévia do front e na
- * aprovação de desconto). Este wrapper existe só pra não obrigar os ~4 callers
- * deste arquivo (resolverItemComissao, calcularItemComDesconto) a trocar de import.
+ * Comissão a partir do % de desconto, espelhando getComissao de NovaVendaClientV2:
+ *  - desconto > 30% → 0,5% (fixo)
+ *  - senão, faixa cujo desconto_pct == round(pct); se não houver, 0%.
  * IMPACTO: é a fórmula promo-aware oficial — usar a MESMA em venda nova, detalhe,
  *   dashboard e análise acaba com o "4% chumbado" e a comissão errada ao editar.
  */
 export function comissaoDaFaixa(pctDesconto: number, faixas: FaixaComissao[] = []): number {
-  return getComissao(pctDesconto, faixas);
+  if (pctDesconto > 30) return 0.5;
+  const faixa = faixas.find((f) => f.desconto_pct === Math.round(pctDesconto));
+  return faixa ? faixa.comissao_pct : 0;
 }
 
 /**

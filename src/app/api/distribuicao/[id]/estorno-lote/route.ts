@@ -95,11 +95,11 @@ export async function POST(
 
   // Todas as CEs do lote (exceto ESTORNO — nunca reverter o estorno)
   const movimentacoes = await sql`
-    SELECT id, insumo_id, deposito_id, entrada, saida, marcador::text AS marcador, ordem_id, observacao AS obs
+    SELECT id, insumo_id, deposito_id, entrada, saida, marcador::text AS marcador, ordem_id, obs
     FROM alissonerp.movimentacoes_estoque
     WHERE ordem_id = ANY(${ordemIds})
     AND marcador::text IN ('TEDD', 'QUEBRA_LOTE')
-    AND observacao ~ ${'distribuicao #' + distId + '([^0-9]|$)'}
+    AND obs ~ ${'distribuicao #' + distId + '([^0-9]|$)'}
     ORDER BY created_at, id
   `;
 
@@ -119,7 +119,7 @@ export async function POST(
 
   // Apontamentos do lote (para Fase 2.5 e snapshot)
   const apontamentos = await sql`
-    SELECT id, tipo_apontamento_id, deposito_id, insumo_id, quantidade AS qtd
+    SELECT id, tipo_apontamento_id, deposito_id, insumo_id, qtd
     FROM alissonerp.apontamentos_distribuicao
     WHERE distribuicao_id = ${distId}
   `;
@@ -170,7 +170,7 @@ export async function POST(
       if (quebraLote > 0) {
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, observacao, created_by, created_at, local_estoque_id)
+            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at, local_estoque_id)
           VALUES
             (1, ${depDist}, ${quebraLote}, 0,
              'ESTORNO'::alissonerp.enum_marcador_estoque,
@@ -193,7 +193,7 @@ export async function POST(
       if (entradaReversa > 0 || saidaReversa > 0) {
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, ordem_id, observacao, created_by, created_at, local_estoque_id)
+            (insumo_id, deposito_id, entrada, saida, marcador, ordem_id, obs, created_by, created_at, local_estoque_id)
           VALUES (
             ${ce.insumo_id as number},
             ${ce.deposito_id as number},
@@ -224,24 +224,24 @@ export async function POST(
         // Entrada (Almox → Operador): reversa devolve ao Almox
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, observacao, created_by, created_at, local_estoque_id)
+            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at, local_estoque_id)
           VALUES (${ins}, ${dep},   0,     ${qtd}, 'ESTORNO'::alissonerp.enum_marcador_estoque, ${obs}, ${user.id}::uuid, now(), 1)
         `;
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, observacao, created_by, created_at, local_estoque_id)
+            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at, local_estoque_id)
           VALUES (${ins}, ${almox}, ${qtd},   0,    'ESTORNO'::alissonerp.enum_marcador_estoque, ${obs}, ${user.id}::uuid, now(), 1)
         `;
       } else if ([5, 6].includes(tipo)) {
         // Retorno (Operador → Almox): reversa devolve ao Operador
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, observacao, created_by, created_at, local_estoque_id)
+            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at, local_estoque_id)
           VALUES (${ins}, ${almox}, 0,     ${qtd}, 'ESTORNO'::alissonerp.enum_marcador_estoque, ${obs}, ${user.id}::uuid, now(), 1)
         `;
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, entrada, saida, marcador, observacao, created_by, created_at, local_estoque_id)
+            (insumo_id, deposito_id, entrada, saida, marcador, obs, created_by, created_at, local_estoque_id)
           VALUES (${ins}, ${dep},  ${qtd},   0,    'ESTORNO'::alissonerp.enum_marcador_estoque, ${obs}, ${user.id}::uuid, now(), 1)
         `;
       }

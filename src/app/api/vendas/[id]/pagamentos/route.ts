@@ -94,7 +94,7 @@ export async function POST(
 
   const descontoThreshold = await getDescontoThreshold(vendaId);
   const [venda] = await sql`
-    SELECT v.id, v.bloqueado, v.status AS situacao,
+    SELECT v.id, v.bloqueado, v.situacao,
     v.desconto_aprovado_por,
     v.desconto_cartao_aprovado_por,
     EXISTS(
@@ -221,7 +221,7 @@ export async function POST(
           SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1
         `;
         const [cfg] = await sql<{ valor: string }[]>`
-          SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'aprovador_vale_troca_excecao'
+          SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovador_vale_troca_excecao'
         `;
         const autorizado = hasRole(u?.role, ROLES_DEVOLUCAO) || (!!cfg?.valor && cfg.valor === user.id);
         if (!autorizado) {

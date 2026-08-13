@@ -1,15 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { X, Loader2, CheckCircle, AlertCircle } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { X, Loader2, CheckCircle, AlertCircle, Camera, RefreshCw } from "lucide-react";
 import { formatPeso, gramasToCt } from "@/lib/formatters";
 import { createClient } from "@/lib/supabase/client";
-// REGRA DE NEGOCIO: validacao de foto+IA e busca de pedra centralizadas em
-// _shared (pente-fino 10/08/2026, etapa 4) — nao duplicar aqui.
-import { useValidacaoIABalanca } from "./_shared/useValidacaoIABalanca";
-import { FotoBalancaCampo } from "./_shared/FotoBalancaCampo";
-import { InsumoPedraAutocomplete } from "./_shared/InsumoPedraAutocomplete";
-import type { Insumo } from "./_shared/types";
 
 const C = {
   esmeralda: "#184036",
@@ -52,6 +46,16 @@ interface TipoApontamento {
   scope: string;
 }
 
+interface Insumo {
+  id: number;
+  nome: string;
+  sku: string | null;
+  categoria_id: number;
+  saldo_disponivel?: number;
+  unidade?: string;
+  peso_pedra?: number | null;
+}
+
 interface Deposito {
   id: number;
   nome: string;
@@ -60,6 +64,14 @@ interface Deposito {
 interface Setor {
   id: number;
   nome: string;
+}
+
+interface ValidacaoIA {
+  peso_digitado: number;
+  peso_balanca: number | null;
+  confianca: string;
+  match: boolean;
+  mensagem: string;
 }
 
 export default function ApontamentoPCPModal({
@@ -92,14 +104,19 @@ export default function ApontamentoPCPModal({
   // Autocomplete de pedras
   const [buscaPedra, setBuscaPedra] = useState("");
   const [dropdownAberto, setDropdownAberto] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Estados de foto e IA
+  const [fotoFile, setFotoFile] = useState<File | null>(null);
+  const [fotoPreview, setFotoPreview] = useState<string | null>(null);
+  const [validacaoIA, setValidacaoIA] = useState<ValidacaoIA | null>(null);
+  const [validando, setValidando] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const precisaFotoIA = tipoId === TIPO_FOTO_IA || tipoId === TIPO_ADITIVO || tipoId === TIPO_RETORNO || tipoId === TIPO_ENTRADA_PEDRA || tipoId === TIPO_RETORNO_PEDRA || tipoId === TIPO_OUTROS;
   const isPedra  = TIPO_PEDRA.includes(tipoId as number);
   const isOutros = tipoId === TIPO_OUTROS;
   const pesoCt = pesoGPedra && !isNaN(parseFloat(pesoGPedra)) ? gramasToCt(parseFloat(pesoGPedra)) : 0;
-
-  const { fotoFile, fotoPreview, validacaoIA, validando, handleFoto, handleRevalidar, resetFoto } =
-    useValidacaoIABalanca({ isPedra, qtd, pesoGPedra, pesoPedraUnitario });
 
   // ─── Carregar tipos e depósitos ao abrir ──────────────────────────────────
   useEffect(() => {
@@ -211,6 +228,82 @@ export default function ApontamentoPCPModal({
       });
   }, [tipoId]);
 
+  // ─── Fechar dropdown ao clicar fora ou ESC ─────────────────────────────────
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownAberto(false);
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setDropdownAberto(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, []);
+
+  // ─── Resetar validação quando qtd ou pesoGPedra muda (precisa revalidar) ───
+  useEffect(() => {
+    if (validacaoIA !== null) setValidacaoIA(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qtd, pesoGPedra]);
+
+  // ─── Validação IA ──────────────────────────────────────────────────────────
+  const validarComIA = useCallback(async (file: File, valor: number, tipo: "metal" | "pedra" = "metal") => {
+    setValidando(true);
+    setValidacaoIA(null);
+
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("peso", String(valor)); // metal: peso digitado | pedra: peso calculado (qtd × peso_pedra)
+    if (tipo === "pedra") fd.append("tipo", "pedra");
+
+    const res = await fetch("/api/pcp/validar-peso", { method: "POST", body: fd });
+    const result: ValidacaoIA = await res.json();
+    setValidacaoIA(result);
+    setValidando(false);
+  }, []);
+
+  const handleFoto = useCallback(
+    async (file: File) => {
+      setFotoFile(file);
+      setFotoPreview(URL.createObjectURL(file));
+      setValidacaoIA(null);
+
+      if (isPedra) {
+        const g = parseFloat(pesoGPedra);
+        if (!isNaN(g) && g > 0) {
+          await validarComIA(file, gramasToCt(g), "pedra");
+        }
+      } else {
+        const num = parseFloat(qtd);
+        if (!isNaN(num) && num > 0) {
+          const valorIA = pesoPedraUnitario !== null ? num * pesoPedraUnitario : num;
+          await validarComIA(file, valorIA, "metal");
+        }
+      }
+    },
+    [qtd, pesoGPedra, validarComIA, isPedra, pesoPedraUnitario]
+  );
+
+  const handleRevalidar = useCallback(() => {
+    if (!fotoFile) return;
+    if (isPedra) {
+      const g = parseFloat(pesoGPedra);
+      if (!isNaN(g) && g > 0) validarComIA(fotoFile, gramasToCt(g), "pedra");
+    } else {
+      const num = parseFloat(qtd);
+      if (!isNaN(num) && num > 0) {
+        const valorIA = pesoPedraUnitario !== null ? num * pesoPedraUnitario : num;
+        validarComIA(fotoFile, valorIA, "metal");
+      }
+    }
+  }, [fotoFile, qtd, pesoGPedra, validarComIA, isPedra, pesoPedraUnitario]);
+
   // ─── Reset ─────────────────────────────────────────────────────────────────
   function resetForm() {
     setDepositoSelecionado(depositoId);
@@ -224,7 +317,10 @@ export default function ApontamentoPCPModal({
     setDropdownAberto(false);
     setError("");
     setSuccess(false);
-    resetFoto();
+    setFotoFile(null);
+    setFotoPreview(null);
+    setValidacaoIA(null);
+    setValidando(false);
   }
 
   function handleClose() {
@@ -407,7 +503,9 @@ export default function ApontamentoPCPModal({
                 setBuscaPedra("");
                 setDropdownAberto(false);
                 setPesoPedraUnitario(null);
-                resetFoto();
+                setFotoFile(null);
+                setFotoPreview(null);
+                setValidacaoIA(null);
                 setError("");
               }}
               className="w-full px-3 py-2.5 rounded-lg border text-sm focus:outline-none"
@@ -518,21 +616,107 @@ export default function ApontamentoPCPModal({
                 </label>
 
                 {isPedra ? (
-                  <InsumoPedraAutocomplete
-                    insumos={insumos}
-                    insumoId={insumoId}
-                    busca={buscaPedra}
-                    onBuscaChange={setBuscaPedra}
-                    dropdownAberto={dropdownAberto}
-                    onDropdownChange={setDropdownAberto}
-                    comHoverEffect
-                    onLimpar={() => { setInsumoId(""); setPesoPedraUnitario(null); }}
-                    onSelecionar={(i) => {
-                      setInsumoId(i.id); setPesoPedraUnitario(i.peso_pedra ?? null);
-                      setBuscaPedra(`${i.nome}${i.sku ? ` (${i.sku})` : ""}`);
-                      setDropdownAberto(false); setError("");
-                    }}
-                  />
+                  /* ── Autocomplete pesquisável para pedras ── */
+                  <div ref={dropdownRef} className="relative">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "#9CA3AF" }}>
+                        🔍
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="Buscar por nome ou SKU..."
+                        value={buscaPedra}
+                        onChange={(e) => {
+                          setBuscaPedra(e.target.value);
+                          setDropdownAberto(true);
+                          // Se limpou o campo, limpar seleção
+                          if (!e.target.value) {
+                            setInsumoId("");
+                            setPesoPedraUnitario(null);
+                          }
+                        }}
+                        onFocus={() => setDropdownAberto(true)}
+                        className="w-full pl-8 pr-3 py-2.5 rounded-lg border text-sm focus:outline-none"
+                        style={{ borderColor: insumoId ? C.esmeralda : C.cremeBorder, backgroundColor: "#fff" }}
+                      />
+                    </div>
+
+                    {dropdownAberto && (
+                      <div
+                        className="absolute z-50 w-full mt-1 rounded-lg shadow-lg overflow-y-auto"
+                        style={{
+                          maxHeight: 220,
+                          backgroundColor: "#fff",
+                          border: `1px solid ${C.cremeBorder}`,
+                        }}
+                      >
+                        {(() => {
+                          const filtradas = insumos.filter((i) => {
+                            const q = buscaPedra.toLowerCase();
+                            return (
+                              i.nome.toLowerCase().includes(q) ||
+                              (i.sku ?? "").toLowerCase().includes(q)
+                            );
+                          });
+                          if (filtradas.length === 0) {
+                            return (
+                              <p className="px-3 py-2.5 text-sm" style={{ color: "#9CA3AF" }}>
+                                Nenhuma pedra encontrada
+                              </p>
+                            );
+                          }
+                          return filtradas.map((i) => (
+                            <button
+                              key={i.id}
+                              type="button"
+                              onMouseDown={(e) => {
+                                e.preventDefault(); // evita blur antes do click
+                                setInsumoId(i.id);
+                                setPesoPedraUnitario(i.peso_pedra ?? null);
+                                setBuscaPedra(`${i.nome}${i.sku ? ` (${i.sku})` : ""}`);
+                                setDropdownAberto(false);
+                                setError("");
+                              }}
+                              className="w-full text-left px-3 py-2 text-sm flex items-center justify-between transition-colors"
+                              style={{
+                                borderBottom: `1px solid ${C.cremeBorder}`,
+                                backgroundColor: insumoId === i.id ? C.cremeBg : "transparent",
+                                color: "#111827",
+                              }}
+                              onMouseEnter={(e) => {
+                                if (insumoId !== i.id)
+                                  (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.cremeBg;
+                              }}
+                              onMouseLeave={(e) => {
+                                if (insumoId !== i.id)
+                                  (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent";
+                              }}
+                            >
+                              <span>
+                                <span className="font-medium">{i.nome}</span>
+                                {i.sku && (
+                                  <span className="ml-1.5 text-[11px]" style={{ color: "#9CA3AF" }}>
+                                    ({i.sku})
+                                  </span>
+                                )}
+                              </span>
+                              {i.saldo_disponivel !== undefined && (
+                                <span className="text-[11px] shrink-0 ml-2" style={{ color: "#6B7280" }}>
+                                  {Math.round(Number(i.saldo_disponivel))} UN disp.
+                                </span>
+                              )}
+                            </button>
+                          ));
+                        })()}
+                      </div>
+                    )}
+
+                    {insumos.length === 0 && (
+                      <p className="text-[12px] mt-1.5" style={{ color: "#B45309" }}>
+                        Nenhuma pedra com saldo disponível no Almoxarifado Central.
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   /* ── Select simples para metal ── */
                   <>
@@ -615,15 +799,112 @@ export default function ApontamentoPCPModal({
                 </div>
               )}
 
-              <FotoBalancaCampo
-                fotoPreview={fotoPreview}
-                validando={validando}
-                validacaoIA={validacaoIA}
-                onFotoChange={handleFoto}
-                onRevalidar={handleRevalidar}
-                subtitleBotao="Câmera ou galeria"
-                textoAnalisando="Analisando peso na balança..."
-              />
+              {/* Foto da Balança + Validação IA */}
+              <div className="space-y-3">
+                <label
+                  className="block text-[11px] font-semibold uppercase tracking-wider"
+                  style={{ color: "#6B7280" }}
+                >
+                  Foto da Balança{" "}
+                  <span style={{ color: "#EF4444" }}>*</span>
+                </label>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleFoto(file);
+                    e.target.value = "";
+                  }}
+                />
+
+                {!fotoPreview ? (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full flex flex-col items-center justify-center gap-2 py-6 rounded-xl border-2 border-dashed transition-colors"
+                    style={{ borderColor: C.cremeBorder, color: "#9CA3AF" }}
+                  >
+                    <Camera size={28} style={{ color: C.sage }} />
+                    <span className="text-[13px]">Tirar foto da balança</span>
+                    <span className="text-[11px]">Câmera ou galeria</span>
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="relative rounded-xl overflow-hidden" style={{ height: 180 }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={fotoPreview}
+                        alt="Foto balança"
+                        className="w-full h-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="absolute bottom-2 right-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold"
+                        style={{ backgroundColor: "rgba(0,0,0,0.6)", color: "#fff" }}
+                      >
+                        <RefreshCw size={11} />
+                        Trocar foto
+                      </button>
+                    </div>
+
+                    {validando && (
+                      <div
+                        className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px]"
+                        style={{ backgroundColor: "#EFF6FF", color: "#2563EB" }}
+                      >
+                        <Loader2 size={14} className="animate-spin shrink-0" />
+                        Analisando peso na balança...
+                      </div>
+                    )}
+
+                    {!validando && validacaoIA && (
+                      <div
+                        className="px-3 py-2.5 rounded-lg text-[13px]"
+                        style={
+                          validacaoIA.match
+                            ? { backgroundColor: "#ECFDF5", color: "#065F46" }
+                            : { backgroundColor: "#FEF2F2", color: "#991B1B" }
+                        }
+                      >
+                        <div className="flex items-center gap-2 font-semibold mb-0.5">
+                          {validacaoIA.match ? (
+                            <>
+                              <CheckCircle size={14} className="shrink-0" />
+                              {validacaoIA.mensagem}
+                            </>
+                          ) : (
+                            <>
+                              <AlertCircle size={14} className="shrink-0" />
+                              {validacaoIA.mensagem}
+                            </>
+                          )}
+                        </div>
+                        <span className="text-[11px] opacity-70">
+                          Confiança: {validacaoIA.confianca}
+                        </span>
+                      </div>
+                    )}
+
+                    {!validando && !validacaoIA && fotoFile && (
+                      <button
+                        type="button"
+                        onClick={handleRevalidar}
+                        className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-[13px] font-semibold border transition-colors"
+                        style={{ borderColor: C.cremeBorder, color: C.esmeralda }}
+                      >
+                        <RefreshCw size={13} />
+                        Validar com IA
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {/* Info direcional */}
               <div

@@ -18,7 +18,7 @@ import {
  * - Impacto se alterado/removido: operador volta a agir direto (sem
  *   governança) ou fica 100% travado (sem canal de pedido).
  *
- * Aprovador: configuracoes_unificado chave 'aprovador_inventario' (UUID do
+ * Aprovador: configuracoes_sistema chave 'aprovador_inventario' (UUID do
  * usuário — o Jonathan). Sem config → pedido é recusado com orientação.
  */
 
@@ -41,14 +41,14 @@ export async function criarSolicitacaoInventario(params: {
 
   // Aprovador vem SÓ da configuração central (governança — igual compra comercial)
   const [cfg] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado
+    SELECT valor FROM alissonerp.configuracoes_sistema
     WHERE chave = 'aprovador_inventario'
     LIMIT 1
   `;
   const aprovadorId = String(cfg?.valor ?? "").replace(/"/g, "").trim();
   if (!aprovadorId) {
     throw new InventarioAcaoError(
-      "Nenhum aprovador de inventário configurado (configuracoes_unificado.aprovador_inventario)", 409,
+      "Nenhum aprovador de inventário configurado (configuracoes_sistema.aprovador_inventario)", 409,
     );
   }
   const [aprovador] = await sql`

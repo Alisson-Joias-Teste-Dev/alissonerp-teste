@@ -26,45 +26,6 @@ async function isRoleValida(role: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-// GET /api/user/[id] — obter dados do usuário
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-
-  const [row] = await sql`
-    SELECT u.id::text, u.email, u.nome, u.role::text, u.ativo, u.created_at,
-           u.deposito_id, u.vendedor_id, u.tipos_ordem_permitidos, u.tipos_protocolo_permitidos,
-           u.is_operador_service, u.is_transportador, u.mx_desconto_permitido,
-           up.avatar_url
-    FROM alissonerp.usuarios u
-    LEFT JOIN public.user_profiles up ON up.id_user = u.id
-    WHERE u.id = ${id}::uuid
-  `;
-  if (!row) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
-
-  const data = row as Record<string, unknown>;
-  return NextResponse.json({
-    id: data.id,
-    nome: data.nome,
-    email: data.email,
-    role: data.role,
-    ativo: data.ativo,
-    avatar_url: data.avatar_url ?? null,
-    deposito_id: data.deposito_id,
-    vendedor_id: data.vendedor_id,
-    tipos_ordem_permitidos: data.tipos_ordem_permitidos,
-    tipos_protocolo_permitidos: data.tipos_protocolo_permitidos,
-    is_operador_service: data.is_operador_service,
-    is_transportador: data.is_transportador,
-    mx_desconto_permitido: data.mx_desconto_permitido,
-  });
-}
-
 // PATCH /api/user/[id] — atualizar dados do usuário
 // Body: { nome?, role?, ativo?, deposito_id?, email?, nova_senha? }
 export async function PATCH(

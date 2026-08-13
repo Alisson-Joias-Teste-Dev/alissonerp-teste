@@ -124,7 +124,7 @@ export async function criarContaPagarReembolso(
     const [conta] = await tx`
       INSERT INTO alissonerp.contas_pagar (
         descricao, fornecedor_id, valor, data_vencimento,
-        status, categoria, observacao, created_by
+        situacao, categoria, obs, created_by
       ) VALUES (
         ${descricao},
         ${clienteId},

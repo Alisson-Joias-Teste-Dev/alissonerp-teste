@@ -117,7 +117,7 @@ export async function calcularFaturamentoLiquidoMes(inicio: string, fim: string)
 
 /**
  * Lê o percentual da verba de frete grátis — config `percentual_verba_frete`
- * em alissonerp.configuracoes_unificado (valor "0.1" = 0,1%). Default
+ * em alissonerp.configuracoes_sistema (valor "0.1" = 0,1%). Default
  * PERCENTUAL_VERBA_FRETE_DEFAULT se a chave ainda não existir — mesmo
  * padrão de leitura direta (sem cache) usado por
  * desconto_fallback_sem_cadastro_pct/limite_desconto_cartao_pct em
@@ -127,7 +127,7 @@ export async function calcularFaturamentoLiquidoMes(inicio: string, fim: string)
  */
 export async function obterPercentualVerbaFrete(): Promise<number> {
   const [config] = await sql<{ valor: string }[]>`
-    SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'percentual_verba_frete'
+    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'percentual_verba_frete'
   `;
   const num = Number(config?.valor);
   return Number.isFinite(num) ? num : PERCENTUAL_VERBA_FRETE_DEFAULT;

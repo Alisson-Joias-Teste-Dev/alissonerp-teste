@@ -2,9 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
-// REGRA DE NEGOCIO: saldo de estoque centralizado em src/lib/estoque-saldo.ts
-// (pente-fino 10/08/2026, etapa 2) — nao reimplementar SUM(saldo) aqui.
-import { buscarSaldoEstoque } from "@/lib/estoque-saldo";
 
 // ─── GET /api/relatorios?tipo=producao|comercial|financeiro|estoque&inicio=&fim=
 export async function GET(req: NextRequest) {
@@ -75,7 +72,7 @@ export async function GET(req: NextRequest) {
             COALESCE(SUM(total_desconto), 0) AS total_desconto
           FROM alissonerp.vendas_erp
           WHERE data_venda >= ${inicio}::date AND data_venda <= ${fim}::date
-            AND status != 'cancelado'
+            AND situacao != 'cancelado'
         `,
         sql`
           SELECT
@@ -85,7 +82,7 @@ export async function GET(req: NextRequest) {
           FROM alissonerp.vendas_erp ve
           JOIN public.vendedores v ON v.id_vendedor = ve.vendedor_id
           WHERE ve.data_venda >= ${inicio}::date AND ve.data_venda <= ${fim}::date
-            AND ve.status != 'cancelado'
+            AND ve.situacao != 'cancelado'
           GROUP BY v.nome ORDER BY valor_total DESC LIMIT 10
         `,
         sql`
@@ -94,7 +91,7 @@ export async function GET(req: NextRequest) {
             COUNT(*) AS qtd, COALESCE(SUM(total_venda), 0) AS valor
           FROM alissonerp.vendas_erp
           WHERE data_venda >= ${inicio}::date AND data_venda <= ${fim}::date
-            AND status != 'cancelado'
+            AND situacao != 'cancelado'
           GROUP BY mes ORDER BY mes
         `,
       ]);
@@ -111,21 +108,21 @@ export async function GET(req: NextRequest) {
       const [pagar, receber] = await Promise.all([
         sql`
           SELECT
-            COUNT(*) FILTER (WHERE status = 'pendente') AS pendentes,
-            COALESCE(SUM(valor) FILTER (WHERE status = 'pendente'), 0) AS total_pendente,
-            COUNT(*) FILTER (WHERE status = 'pago') AS pagos,
-            COALESCE(SUM(valor) FILTER (WHERE status = 'pago'), 0) AS total_pago,
-            COUNT(*) FILTER (WHERE status = 'pendente' AND data_vencimento < CURRENT_DATE) AS vencidos
+            COUNT(*) FILTER (WHERE situacao = 'pendente') AS pendentes,
+            COALESCE(SUM(valor) FILTER (WHERE situacao = 'pendente'), 0) AS total_pendente,
+            COUNT(*) FILTER (WHERE situacao = 'pago') AS pagos,
+            COALESCE(SUM(valor) FILTER (WHERE situacao = 'pago'), 0) AS total_pago,
+            COUNT(*) FILTER (WHERE situacao = 'pendente' AND data_vencimento < CURRENT_DATE) AS vencidos
           FROM alissonerp.contas_pagar
           WHERE created_at >= ${inicio}::date AND created_at <= ${fim}::date + interval '1 day'
         `,
         sql`
           SELECT
-            COUNT(*) FILTER (WHERE status = 'pendente') AS pendentes,
-            COALESCE(SUM(valor) FILTER (WHERE status = 'pendente'), 0) AS total_pendente,
-            COUNT(*) FILTER (WHERE status = 'recebido') AS recebidos,
-            COALESCE(SUM(valor) FILTER (WHERE status = 'recebido'), 0) AS total_recebido,
-            COUNT(*) FILTER (WHERE status = 'pendente' AND data_vencimento < CURRENT_DATE) AS vencidos
+            COUNT(*) FILTER (WHERE situacao = 'pendente') AS pendentes,
+            COALESCE(SUM(valor) FILTER (WHERE situacao = 'pendente'), 0) AS total_pendente,
+            COUNT(*) FILTER (WHERE situacao = 'recebido') AS recebidos,
+            COALESCE(SUM(valor) FILTER (WHERE situacao = 'recebido'), 0) AS total_recebido,
+            COUNT(*) FILTER (WHERE situacao = 'pendente' AND data_vencimento < CURRENT_DATE) AS vencidos
           FROM alissonerp.contas_receber
           WHERE created_at >= ${inicio}::date AND created_at <= ${fim}::date + interval '1 day'
         `,
@@ -141,8 +138,12 @@ export async function GET(req: NextRequest) {
     case "estoque": {
       const almoxarifadoId = await getParametroNumber(PARAM.ALMOXARIFADO_DEPOSITO_ID);
       const ouro18kId      = await getParametroNumber(PARAM.OURO_18K_INSUMO_ID);
-      const [ouroPote, alertas, movimentacoes] = await Promise.all([
-        buscarSaldoEstoque(sql, almoxarifadoId, ouro18kId),
+      const [saldo_ouro, alertas, movimentacoes] = await Promise.all([
+        sql`
+          SELECT COALESCE(SUM(saldo), 0) AS total_ouro
+          FROM alissonerp.vw_saldo_estoque
+          WHERE deposito_id = ${almoxarifadoId} AND insumo_id = ${ouro18kId}
+        `,
         sql`
           SELECT status_alerta, COUNT(*) AS qtd
           FROM alissonerp.vw_estoque_comercial_com_alerta
@@ -162,7 +163,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         tipo: "estoque",
         periodo: { inicio, fim },
-        ouro_pote: ouroPote,
+        ouro_pote: Number(saldo_ouro[0].total_ouro),
         alertas_comercial: alertas.map((a) => ({ ...a, qtd: Number(a.qtd) })),
         movimentacoes_mensal: movimentacoes.map((m) => ({ ...m, total_movimentacoes: Number(m.total_movimentacoes), entradas: Number(m.entradas), saidas: Number(m.saidas) })),
       });

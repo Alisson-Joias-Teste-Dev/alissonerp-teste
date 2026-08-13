@@ -1,9 +1,7 @@
 export { Badge, StatusBadge } from "./Badge";
-export { default as BadgePromo } from "./BadgePromo";
 export { Button } from "./Button";
 export { Card } from "./Card";
 export { Alert } from "./Alert";
-export { Label } from "./Label";
 export { InputField } from "./InputField";
 export { default as Input } from "./Input";
 export { Select } from "./Select";
@@ -13,6 +11,3 @@ export { Table, TableHeader, TableBody, TableRow, TableCell } from "./Table";
 export { default as MessageBox } from "./MessageBox";
 export { default as Spinner } from "./Spinner";
 export { default as Toggle } from "./Toggle";
-export { default as Paginacao } from "./Paginacao";
-export { default as GlobalErrorToast } from "./GlobalErrorToast";
-export { DropZone } from "./DropZone";

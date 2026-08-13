@@ -68,20 +68,20 @@ export async function fecharContaReceberAposPagamentoMp(
   // pagamento não trouxer essa referência (cobranças antigas).
   const [conta] = params.contaReceberId
     ? await tx`
-        SELECT id, valor, status AS situacao
+        SELECT id, valor, situacao
         FROM alissonerp.contas_receber
         WHERE id = ${params.contaReceberId}
           AND venda_erp_id = ${params.vendaId}
           AND categoria = 'venda'
-          AND status = 'pendente'
+          AND situacao = 'pendente'
         FOR UPDATE
       `
     : await tx`
-        SELECT id, valor, status AS situacao
+        SELECT id, valor, situacao
         FROM alissonerp.contas_receber
         WHERE venda_erp_id = ${params.vendaId}
           AND categoria = 'venda'
-          AND status = 'pendente'
+          AND situacao = 'pendente'
         ORDER BY id
         LIMIT 1
         FOR UPDATE
@@ -91,7 +91,7 @@ export async function fecharContaReceberAposPagamentoMp(
   // 1. Baixa a conta
   await tx`
     UPDATE alissonerp.contas_receber
-    SET status = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
+    SET situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
     WHERE id = ${conta.id}
   `;
 

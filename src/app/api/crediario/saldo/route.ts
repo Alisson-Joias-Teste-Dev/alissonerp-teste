@@ -21,7 +21,7 @@ export async function GET() {
 
   const [configs, pendente] = await Promise.all([
     sql`
-      SELECT chave, valor FROM alissonerp.configuracoes_unificado
+      SELECT chave, valor FROM alissonerp.configuracoes_sistema
       WHERE chave IN ('saldo_gerente_limite', 'saldo_gerente_atual')
     `,
     sql`

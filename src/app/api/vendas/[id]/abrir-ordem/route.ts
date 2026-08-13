@@ -67,7 +67,7 @@ type Ctx = { params: Promise<{ id: string }> };
  */
 async function carregar(vendaId: number) {
   const [venda] = await sql`
-    SELECT id, numero_venda, status AS situacao, orcamento_id
+    SELECT id, numero_venda, situacao, orcamento_id
       FROM alissonerp.vendas_erp
      WHERE id = ${vendaId}
      LIMIT 1

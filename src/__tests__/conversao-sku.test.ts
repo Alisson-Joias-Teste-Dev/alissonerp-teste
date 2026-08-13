@@ -47,17 +47,6 @@ vi.mock("@/lib/ia-validar-peso", () => ({
   validarPesoBalanca: mockValidarPeso,
 }));
 
-// aprovar/recusar passaram a decidir permissão via podeDecidir (autoridade
-// central de aprovações) em vez de checar role na hora — mocka direto pra não
-// precisar simular resolverAprovadores/buscarUUIDsDaConfig (que fazem suas
-// próprias queries e bagunçariam a fila sequencial do sqlSequence acima).
-const mockPodeDecidir = vi.fn();
-const mockResolverAprovadores = vi.fn();
-vi.mock("@/lib/aprovacoes", () => ({
-  podeDecidir: (...args: unknown[]) => mockPodeDecidir(...args),
-  resolverAprovadores: (...args: unknown[]) => mockResolverAprovadores(...args),
-}));
-
 // ── Imports ──────────────────────────────────────────────────────────────────
 const ROUTES: Record<string, any> = {};
 const ROUTE_IMPORTS = {
@@ -96,10 +85,6 @@ function req(url: string, body: any) {
 beforeEach(() => {
   sqlSequence.length = 0;
   vi.clearAllMocks();
-  mockPodeDecidir.mockResolvedValue({ pode: false, motivo: "aprovador_nao_configurado" });
-  // Default: aprovador configurado (rota de criação segue em frente). Testes
-  // que precisam do bloqueio "nao_configurado" sobrescrevem explicitamente.
-  mockResolverAprovadores.mockResolvedValue({ status: "ok", aprovadores: ["uuid-aprovador"] });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -172,7 +157,6 @@ describe("Conversão SKU — POST /api/conversao-sku (criar)", () => {
 describe("Conversão SKU — POST /api/conversao-sku/aprovar", () => {
   it("aprova como admin", async () => {
     mockGetUser.mockResolvedValue({ data: { user: USER_ADMIN } });
-    mockPodeDecidir.mockResolvedValueOnce({ pode: true });
     sqlSequence.push(
       [{ role: "admin" }],          // auth
       [{ id: 10, status: "aguardando_aprovacao", ordem_id: 100 }], // tarefa
@@ -192,7 +176,6 @@ describe("Conversão SKU — POST /api/conversao-sku/aprovar", () => {
 
   it("rejeita já aprovada", async () => {
     mockGetUser.mockResolvedValue({ data: { user: USER_ADMIN } });
-    mockPodeDecidir.mockResolvedValueOnce({ pode: true });
     sqlSequence.push(
       [{ role: "admin" }],
       [{ id: 10, status: "aguardando_aprovacao", ordem_id: 100 }],
@@ -206,7 +189,6 @@ describe("Conversão SKU — POST /api/conversao-sku/aprovar", () => {
 describe("Conversão SKU — POST /api/conversao-sku/recusar", () => {
   it("recusa como admin", async () => {
     mockGetUser.mockResolvedValue({ data: { user: USER_ADMIN } });
-    mockPodeDecidir.mockResolvedValueOnce({ pode: true });
     sqlSequence.push(
       [{ role: "admin" }],
       [{ id: 10, status: "aguardando_aprovacao", ordem_id: 100 }],
@@ -290,9 +272,6 @@ describe("Conversão SKU — POST /api/ia/validar-peso", () => {
   });
 
   it("retorna match quando peso confere", async () => {
-    // authOr401 → requireAuth: getUser() + SELECT role,ativo (checa usuário ativo).
-    mockGetUser.mockResolvedValue({ data: { user: USER_ADMIN } });
-    sqlSequence.push([{ role: "admin", ativo: true }]);
     mockValidarPeso.mockResolvedValue({
       peso_digitado: 10.0, peso_balanca: 10.02, confianca: "alta",
       match: true, mensagem: "OK", provedor: "claude",
@@ -306,8 +285,6 @@ describe("Conversão SKU — POST /api/ia/validar-peso", () => {
   });
 
   it("rejeita peso fora da tolerância", async () => {
-    mockGetUser.mockResolvedValue({ data: { user: USER_ADMIN } });
-    sqlSequence.push([{ role: "admin", ativo: true }]);
     mockValidarPeso.mockResolvedValue({
       peso_digitado: 10.0, peso_balanca: 10.3, confianca: "alta",
       match: false, mensagem: "Peso não confere", provedor: "claude",

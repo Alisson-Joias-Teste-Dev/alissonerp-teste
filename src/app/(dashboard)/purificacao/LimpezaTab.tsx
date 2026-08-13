@@ -9,8 +9,6 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { STATUS_LABEL, STATUS_COLORS } from "@/lib/cofre-ouro-status";
 import { EvidenciasLimpeza } from "@/components/EvidenciasLimpeza";
-import { P } from "./_shared/estilos";
-import { formatPeso, formatDate, timeAgo } from "./_shared/formatadores";
 
 /**
  * REGRA DE NEGÓCIO: aba Limpeza dentro de Purificação para tratar metal sujo
@@ -21,6 +19,12 @@ import { formatPeso, formatDate, timeAgo } from "./_shared/formatadores";
  * POR QUE: separa o processo metalúrgico do fluxo logístico/financeiro.
  * IMPACTO SE REMOVIDO: metal sujo não tem caminho para entrar no estoque.
  */
+
+const P = {
+  bg: "#f9fafb", card: "#ffffff", border: "#e5e7eb",
+  text: "#111827", muted: "#6b7280", amber: "#d97706",
+  verde: "#16a34a", vermelho: "#dc2626", azul: "#2563eb",
+};
 
 interface BaixaLimpeza {
   id: number;
@@ -44,6 +48,27 @@ interface BaixaLimpeza {
 interface Props {
   userRole: string | null;
   userId: string | null;
+}
+
+function formatPeso(v: number | null | undefined): string {
+  if (v === null || v === undefined) return "—";
+  return isNaN(v) ? "—" : v.toFixed(2) + "g";
+}
+
+function formatDate(s: string | null | undefined): string {
+  if (!s) return "—";
+  return new Date(s).toLocaleDateString("pt-BR", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function timeAgo(s: string): string {
+  const diff = Date.now() - new Date(s).getTime();
+  const h = Math.floor(diff / 3600000);
+  if (h < 24) return `há ${h}h`;
+  const d = Math.floor(h / 24);
+  return `há ${d}d`;
 }
 
 /**

@@ -17,7 +17,7 @@ export async function GET(
 
   const [auditoria] = await sql`
     SELECT a.id, a.local_estoque_id, le.nome AS local_nome,
-      a.status, a.observacao AS obs, a.total_itens, a.itens_contados, a.itens_divergentes,
+      a.status, a.obs, a.total_itens, a.itens_contados, a.itens_divergentes,
       a.created_at, a.data_conclusao, uc.email AS criado_por_email
     FROM alissonerp.auditorias_estoque a
     LEFT JOIN alissonerp.locais_estoque le ON le.id = a.local_estoque_id

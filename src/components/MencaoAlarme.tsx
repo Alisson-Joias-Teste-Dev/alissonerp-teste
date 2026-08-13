@@ -408,7 +408,7 @@ export default function MencaoAlarme() {
 
   return (
     <div
-      className="fixed top-14 md:top-[77px] left-0 md:left-56 right-0 z-[55] shadow-md"
+      className="fixed top-14 md:top-0 left-0 md:left-56 right-0 z-[55] shadow-md"
       style={{
         background: "#fef2f2",
         borderBottom: "2px solid #dc2626",

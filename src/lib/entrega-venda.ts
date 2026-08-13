@@ -467,7 +467,7 @@ async function marcarVendaEntregueSeCompleta(
         iv.id,
         iv.quantidade,
         COALESCE(SUM(ei.quantidade_entregue) FILTER (
-          WHERE ev.status <> 'cancelada'
+          WHERE ev.situacao <> 'cancelada'
             AND ei.baixa_estoque_realizada = true
         ), 0) AS quantidade_confirmada
       FROM alissonerp.itens_venda_erp iv
@@ -476,7 +476,7 @@ async function marcarVendaEntregueSeCompleta(
       WHERE iv.venda_id = ${vendaId}
       GROUP BY iv.id, iv.quantidade
       HAVING iv.quantidade > COALESCE(SUM(ei.quantidade_entregue) FILTER (
-        WHERE ev.status <> 'cancelada'
+        WHERE ev.situacao <> 'cancelada'
           AND ei.baixa_estoque_realizada = true
       ), 0)
     ) pendentes
@@ -502,9 +502,9 @@ async function marcarVendaEntregueSeCompleta(
 
   await tx`
     UPDATE alissonerp.vendas_erp
-    SET status = 'entregue', updated_at = now()
+    SET situacao = 'entregue', updated_at = now()
     WHERE id = ${vendaId}
-      AND status <> 'entregue'
+      AND situacao <> 'entregue'
   `;
 
   return true;
@@ -794,7 +794,7 @@ export async function criarEntrega(
 
   // 1. Venda existe e não está cancelada
   const [venda] = await sql`
-    SELECT id, status AS situacao, numero_venda, cliente_id
+    SELECT id, situacao, numero_venda, cliente_id
     FROM alissonerp.vendas_erp
     WHERE id = ${params.vendaId}
   `;
@@ -1058,7 +1058,7 @@ export async function criarEntrega(
     const [entregaRow] = await tx`
       INSERT INTO alissonerp.entregas_venda (
         venda_id, codigo_entrega, codigo_cliente, codigo_motoboy,
-        tipo, forma_entrega, status, regiao,
+        tipo, forma_entrega, situacao, regiao,
         motoboy_id, frete_cobrado, frete_motoboy,
         aprovacao_frete_necessaria, observacoes,
         created_by
@@ -1175,7 +1175,7 @@ export async function criarEntrega(
       codigoMotoboy,
       tipo: String(entregaRow.tipo),
       formaEntrega: String(entregaRow.forma_entrega),
-      situacao: String(entregaRow.status),
+      situacao: String(entregaRow.situacao),
       regiao: entregaRow.regiao ? String(entregaRow.regiao) : null,
       motoboyId: entregaRow.motoboy_id ? String(entregaRow.motoboy_id) : null,
       freteCobrado: money(entregaRow.frete_cobrado),
@@ -1589,7 +1589,7 @@ export async function confirmarEntrega(
 ): Promise<ConfirmacaoResult> {
   // Carregar entrega
   const [entrega] = await sql`
-    SELECT *, status AS situacao
+    SELECT *
     FROM alissonerp.entregas_venda
     WHERE id = ${entregaId}
   `;
@@ -1760,9 +1760,9 @@ export async function confirmarEntrega(
       // da loja mas ainda não foi entregue ao cliente.
       await tx`
         UPDATE alissonerp.vendas_erp
-        SET status = 'em_rota', updated_at = now()
+        SET situacao = 'em_rota', updated_at = now()
         WHERE id = ${Number(entrega.venda_id)}
-          AND status = 'aprovado'
+          AND situacao = 'aprovado'
       `;
     }
     // CÓDIGO A — Cliente (retirada na loja ou recebimento via motoboy)
@@ -1782,7 +1782,7 @@ export async function confirmarEntrega(
           UPDATE alissonerp.entregas_venda
           SET
             data_retirada = now(),
-            status = 'confirmada',
+            situacao = 'confirmada',
             confirmado_por_retirada = ${usuarioId}::uuid,
             updated_at = now()
           WHERE id = ${entregaId}
@@ -1803,7 +1803,7 @@ export async function confirmarEntrega(
           UPDATE alissonerp.entregas_venda
           SET
             data_entrega_realizada = now(),
-            status = 'confirmada',
+            situacao = 'confirmada',
             confirmado_por_motoboy_entrega = ${usuarioId}::uuid,
             latitude_entrega = ${opts?.latitude ?? null},
             longitude_entrega = ${opts?.longitude ?? null},
@@ -1928,7 +1928,7 @@ export async function cancelarEntrega(
   usuarioId: string,
 ): Promise<void> {
   const [entrega] = await sql`
-    SELECT id, status AS situacao, codigo_entrega
+    SELECT id, situacao, codigo_entrega
     FROM alissonerp.entregas_venda
     WHERE id = ${entregaId}
   `;
@@ -1947,7 +1947,7 @@ export async function cancelarEntrega(
   await sql.begin(async (tx: DbSql) => {
     await tx`
       UPDATE alissonerp.entregas_venda
-      SET status = 'cancelada', updated_at = now()
+      SET situacao = 'cancelada', updated_at = now()
       WHERE id = ${entregaId}
     `;
 
@@ -2041,7 +2041,7 @@ export async function atualizarCorreios(
   }
 
   const [entrega] = await sql`
-    SELECT id, status AS situacao, codigo_entrega
+    SELECT id, situacao, codigo_entrega
     FROM alissonerp.entregas_venda
     WHERE id = ${entregaId}
   `;
@@ -2112,7 +2112,7 @@ export async function atualizarTransporte(
   usuarioId: string,
 ): Promise<Record<string, unknown>> {
   const [entrega] = await sql`
-    SELECT id, status AS situacao, codigo_entrega, frete_cobrado, regiao
+    SELECT id, situacao, codigo_entrega, frete_cobrado, regiao
     FROM alissonerp.entregas_venda
     WHERE id = ${entregaId}
   `;
@@ -2265,7 +2265,7 @@ export interface MovimentacaoFrete {
  */
 export async function resolverGerenteFreteGratisId(db: DbSql, fallbackUserId: string): Promise<string> {
   const [config] = await db`
-    SELECT valor FROM alissonerp.configuracoes_unificado
+    SELECT valor FROM alissonerp.configuracoes_sistema
     WHERE chave = 'gerente_frete_gratis'
   `;
   const configurado = typeof config?.valor === "string" ? config.valor.trim() : "";
@@ -2394,7 +2394,7 @@ function montarMovimentacao(r: any): MovimentacaoFrete {
  */
 export async function listarAprovadoresFreteAvulso(): Promise<string[]> {
   const [cfg] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado
+    SELECT valor FROM alissonerp.configuracoes_sistema
     WHERE chave = 'aprovadores_frete_avulso'
   `;
   return String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -2414,7 +2414,7 @@ export async function listarAprovadoresFreteAvulso(): Promise<string[]> {
  */
 export async function listarAprovadoresFreteAvulsoLoja(): Promise<string[]> {
   const [cfg] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado
+    SELECT valor FROM alissonerp.configuracoes_sistema
     WHERE chave = 'aprovadores_frete_avulso_loja'
   `;
   return String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -2936,7 +2936,7 @@ export async function criarFreteAvulso(
         is_avulso, venda_id,
         contato_id, descricao_avulso,
         codigo_entrega, codigo_cliente, codigo_motoboy,
-        tipo, forma_entrega, status, regiao,
+        tipo, forma_entrega, situacao, regiao,
         motoboy_id, frete_cobrado, frete_motoboy,
         aprovacao_frete_necessaria, observacoes,
         endereco_entrega, endereco_entrega_numero, endereco_entrega_complemento,
@@ -3117,7 +3117,7 @@ export async function criarFreteAvulso(
   return {
     id: Number(resultado.id),
     codigoEntrega: String(resultado.codigo_entrega),
-    situacao: String(resultado.status),
+    situacao: String(resultado.situacao),
     regiao: String(resultado.regiao),
     motoboyId: resultado.motoboy_id ? String(resultado.motoboy_id) : null,
     freteCobrado: money(resultado.frete_cobrado),
@@ -3455,7 +3455,7 @@ export async function confirmarFreteAvulso(
   opts?: { usuarioRole?: string; latitude?: number; longitude?: number },
 ): Promise<void> {
   const [entrega] = await sql`
-    SELECT id, status AS situacao, codigo_entrega, is_avulso, motoboy_id, created_by
+    SELECT id, situacao, codigo_entrega, is_avulso, motoboy_id, created_by
     FROM alissonerp.entregas_venda
     WHERE id = ${entregaId}
   `;
@@ -3516,7 +3516,7 @@ export async function confirmarFreteAvulso(
     await tx`
       UPDATE alissonerp.entregas_venda
       SET
-        status = 'confirmada',
+        situacao = 'confirmada',
         data_entrega_realizada = now(),
         confirmado_por_motoboy_entrega = ${usuarioId}::uuid,
         latitude_entrega = ${opts?.latitude ?? null},

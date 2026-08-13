@@ -4,9 +4,6 @@ import sql, { normalizeRow } from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
 import { isFullAccess } from "@/lib/roles";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
-// REGRA DE NEGOCIO: saldo de estoque centralizado em src/lib/estoque-saldo.ts
-// (pente-fino 10/08/2026, etapa 2) — nao reimplementar SUM(saldo) aqui.
-import { buscarSaldoEstoque } from "@/lib/estoque-saldo";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { zodError } from "@/lib/schemas/common";
 
@@ -228,7 +225,12 @@ export async function POST(req: NextRequest) {
   // global. vw_detalhe_pote soma TODOS os depósitos (inclui operadores), e um operador negativo
   // derrubava o "Disponível" — mostrando/bloqueando menos ouro do que o pote realmente tem.
   // IMPACTO se voltar ao total global: tela engana e o backend bloqueia ligações válidas.
-  const saldo24k = await buscarSaldoEstoque(sql, almoxarifadoId, ouro24kLigaId);
+  const [saldo24kRow] = await sql`
+    SELECT COALESCE(SUM(saldo), 0)::numeric AS saldo
+    FROM alissonerp.vw_saldo_estoque
+    WHERE insumo_id = ${ouro24kLigaId} AND deposito_id = ${almoxarifadoId}
+  `;
+  const saldo24k = Number((saldo24kRow as any)?.saldo ?? 0);
   if (peso_24k > saldo24k) {
     return NextResponse.json(
       { error: `Saldo insuficiente de Ouro 24k. Saldo: ${saldo24k.toFixed(3)}g, Solicitado: ${peso_24k}g` },
@@ -237,7 +239,12 @@ export async function POST(req: NextRequest) {
   }
 
   // Verificar saldo da liga no pote (mesma regra: depósito 1)
-  const saldoLiga = await buscarSaldoEstoque(sql, almoxarifadoId, liga_insumo_id);
+  const [saldoLigaRow] = await sql`
+    SELECT COALESCE(SUM(saldo), 0)::numeric AS saldo
+    FROM alissonerp.vw_saldo_estoque
+    WHERE insumo_id = ${liga_insumo_id} AND deposito_id = ${almoxarifadoId}
+  `;
+  const saldoLiga = Number((saldoLigaRow as any)?.saldo ?? 0);
   if (peso_liga_calculado > saldoLiga) {
     return NextResponse.json(
       { error: `Saldo insuficiente de ${liga_nome}. Saldo: ${saldoLiga.toFixed(3)}g, Necessário: ${peso_liga_calculado.toFixed(3)}g` },
@@ -279,13 +286,23 @@ export async function POST(req: NextRequest) {
 
       // Reconfere saldo DENTRO da transação (autoritativo) — pode ter mudado entre a
       // checagem inicial e o upload da foto. Mesma regra §3: saldo do POTE (depósito 1).
-      const saldo24kTx = await buscarSaldoEstoque(tx, almoxarifadoId, ouro24kLigaId);
+      const [s24] = await tx`
+        SELECT COALESCE(SUM(saldo), 0)::numeric AS saldo
+        FROM alissonerp.vw_saldo_estoque
+        WHERE insumo_id = ${ouro24kLigaId} AND deposito_id = ${almoxarifadoId}
+      `;
+      const saldo24kTx = Number((s24 as any)?.saldo ?? 0);
       if (peso_24k > saldo24kTx) {
         saldoErro = `Saldo insuficiente de Ouro 24k. Saldo: ${saldo24kTx.toFixed(3)}g, Solicitado: ${peso_24k}g`;
         throw new Error("SALDO_INSUFICIENTE");
       }
 
-      const saldoLigaTx = await buscarSaldoEstoque(tx, almoxarifadoId, liga_insumo_id);
+      const [sLiga] = await tx`
+        SELECT COALESCE(SUM(saldo), 0)::numeric AS saldo
+        FROM alissonerp.vw_saldo_estoque
+        WHERE insumo_id = ${liga_insumo_id} AND deposito_id = ${almoxarifadoId}
+      `;
+      const saldoLigaTx = Number((sLiga as any)?.saldo ?? 0);
       if (peso_liga_calculado > saldoLigaTx) {
         saldoErro = `Saldo insuficiente de ${liga_nome}. Saldo: ${saldoLigaTx.toFixed(3)}g, Necessário: ${peso_liga_calculado.toFixed(3)}g`;
         throw new Error("SALDO_INSUFICIENTE");
@@ -320,7 +337,7 @@ export async function POST(req: NextRequest) {
       // para insumos diferentes caso o parâmetro mude.
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, marcador, observacao, created_by, created_at, local_estoque_id)
+          (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at, local_estoque_id)
         VALUES (
           ${ouro24kLigaId}, 1,
           ${peso_24k}::real,
@@ -334,7 +351,7 @@ export async function POST(req: NextRequest) {
       // CE saída liga do pote
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, marcador, observacao, created_by, created_at, local_estoque_id)
+          (insumo_id, deposito_id, saida, marcador, obs, created_by, created_at, local_estoque_id)
         VALUES (
           ${liga_insumo_id}, 1,
           ${peso_liga_calculado}::real,

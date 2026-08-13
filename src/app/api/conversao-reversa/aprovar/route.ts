@@ -220,7 +220,7 @@ export async function POST(req: NextRequest) {
       // 2. Baixa do cofre — concluída direto (destino='estoque', sem transporte/protocolo)
       const [baixa] = await tx`
         INSERT INTO alissonerp.cofre_ouro_baixas
-          (gramas, destino, status, realizado_por, realizado_nome, observacao, confirmado_em)
+          (gramas, destino, status, realizado_por, realizado_nome, obs, confirmado_em)
         VALUES
           (${pesoSaida}, 'estoque', 'concluido', ${user.id}::uuid, ${realizadoNome},
            ${'Conversão reversa ' + conversao.numero_ordem}, NOW())

@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
   // Configurações → Aprovadores, não só pro responsável. Fragmento reutilizado
   // nos filtros de visibilidade abaixo.
   const reversaAprovadorCond = sql`(t.tipo = 'conversao_reversa' AND EXISTS (
-    SELECT 1 FROM alissonerp.configuracoes_unificado cs
+    SELECT 1 FROM alissonerp.configuracoes_sistema cs
     WHERE cs.chave = 'aprovadores_conversao_reversa'
       AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
   ))`;
@@ -105,48 +105,48 @@ export async function GET(req: NextRequest) {
   const multiAprovadorCond = sql`(
     ${reversaAprovadorCond}
     OR (t.tipo = 'desconto_acima' AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovador_desconto_padrao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     OR (t.tipo = 'cartao_desconto' AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovador_cartao_desconto_padrao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     OR (t.tipo = 'entrega_sem_pagamento_total' AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovador_entrega_sem_pagamento' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     OR (t.tipo = 'compra_comercial' AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovador_compra_comercial' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     OR (t.tipo = 'conversao' AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovador_conversao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     -- conversao_sku: MESMA chave de 'conversao' (decisão do Jonathan, 12/07 — vide catalogo.ts).
     OR (t.tipo = 'conversao_sku' AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovador_conversao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     -- compra_metal e recebimento_metal: chave 'metal_aprovador_id' (api/metal/compras
     -- e api/metal/recebimentos gravam esses tipos — conferido no INSERT, 16/07).
     OR (t.tipo IN ('compra_metal', 'recebimento_metal') AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'metal_aprovador_id' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     -- limpeza de ouro: a tarefa nasce com tipo 'aprovacao_quebra_metal' (NÃO
     -- 'limpeza_ouro') — api/purificacao/limpeza grava assim de propósito, porque o
     -- aprovador valida a QUEBRA, não o recebimento. Chave: 'aprovador_limpeza'.
     OR (t.tipo = 'aprovacao_quebra_metal' AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovador_limpeza' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     -- garantia fora do prazo (17/07): tarefa nasce com tipo 'garantia_fora_prazo'
     -- em api/garantia/solicitar-aprovacao (conferido no INSERT, não adivinhado).
     -- Chave: 'aprovadores_garantia_fora_prazo'. Ver docs/regras-negocio/ordens.md §3.
     OR (t.tipo = 'garantia_fora_prazo' AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovadores_garantia_fora_prazo' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     -- frete avulso solicitado (migration 353, camada central — evento 'frete_avulso'
@@ -169,11 +169,11 @@ export async function GET(req: NextRequest) {
     -- IMPACTO SE VOLTAR A LER A TAG: reabre o caminho de o solicitante trocar
     -- a tag e mudar pra qual pool a tarefa aparece na listagem.
     OR (t.tipo = 'frete_avulso' AND COALESCE(evfa.pagante, 'cliente') <> 'loja' AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovadores_frete_avulso' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     OR (t.tipo = 'frete_avulso' AND COALESCE(evfa.pagante = 'loja', false) AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovadores_frete_avulso_loja' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     -- fechamento mensal de frete grátis com saldo negativo (BLOCO 4, jul/2026,
@@ -181,7 +181,7 @@ export async function GET(req: NextRequest) {
     -- 'fechamento_frete_negativo', exclusiva desse fluxo (não compete com
     -- outros tipos/tags). Chave: 'aprovadores_fechamento_frete'.
     OR (t.tipo = 'fechamento_frete_negativo' AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovadores_fechamento_frete' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     -- credito_loja: tags = ['credito_loja', 'gerente'|'diretor'] (vendas-credito-aprovar.ts) — tipo NULL.
@@ -212,20 +212,20 @@ export async function GET(req: NextRequest) {
     --   correção (5fac3e5c) esses usuários não tinham botão NENHUM, então
     --   isto não é uma regressão introduzida agora.
     OR ('credito_loja' = ANY(t.tags) AND 'gerente' = ANY(t.tags) AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovadora_credito_gerente' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     OR ('credito_loja' = ANY(t.tags) AND 'diretor' = ANY(t.tags) AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovador_credito_diretor' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     -- devolucao: tags=['devolucao'] (etapa 1) vs tags=['devolucao','devolucao_estoque'] (etapa 2) — tipo NULL (devolucoes.ts).
     OR ('devolucao_estoque' = ANY(t.tags) AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovador_devolucao_estoque' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
     OR ('devolucao' = ANY(t.tags) AND NOT ('devolucao_estoque' = ANY(t.tags)) AND EXISTS (
-      SELECT 1 FROM alissonerp.configuracoes_unificado cs
+      SELECT 1 FROM alissonerp.configuracoes_sistema cs
       WHERE cs.chave = 'aprovador_devolucao' AND ${userId}::text = ANY(string_to_array(cs.valor, ','))
     ))
   )`;

@@ -9,10 +9,12 @@ import {
   CheckCircle,
   Clock,
   AlertTriangle,
+  FileUp,
   Landmark,
   Plus,
   X,
   Loader2,
+  Link2,
   Save,
   TrendingUp,
   Calendar,
@@ -119,6 +121,30 @@ interface ContaReceber {
   taxas_mp?: number | null;
 }
 
+interface Extrato {
+  id: number;
+  banco: string | null;
+  arquivo_nome: string | null;
+  processado: boolean;
+  total_lancamentos: number;
+  data_inicio: string | null;
+  data_fim: string | null;
+  created_at: string;
+}
+
+interface Lancamento {
+  id: number;
+  fitid: string | null;
+  tipo: string | null;
+  valor: number;
+  data_transacao: string | null;
+  descricao: string | null;
+  memo: string | null;
+  conciliado: boolean;
+  extrato_id: number | null;
+  banco: string | null;
+}
+
 interface CofreOuro {
   total_transacoes: number;
   total_gramas: number;
@@ -144,6 +170,8 @@ interface ConciliacaoPendente {
 interface Props {
   pagar: ContaPagar[];
   receber: ContaReceber[];
+  extratos: Extrato[];
+  lancamentos: Lancamento[];
   caixaPagamentos: CaixaDinheiro[];
   caixaBaixas: CaixaBaixa[];
   userRole: string | null;
@@ -1324,6 +1352,336 @@ function TabReceber({ receber, saldoLiquido }: { receber: ContaReceber[]; saldoL
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── TabConciliacao ──────────────────────────────────────────────────────────
+
+function TabConciliacao({ extratos: extratosInit, lancamentos: lancamentosInit }: { extratos: Extrato[]; lancamentos: Lancamento[] }) {
+  const [extratosList, setExtratosList] = useState(extratosInit);
+  const [lancamentosList, setLancamentosList] = useState(lancamentosInit);
+  const [extratoSel, setExtratoSel] = useState<number | null>(extratosInit[0]?.id ?? null);
+  const [reprocessando, setReprocessando] = useState<number | null>(null);
+
+  const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<{ inseridos: number; duplicados: number } | null>(null);
+  const [uploadError, setUploadError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [sugestoes, setSugestoes] = useState<Array<{
+    lancamento: { id: number; valor: number; descricao: string | null; data_transacao: string | null; tipo: string };
+    tipo_match: string;
+    matches: Array<{ id: number; valor: number; descricao: string | null; fornecedor_nome?: string; cliente_nome?: string }>;
+  }>>([]);
+  const [loadingSugestoes, setLoadingSugestoes] = useState(false);
+  const [confirmandoId, setConfirmandoId] = useState<number | null>(null);
+
+  const carregarSugestoes = useCallback(async () => {
+    setLoadingSugestoes(true);
+    try {
+      const res = await fetch("/api/financeiro/conciliar");
+      if (res.ok) {
+        const data = await res.json();
+        setSugestoes(data.sugestoes ?? []);
+      }
+    } catch (e) { console.error("Erro ao carregar sugestões:", e); }
+    setLoadingSugestoes(false);
+  }, []);
+
+  useEffect(() => { carregarSugestoes(); }, [carregarSugestoes]);
+
+  async function handleUploadOFX(file: File) {
+    if (!file.name.toLowerCase().endsWith(".ofx")) {
+      setUploadError("Apenas arquivos .ofx são aceitos");
+      return;
+    }
+    setUploading(true);
+    setUploadResult(null);
+    setUploadError("");
+    const fd = new FormData();
+    fd.append("arquivo", file);
+    try {
+      const res = await fetch("/api/financeiro/upload-ofx", { method: "POST", body: fd });
+      const data = await res.json();
+      if (res.ok) {
+        setUploadResult({ inseridos: data.inseridos, duplicados: data.duplicados });
+        const [eRes, lRes] = await Promise.all([
+          fetch("/api/financeiro/extratos"),
+          fetch("/api/financeiro/lancamentos"),
+        ]);
+        if (eRes.ok) { const e = await eRes.json(); setExtratosList(e); }
+        if (lRes.ok) { const l = await lRes.json(); setLancamentosList(l); }
+        carregarSugestoes();
+      } else {
+        setUploadError(data.error ?? "Erro ao processar OFX");
+      }
+    } catch {
+      setUploadError("Falha no upload");
+    }
+    setUploading(false);
+    setTimeout(() => { setUploadResult(null); setUploadError(""); }, 6000);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleUploadOFX(file);
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) handleUploadOFX(file);
+    e.target.value = "";
+  }
+
+  async function confirmarConciliacao(lancamentoId: number, match: { id: number }, tipoMatch: string) {
+    setConfirmandoId(lancamentoId);
+    const body: Record<string, number> = { lancamento_id: lancamentoId };
+    if (tipoMatch === "conta_pagar") body.conta_pagar_id = match.id;
+    else body.conta_receber_id = match.id;
+    try {
+      const res = await fetch("/api/financeiro/conciliar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setSugestoes(prev => prev.filter(s => s.lancamento.id !== lancamentoId));
+        setLancamentosList(prev => prev.map(l => l.id === lancamentoId ? { ...l, conciliado: true } : l));
+      }
+    } catch { /* silenciar */ }
+    setConfirmandoId(null);
+  }
+
+  async function handleReprocessar(extratoId: number) {
+    setReprocessando(extratoId);
+    await dispararWebhook("processar-ofx", { extrato_id: extratoId });
+    setReprocessando(null);
+  }
+
+  const lancamentos = lancamentosList;
+  const extratos = extratosList;
+
+  const lançamentosFiltrados = useMemo(
+    () => (extratoSel ? lancamentos.filter(l => l.extrato_id === extratoSel) : lancamentos),
+    [lancamentos, extratoSel]
+  );
+
+  const totalC = lançamentosFiltrados.filter(l => l.tipo === "C").reduce((s, l) => s + Number(l.valor), 0);
+  const totalD = lançamentosFiltrados.filter(l => l.tipo === "D").reduce((s, l) => s + Number(l.valor), 0);
+  const conciliados = lançamentosFiltrados.filter(l => l.conciliado).length;
+
+  return (
+    <div className="space-y-5">
+      {/* Upload OFX */}
+      <div>
+        <p className="text-sm font-semibold mb-2" style={{ color: "#1A1A1A" }}>Importar Extrato OFX</p>
+        <div
+          onDragOver={e => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          className="rounded-xl p-8 text-center cursor-pointer transition-colors bg-white"
+          style={{
+            backgroundColor: dragging ? C.esmeraldaLt : "white",
+            border: `2px dashed ${dragging ? C.esmeralda : C.cremeBorder}`,
+          }}
+        >
+          <input ref={fileInputRef} type="file" accept=".ofx" onChange={handleFileSelect} className="hidden" />
+          {uploading ? (
+            <div className="flex items-center justify-center gap-2">
+              <Loader2 size={18} className="animate-spin" style={{ color: C.esmeralda }} />
+              <p className="text-sm" style={{ color: C.cinza }}>Processando arquivo...</p>
+            </div>
+          ) : (
+            <>
+              <FileUp size={28} className="mx-auto mb-2" style={{ color: C.cinza }} />
+              <p className="text-sm font-medium" style={{ color: "#374151" }}>
+                Arraste um arquivo .ofx ou clique para selecionar
+              </p>
+            </>
+          )}
+        </div>
+        {uploadResult && (
+          <div className="mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: C.verdeLt, color: C.verde }}>
+            <CheckCircle size={13} /> {uploadResult.inseridos} inseridos, {uploadResult.duplicados} duplicados
+          </div>
+        )}
+        {uploadError && (
+          <div className="mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: C.vermelhoLt, color: C.vermelho }}>
+            <AlertTriangle size={13} /> {uploadError}
+          </div>
+        )}
+      </div>
+
+      {/* Sugestões de conciliação */}
+      {sugestoes.length > 0 && (
+        <div>
+          <p className="text-sm font-semibold mb-2" style={{ color: "#1A1A1A" }}>
+            Sugestões de Conciliação ({sugestoes.length})
+          </p>
+          <div className="space-y-2">
+            {sugestoes.map(s => (
+              <div key={s.lancamento.id} className="rounded-xl bg-white p-4 border" style={{ borderColor: C.cremeBorder }}>
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span
+                        className="text-[10px] px-2 py-0.5 rounded font-semibold"
+                        style={{
+                          backgroundColor: s.lancamento.tipo === "C" ? C.verdeLt : C.vermelhoLt,
+                          color: s.lancamento.tipo === "C" ? C.verde : C.vermelho,
+                        }}
+                      >
+                        {s.lancamento.tipo === "C" ? "Entrada" : "Saída"}
+                      </span>
+                      <span className="text-sm font-semibold tabular-nums" style={{ color: "#1A1A1A" }}>{fmt(s.lancamento.valor)}</span>
+                      <span className="text-xs" style={{ color: C.cinza }}>{fmtDate(s.lancamento.data_transacao)}</span>
+                    </div>
+                    <p className="text-sm truncate" style={{ color: "#374151" }}>{s.lancamento.descricao ?? "Sem descrição"}</p>
+                  </div>
+                  <Link2 size={14} style={{ color: C.cinza }} />
+                </div>
+                <div className="space-y-1.5">
+                  {s.matches.map(m => (
+                    <div key={m.id} className="flex items-center justify-between gap-2 rounded-lg px-3 py-2" style={{ backgroundColor: C.cremeBg }}>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs truncate font-medium" style={{ color: "#374151" }}>
+                          {m.descricao ?? (s.tipo_match === "conta_pagar" ? (m as Record<string, unknown>).fornecedor_nome as string : (m as Record<string, unknown>).cliente_nome as string) ?? "—"}
+                        </p>
+                        <p className="text-[11px] tabular-nums" style={{ color: C.cinza }}>{fmt(m.valor)}</p>
+                      </div>
+                      <button
+                        onClick={() => confirmarConciliacao(s.lancamento.id, m, s.tipo_match)}
+                        disabled={confirmandoId === s.lancamento.id}
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-30 transition-opacity inline-flex items-center gap-1 whitespace-nowrap"
+                        style={{ backgroundColor: C.verde, color: "white" }}
+                      >
+                        {confirmandoId === s.lancamento.id ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />}
+                        Confirmar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {loadingSugestoes && (
+        <div className="flex items-center gap-2 text-xs" style={{ color: C.cinza }}>
+          <Loader2 size={12} className="animate-spin" /> Carregando sugestões...
+        </div>
+      )}
+
+      {/* Extratos */}
+      <div>
+        <p className="text-sm font-semibold mb-2" style={{ color: "#1A1A1A" }}>Extratos importados</p>
+        {extratos.length === 0 ? (
+          <div className="rounded-xl bg-white p-6 text-center border border-dashed" style={{ borderColor: C.cremeBorder }}>
+            <FileUp size={24} className="mx-auto mb-2" style={{ color: C.cinza }} />
+            <p className="text-sm" style={{ color: C.cinza }}>
+              Nenhum extrato importado. Arraste um arquivo .ofx acima.
+            </p>
+          </div>
+        ) : (
+          <div className="flex gap-2 flex-wrap">
+            {extratos.map(e => (
+              <button
+                key={e.id}
+                onClick={() => setExtratoSel(e.id)}
+                className="rounded-lg px-3 py-2 text-left transition-colors bg-white border"
+                style={{
+                  borderColor: extratoSel === e.id ? C.esmeralda : C.cremeBorder,
+                  backgroundColor: extratoSel === e.id ? C.esmeraldaLt : "white",
+                }}
+              >
+                <div className="flex items-center gap-2 mb-0.5">
+                  <Landmark size={12} style={{ color: C.esmeralda }} />
+                  <span className="text-xs font-medium" style={{ color: "#1A1A1A" }}>
+                    {e.banco ?? "Banco"} — #{e.id}
+                  </span>
+                  {e.processado && <CheckCircle size={11} style={{ color: C.verde }} />}
+                </div>
+                <p className="text-[10px]" style={{ color: C.cinza }}>
+                  {e.total_lancamentos} lançamentos · {fmtDate(e.data_inicio)}
+                  {e.data_fim ? ` – ${fmtDate(e.data_fim)}` : ""}
+                </p>
+                <button
+                  onClick={ev => { ev.stopPropagation(); handleReprocessar(e.id); }}
+                  disabled={reprocessando === e.id}
+                  className="mt-1.5 text-[10px] flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity disabled:opacity-30"
+                  style={{ color: C.esmeralda }}
+                >
+                  <RefreshCw size={9} className={reprocessando === e.id ? "animate-spin" : ""} />
+                  {reprocessando === e.id ? "Enviando..." : "Reprocessar"}
+                </button>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Mini stats extrato */}
+      {extratoSel && lançamentosFiltrados.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <KpiCard label="Lançamentos" value={lançamentosFiltrados.length} />
+          <KpiCard label="Entradas (C)" value={fmt(totalC)} valueColor={C.verde} />
+          <KpiCard label="Saídas (D)" value={fmt(totalD)} valueColor={C.vermelho} />
+          <KpiCard label="Conciliados" value={conciliados} valueColor={conciliados > 0 ? C.verde : C.cinza} />
+        </div>
+      )}
+
+      {/* Tabela lançamentos */}
+      {lançamentosFiltrados.length > 0 && (
+        <div className="rounded-xl bg-white overflow-hidden border" style={{ borderColor: C.cremeBorder }}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ backgroundColor: C.cremeBg, borderBottom: `1px solid ${C.cremeBorder}` }}>
+                  {["Data", "Tipo", "Valor", "Descrição", "FITID", "Conciliado"].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-[11px] uppercase tracking-wider font-semibold" style={{ color: C.cinza }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {lançamentosFiltrados.map(l => (
+                  <tr key={l.id} className="hover:bg-stone-50 transition-colors border-b" style={{ borderColor: C.cremeBorder }}>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#374151" }}>{fmtDate(l.data_transacao)}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className="text-[10px] px-2 py-0.5 rounded font-semibold"
+                        style={{
+                          backgroundColor: l.tipo === "C" ? C.verdeLt : C.vermelhoLt,
+                          color: l.tipo === "C" ? C.verde : C.vermelho,
+                        }}
+                      >
+                        {l.tipo === "C" ? "↑ Entrada" : "↓ Saída"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold whitespace-nowrap" style={{ color: l.tipo === "C" ? C.verde : C.vermelho }}>
+                      {fmt(Number(l.valor))}
+                    </td>
+                    <td className="px-4 py-3 max-w-[240px] truncate text-sm" style={{ color: "#374151" }}>{l.descricao ?? l.memo ?? "—"}</td>
+                    <td className="px-4 py-3 font-mono text-[10px]" style={{ color: C.cinza }}>{l.fitid ?? "—"}</td>
+                    <td className="px-4 py-3 text-center">
+                      {l.conciliado
+                        ? <CheckCircle size={14} style={{ color: C.verde }} className="mx-auto" />
+                        : <RefreshCw size={12} style={{ color: C.cinza }} className="mx-auto" />}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3704,9 +4062,9 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
   );
 }
 
-type Tab = "pagar" | "receber" | "caixa" | "conciliacao_pendente" | "comissoes";
+type Tab = "pagar" | "receber" | "caixa" | "conciliacao_pendente" | "bancario" | "comissoes";
 
-export default function FinanceiroClient({ pagar, receber, caixaPagamentos, caixaBaixas, userRole, defaultTab, comissoes, vendedores }: Props) {
+export default function FinanceiroClient({ pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas, userRole, defaultTab, comissoes, vendedores }: Props) {
   const [tab, setTab] = useState<Tab>(defaultTab ?? "pagar");
   const [cofre, setCofre] = useState<CofreOuro | null>(null);
   const [cofreLoaded, setCofreLoaded] = useState(false);
@@ -3738,6 +4096,7 @@ export default function FinanceiroClient({ pagar, receber, caixaPagamentos, caix
     { key: "pagar",   label: "A Pagar",   icon: ArrowUpCircle,   badge: pagar.filter(p => p.situacao === "pendente").length > 0 ? String(pagar.filter(p => p.situacao === "pendente").length) : undefined },
     { key: "receber", label: "A Receber", icon: ArrowDownCircle, badge: receber.filter(r => r.situacao === "pendente").length > 0 ? String(receber.filter(r => r.situacao === "pendente").length) : undefined },
     { key: "caixa",   label: "Caixa",     icon: Banknote,        badge: caixaPagamentos.filter(r => r.forma === "Dinheiro" && r.caixa_baixa_id == null).length > 0 ? String(caixaPagamentos.filter(r => r.forma === "Dinheiro" && r.caixa_baixa_id == null).length) : undefined },
+    { key: "bancario", label: "Bancário", icon: Landmark },
     { key: "comissoes", label: "Comissões", icon: DollarSign, badge: (comissoes ?? []).filter((f: any) => f.status === "rascunho" || f.status === "fechado").length > 0 ? String((comissoes ?? []).filter((f: any) => f.status === "rascunho" || f.status === "fechado").length) : undefined },
     ...(isFinanceiro ? [{ key: "conciliacao_pendente" as Tab, label: "Conciliação MP", icon: ShieldCheck }] : []),
   ];
@@ -3801,6 +4160,7 @@ export default function FinanceiroClient({ pagar, receber, caixaPagamentos, caix
       {tab === "pagar"                && <TabPagar pagar={pagar} />}
       {tab === "receber"              && <TabReceber receber={receber} saldoLiquido={totalReceber} />}
       {tab === "caixa"                && <TabCaixa caixa={caixaPagamentos} baixas={caixaBaixas} podeBaixar={["admin","desenvolvedor","gerente_loja","gerente_fabrica"].includes(userRole ?? "")} podeReversa={["admin","desenvolvedor","gerente_loja","estoquista_loja"].includes(userRole ?? "")} caixaOuroTrigger={caixaOuroTrigger} />}
+      {tab === "bancario"             && <TabConciliacao extratos={extratos} lancamentos={lancamentos} />}
       {tab === "conciliacao_pendente" && <TabConciliacaoPendente />}
       {tab === "comissoes"            && <ExtratoComissao />}
     </div>

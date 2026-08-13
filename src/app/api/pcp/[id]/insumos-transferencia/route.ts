@@ -118,12 +118,12 @@ export async function GET(
         i.categoria_id,
         COALESCE(i.peso_pedra, 0)::float8 AS peso_pedra,
         COALESCE(SUM(CASE
-          WHEN a.tipo_apontamento_id = 1 THEN a.quantidade
-          WHEN a.tipo_apontamento_id = 3 THEN a.quantidade
+          WHEN a.tipo_apontamento_id = 1 THEN a.qtd
+          WHEN a.tipo_apontamento_id = 3 THEN a.qtd
           ELSE 0
         END), 0)
         - COALESCE(SUM(CASE
-          WHEN a.tipo_apontamento_id IN (5, 6) THEN a.quantidade
+          WHEN a.tipo_apontamento_id IN (5, 6) THEN a.qtd
           ELSE 0
         END), 0) AS saldo
       FROM alissonerp.apontamentos_pcp a
@@ -134,12 +134,12 @@ export async function GET(
       GROUP BY a.insumo_id, i.nome, i.categoria_id, i.peso_pedra
       HAVING
         COALESCE(SUM(CASE
-          WHEN a.tipo_apontamento_id = 1 THEN a.quantidade
-          WHEN a.tipo_apontamento_id = 3 THEN a.quantidade
+          WHEN a.tipo_apontamento_id = 1 THEN a.qtd
+          WHEN a.tipo_apontamento_id = 3 THEN a.qtd
           ELSE 0
         END), 0)
         - COALESCE(SUM(CASE
-          WHEN a.tipo_apontamento_id IN (5, 6) THEN a.quantidade
+          WHEN a.tipo_apontamento_id IN (5, 6) THEN a.qtd
           ELSE 0
         END), 0) > 0
     `;
@@ -174,10 +174,10 @@ export async function GET(
         i.nome,
         i.categoria_id,
         COALESCE(i.peso_pedra, 0)::float8 AS peso_pedra,
-        COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 1 THEN a.quantidade ELSE 0 END), 0)
-        + COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 2 THEN a.quantidade ELSE 0 END), 0)
-        + COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.quantidade ELSE 0 END), 0)
-        - COALESCE(SUM(CASE WHEN a.tipo_apontamento_id IN (5, 6) THEN a.quantidade ELSE 0 END), 0)
+        COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 1 THEN a.qtd ELSE 0 END), 0)
+        + COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 2 THEN a.qtd ELSE 0 END), 0)
+        + COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END), 0)
+        - COALESCE(SUM(CASE WHEN a.tipo_apontamento_id IN (5, 6) THEN a.qtd ELSE 0 END), 0)
         AS saldo
       FROM alissonerp.apontamentos_pcp a
       JOIN alissonerp.insumos i ON i.id = a.insumo_id
@@ -186,10 +186,10 @@ export async function GET(
         AND a.insumo_id IS NOT NULL
       GROUP BY a.insumo_id, i.nome, i.categoria_id, i.peso_pedra
       HAVING
-        COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 1 THEN a.quantidade ELSE 0 END), 0)
-        + COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 2 THEN a.quantidade ELSE 0 END), 0)
-        + COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.quantidade ELSE 0 END), 0)
-        - COALESCE(SUM(CASE WHEN a.tipo_apontamento_id IN (5, 6) THEN a.quantidade ELSE 0 END), 0)
+        COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 1 THEN a.qtd ELSE 0 END), 0)
+        + COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 2 THEN a.qtd ELSE 0 END), 0)
+        + COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 3 THEN a.qtd ELSE 0 END), 0)
+        - COALESCE(SUM(CASE WHEN a.tipo_apontamento_id IN (5, 6) THEN a.qtd ELSE 0 END), 0)
         > 0
     `;
 

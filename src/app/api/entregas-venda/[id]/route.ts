@@ -62,7 +62,7 @@ export async function GET(
         ev.codigo_motoboy,
         ev.tipo,
         ev.forma_entrega,
-        ev.status AS situacao,
+        ev.situacao,
         ev.regiao,
         ev.motoboy_id,
         ev.frete_cobrado,
@@ -87,7 +87,7 @@ export async function GET(
         -- Dados da venda vinculada
         ve.numero_venda,
         ve.total_venda,
-        ve.status AS venda_situacao,
+        ve.situacao AS venda_situacao,
         ve.cliente_id,
         c.nome AS cliente_nome,
         c.celular AS cliente_celular,

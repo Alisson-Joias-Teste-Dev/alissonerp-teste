@@ -114,7 +114,7 @@ export async function POST(
     if (pcpId) {
       await tx`
         INSERT INTO alissonerp.transferencias_ordem
-          (pcp_id, ordem_id, deposito_id, setor_id, observacao, created_by)
+          (pcp_id, ordem_id, deposito_id, setor_id, obs, created_by)
         VALUES
           (${pcpId}, ${ordemId}, ${deposito_destino_id}, ${null},
            ${'Transferência service #' + servicoId},

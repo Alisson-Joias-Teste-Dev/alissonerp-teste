@@ -114,7 +114,7 @@ function criarDbMock(opts: {
   const fn = vi.fn((...args: unknown[]) => {
     calls.push(args);
     const texto = textoDaChamada(args);
-    if (texto.includes("FROM alissonerp.configuracoes_unificado")) {
+    if (texto.includes("FROM alissonerp.configuracoes_sistema")) {
       // As duas chaves saem da MESMA query (lerConfigListaDeIds) — o que muda é
       // o parâmetro interpolado, então o mock responde por ele.
       const chave = texto.includes("entregas_teste") ? "entregas_teste" : "contatos_teste";

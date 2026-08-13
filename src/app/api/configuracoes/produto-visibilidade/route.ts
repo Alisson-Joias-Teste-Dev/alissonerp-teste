@@ -9,7 +9,7 @@ const CHAVE = "produto_visibilidade";
 export async function GET() {
   try {
     const rows = await sql<{ valor: string }[]>`
-      SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = ${CHAVE}
+      SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = ${CHAVE}
     `;
     if (rows.length === 0) return NextResponse.json({ config: VISIBILIDADE_DEFAULT });
     const config = JSON.parse(rows[0].valor) as ProdutoVisibilidadeConfig;
@@ -28,7 +28,7 @@ export async function PUT(req: NextRequest) {
     const body = await req.json() as { config: ProdutoVisibilidadeConfig };
     const valor = JSON.stringify(body.config);
     await sql`
-      INSERT INTO alissonerp.configuracoes_unificado (chave, valor)
+      INSERT INTO alissonerp.configuracoes_sistema (chave, valor)
       VALUES (${CHAVE}, ${valor})
       ON CONFLICT (chave) DO UPDATE SET valor = ${valor}
     `;

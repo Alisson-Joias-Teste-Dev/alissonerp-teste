@@ -218,7 +218,7 @@ export async function linhasExtrato(
            dv.numero_venda AS vale_pedido_origem
     FROM alissonerp.pagamentos_venda pv
     JOIN alissonerp.vendas_erp v ON v.id = pv.venda_id
-      AND v.status = ANY(${SITUACOES_VENDA_ATIVAS})
+      AND v.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
     LEFT JOIN public.vendedores ven ON ven.id_vendedor = v.vendedor_id
     LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
     LEFT JOIN alissonerp.vale_troca vt ON vt.id = pv.vale_troca_id
@@ -387,7 +387,7 @@ export async function saldoAnterior(
              COALESCE(SUM(ROUND(v.total_comissao * LEAST(pv.valor / NULLIF(v.total_venda, 0), 1), 2)), 0) AS v
       FROM alissonerp.pagamentos_venda pv
       JOIN alissonerp.vendas_erp v ON v.id = pv.venda_id
-        AND v.status = ANY(${SITUACOES_VENDA_ATIVAS})
+        AND v.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
       WHERE pv.status = 'confirmado' AND pv.comissionavel IS TRUE
         AND v.vendedor_id IS NOT NULL
         AND (${cid}::int IS NULL OR v.vendedor_id = ${cid}::int)
@@ -444,8 +444,8 @@ export async function comissoesPendentes(
                      ELSE 0 END), 2)::text AS atrasado
     FROM alissonerp.contas_receber cr
     JOIN alissonerp.vendas_erp v ON v.id = cr.venda_erp_id
-      AND v.status = ANY(${SITUACOES_VENDA_ATIVAS})
-    WHERE cr.data_recebimento IS NULL AND cr.status = 'pendente'
+      AND v.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
+    WHERE cr.data_recebimento IS NULL AND cr.situacao = 'pendente'
       AND v.vendedor_id IS NOT NULL
       AND (${cid}::int IS NULL OR v.vendedor_id = ${cid}::int)
     GROUP BY 1
@@ -490,9 +490,9 @@ export async function pendentesDetalhe(consultoraId: number): Promise<ParcelaPen
            (cr.data_vencimento < CURRENT_DATE) AS atrasado
     FROM alissonerp.contas_receber cr
     JOIN alissonerp.vendas_erp v ON v.id = cr.venda_erp_id
-      AND v.status = ANY(${SITUACOES_VENDA_ATIVAS})
+      AND v.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
     LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
-    WHERE cr.data_recebimento IS NULL AND cr.status = 'pendente'
+    WHERE cr.data_recebimento IS NULL AND cr.situacao = 'pendente'
       AND v.vendedor_id = ${consultoraId}
     ORDER BY cr.data_vencimento NULLS LAST, cr.id
   `;

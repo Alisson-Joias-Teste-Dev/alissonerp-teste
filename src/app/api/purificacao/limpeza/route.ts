@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
     SELECT
       b.id, b.gramas, b.destino, b.status, b.protocolo_id,
       b.realizado_nome, b.transportador_nome, b.recebedor_nome,
-      b.confirmado_em, b.foto_comprovacao, b.observacao AS obs,
+      b.confirmado_em, b.foto_comprovacao, b.obs,
       b.created_at, b.updated_at,
       l.id AS limpeza_id,
       l.tentativa AS limpeza_tentativa,
@@ -158,7 +158,7 @@ async function iniciarLimpeza(
   const nome = usuario?.nome ?? user.email ?? "Sistema";
 
   const [cfg] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'aprovador_limpeza' LIMIT 1
+    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovador_limpeza' LIMIT 1
   `;
   const aprovadorId = String(cfg?.valor ?? "").trim();
   if (!aprovadorId) {
@@ -172,10 +172,10 @@ async function iniciarLimpeza(
     const [row] = await tx`
       UPDATE alissonerp.cofre_ouro_baixas
       SET status = ${STATUS_BAIXA_OURO.EM_LIMPEZA},
-          observacao = CASE
-            WHEN ${obs ?? null}::text IS NULL THEN observacao
-            WHEN observacao IS NULL OR observacao = '' THEN ${obs ?? null}
-            ELSE observacao || ' | ' || ${obs ?? null}
+          obs = CASE
+            WHEN ${obs ?? null}::text IS NULL THEN obs
+            WHEN obs IS NULL OR obs = '' THEN ${obs ?? null}
+            ELSE obs || ' | ' || ${obs ?? null}
           END,
           updated_at = now()
       WHERE id = ${baixa_id}
@@ -234,7 +234,7 @@ async function concluirLimpeza(
   obs?: string,
 ) {
   const [baixa] = await sql`
-    SELECT id, status, gramas, destino, observacao AS obs FROM alissonerp.cofre_ouro_baixas WHERE id = ${baixa_id}
+    SELECT id, status, gramas, destino, obs FROM alissonerp.cofre_ouro_baixas WHERE id = ${baixa_id}
   `;
   if (!baixa) return NextResponse.json({ error: "Baixa não encontrada" }, { status: 404 });
   if (!validarTransicao(baixa.status, STATUS_BAIXA_OURO.AGUARDANDO_APROVACAO)) {
@@ -271,7 +271,7 @@ async function concluirLimpeza(
    * aprovação da limpeza.
    */
   const [cfg] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'aprovador_limpeza' LIMIT 1
+    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'aprovador_limpeza' LIMIT 1
   `;
   const aprovadorId = String(cfg?.valor ?? "").trim();
   if (!aprovadorId) {
@@ -308,9 +308,9 @@ async function concluirLimpeza(
     UPDATE alissonerp.cofre_ouro_baixas
     SET status = ${STATUS_BAIXA_OURO.AGUARDANDO_APROVACAO},
         foto_comprovacao = ${foto_saida},
-        observacao = CASE
-          WHEN observacao IS NULL OR observacao = '' THEN ${dadosLimpezaTexto}
-          ELSE observacao || ' | ' || ${dadosLimpezaTexto}
+        obs = CASE
+          WHEN obs IS NULL OR obs = '' THEN ${dadosLimpezaTexto}
+          ELSE obs || ' | ' || ${dadosLimpezaTexto}
         END,
         updated_at = now()
     WHERE id = ${baixa_id}

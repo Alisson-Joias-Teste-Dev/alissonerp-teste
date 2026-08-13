@@ -103,7 +103,7 @@ export async function POST(
   }
 
   const [conta] = await sql`
-    SELECT id, status AS situacao, valor, venda_erp_id, descricao
+    SELECT id, situacao, valor, venda_erp_id, descricao
     FROM alissonerp.contas_receber
     WHERE id = ${contaId} AND categoria = 'venda'
   `;
@@ -212,7 +212,7 @@ export async function POST(
     await tx`
       UPDATE alissonerp.contas_receber
       SET valor = ${valorEfetivo},
-          status = 'pago',
+          situacao = 'pago',
           data_recebimento = CURRENT_DATE,
           updated_at = NOW()
       WHERE id = ${contaId}
@@ -230,7 +230,7 @@ export async function POST(
       const [nova] = await tx`
         INSERT INTO alissonerp.contas_receber
           (descricao, cliente_id, cliente_nome, venda_erp_id, valor,
-           data_vencimento, status, categoria, observacao, created_by)
+           data_vencimento, situacao, categoria, obs, created_by)
         SELECT
           ${`Saldo restante — ${conta.descricao}`},
           cr.cliente_id, cr.cliente_nome, cr.venda_erp_id,

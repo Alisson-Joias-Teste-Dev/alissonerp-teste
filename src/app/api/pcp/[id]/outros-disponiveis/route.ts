@@ -25,7 +25,7 @@ export async function GET(
       i.nome                    AS insumo_nome,
       i.categoria_id,
       cat.nome                  AS categoria_nome,
-      SUM(a.quantidade)::float8 AS peso_total
+      SUM(a.qtd)::float8        AS peso_total
     FROM alissonerp.apontamentos_pcp a
     JOIN alissonerp.insumos i          ON i.id  = a.insumo_id
     JOIN alissonerp.categorias_insumo cat ON cat.id = i.categoria_id
@@ -34,7 +34,7 @@ export async function GET(
       AND i.categoria_id NOT IN (1, 2)
       AND a.insumo_id IS NOT NULL
     GROUP BY a.insumo_id, i.nome, i.categoria_id, cat.nome
-    HAVING SUM(a.quantidade) > 0
+    HAVING SUM(a.qtd) > 0
     ORDER BY i.nome
   `;
 

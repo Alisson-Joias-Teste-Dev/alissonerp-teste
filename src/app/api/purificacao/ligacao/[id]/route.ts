@@ -135,7 +135,7 @@ export async function PATCH(
     // CE entrada 18k no pote
     await tx`
       INSERT INTO alissonerp.movimentacoes_estoque
-        (insumo_id, deposito_id, entrada, marcador, observacao, created_by, created_at, local_estoque_id)
+        (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
       VALUES (
         ${tipo_18k_insumo_id}, 1,
         ${peso_18k_real}::real,
@@ -207,7 +207,7 @@ export async function DELETE(
     // CE reversa: 24k volta pro pote
     await tx`
       INSERT INTO alissonerp.movimentacoes_estoque
-        (insumo_id, deposito_id, entrada, marcador, observacao, created_by, created_at, local_estoque_id)
+        (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
       VALUES (
         ${ouro24kLigaId}, 1,
         ${Number(peso_24k)}::real,
@@ -221,7 +221,7 @@ export async function DELETE(
     // CE reversa: liga volta pro pote
     await tx`
       INSERT INTO alissonerp.movimentacoes_estoque
-        (insumo_id, deposito_id, entrada, marcador, observacao, created_by, created_at, local_estoque_id)
+        (insumo_id, deposito_id, entrada, marcador, obs, created_by, created_at, local_estoque_id)
       VALUES (
         ${Number(liga_insumo_id)}, 1,
         ${Number(peso_liga_calculado)}::real,

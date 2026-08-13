@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function ComprasPage() {
   const rows = await sql`
-    SELECT c.id, c.status AS situacao, c.total, c.bloqueado, c.observacao AS obs,
+    SELECT c.id, c.situacao, c.total, c.bloqueado, c.obs,
       c.local_destino_id, c.numero_nf, c.data_compra, c.data_recebimento,
       c.recebido_por, c.created_at, c.fornecedor_id,
       ct.nome AS fornecedor_nome,

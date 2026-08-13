@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import sql, { normalizeRow } from "@/lib/db";
+import sql from "@/lib/db";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 
 export async function GET() {
@@ -17,17 +17,5 @@ export async function GET() {
       total_valor_brl: 0, preco_medio_grama: 0,
     });
   }
-  // REGRA DE NEGOCIO: colunas numeric da view (total_gramas, disponivel_gramas,
-  // total_valor_brl, preco_medio_grama) voltam como STRING pelo driver postgres.
-  // O front (CofreClient.tsx) chama .toFixed() direto nesses campos — sem
-  // normalizar aqui a tela quebra com "toFixed is not a function".
-  return NextResponse.json(
-    normalizeRow(rows[0] as Record<string, unknown>, [
-      "total_transacoes",
-      "total_gramas",
-      "disponivel_gramas",
-      "total_valor_brl",
-      "preco_medio_grama",
-    ]),
-  );
+  return NextResponse.json(rows[0]);
 }

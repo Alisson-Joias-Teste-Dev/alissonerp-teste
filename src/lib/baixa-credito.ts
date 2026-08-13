@@ -233,7 +233,7 @@ export async function baixarContaReceber(
   // Captura IDs das contas pendentes ANTES do UPDATE para comunicação
   const contas = await sql<{ id: number; descricao: string }[]>`
     SELECT id, descricao FROM alissonerp.contas_receber
-    WHERE venda_erp_id = ${vendaId} AND status = 'pendente'
+    WHERE venda_erp_id = ${vendaId} AND situacao = 'pendente'
   `;
 
   if (contas.length === 0) {
@@ -246,7 +246,7 @@ export async function baixarContaReceber(
     await sql`
       UPDATE alissonerp.contas_receber
       SET valor = ${options.valorPago},
-          status = 'pago',
+          situacao = 'pago',
           data_recebimento = CURRENT_DATE,
           updated_at = NOW()
       WHERE id = ${primeiraConta.id}
@@ -255,7 +255,7 @@ export async function baixarContaReceber(
     const [nova] = await sql`
       INSERT INTO alissonerp.contas_receber
         (descricao, cliente_id, cliente_nome, venda_erp_id, valor,
-         data_vencimento, status, categoria, observacao, created_by)
+         data_vencimento, situacao, categoria, obs, created_by)
       SELECT
         ${`Saldo restante — ${primeiraConta.descricao}`},
         cr.cliente_id, cr.cliente_nome, cr.venda_erp_id,
@@ -276,8 +276,8 @@ export async function baixarContaReceber(
   // Pagamento total: marcar todas as pendentes como pago
   await sql`
     UPDATE alissonerp.contas_receber
-    SET status = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
-    WHERE venda_erp_id = ${vendaId} AND status = 'pendente'
+    SET situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
+    WHERE venda_erp_id = ${vendaId} AND situacao = 'pendente'
   `;
 
   return { quitada: true };
@@ -321,7 +321,7 @@ export async function autoAprovarVendaRascunho(
   userId: string,
 ): Promise<boolean> {
   const [venda] = await sql`
-    SELECT status AS situacao, aprovacao_credito_tipo,
+    SELECT situacao, aprovacao_credito_tipo,
            desconto_revalidacao_necessaria, desconto_aprovado_por
     FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;

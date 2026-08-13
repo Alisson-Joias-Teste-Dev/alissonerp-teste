@@ -13,7 +13,7 @@ import { internalError } from "@/lib/api-error";
 // Por que: dar visibilidade do fluxo completo de pagamento de comissão.
 // Impacto se alterado: usuário perde visão do pipeline de comissões.
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase();
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
       ), 0)::text AS valor
       FROM alissonerp.pagamentos_venda pv
       JOIN alissonerp.vendas_erp ve ON ve.id = pv.venda_id
-        AND ve.status = ANY(${SITUACOES_VENDA_ATIVAS})
+        AND ve.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
       WHERE pv.status = 'confirmado'
         AND pv.comissionavel = true
         AND pv.id NOT IN (

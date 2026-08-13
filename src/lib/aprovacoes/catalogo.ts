@@ -12,7 +12,7 @@
  *   plugados em endpoints reais; os demais eventos abaixo ainda não. `conversao` e
  *   `conversao_sku` usam a MESMA chave `aprovador_conversao` (decisão do Jonathan, 12/07 —
  *   antes eram 2 chaves). `alteracao_venda`, `precificacao` e `auditoria` ainda usam chave de
- *   config NOVA que NÃO existe em alissonerp.configuracoes_unificado — será criada via skill
+ *   config NOVA que NÃO existe em alissonerp.configuracoes_sistema — será criada via skill
  *   `/dba` quando cada uma for plugada. Até lá, esses 3 eventos resolvem sempre
  *   "nao_configurado" — comportamento correto e esperado (destrava assim que a chave existir
  *   e for preenchida, sem precisar mudar código).
@@ -108,7 +108,7 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
     configKeys: ["aprovador_compra_comercial"],
     configMulti: true,
     camposLock: [
-      "compras_comercial.status",
+      "compras_comercial.situacao",
       "compras_comercial.bloqueado",
       "compras_comercial.aprovador_id",
       "compras_comercial.tarefa_aprovacao_id",
@@ -196,7 +196,7 @@ export const CATALOGO: Record<EventoAprovacao, RegraAutoridade> = {
     rotulo: "Auditoria — parecer final",
     configKeys: ["aprovador_auditoria"],
     configMulti: true,
-    camposLock: ["auditorias.status", "auditorias.parecer", "auditorias.motivo_reprovacao"],
+    camposLock: ["auditorias.situacao", "auditorias.parecer", "auditorias.motivo_reprovacao"],
     observacao: "Chave NOVA (ver conversao). FIX (mapa §C): hoje é brecha total — a rota não checa cargo nenhum (`void user`).",
   },
   conferencia_consultora: {

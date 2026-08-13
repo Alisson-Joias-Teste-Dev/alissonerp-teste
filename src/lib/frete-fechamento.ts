@@ -96,7 +96,7 @@ function fmtDate(d: Date): string {
  * foi ocultado, justamente para o cabeçalho continuar explicável).
  *
  * Mesmo padrão de leitura de `listarAprovadoresFechamentoFrete` (CSV na
- * `configuracoes_unificado`, sem cache). Ignora pedaços não numéricos — a chave é
+ * `configuracoes_sistema`, sem cache). Ignora pedaços não numéricos — a chave é
  * editada à mão pelo Jonathan e um espaço/vírgula sobrando não pode virar erro
  * de SQL.
  */
@@ -132,7 +132,7 @@ export async function listarEntregasTeste(db: DbSql): Promise<number[]> {
  */
 async function lerConfigListaDeIds(db: DbSql, chave: string): Promise<number[]> {
   const [cfg] = await db`
-    SELECT valor FROM alissonerp.configuracoes_unificado
+    SELECT valor FROM alissonerp.configuracoes_sistema
     WHERE chave = ${chave}
   `;
   return String(cfg?.valor ?? "")
@@ -143,7 +143,7 @@ async function lerConfigListaDeIds(db: DbSql, chave: string): Promise<number[]> 
 
 export async function listarAprovadoresFechamentoFrete(): Promise<string[]> {
   const [cfg] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado
+    SELECT valor FROM alissonerp.configuracoes_sistema
     WHERE chave = 'aprovadores_fechamento_frete'
   `;
   return String(cfg?.valor ?? "").split(",").map((s) => s.trim()).filter(Boolean);

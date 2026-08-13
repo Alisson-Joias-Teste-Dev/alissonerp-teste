@@ -41,11 +41,11 @@ const WEBHOOK_NOME = "pagbank-payment";
 
 /**
  * Resolve o user ID do sistema para transições automáticas.
- * Cadeia: configuracoes_unificado.pb_system_user_id → created_by da venda → null.
+ * Cadeia: configuracoes_sistema.pb_system_user_id → created_by da venda → null.
  */
 async function getSystemUserId(vendaId: number): Promise<string | null> {
   const [row] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'pb_system_user_id'
+    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'pb_system_user_id'
   `;
   if (row?.valor) {
     let v: string;
@@ -264,7 +264,7 @@ export async function POST(req: NextRequest) {
         try {
           const contas = await sql<{ id: number; descricao: string }[]>`
             SELECT id, descricao FROM alissonerp.contas_receber
-            WHERE venda_erp_id = ${vendaId} AND status = 'pago'
+            WHERE venda_erp_id = ${vendaId} AND situacao = 'pago'
             ORDER BY updated_at DESC LIMIT 1
           `;
           for (const c of contas) {

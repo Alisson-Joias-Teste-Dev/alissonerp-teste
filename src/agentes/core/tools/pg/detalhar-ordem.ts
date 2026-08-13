@@ -38,7 +38,7 @@ export const detalharOrdem: Tool = {
     if (ordem.length === 0) return { erro: 'Ordem não encontrada' };
 
     const apontamentos = await sql`
-      SELECT ap.id, ap.quantidade AS qtd, ap.created_at, ti.nome as tipo_apontamento,
+      SELECT ap.id, ap.qtd, ap.created_at, ti.nome as tipo_apontamento,
              s.nome as setor, i.nome as insumo
       FROM alissonerp.apontamentos_pcp ap
       JOIN alissonerp.pcp p ON p.id = ap.pcp_id

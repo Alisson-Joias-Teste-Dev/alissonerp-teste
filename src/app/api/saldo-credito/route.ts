@@ -56,8 +56,8 @@ export async function PATCH(req: NextRequest) {
   const body = parsedPatch.data;
 
   await sql`
-    UPDATE alissonerp.configuracoes_unificado
-    SET valor = ${String(body.limite)}, atualizado_em = now(), atualizado_por = ${user.id}::uuid
+    UPDATE alissonerp.configuracoes_sistema
+    SET valor = ${String(body.limite)}, updated_at = now(), updated_by = ${user.id}::uuid
     WHERE chave = 'saldo_gerente_limite'
   `;
 

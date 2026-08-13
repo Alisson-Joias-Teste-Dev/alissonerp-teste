@@ -43,7 +43,7 @@ async function calcularTotais(vendaId: number, db: DbSql = sql): Promise<TotaisE
         SELECT COALESCE(SUM(cr.valor), 0)::numeric
         FROM alissonerp.contas_receber cr
         WHERE cr.venda_erp_id = v.id
-          AND cr.status = 'pendente'
+          AND cr.situacao = 'pendente'
           AND cr.categoria = 'venda'
       ) AS valor_a_receber_conta,
       COUNT(p.id) FILTER (WHERE p.status = 'pendente')::int AS qtd_pagamentos_pendentes
@@ -240,7 +240,7 @@ async function garantirAReceberSemDuplicar(vendaId: number, userId: string, tx: 
     SELECT id, valor
     FROM alissonerp.contas_receber
     WHERE venda_erp_id = ${vendaId}
-      AND status = 'pendente'
+      AND situacao = 'pendente'
       AND categoria = 'venda'
     ORDER BY id
     FOR UPDATE
@@ -252,14 +252,14 @@ async function garantirAReceberSemDuplicar(vendaId: number, userId: string, tx: 
       await tx`
         UPDATE alissonerp.contas_receber
         SET valor = valor + ${diffConta},
-            observacao = CONCAT(COALESCE(observacao, ''), ${`\n[Automacao Estoque 2.0] Complemento A Receber de R$ ${diffConta.toFixed(2)} para cobrir entrega sem pagamento total.`}),
+            obs = CONCAT(COALESCE(obs, ''), ${`\n[Automacao Estoque 2.0] Complemento A Receber de R$ ${diffConta.toFixed(2)} para cobrir entrega sem pagamento total.`}),
             updated_at = NOW()
         WHERE id = ${contas[0].id}
       `;
     } else {
       await tx`
         INSERT INTO alissonerp.contas_receber
-          (descricao, cliente_id, cliente_nome, venda_erp_id, valor, data_vencimento, status, categoria, observacao, created_by)
+          (descricao, cliente_id, cliente_nome, venda_erp_id, valor, data_vencimento, situacao, categoria, obs, created_by)
         VALUES (
           ${`A Receber — Entrega sem pagamento total Venda ${totais.numero_venda ?? vendaId}`},
           ${totais.cliente_id}, ${totais.cliente_nome}, ${vendaId}, ${diffConta},

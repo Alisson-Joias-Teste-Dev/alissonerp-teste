@@ -30,8 +30,6 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
   const rows = await sql`
     SELECT
       ic.*,
-      ic.quantidade AS qtd,
-      ic.observacao AS obs,
       p.nome AS produto_nome,
       p.sku AS produto_sku,
       p.categoria AS produto_categoria,
@@ -178,7 +176,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
   // - Impacto se alterado/removido: insercao de itens pode quebrar em ambientes parcialmente atualizados.
   const [row] = await sql`
     INSERT INTO alissonerp.itens_compra_comercial
-      (compra_comercial_id, produto_id, quantidade, valor_unitario, cotacao_referencial, fator_ouro, valor_grama, peso_total, observacao)
+      (compra_comercial_id, produto_id, qtd, valor_unitario, cotacao_referencial, fator_ouro, valor_grama, peso_total, obs)
     VALUES
       (
         ${compraId},

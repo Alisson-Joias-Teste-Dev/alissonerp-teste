@@ -15,7 +15,7 @@ import { zodError } from "@/lib/schemas/common";
  *     senao o saldo do sistema fica mentindo para sempre e a peca reaparece em
  *     relatorio, em venda e no proximo inventario.
  *   - Essa e a UNICA baixa manual que existe no ERP e e EXCLUSIVA do master admin
- *     (o dono — configuracoes_unificado.MASTER_ADMIN_USER_ID, hoje o Alisson).
+ *     (o dono — parametros_sistema.MASTER_ADMIN_USER_ID, hoje o Alisson).
  *     NAO e permissao por cargo: admin, desenvolvedor, gerente — ninguem mais faz.
  *     Por isso o gate usa isMasterAdmin(user.id) e NAO uma lista de roles.
  *

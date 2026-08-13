@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams, useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -52,7 +52,6 @@ import {
   Banknote,
   Landmark,
   CreditCard,
-  Webhook,
   GraduationCap,
   HelpCircle,
 } from "lucide-react";
@@ -110,7 +109,6 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; strokeWidth?
   Banknote,
   Landmark,
   CreditCard,
-  Webhook,
   GraduationCap,
   HelpCircle,
 };
@@ -127,7 +125,6 @@ function isActiveInGroup(group: MenuGroup, pathname: string) {
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const router = useRouter();
   const { role, nome, fotoUrl, loading, user, modulos_leitura, isOperadorService, isVendedora } = useAuth();
   const { aberta, setAberta } = useSidebar();
@@ -195,26 +192,6 @@ export default function Sidebar() {
   }
 
   // Usar permissões do banco quando disponíveis; fallback para hardcode (permissions.ts)
-  // Configurações — atalho direto pra cada aba (evita abrir a tela e caçar
-  // a aba certa). Gate de permissão continua em `configEntry`, mais abaixo.
-  const configSubItems: MenuItem[] = [
-    { label: "Cotações de Mercado", href: "/configuracoes?tab=parametros", icon: "none" },
-    { label: "Integrações",   href: "/configuracoes?tab=integracoes",   icon: "none" },
-    { label: "Webhooks",      href: "/configuracoes?tab=webhooks",      icon: "none" },
-    { label: "Usuários",      href: "/configuracoes?tab=usuarios",      icon: "none" },
-    { label: "IA",            href: "/configuracoes?tab=ia",            icon: "none" },
-    { label: "Depósitos e Setores", href: "/configuracoes?tab=depositos", icon: "none" },
-    { label: "Teores e Ligas", href: "/configuracoes?tab=teores",       icon: "none" },
-    { label: "Locais",        href: "/configuracoes?tab=locais",        icon: "none" },
-    { label: "Tipos de Serviço", href: "/configuracoes?tab=tipos_servico", icon: "none" },
-    { label: "Comissões",     href: "/configuracoes?tab=comissoes",     icon: "none" },
-    { label: "Crédito Loja",  href: "/configuracoes?tab=credito_loja",  icon: "none" },
-    { label: "Fretes",        href: "/configuracoes?tab=fretes",        icon: "none" },
-    { label: "Gateways de Pagamento", href: "/configuracoes?tab=gateways", icon: "none" },
-    { label: "Metal",         href: "/configuracoes?tab=metal",         icon: "none" },
-    { label: "Aprovadores",   href: "/configuracoes?tab=aprovadores",   icon: "none" },
-  ];
-
   const allEntries = modulosEfetivos.length > 0
     ? getMenuGroupsForModulos(modulosEfetivos)
     : getMenuGroupsForRole(role);
@@ -554,45 +531,29 @@ export default function Sidebar() {
           A condição está no PRÓPRIO div: antes ele existia sempre e só o
           conteúdo era condicional, então quem não tem Configurações (consultora,
           gerente_loja) via um bloco VAZIO com `border-t` — um risco solto colado
-          na borda do rodapé do usuário.
-          Grupo expansível com atalho direto pra cada aba (configSubItems) —
-          mesmo gate de permissão (`configEntry`) de antes, só a apresentação
-          mudou de link único pra submenu. */}
+          na borda do rodapé do usuário. */}
       {configEntry && (
-      <div className="border-t px-3 py-2" style={{ borderColor: "#0F2922" }}>
-        <button
-          onClick={() => toggleGroup("Configurações")}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors"
-          style={{
-            color: pathname.startsWith("/configuracoes") ? "#F3EADA" : "#80A795",
-          }}
-        >
-          {(() => { const Icon = ICON_MAP[configEntry.icon]; return Icon ? <Icon size={15} strokeWidth={1.75} /> : null; })()}
-          <span className="flex-1 text-left tracking-wide">{configEntry.label}</span>
-          <ChevronDown size={14} strokeWidth={2} className={`transition-transform duration-200 ${openGroups.has("Configurações") ? "rotate-0" : "-rotate-90"}`} />
-        </button>
-        {openGroups.has("Configurações") && (
-          <div className="ml-4 mt-0.5 space-y-0.5 border-l pl-3" style={{ borderColor: "#0F2922" }}>
-            {configSubItems.map(item => {
-              const tabParam = new URLSearchParams(item.href.split("?")[1] || "").get("tab");
-              const active = pathname === "/configuracoes" && searchParams.get("tab") === tabParam;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setAberta(false)}
-                  className="flex items-center px-3 py-2 rounded-lg text-sm transition-colors truncate"
-                  style={{
-                    backgroundColor: active ? "#0F2922" : "transparent",
-                    color: active ? "#F3EADA" : "#80A795",
-                  }}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        )}
+      <div className="border-t" style={{ borderColor: "#0F2922" }}>
+        {(() => {
+          const Icon = ICON_MAP[configEntry.icon];
+          const active = pathname === "/configuracoes" || pathname.startsWith("/configuracoes/");
+          return (
+            <div className="px-3 py-2">
+              <Link
+                href="/configuracoes"
+                onClick={() => setAberta(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors"
+                style={{
+                  backgroundColor: active ? "#0F2922" : "transparent",
+                  color: active ? "#F3EADA" : "#80A795",
+                }}
+              >
+                {Icon && <Icon size={15} strokeWidth={1.75} />}
+                <span className="tracking-wide">{configEntry.label}</span>
+              </Link>
+            </div>
+          );
+        })()}
       </div>
       )}
       <div className="px-4 py-4 border-t" style={{ borderColor: "#0F2922" }}>

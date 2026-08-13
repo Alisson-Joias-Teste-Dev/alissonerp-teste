@@ -52,7 +52,7 @@ export async function GET() {
     -- Não listar pagamento de venda CANCELADA (senão o caixa confirmaria dinheiro
     -- de uma venda que não existe mais). Bug pego no code-review 13/06.
     WHERE p.status = 'aguard_conferencia' AND p.forma IN ('Dinheiro', 'Ouro')
-      AND v.status <> 'cancelado'
+      AND v.situacao <> 'cancelado'
     ORDER BY p.data_confirmacao ASC NULLS LAST, p.id ASC
   `;
 
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
         JOIN alissonerp.vendas_erp v ON v.id = p.venda_id
         WHERE p.id = ${pagamentoId} AND p.status = 'aguard_conferencia'
           AND p.forma IN ('Dinheiro', 'Ouro')
-          AND v.status <> 'cancelado'
+          AND v.situacao <> 'cancelado'
         FOR UPDATE OF p
       `;
       if (!pag) return { erro: "Pagamento não está aguardando conferência (venda cancelada ou já confirmado?)", status: 409 };
