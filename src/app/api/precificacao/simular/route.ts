@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
 
   // Buscar arredondamento configurado
   const [configArr] = await sql<{ valor: string }[]>`
-    SELECT valor FROM alissonerp.configuracoes_unificado
+    SELECT valor FROM alissonerp.configuracoes_sistema
     WHERE chave = 'preco_arredondamento'
     LIMIT 1
   `.catch(() => [{ valor: "dezena" }] as { valor: string }[]);

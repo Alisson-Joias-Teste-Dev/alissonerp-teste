@@ -190,7 +190,7 @@ export async function POST(
       // REGRA DE OURO #1: se a venda usou crédito do gerente, devolve o valor
       // pago proporcionalmente ao saldo rotativo — na MESMA transação.
       const [venda] = await tx`
-        SELECT credito_gerente_usado, status AS situacao
+        SELECT credito_gerente_usado, situacao
         FROM alissonerp.vendas_erp WHERE id = ${vendaId}
         FOR UPDATE
       `;
@@ -215,7 +215,7 @@ export async function POST(
       const contasParaComunicar = formaRecebimento
         ? await tx`
             SELECT id, descricao FROM alissonerp.contas_receber
-            WHERE venda_erp_id = ${vendaId} AND status = 'pendente'
+            WHERE venda_erp_id = ${vendaId} AND situacao = 'pendente'
             FOR UPDATE
           `
         : [];
@@ -226,13 +226,13 @@ export async function POST(
         await tx`
           UPDATE alissonerp.contas_receber
           SET valor = ${valorEfetivo},
-              status = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
+              situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
           WHERE id = ${primeiraConta.id}
         `;
         const [nova] = await tx`
           INSERT INTO alissonerp.contas_receber
             (descricao, cliente_id, cliente_nome, venda_erp_id, valor,
-             data_vencimento, status, categoria, observacao, created_by)
+             data_vencimento, situacao, categoria, obs, created_by)
           SELECT
             ${`Saldo restante — ${primeiraConta.descricao}`},
             cr.cliente_id, cr.cliente_nome, cr.venda_erp_id,
@@ -251,8 +251,8 @@ export async function POST(
         // Pagamento total: marcar todas as pendentes como pago
         await tx`
           UPDATE alissonerp.contas_receber
-          SET status = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
-          WHERE venda_erp_id = ${vendaId} AND status = 'pendente'
+          SET situacao = 'pago', data_recebimento = CURRENT_DATE, updated_at = NOW()
+          WHERE venda_erp_id = ${vendaId} AND situacao = 'pendente'
         `;
       }
 

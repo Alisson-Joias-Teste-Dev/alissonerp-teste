@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
     if (pesoSobraReal > 0) {
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (entrada, insumo_id, deposito_id, local_estoque_id, marcador, ordem_id, observacao, created_by)
+          (entrada, insumo_id, deposito_id, local_estoque_id, marcador, ordem_id, obs, created_by)
         VALUES
           (${pesoSobraReal}, ${insumoId}, ${localFabrica}, ${localFabrica},
            'EM'::alissonerp.enum_marcador_estoque, ${conv.ordem_id},

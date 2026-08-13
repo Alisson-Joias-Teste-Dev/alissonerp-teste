@@ -33,7 +33,7 @@ function mascararTelefone(tel: string | null | undefined): string {
 
 async function lerWhatsappDesenvolvedor(): Promise<string | null> {
   const [c] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'whatsapp_desenvolvedor'
+    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'whatsapp_desenvolvedor'
   `;
   return c?.valor ? String(c.valor) : null;
 }

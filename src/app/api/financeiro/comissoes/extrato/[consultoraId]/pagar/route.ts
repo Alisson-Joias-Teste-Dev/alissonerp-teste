@@ -115,7 +115,7 @@ export async function POST(
       JOIN alissonerp.pagamentos_venda pv ON pv.venda_id = v.id AND pv.status = 'confirmado'
       LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
       WHERE v.vendedor_id = ${cid}
-        AND v.status = ANY(${SITUACOES_VENDA_ATIVAS})
+        AND v.situacao = ANY(${SITUACOES_VENDA_ATIVAS})
         AND pv.data_confirmacao >= ${de}::date
         AND pv.data_confirmacao < ${ate}::date + interval '1 day'
         AND pv.id NOT IN (

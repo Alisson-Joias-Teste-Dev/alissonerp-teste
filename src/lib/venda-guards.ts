@@ -53,7 +53,7 @@ export class VendaGuardError extends Error {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function assertVendaForaDeRascunho(db: any, vendaId: number, acao: string): Promise<void> {
   const [venda] = await db`
-    SELECT id, numero_venda, status AS situacao
+    SELECT id, numero_venda, situacao
     FROM alissonerp.vendas_erp
     WHERE id = ${vendaId}
   `;

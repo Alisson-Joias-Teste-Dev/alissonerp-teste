@@ -24,7 +24,7 @@ interface SaldoResult {
 /** Lê o limite configurado. */
 export async function getSaldoLimite(): Promise<number> {
   const [row] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado
+    SELECT valor FROM alissonerp.configuracoes_sistema
     WHERE chave = 'saldo_gerente_limite'
   `;
   return row ? parseFloat(row.valor) : 50000;
@@ -99,7 +99,7 @@ export async function creditarSaldo(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const executar = async (tx: any): Promise<SaldoResult> => {
     const [row] = await tx`
-      SELECT valor FROM alissonerp.configuracoes_unificado
+      SELECT valor FROM alissonerp.configuracoes_sistema
       WHERE chave = 'saldo_gerente_atual'
       FOR UPDATE
     `;
@@ -107,8 +107,8 @@ export async function creditarSaldo(
     const saldoDepois = Math.round((saldoAntes + valor) * 100) / 100;
 
     await tx`
-      UPDATE alissonerp.configuracoes_unificado
-      SET valor = ${String(saldoDepois)}, atualizado_em = now()
+      UPDATE alissonerp.configuracoes_sistema
+      SET valor = ${String(saldoDepois)}, updated_at = now()
       WHERE chave = 'saldo_gerente_atual'
     `;
 

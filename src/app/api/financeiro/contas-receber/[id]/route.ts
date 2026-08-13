@@ -5,7 +5,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
 
 const ContaReceberPatchSchema = z.object({
   situacao: z.string().optional(),
@@ -51,11 +51,11 @@ export async function PATCH(
 
   const result = await sql`
     UPDATE alissonerp.contas_receber SET
-      status            = COALESCE(${body.situacao ?? null},                status),
+      situacao          = COALESCE(${body.situacao ?? null},                situacao),
       valor             = COALESCE(${body.valor ?? null},                   valor),
       data_vencimento   = COALESCE(${body.data_vencimento ?? null}::date,   data_vencimento),
       data_recebimento  = COALESCE(${dataRecebimentoFinal}::date,           data_recebimento),
-      observacao        = COALESCE(${body.obs ?? null},                     observacao),
+      obs               = COALESCE(${body.obs ?? null},                     obs),
       updated_at        = now()
     WHERE id = ${contaId}
     RETURNING id

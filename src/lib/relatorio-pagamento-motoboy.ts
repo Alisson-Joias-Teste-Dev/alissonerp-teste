@@ -41,14 +41,14 @@ export function periodoAntesDoMarco(dataInicio: string): boolean {
 
 export type ClassificacaoCorridaMotoboy = "pagar" | "revisar" | "nao_pagar";
 
-/** Situações de `vendas_erp.status` que indicam a venda já FECHADA/entregue no ERP. */
+/** Situações de `vendas_erp.situacao` que indicam a venda já FECHADA/entregue no ERP. */
 const SITUACOES_VENDA_FECHADA = new Set(["entregue", "concluido"]);
 
 /** Dados mínimos de UMA corrida necessários para classificá-la. */
 export interface CorridaParaClassificar {
   /** `entregas_venda.venda_id` — null quando é avulsa sem venda vinculada. */
   vendaId: number | null;
-  /** `vendas_erp.status` da venda vinculada — null quando não há venda. */
+  /** `vendas_erp.situacao` da venda vinculada — null quando não há venda. */
   vendaSituacao: string | null;
   /** `entregas_venda.is_avulso`. */
   isAvulso: boolean;

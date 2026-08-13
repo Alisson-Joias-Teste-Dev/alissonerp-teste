@@ -69,8 +69,8 @@ export async function POST(
   //    tipos 1 (Aditivo) + 2 (Entrada) − tipo 5 (Retorno)
   const [metalLote] = await sql`
     SELECT
-      COALESCE(SUM(CASE WHEN a.tipo_apontamento_id IN (1, 2) THEN a.quantidade ELSE 0 END), 0)::float8 AS entrada,
-      COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 5       THEN a.quantidade ELSE 0 END), 0)::float8 AS retorno
+      COALESCE(SUM(CASE WHEN a.tipo_apontamento_id IN (1, 2) THEN a.qtd ELSE 0 END), 0)::float8 AS entrada,
+      COALESCE(SUM(CASE WHEN a.tipo_apontamento_id = 5       THEN a.qtd ELSE 0 END), 0)::float8 AS retorno
     FROM alissonerp.apontamentos_distribuicao a
     JOIN alissonerp.insumos i ON i.id = a.insumo_id
     WHERE a.distribuicao_id = ${distId} AND i.categoria_id = ${metalCategoriaId}

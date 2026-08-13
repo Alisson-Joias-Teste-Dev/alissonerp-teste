@@ -45,7 +45,7 @@ export async function PATCH(
   if (isNaN(vendaId) || isNaN(iId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [venda] = await sql`
-    SELECT id, bloqueado, status AS situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    SELECT id, bloqueado, situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
@@ -194,7 +194,7 @@ export async function DELETE(
   if (isNaN(vendaId) || isNaN(iId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [venda] = await sql`
-    SELECT id, bloqueado, status AS situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    SELECT id, bloqueado, situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });

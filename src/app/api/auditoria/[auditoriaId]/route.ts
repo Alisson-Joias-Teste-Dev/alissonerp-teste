@@ -31,12 +31,12 @@ export async function PATCH(
   const rows = await sql`
     UPDATE alissonerp.auditorias
     SET
-      status              = ${situacao},
+      situacao            = ${situacao},
       parecer             = ${parecer ?? null},
       motivo_reprovacao   = ${motivo_reprovacao ?? null},
       data_conclusao      = CASE WHEN ${situacao} IN ('aprovado','reprovado') THEN now() ELSE data_conclusao END
     WHERE id = ${id}
-    RETURNING id, status AS situacao
+    RETURNING id, situacao
   `;
 
   if (rows.length === 0) {

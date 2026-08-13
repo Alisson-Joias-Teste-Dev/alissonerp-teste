@@ -125,7 +125,7 @@ export async function avaliarGarantia(
 
   const [row] = (await db`
     SELECT
-      v.status AS situacao,
+      v.situacao,
 
       -- 1ª fonte: entrega real ao cliente (motoboy = data_entrega_realizada,
       -- loja = data_retirada). É a mais confiável: alguém confirmou o

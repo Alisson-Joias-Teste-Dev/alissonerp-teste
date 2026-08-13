@@ -49,7 +49,7 @@ export async function POST(
 
   // Bloqueia solicitação se venda já está num estado final
   const [vendaSituacao] = await sql<{ situacao: string }[]>`
-    SELECT status AS situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId} LIMIT 1
+    SELECT situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId} LIMIT 1
   `;
   if (vendaSituacao && ["cancelada", "cancelado", "bloqueada", "bloqueado", "concluida", "concluido"].includes(vendaSituacao.situacao)) {
     return NextResponse.json(
@@ -87,7 +87,7 @@ export async function POST(
       return NextResponse.json({ error: "Campo não permitido para solicitação" }, { status: 400 });
     }
     const [venda] = await sql<Record<string, unknown>[]>`
-      SELECT status AS situacao, cliente_id, vendedor_id, data_venda
+      SELECT situacao, cliente_id, vendedor_id, data_venda
       FROM alissonerp.vendas_erp WHERE id = ${vendaId}
     `;
     if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });

@@ -92,7 +92,7 @@ export async function GET(_req: NextRequest) {
           SELECT DISTINCT o.id, o.numero_ordem
           FROM alissonerp.ordens o
           JOIN alissonerp.auditorias a ON a.ordem_id = o.id
-          WHERE a.status IN ('pendente', 'em_analise', 'pendenciado')
+          WHERE a.situacao IN ('pendente', 'em_analise', 'pendenciado')
             AND o.vendedor_id = ${vendedorId}
           ORDER BY o.id DESC
         `
@@ -100,7 +100,7 @@ export async function GET(_req: NextRequest) {
           SELECT DISTINCT o.id, o.numero_ordem
           FROM alissonerp.ordens o
           JOIN alissonerp.auditorias a ON a.ordem_id = o.id
-          WHERE a.status IN ('pendente', 'em_analise', 'pendenciado')
+          WHERE a.situacao IN ('pendente', 'em_analise', 'pendenciado')
           ORDER BY o.id DESC
         `;
 

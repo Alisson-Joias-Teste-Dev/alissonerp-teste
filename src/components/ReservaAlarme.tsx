@@ -163,7 +163,7 @@ export default function ReservaAlarme() {
 
   return (
     <div
-      className="fixed top-14 md:top-[77px] left-0 md:left-56 right-0 z-[54] shadow-md"
+      className="fixed top-14 md:top-0 left-0 md:left-56 right-0 z-[54] shadow-md"
       style={{ background: bg, borderBottom: `2px solid ${borda}`, color: cor }}
       role="alert"
       aria-live="polite"

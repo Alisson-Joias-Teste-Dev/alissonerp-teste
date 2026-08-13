@@ -42,7 +42,7 @@ export async function POST(
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [venda] = await sql`
-    SELECT id, numero_venda, status AS situacao, bloqueado, total_venda, vendedor_id
+    SELECT id, numero_venda, situacao, bloqueado, total_venda, vendedor_id
     FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });

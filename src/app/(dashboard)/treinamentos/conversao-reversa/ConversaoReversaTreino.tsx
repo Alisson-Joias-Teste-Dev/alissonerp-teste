@@ -302,9 +302,12 @@ const COLA: ColaItem[] = [
   { chip: <StatusChip s="rejeitada" />, txt: "Nada mudou: o ouro continua no cofre e nenhuma peça entrou no estoque." },
 ];
 
-export default function ConversaoReversaTreino() {
+interface TreinoProps { videoUrl: string | null; isDev: boolean; treinamentoKey: string }
+
+export default function ConversaoReversaTreino(props: TreinoProps) {
   return (
     <TreinamentoLayout
+      {...props}
       titulo="Conversão Reversa"
       subtitulo="Um ouro que está no cofre esperando baixa (de uma venda em ouro, upgrade, compra de metal ou conversão) vira uma joia pronta no estoque da Loja. Tira peso do cofre e coloca a peça no estoque — sem nenhum lançamento financeiro."
       regraDeOuro={<>foto do peso é <b style={{ color: "#111827" }}>obrigatória</b> e <b style={{ color: "#111827" }}>nada sai do cofre sem aprovação</b>. Só quem está na lista de aprovadores aprova — e o peso nunca pode passar do restante da origem.</>}

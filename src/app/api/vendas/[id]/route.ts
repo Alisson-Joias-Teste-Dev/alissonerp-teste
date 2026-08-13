@@ -101,7 +101,7 @@ export async function GET(
       (SELECT u.nome FROM alissonerp.usuarios u WHERE u.id = ve.desconto_cartao_aprovado_por) AS desconto_cartao_aprovado_por_nome,
       -- Entrega "levou devendo" (crediário ②): há A Receber pendente? E status da exceção de aprovação.
       (EXISTS(SELECT 1 FROM alissonerp.pagamentos_venda p WHERE p.venda_id = ve.id AND p.forma = 'A Receber' AND p.status = 'pendente')
-       OR EXISTS(SELECT 1 FROM alissonerp.contas_receber cr WHERE cr.venda_erp_id = ve.id AND cr.categoria = 'venda' AND cr.status = 'pendente')) AS entrega_devendo,
+       OR EXISTS(SELECT 1 FROM alissonerp.contas_receber cr WHERE cr.venda_erp_id = ve.id AND cr.categoria = 'venda' AND cr.situacao = 'pendente')) AS entrega_devendo,
       (SELECT ex.status FROM alissonerp.vendas_entrega_excecoes_pagamento ex
         WHERE ex.venda_id = ve.id
         ORDER BY CASE ex.status WHEN 'aprovado' THEN 1 WHEN 'pendente' THEN 2 ELSE 3 END, ex.id DESC
@@ -396,7 +396,7 @@ export async function PATCH(
   if (isNaN(vendaId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [venda] = await sql`
-    SELECT id, status AS situacao, bloqueado, aprovacao_credito_tarefa_id, vendedor_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+    SELECT id, situacao, bloqueado, aprovacao_credito_tarefa_id, vendedor_id FROM alissonerp.vendas_erp WHERE id = ${vendaId}
   `;
   if (!venda) return NextResponse.json({ error: "Venda não encontrada" }, { status: 404 });
   if (venda.bloqueado) return NextResponse.json({ error: "Venda bloqueada" }, { status: 409 });
@@ -522,7 +522,7 @@ export async function PATCH(
           SELECT 1 FROM alissonerp.apontamentos_pcp ap
           JOIN alissonerp.pcp p ON p.id = ap.pcp_id
           JOIN alissonerp.insumos i ON i.id = ap.insumo_id
-          WHERE p.ordem_id = o.id AND i.categoria_id = 1 AND ap.quantidade > 0
+          WHERE p.ordem_id = o.id AND i.categoria_id = 1 AND ap.qtd > 0
         ) AS ouro_movido
       FROM alissonerp.ordens o
       WHERE o.venda_id = ${vendaId} AND o.situacao != 'cancelado'
@@ -886,7 +886,7 @@ export async function PATCH(
     const situacaoUpdate = body.situacao === "aprovado" ? null : body.situacao ?? null;
     await sql`
       UPDATE alissonerp.vendas_erp SET
-        status               = COALESCE(${situacaoUpdate},                    status),
+        situacao             = COALESCE(${situacaoUpdate},                    situacao),
         cliente_id           = COALESCE(${body.cliente_id ?? null},           cliente_id),
         vendedor_id          = COALESCE(${body.vendedor_id ?? null},          vendedor_id),
         data_venda           = COALESCE(${body.data_venda ?? null},           data_venda),

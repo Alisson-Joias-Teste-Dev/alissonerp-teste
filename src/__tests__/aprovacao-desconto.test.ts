@@ -172,13 +172,11 @@ describe("PATCH aprovacao — hook aprovacao_desconto", () => {
   it("aprovação: libera o lock e atualiza comissão para 0,5%", async () => {
     setupBase(["aprovacao_desconto"], 5);
     sqlMock
-      .mockResolvedValueOnce([])                                              // 8. UPDATE vendas_erp (limpa lock + grava aprovador)
-      .mockResolvedValueOnce([{ id: 42, total_item: "1000.00", desconto: "35" }]) // 9. SELECT itens p/ recalcular
-      .mockResolvedValueOnce([])                                              // 10. SELECT faixas ativas
-      .mockResolvedValueOnce([])                                              // 11. UPDATE itens_venda_erp (loop, item 42)
-      .mockResolvedValueOnce([{ solicitante_id: "solicit-uuid" }])           // 12. SELECT solicitante_id
-      .mockResolvedValueOnce([]);                                             // 13. INSERT notificacoes
-      // 14. INSERT webhook_log cai no default (mockResolvedValue([]))
+      .mockResolvedValueOnce([])                                    // 8. UPDATE vendas_erp (limpa lock + grava aprovador)
+      .mockResolvedValueOnce([])                                    // 9. UPDATE itens_venda_erp (comissão 0,5%)
+      .mockResolvedValueOnce([{ solicitante_id: "solicit-uuid" }]) // 10. SELECT solicitante_id
+      .mockResolvedValueOnce([]);                                   // 11. INSERT notificacoes
+      // 12. INSERT webhook_log cai no default (mockResolvedValue([]))
 
     const res = await PATCH(makeRequest("10", { aprovacao_id: 1, decisao: "aprovado" }), makeParams("10"));
     const data = await res.json();
@@ -186,9 +184,9 @@ describe("PATCH aprovacao — hook aprovacao_desconto", () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.desconto).toEqual({ decisao: "aprovado" });
-    // setupBase (7) + UPDATE vendas_erp + SELECT itens + SELECT faixas + UPDATE item (1)
-    // + SELECT solicitante + INSERT notificacoes + INSERT webhook_log = 14
-    expect(sqlMock).toHaveBeenCalledTimes(14);
+    // setupBase (7: aprovacoes_tarefa + role + tarefaInfo + tx[4]) + UPDATE vendas_erp
+    // + UPDATE itens + SELECT solicitante + INSERT notificacoes + INSERT webhook_log = 12
+    expect(sqlMock).toHaveBeenCalledTimes(12);
   });
 
   it("rejeição: limpa lock mas NÃO altera situacao nem comissão", async () => {
@@ -215,8 +213,7 @@ describe("PATCH aprovacao — hook aprovacao_desconto", () => {
     setupBase(["aprovacao_desconto"], 5);
     sqlMock
       .mockResolvedValueOnce([])                        // UPDATE vendas_erp
-      .mockResolvedValueOnce([])                        // SELECT itens p/ recalcular (nenhum item)
-      .mockResolvedValueOnce([])                        // SELECT faixas ativas
+      .mockResolvedValueOnce([])                        // UPDATE itens (comissão 0,5%)
       .mockResolvedValueOnce([{ solicitante_id: "x" }])
       .mockResolvedValueOnce([]);                       // INSERT notificacoes
 
@@ -229,8 +226,7 @@ describe("PATCH aprovacao — hook aprovacao_desconto", () => {
     setupBase("{aprovacao_desconto}", 5);
     sqlMock
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])                        // SELECT itens p/ recalcular (nenhum item)
-      .mockResolvedValueOnce([])                        // SELECT faixas ativas
+      .mockResolvedValueOnce([])                        // UPDATE itens (comissão 0,5%)
       .mockResolvedValueOnce([{ solicitante_id: "x" }])
       .mockResolvedValueOnce([]);
 
@@ -278,26 +274,15 @@ describe("PATCH aprovacao — hook aprovacao_desconto", () => {
     return call as unknown[];
   }
 
-  /** SELECT que computa o desconto real de cada item (base do recalculo de comissão). */
-  function acharSelectItensParaRecalcular(): unknown[] {
+  function acharUpdateItensVendaErp(): unknown[] {
     const call = sqlMock.mock.calls.find((c) => {
       const partes = c[0];
       if (!Array.isArray(partes)) return false;
       const texto = partes.join(" ");
-      return /itens_venda_erp/i.test(texto) && /preco_lista_cheio/i.test(texto);
-    });
-    if (!call) throw new Error("SELECT de itens p/ recalcular não foi chamado");
-    return call as unknown[];
-  }
-
-  /** Todos os UPDATE de itens_venda_erp — um por item, gravados no loop pós-getComissao(). */
-  function acharUpdatesItensVendaErp(): unknown[][] {
-    return sqlMock.mock.calls.filter((c) => {
-      const partes = c[0];
-      if (!Array.isArray(partes)) return false;
-      const texto = partes.join(" ");
       return /UPDATE\s+alissonerp\.itens_venda_erp/i.test(texto);
-    }) as unknown[][];
+    });
+    if (!call) throw new Error("UPDATE alissonerp.itens_venda_erp não foi chamado");
+    return call as unknown[];
   }
 
   it("aprovação: UPDATE vendas_erp NÃO inclui mudança de situacao", async () => {
@@ -323,37 +308,28 @@ describe("PATCH aprovacao — hook aprovacao_desconto", () => {
   });
 
   /**
-   * REESCRITO (unificação 11/08/2026): a versão anterior conferia o CASE WHEN
-   * desconto>30 direto no texto do UPDATE — essa lógica saiu do SQL e passou a
-   * vir de getComissao() (src/lib/comissao.ts, MESMA função usada ao criar a
-   * venda). O route.ts só calcula o desconto real de cada item em SQL; quem
-   * decide a comissão é a função compartilhada. Este teste passa 2 itens (um
-   * com desconto > 30%, outro dentro de faixa cadastrada) e confere o valor
-   * gravado em cada UPDATE.
+   * REESCRITO: a versão anterior deste teste ("pct_comissao = 0.5 e * 0.005")
+   * afirmava a regra ANTIGA — TODO desconto acima do teto zerava a comissão pra
+   * um fixo de 0,5% (via `* 0.005`). Essa regra não existe mais no código: o
+   * route.ts (comentário "jul/2026 — correção") mudou pra usar a TABELA DE
+   * FAIXAS (faixas_comissao) pelo desconto real de cada item — só quem tem
+   * desconto > 30% cai no fixo de 0,5%; os demais usam fc.comissao_pct via
+   * LEFT JOIN. Ver getComissao() do front pra mesma fonte única.
    */
-  it("aprovação: recalcula comissão via getComissao() — acima de 30% cai no piso 0,5%, senão usa a tabela de faixas", async () => {
+  it("aprovação: UPDATE itens_venda_erp recalcula comissão pela tabela de faixas (fallback 0,5% só acima de 30%)", async () => {
     setupBase(["aprovacao_desconto"], 5);
-    sqlMock
-      .mockResolvedValueOnce([]) // UPDATE vendas_erp
-      .mockResolvedValueOnce([
-        { id: 101, total_item: "1000.00", desconto: "35" }, // >30% → piso 0,5%
-        { id: 102, total_item: "500.00", desconto: "20" },  // dentro da faixa cadastrada
-      ]) // SELECT itens p/ recalcular
-      .mockResolvedValueOnce([{ desconto_pct: "20", comissao_pct: "1.5" }]) // SELECT faixas ativas
-      .mockResolvedValueOnce([]) // UPDATE item 101
-      .mockResolvedValueOnce([]) // UPDATE item 102
-      .mockResolvedValueOnce([{ solicitante_id: "x" }])
-      .mockResolvedValueOnce([]);
 
     await PATCH(makeRequest("10", { aprovacao_id: 1, decisao: "aprovado" }), makeParams("10"));
 
-    const updates = acharUpdatesItensVendaErp();
-    expect(updates).toHaveLength(2);
-    const paramsPorItem = updates.map((c) => c.slice(1) as unknown[]);
-    // item 101 (35% de desconto): comissão fixa no piso de 0,5%
-    expect(paramsPorItem.some((p) => p.includes(0.5) && p.includes(101))).toBe(true);
-    // item 102 (20% de desconto, faixa cadastrada 20→1,5%): comissão da faixa, NÃO o piso
-    expect(paramsPorItem.some((p) => p.includes(1.5) && p.includes(102))).toBe(true);
+    const sqlParts: string = (acharUpdateItensVendaErp()[0] as string[]).join(" ");
+    expect(sqlParts).toMatch(/itens_venda_erp/);
+    expect(sqlParts).toMatch(/pct_comissao/);
+    expect(sqlParts).toMatch(/valor_comissao/);
+    expect(sqlParts).toMatch(/faixas_comissao/);
+    // fallback fixo só para item com desconto > 30% — não mais para toda a venda
+    expect(sqlParts).toMatch(/desconto\s*>\s*30\s+THEN\s+0\.5/i);
+    // demais itens seguem a tabela de faixas (fc.comissao_pct), não um * 0.005 fixo
+    expect(sqlParts).toMatch(/comissao_pct/);
   });
 
   /**
@@ -369,7 +345,7 @@ describe("PATCH aprovacao — hook aprovacao_desconto", () => {
 
     await PATCH(makeRequest("10", { aprovacao_id: 1, decisao: "aprovado" }), makeParams("10"));
 
-    const sqlParts: string = (acharSelectItensParaRecalcular()[0] as string[]).join(" ");
+    const sqlParts: string = (acharUpdateItensVendaErp()[0] as string[]).join(" ");
     expect(sqlParts).toMatch(/preco_lista_cheio/);
     // COALESCE com preco_lista cobre linha antiga com a coluna ainda nula
     expect(sqlParts).toMatch(/COALESCE\(\s*i\.preco_lista_cheio,\s*i\.preco_lista\s*\)/i);
@@ -391,7 +367,7 @@ describe("PATCH aprovacao — hook aprovacao_desconto", () => {
 
     await PATCH(makeRequest("10", { aprovacao_id: 1, decisao: "aprovado" }), makeParams("10"));
 
-    const sqlParts: string = (acharSelectItensParaRecalcular()[0] as string[]).join(" ");
+    const sqlParts: string = (acharUpdateItensVendaErp()[0] as string[]).join(" ");
     expect(sqlParts).toMatch(/produto_id\s+IS\s+NOT\s+NULL/i);
   });
 

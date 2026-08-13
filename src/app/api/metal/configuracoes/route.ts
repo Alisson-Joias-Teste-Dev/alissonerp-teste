@@ -2,7 +2,7 @@
 // TASK-006+007: GET/PUT /api/metal/configuracoes
 //
 // REGRA DE NEGÓCIO: Configurações do módulo metal armazenadas em
-// alissonerp.configuracoes_unificado. PUT restrito a admin/desenvolvedor.
+// alissonerp.configuracoes_sistema. PUT restrito a admin/desenvolvedor.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from "next/server";

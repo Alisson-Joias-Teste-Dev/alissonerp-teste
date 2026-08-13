@@ -2,9 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sql from "@/lib/db";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
-// REGRA DE NEGOCIO: saldo de estoque centralizado em src/lib/estoque-saldo.ts
-// (pente-fino 10/08/2026, etapa 2) — nao reimplementar SUM(saldo) aqui.
-import { buscarSaldoEstoque } from "@/lib/estoque-saldo";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { zodError } from "@/lib/schemas/common";
@@ -88,7 +85,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Insumo comum sem quantidade não pode entrar (a coluna quantidade é NOT NULL e o
+  // Insumo comum sem quantidade não pode entrar (a coluna qtd é NOT NULL e o
   // apontamento não teria significado).
   if (!ehPedra && !qtd) {
     return NextResponse.json(
@@ -118,7 +115,11 @@ export async function POST(req: NextRequest) {
    * saldo, senão divergem.
    */
   if ((tipo_apontamento_id === 1 || tipo_apontamento_id === 2 || tipo_apontamento_id === 3) && insumo_id) {
-    const saldoAtual = await buscarSaldoEstoque(sql, almoxarifadoId, insumo_id);
+    const saldo = await sql`
+      SELECT COALESCE(SUM(saldo), 0) AS saldo FROM alissonerp.vw_saldo_estoque
+      WHERE deposito_id = ${almoxarifadoId} AND insumo_id = ${insumo_id}
+    `;
+    const saldoAtual = Number(saldo[0]?.saldo ?? 0);
     const ehPedraCt = tipo_apontamento_id === 3 && peso_ct_final != null;
     // Pedra: saldo vem em grama → converter para ct antes de comparar com o pedido em ct.
     const disponivel = ehPedraCt ? saldoGramasParaCt(saldoAtual) : saldoAtual;
@@ -136,14 +137,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Pedra: a coluna quantidade (NOT NULL) guarda o peso em GRAMAS — mesma convenção da
+  // Pedra: a coluna qtd (NOT NULL) guarda o peso em GRAMAS — mesma convenção da
   // apontamentos_pcp. O ct vai na coluna peso_ct, que é a que o gatilho lê.
   const qtdParaInserir = ehPedra && peso_g_pedra_final != null ? peso_g_pedra_final : qtd;
 
   const rows = await sql`
     INSERT INTO alissonerp.apontamentos_distribuicao
       (distribuicao_id, tipo_apontamento_id, deposito_id, setor_id,
-       insumo_id, quantidade, peso_ct, foto_balanca, created_by)
+       insumo_id, qtd, peso_ct, foto_balanca, created_by)
     VALUES
       (${distribuicao_id}, ${tipo_apontamento_id}, ${deposito_id}, ${setor_id ?? null},
        ${insumo_id ?? null}, ${qtdParaInserir}, ${peso_ct_final ?? null},

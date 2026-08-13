@@ -14,7 +14,7 @@ import { IdSchema } from "@/lib/schemas/common";
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ─── Configurações ──────────────────────────────────────────────────────────
-/** Configurações do módulo metal lidas de alissonerp.configuracoes_unificado */
+/** Configurações do módulo metal lidas de alissonerp.configuracoes_sistema */
 export interface MetalConfig {
   /** Percentual MÍNIMO da cotação XAU pago na compra de metal. Ex: 80 = 80% */
   compra_metal_min_pct: number;

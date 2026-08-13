@@ -1,11 +1,8 @@
-import sql, { normalizeRow } from "@/lib/db";
+import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import DistribuicaoClient from "@/components/DistribuicaoClient";
 
 export const dynamic = 'force-dynamic';
-
-// Fase 3.6: colunas real → numeric — driver devolve como string, front usa .toFixed()/aritmética
-const DIST_NUMERIC_FIELDS = ["total_metal", "retorno_metal", "pmc", "quebra", "porcentagem_de_quebra", "peso_final"];
 
 export default async function DistribuicaoPage() {
   const supabase = await createServerSupabase();
@@ -97,7 +94,5 @@ export default async function DistribuicaoPage() {
         LIMIT 100
       `;
 
-  const distsNormalizados = (dists as Record<string, unknown>[]).map((d) => normalizeRow(d, DIST_NUMERIC_FIELDS));
-
-  return <DistribuicaoClient dists={distsNormalizados as any[]} semDeposito={false} userRole={userRole} />;
+  return <DistribuicaoClient dists={dists as any[]} semDeposito={false} userRole={userRole} />;
 }

@@ -55,7 +55,7 @@ export async function POST(
   // atômico dentro de aceitarFreteAvulso() na lib — este check aqui é só a
   // resposta amigável do caso comum (corrida já tem dono confirmado).
   const [entrega] = await sql`
-    SELECT is_avulso, status, motoboy_id
+    SELECT is_avulso, situacao, motoboy_id
     FROM alissonerp.entregas_venda
     WHERE id = ${entregaId} LIMIT 1
   `;

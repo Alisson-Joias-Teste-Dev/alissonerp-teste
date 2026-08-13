@@ -35,7 +35,7 @@ export default async function RastreioPage({ params }: Props) {
   const [entrega] = await sql`
     SELECT
       ev.codigo_entrega,
-      ev.status AS situacao,
+      ev.situacao,
       ev.forma_entrega,
       ev.data_saida,
       ev.data_retirada,

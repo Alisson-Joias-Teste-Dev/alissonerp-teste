@@ -39,7 +39,7 @@ export async function GET(_req: NextRequest) {
   const inventarios = await sql`
     SELECT
       i.id, i.local_estoque_id, le.nome AS local_nome,
-      i.status, i.categoria, i.data_abertura, i.observacao AS obs, i.created_at,
+      i.status, i.categoria, i.data_abertura, i.obs, i.created_at,
       (SELECT COUNT(*) FROM alissonerp.itens_inventario_comercial ii WHERE ii.inventario_id = i.id AND ${condPecaPronta(sql)}) AS total_itens,
       (SELECT COUNT(*) FROM alissonerp.itens_inventario_comercial ii WHERE ii.inventario_id = i.id AND ii.quantidade_contada IS NOT NULL AND ${condPecaPronta(sql)}) AS itens_contados
     FROM alissonerp.inventarios_comercial i

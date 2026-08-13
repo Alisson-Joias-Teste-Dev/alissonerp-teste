@@ -17,7 +17,7 @@
  *     / `..._itens`.
  *
  * O QUE NÃO MUDOU: fonte (`entregas_venda`, `forma_entrega='motoboy'`,
- * `status='confirmada'`), marco de corte (`MARCO_RELATORIO_PAGAMENTO_MOTOBOY`
+ * `situacao='confirmada'`), marco de corte (`MARCO_RELATORIO_PAGAMENTO_MOTOBOY`
  * = 20/07/2026), classificação Pagar/Revisar/Não pagar, papéis permitidos.
  *
  * IMPACTO SE ALTERADO: mexer no marco reabre corridas já pagas manualmente
@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
   const rows: Record<string, unknown>[] = await sql`
     SELECT
       ev.id, ev.frete_motoboy, ev.venda_id, ev.is_avulso, ev.descricao_avulso,
-      ve.status AS venda_situacao,
+      ve.situacao AS venda_situacao,
       (mb.id IS NOT NULL) AS tem_cadastro_motoboy,
       CASE WHEN ev.venda_id IS NOT NULL THEN
         ROW_NUMBER() OVER (PARTITION BY ev.venda_id ORDER BY ev.data_entrega_realizada ASC, ev.id ASC)
@@ -146,7 +146,7 @@ export async function POST(req: NextRequest) {
     LEFT JOIN alissonerp.motoboys mb ON mb.user_id = ev.motoboy_id
     WHERE ev.motoboy_id = ${motoboy_id}::uuid
       AND ev.forma_entrega = 'motoboy'
-      AND ev.status = 'confirmada'
+      AND ev.situacao = 'confirmada'
       AND ev.data_entrega_realizada >= ${inicio}::date
       AND ev.data_entrega_realizada < (${fim}::date + interval '1 day')
     ORDER BY ev.data_entrega_realizada ASC, ev.id ASC

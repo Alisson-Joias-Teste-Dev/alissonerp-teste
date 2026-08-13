@@ -175,9 +175,8 @@ async function processarDecisao(
 }
 
 /**
- * Lê uma chave NUMÉRICA de alissonerp.configuracoes_unificado (fusão de
- * configuracoes_sistema + parametros_sistema), com fallback seguro se a
- * chave não existir/não for número válido.
+ * Lê uma chave NUMÉRICA de alissonerp.configuracoes_sistema, com fallback
+ * seguro se a chave não existir/não for número válido.
  *
  * FASE 5 (15/07): as chaves `desconto_fallback_sem_cadastro_pct` e
  * `limite_desconto_cartao_pct` ainda NÃO existem no banco — serão criadas
@@ -187,7 +186,7 @@ async function processarDecisao(
  */
 async function buscarConfigNumerica(chave: string, fallback: number): Promise<number> {
   const [row] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = ${chave} LIMIT 1
+    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = ${chave} LIMIT 1
   `;
   const n = Number(row?.valor);
   return row && Number.isFinite(n) ? n : fallback;
@@ -214,7 +213,7 @@ async function buscarLimiteDescontoCartao(): Promise<number> {
  * fora (bug: caiam no "resto=15"). Ordem agora:
  *   1. full-access (admin/desenvolvedor) → 100
  *   2. mx_desconto_permitido do cadastro > 0 → esse valor
- *   3. sem cadastro → fallback configurável (configuracoes_unificado.
+ *   3. sem cadastro → fallback configurável (configuracoes_sistema.
  *      desconto_fallback_sem_cadastro_pct, seed 0)
  * Usa LEFT JOIN (1 query só) em vez de query separada, para não mudar o
  * shape de chamada aos callers/mocks existentes.
@@ -224,7 +223,7 @@ async function buscarLimiteDescontoCartao(): Promise<number> {
 async function getDescontoThreshold(vendaId: number): Promise<number> {
   const [row] = await sql`
     SELECT u.mx_desconto_permitido, u.role,
-           (SELECT valor FROM alissonerp.configuracoes_unificado
+           (SELECT valor FROM alissonerp.configuracoes_sistema
             WHERE chave = 'desconto_fallback_sem_cadastro_pct' LIMIT 1) AS fallback_config
     FROM alissonerp.vendas_erp ve
     JOIN alissonerp.usuarios u ON u.vendedor_id = ve.vendedor_id

@@ -7,6 +7,8 @@ import {
   ArrowLeft, RefreshCw, Loader2, CheckCircle, XCircle, Trash2,
   Send, FileText, CreditCard, Ticket, ArrowRight,
 } from "lucide-react";
+import NotaFiscalStatusBadge from "@/components/fiscal/NotaFiscalStatusBadge";
+import NotaFiscalDetalheModal from "@/components/fiscal/NotaFiscalDetalheModal";
 import ComentariosOrdem from "@/components/ComentariosOrdem";
 import { hasRole, ROLES_DEVOLUCAO } from "@/lib/roles";
 
@@ -81,6 +83,10 @@ interface Devolucao {
   rejeitado_motivo: string | null;
   created_at: string;
   updated_at: string;
+  nota_fiscal_devolucao_id: number | null;
+  nfe_numero: number | null;
+  nfe_chave_44: string | null;
+  nfe_emitida_em: string | null;
   cliente_nome: string | null;
   itens: DevolucaoItem[];
   vales_troca: ValeTrocaSumario[];
@@ -162,6 +168,9 @@ export default function DevolucaoDetalheClient({ id, role }: Props) {
     condicao: DevolucaoItem["condicao"];
     observacao: string;
   } | null>(null);
+  const [emitindoNfe, setEmitindoNfe] = useState(false);
+  const [nfeError, setNfeError] = useState("");
+  const [verNotaId, setVerNotaId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -261,6 +270,27 @@ export default function DevolucaoDetalheClient({ id, role }: Props) {
       setError(e instanceof Error ? e.message : "Erro");
     } finally {
       setUpdating(false);
+    }
+  }
+
+  async function handleEmitirNfe() {
+    if (!dev) return;
+    if (!confirm("Emitir NF-e de devolução? Esta ação não pode ser desfeita.")) return;
+    setEmitindoNfe(true);
+    setNfeError("");
+    try {
+      const res = await fetch("/api/fiscal/emitir/nfe-devolucao", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ devolucao_id: dev.id }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Erro ao emitir NF-e");
+      await load();
+    } catch (e) {
+      setNfeError(e instanceof Error ? e.message : "Erro ao emitir");
+    } finally {
+      setEmitindoNfe(false);
     }
   }
 
@@ -636,14 +666,42 @@ export default function DevolucaoDetalheClient({ id, role }: Props) {
         </div>
       )}
 
-      {/* MERGE: seção "NF-e devolução" da produção (origin/main) foi removida aqui de
-          propósito — módulo de NF-e abandonado por decisão do dono (ver
-          docs/migracao/LIVRO-DE-REGRAS-migracao-erp-novo.md §4.1/§10.1: 7 tabelas e as
-          colunas nota_fiscal_devolucao_id/nfe_numero/nfe_chave_44 de devolucoes_venda
-          foram apagadas, sempre vazias, 0 uso real). Os imports/estado/handler dessa
-          seção (NotaFiscalStatusBadge, NotaFiscalDetalheModal, handleEmitirNfe,
-          verNotaId, nfeError, emitindoNfe) já não existem em nenhum outro ponto deste
-          arquivo — mantê-la aqui quebraria o componente. */}
+      {/* Seção NF-e devolução */}
+      {(dev.status === "aprovado" || dev.status === "concluido" || dev.status === "pendente_entrega") && (
+        <div className="mt-4 pt-4 border-t" style={{ borderColor: "#E7E5E4" }}>
+          {dev.nota_fiscal_devolucao_id ? (
+            <div className="flex items-center gap-3">
+              <NotaFiscalStatusBadge status={dev.nfe_chave_44 ? "autorizada" : "processando"} />
+              <span className="text-sm" style={{ color: "#57534E" }}>NF-e nº {dev.nfe_numero ?? "—"}</span>
+              <button
+                onClick={() => setVerNotaId(dev.nota_fiscal_devolucao_id!)}
+                className="text-sm underline"
+                style={{ color: C.esmeralda }}
+              >
+                Ver detalhes
+              </button>
+            </div>
+          ) : podeGerenciar ? (
+            <div>
+              {nfeError && <p className="text-red-600 text-sm mb-2">{nfeError}</p>}
+              <button
+                onClick={handleEmitirNfe}
+                disabled={emitindoNfe}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+                style={{ backgroundColor: C.esmeralda, color: C.creme }}
+              >
+                {emitindoNfe ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                {emitindoNfe ? "Emitindo..." : "Emitir NF-e"}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {/* Modal detalhes nota */}
+      {verNotaId && (
+        <NotaFiscalDetalheModal notaId={verNotaId} onClose={() => setVerNotaId(null)} />
+      )}
 
       {/* Modal de Inspeção */}
       {inspModal && (

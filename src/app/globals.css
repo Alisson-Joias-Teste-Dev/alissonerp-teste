@@ -1,16 +1,12 @@
 @import "tailwindcss";
 
-*:focus { outline: none !important; }
-*:focus-visible { outline: none !important; }
-* { -webkit-tap-highlight-color: transparent; }
-
 /* =============================================
    DESIGN SYSTEM — ALISSON JOALHERIA
    Tailwind v4: cores via @theme
    ============================================= */
 
 @theme {
-  /* ══════ Esmeralda (identidade visual principal) ══════ */
+  /* Esmeralda */
   --color-esmeralda-50:  #E8F0ED;
   --color-esmeralda-100: #C5D9D1;
   --color-esmeralda-200: #9FBFB3;
@@ -22,133 +18,26 @@
   --color-esmeralda-800: #0A1D17;
   --color-esmeralda-900: #06120E;
 
-  /* ══════ Creme (superfícies / backgrounds) ══════ */
+  /* Creme */
   --color-creme-50:  #FAFAF7;
   --color-creme-100: #F3EADA;
   --color-creme-200: #E8DCC8;
   --color-creme-300: #D4C9B0;
   --color-creme-400: #BFB69A;
 
-  /* ══════ Dourado (acento / destaque) ══════ */
+  /* Dourado */
   --color-dourado-light:   #FEDDB4;
   --color-dourado-DEFAULT: #DB9864;
   --color-dourado-dark:    #C4823E;
 
-  /* ══════ Semântico — mapeia paleta da marca para tokens funcionais ══════ */
-  --color-brand-50:  #E8F0ED;
-  --color-brand-100: #C5D9D1;
-  --color-brand-200: #9FBFB3;
-  --color-brand-300: #80A795;
-  --color-brand-400: #4D7D6A;
-  --color-brand-500: #184036;
-  --color-brand-600: #143830;
-  --color-brand-700: #0F2922;
-  --color-brand-800: #0A1D17;
-  --color-brand-900: #06120E;
+  /* Alias para o módulo Gestão de Estoque (mantém identidade ao usar esmeralda do ERP) */
+  --color-alisson-gold:    #184036;
+  --color-alisson-black:   #FFFFFF;
 
-  --color-success-50:  #ECFDF5;
-  --color-success-100: #D1FAE5;
-  --color-success-200: #A7F3D0;
-  --color-success-300: #6EE7B7;
-  --color-success-400: #34D399;
-  --color-success-500: #10B981;
-  --color-success-600: #059669;
-  --color-success-700: #047857;
-  --color-success-800: #065F46;
-  --color-success-900: #064E3B;
-
-  --color-error-50:  #FEF2F2;
-  --color-error-100: #FEE2E2;
-  --color-error-200: #FECACA;
-  --color-error-300: #FCA5A5;
-  --color-error-400: #F87171;
-  --color-error-500: #EF4444;
-  --color-error-600: #DC2626;
-  --color-error-700: #B91C1C;
-  --color-error-800: #991B1B;
-  --color-error-900: #7F1D1D;
-
-  --color-warning-50:  #FFFBEB;
-  --color-warning-100: #FEF3C7;
-  --color-warning-200: #FDE68A;
-  --color-warning-300: #FCD34D;
-  --color-warning-400: #FBBF24;
-  --color-warning-500: #F59E0B;
-  --color-warning-600: #D97706;
-  --color-warning-700: #B45309;
-  --color-warning-800: #92400E;
-  --color-warning-900: #78350F;
-
-  --color-info-50:  #EFF6FF;
-  --color-info-100: #DBEAFE;
-  --color-info-200: #BFDBFE;
-  --color-info-300: #93C5FD;
-  --color-info-400: #60A5FA;
-  --color-info-500: #3B82F6;
-  --color-info-600: #2563EB;
-  --color-info-700: #1D4ED8;
-  --color-info-800: #1E40AF;
-  --color-info-900: #1E3A8A;
-
-  /* ══════ Superfície / Texto ══════ */
-  --color-surface-page:   #FAFAF7;
-  --color-surface-card:   #FFFFFF;
-  --color-surface-hover:  #F9FAFB;
-  --color-surface-muted:  #F3F4F6;
-
-  --color-text-primary:   #111827;
-  --color-text-secondary: #6B7280;
-  --color-text-muted:     #9CA3AF;
-  --color-text-inverse:   #FFFFFF;
-
-  --color-border-default: #E5E7EB;
-  --color-border-light:   #F3F4F6;
-  --color-border-strong:  #D1D5DB;
-
-  /* ══════ Alias legados ══════ */
-  --color-alisson-gold:  #184036;
-  --color-alisson-black: #FFFFFF;
-
-  /* ══════ Fontes ══════ */
+  /* Fontes */
   --font-display: var(--font-playfair), Georgia, serif;
   --font-sans:    var(--font-dm-sans), system-ui, sans-serif;
   --font-mono:    var(--font-jetbrains), ui-monospace, monospace;
-
-  --text-theme-xs: 0.75rem;
-  --text-theme-sm: 0.875rem;
-
-  /* ══════ Sombras ══════ */
-  --shadow-theme-xs: 0px 1px 2px 0px rgba(16, 24, 40, 0.05);
-  --shadow-theme-sm: 0px 1px 3px 0px rgba(16, 24, 40, 0.10), 0px 1px 2px 0px rgba(16, 24, 40, 0.06);
-  --shadow-theme-md: 0px 4px 8px -2px rgba(16, 24, 40, 0.10), 0px 2px 4px -2px rgba(16, 24, 40, 0.06);
-  --shadow-theme-lg: 0px 12px 16px -4px rgba(16, 24, 40, 0.08), 0px 4px 6px -2px rgba(16, 24, 40, 0.03);
-  --shadow-focus-ring: 0px 0px 0px 4px rgba(24, 64, 54, 0.12);
-
-  /* ══════ Z-index ══════ */
-  --z-index-1:      1;
-  --z-index-9:      9;
-  --z-index-99:     99;
-  --z-index-999:    999;
-  --z-index-9999:   9999;
-  --z-index-99999:  99999;
-}
-
-/* ══════ Utilities customizadas ══════ */
-@utility no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-  &::-webkit-scrollbar {
-    display: none;
-  }
-}
-
-/* Pulse suave para alertas (A Vencer / Vencidas) */
-@keyframes pulse-soft {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.65; }
-}
-.animate-pulse-soft {
-  animation: pulse-soft 2s ease-in-out infinite;
 }
 
 /* Pulse suave para alertas (A Vencer / Vencidas) */
@@ -188,15 +77,4 @@ body {
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
-}
-
-.hide-spinner {
-  appearance: textfield;
-  -moz-appearance: textfield;
-}
-.hide-spinner::-webkit-inner-spin-button,
-.hide-spinner::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  appearance: none;
-  margin: 0;
 }

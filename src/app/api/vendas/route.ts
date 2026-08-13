@@ -253,8 +253,11 @@ export async function GET(req: NextRequest) {
             AND p.data_confirmacao IS NOT NULL
         ), 0),
         0
-      )::numeric AS saldo_financeiro_aberto
+      )::numeric AS saldo_financeiro_aberto,
+      ve.empresa_emitente_id,
+      ve.nota_fiscal_id
     FROM alissonerp.vw_vendas_erp_completa v
+    LEFT JOIN alissonerp.vendas_erp ve ON ve.id = v.id
     WHERE v.data_venda >= ${inicio}::date
       AND v.data_venda <  (${fim}::date + INTERVAL '1 day')
       ${isFullAccess ? sql`` : sql`AND v.vendedor_id = ${meuVendedorId!}`}
@@ -412,7 +415,7 @@ export async function POST(req: NextRequest) {
         endereco_entrega, endereco_entrega_numero, endereco_entrega_complemento,
         endereco_entrega_bairro, endereco_entrega_cidade, endereco_entrega_cep, endereco_entrega_uf,
         tipo_venda, numero_rastreio, venda_garantia_id,
-        status,
+        situacao,
         created_by
       ) VALUES (
         nextval('alissonerp.venda_numero_seq')::text,
@@ -964,7 +967,7 @@ export async function POST(req: NextRequest) {
 
     // 5. Buscar venda completa para retornar
     const [completa] = await tx`
-      SELECT id, numero_venda, status AS situacao,
+      SELECT id, numero_venda, situacao,
              total_produtos, total_desconto, total_frete, total_venda, total_comissao
       FROM alissonerp.vendas_erp
       WHERE id = ${venda.id}

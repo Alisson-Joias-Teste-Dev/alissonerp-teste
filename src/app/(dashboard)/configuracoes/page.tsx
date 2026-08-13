@@ -2,7 +2,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { isFullAccess } from "@/lib/roles";
-import ConfiguracoesClient from "./ConfiguracoesClient";
+import PaginaConfiguracoes from "@/components/configuracoes/PaginaConfiguracoes";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +45,7 @@ export default async function ConfiguracoesPage() {
   ]);
 
   return (
-    <ConfiguracoesClient
+    <PaginaConfiguracoes
       parametros={(parametros as any[])[0] ?? {}}
       webhooks={webhooks as any[]}
       logs={logs as any[]}
@@ -56,4 +56,3 @@ export default async function ConfiguracoesPage() {
     />
   );
 }
-

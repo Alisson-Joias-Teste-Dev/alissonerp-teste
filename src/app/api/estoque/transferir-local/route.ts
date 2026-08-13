@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
   // Saída do local origem
   await sql`
     INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, saida, deposito_id, local_estoque_id, marcador, observacao)
+      (insumo_id, saida, deposito_id, local_estoque_id, marcador, obs)
     VALUES
       (${insumo_id}, ${pesoGramas}::real, ${almoxarifadoId}, ${local_origem_id},
        'TA'::alissonerp.enum_marcador_estoque, ${obsText})
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
   // Entrada no local destino
   await sql`
     INSERT INTO alissonerp.movimentacoes_estoque
-      (insumo_id, entrada, deposito_id, local_estoque_id, marcador, observacao)
+      (insumo_id, entrada, deposito_id, local_estoque_id, marcador, obs)
     VALUES
       (${insumo_id}, ${pesoGramas}::real, ${almoxarifadoId}, ${local_destino_id},
        'TA'::alissonerp.enum_marcador_estoque, ${obsText})

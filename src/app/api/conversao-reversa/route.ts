@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
   // conversão reversa EXIGE pelo menos um aprovador configurado em
   // Configurações → Aprovadores. Sem isso a solicitação NÃO abre — mesma
   // checagem (`resolverAprovadores`) usada pelos ~15 outros fluxos de aprovação
-  // do sistema, em vez de reimplementar a leitura de configuracoes_unificado aqui.
+  // do sistema, em vez de reimplementar a leitura de configuracoes_sistema aqui.
   const resolucao = await resolverAprovadores("conversao_reversa");
   if (resolucao.status === "nao_configurado") {
     return NextResponse.json(

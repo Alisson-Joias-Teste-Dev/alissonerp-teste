@@ -142,8 +142,7 @@ describe("PATCH /api/financeiro/contas-pagar/[id]", () => {
   it.each([
     "desenvolvedor",
     "admin",
-    "administrativo",
-    "financeiro",
+    "gerente_fabrica",
     "gerente_loja",
   ])("aceita role %s", async (role) => {
     mockHappyPath({ role });
@@ -287,11 +286,11 @@ describe("PATCH /api/financeiro/contas-pagar/[id]", () => {
     await PATCH(makePatchRequest({ valor: 100 }), makeParams(1));
     const updateCall = sqlMock.mock.calls[2];
     const sqlText = (updateCall[0] as string[]).join(" ");
-    expect(sqlText).toMatch(/status\s*=\s*COALESCE/i);
+    expect(sqlText).toMatch(/situacao\s*=\s*COALESCE/i);
     expect(sqlText).toMatch(/valor\s*=\s*COALESCE/i);
     expect(sqlText).toMatch(/data_vencimento\s*=\s*COALESCE/i);
     expect(sqlText).toMatch(/data_pagamento\s*=\s*COALESCE/i);
-    expect(sqlText).toMatch(/observacao\s*=\s*COALESCE/i);
+    expect(sqlText).toMatch(/obs\s*=\s*COALESCE/i);
   });
 
   it("UPDATE força updated_at = now()", async () => {

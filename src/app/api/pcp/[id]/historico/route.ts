@@ -95,7 +95,7 @@ export async function GET(
   if (distOrdem?.distribuicao_id) {
     const aptsDist = await sql`
       SELECT
-        a.id, a.quantidade AS qtd, a.created_at, a.foto_balanca, a.peso_ct,
+        a.id, a.qtd, a.created_at, a.foto_balanca, a.peso_ct,
         ta.descricao  AS tipo_nome,
         i.nome        AS insumo_nome,
         i.categoria_id,
@@ -142,7 +142,7 @@ export async function GET(
   // 5. Apontamentos PCP
   const aptsPcp = await sql`
     SELECT
-      a.id, a.quantidade AS qtd, a.created_at, a.foto_balanca, a.peso_ct,
+      a.id, a.qtd, a.created_at, a.foto_balanca, a.peso_ct,
       ta.descricao  AS tipo_nome,
       i.nome        AS insumo_nome,
       i.categoria_id,
@@ -179,7 +179,7 @@ export async function GET(
   // 6. Transferências (deposito_id = destino; origem não é armazenada)
   const transferencias = await sql`
     SELECT
-      t.id, t.deposito_id, t.observacao AS obs, t.created_at,
+      t.id, t.deposito_id, t.obs, t.created_at,
       dep.nome      AS destino_nome,
       up.name       AS criado_por_nome,
       up.avatar_url AS criado_por_foto

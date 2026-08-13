@@ -26,7 +26,7 @@ const usuariosAtivos = new Set<string>();
 
 const sqlMock = vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
   const query = strings.join("?");
-  if (query.includes("FROM alissonerp.configuracoes_unificado")) {
+  if (query.includes("FROM alissonerp.configuracoes_sistema")) {
     // values[0] é o array de chaves (ANY(${chaves})) — duas chaves relevantes
     // nestes testes: aprovadores_frete_avulso (cliente) e
     // aprovadores_frete_avulso_loja (loja, auto-aprovação permitida desde 31/07).

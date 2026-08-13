@@ -675,15 +675,11 @@ export async function PATCH(
     }
 
     // ── Controla estoque (alissonerp.estoque_comercial_config) ────────────────
-    // UPSERT (nao so UPDATE): produto recem-criado (ex. pedra solta) nao tem linha
-    // nessa tabela ainda — um UPDATE sozinho nao afeta nenhuma linha e o toggle
-    // "parece" funcionar na tela mas nao salva nada (achado 11/08, SKU 1845/1868+).
     if (body.controla_estoque !== undefined) {
       await sql`
-        INSERT INTO alissonerp.estoque_comercial_config (produto_id, controla_estoque, ativo)
-        VALUES (${produtoId}, ${body.controla_estoque}, true)
-        ON CONFLICT (produto_id) DO UPDATE SET
-          controla_estoque = EXCLUDED.controla_estoque, updated_at = NOW()
+        UPDATE alissonerp.estoque_comercial_config
+        SET controla_estoque = ${body.controla_estoque}, updated_at = NOW()
+        WHERE produto_id = ${produtoId}
       `;
     }
 

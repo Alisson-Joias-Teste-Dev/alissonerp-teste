@@ -2,7 +2,7 @@
  * REGRA DE NEGÓCIO: tipos da camada central de autoridade de aprovações.
  * O QUÊ: contrato compartilhado entre catálogo, autoridade e (nas próximas fases) os endpoints.
  * POR QUÊ: hoje "quem aprova o quê" está espalhado em 3 fontes que não conversam
- *   (configuracoes_unificado, roles.ts, tarefas_regras_aprovacao) — ver
+ *   (configuracoes_sistema, roles.ts, tarefas_regras_aprovacao) — ver
  *   docs/regras-negocio/aprovacoes-refatoracao/02-mapa-esbarros.md.
  * POLÍTICA (decisão do Jonathan, 11/07 — 03b-config-first-estrito.md): config-first ESTRITA.
  *   Só o(s) aprovador(es) configurado(s) decide(m) — nem admin, nem cargo, nem dono. Sem
@@ -40,7 +40,7 @@ export type EventoAprovacao =
 export interface RegraAutoridade {
   evento: EventoAprovacao;
   rotulo: string;
-  /** Chaves em alissonerp.configuracoes_unificado, em ordem de precedência. Vazio SÓ na exceção (conferencia_consultora). */
+  /** Chaves em alissonerp.configuracoes_sistema, em ordem de precedência. Vazio SÓ na exceção (conferencia_consultora). */
   configKeys: string[];
   /** true = o valor da configKey é lista de UUIDs separada por vírgula. Agora o padrão: todos true (1 ou vários aprovadores por fluxo). */
   configMulti?: boolean;

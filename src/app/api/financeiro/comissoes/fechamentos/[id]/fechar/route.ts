@@ -22,7 +22,7 @@ import { logAudit } from "@/lib/audit";
 // jun/2026 antes de ser pego manualmente.
 const PALAVRAS_SUSPEITAS = ["vale-troca", "vale troca", "permuta", "descontad"];
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
 
 export async function POST(
   req: NextRequest,

@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN vale_por_venda vpv ON vpv.venda_id = v.id
     WHERE v.data_venda >= ${inicio}::date
       AND v.data_venda <= ${fim}::date
-      AND v.status NOT IN ('rascunho', 'cancelado')
+      AND v.situacao NOT IN ('rascunho', 'cancelado')
   `;
 
   // Ranking por vendedora — total_meta = total_venda - vale usado
@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
       ON  v.vendedor_id = vend.id_vendedor
       AND v.data_venda >= ${inicio}::date
       AND v.data_venda <= ${fim}::date
-      AND v.status NOT IN ('rascunho', 'cancelado')
+      AND v.situacao NOT IN ('rascunho', 'cancelado')
     LEFT JOIN vale_por_venda vpv ON vpv.venda_id = v.id
     LEFT JOIN alissonerp.metas_vendedoras m
       ON  m.vendedor_id = vend.id_vendedor

@@ -63,11 +63,11 @@ export async function buscarEntregasValidasParaPagar(
   entregaIds: number[],
 ): Promise<EntregaParaPagar[]> {
   const rows: Record<string, unknown>[] = await tx`
-    SELECT ev.id, ev.frete_motoboy, ev.codigo_entrega, ev.status
+    SELECT ev.id, ev.frete_motoboy, ev.codigo_entrega, ev.situacao
     FROM alissonerp.entregas_venda ev
     WHERE ev.id = ANY(${entregaIds})
       AND ev.motoboy_id = ${motoboyId}::uuid
-      AND ev.status = 'confirmada'
+      AND ev.situacao = 'confirmada'
       AND NOT EXISTS (
         SELECT 1 FROM alissonerp.pagamentos_motoboy_itens pmi
         WHERE pmi.entrega_id = ev.id
@@ -125,7 +125,7 @@ export async function criarPagamentoMotoboyTx(
   const codigosStr = entregas.map((e) => e.codigo_entrega).join(", ");
   await tx`
     INSERT INTO alissonerp.contas_pagar
-      (descricao, valor, data_vencimento, status, categoria, observacao, created_by)
+      (descricao, valor, data_vencimento, situacao, categoria, obs, created_by)
     VALUES
       (
         ${`Pagamento ${motoboyNome} — ${entregas.length} entregas`},

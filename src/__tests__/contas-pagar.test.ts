@@ -104,8 +104,7 @@ describe("GET /api/financeiro/contas-pagar", () => {
   it.each([
     ["admin"],
     ["desenvolvedor"],
-    ["administrativo"],
-    ["financeiro"],
+    ["gerente_fabrica"],
     ["gerente_loja"],
     ["diretor"], // via isFullAccess
   ])("aceita role autorizada: %s", async (role) => {
@@ -182,7 +181,7 @@ describe("GET /api/financeiro/contas-pagar", () => {
     // ao tag-template — verifica que existe e contém 'pendente'
     const fragmentCall = sqlMock.mock.calls.find((call) => {
       const t = joinSqlText(call);
-      return t.includes("AND cp.status");
+      return t.includes("AND cp.situacao");
     });
     expect(fragmentCall).toBeDefined();
     const fragFlat = fragmentCall!.flat(Infinity);
@@ -199,7 +198,7 @@ describe("GET /api/financeiro/contas-pagar", () => {
 
     const fragmentCall = sqlMock.mock.calls.find((call) => {
       const t = joinSqlText(call);
-      return t.includes("AND cp.status");
+      return t.includes("AND cp.situacao");
     });
     expect(fragmentCall).toBeDefined();
     const fragFlat = fragmentCall!.flat(Infinity);
@@ -216,7 +215,7 @@ describe("GET /api/financeiro/contas-pagar", () => {
 
     const fragmentCall = sqlMock.mock.calls.find((call) => {
       const t = joinSqlText(call);
-      return t.includes("AND cp.status");
+      return t.includes("AND cp.situacao");
     });
     expect(fragmentCall).toBeUndefined();
   });
@@ -283,8 +282,7 @@ describe("POST /api/financeiro/contas-pagar", () => {
   it.each([
     ["admin"],
     ["desenvolvedor"],
-    ["administrativo"],
-    ["financeiro"],
+    ["gerente_fabrica"],
     ["gerente_loja"],
     ["diretor"], // via isFullAccess
   ])("aceita role autorizada: %s", async (role) => {

@@ -47,9 +47,9 @@ export async function POST(req: NextRequest) {
                      WHERE p.venda_id = v.id AND p.status = 'confirmado'), 0) AS valor_pago
     FROM alissonerp.contas_receber cr
     JOIN alissonerp.vendas_erp v ON v.id = cr.venda_erp_id
-    WHERE cr.categoria = 'venda' AND cr.status = 'pendente'
+    WHERE cr.categoria = 'venda' AND cr.situacao = 'pendente'
       AND cr.data_vencimento < CURRENT_DATE
-      AND v.status = 'aprovado'
+      AND v.situacao = 'aprovado'
       AND EXISTS (SELECT 1 FROM alissonerp.pagamentos_venda p
                   WHERE p.venda_id = v.id AND p.forma = 'A Receber' AND p.credi_tipo = 'sinal')
   `;
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
           const vale = await gerarValeCredito(s.cliente_id, valorPago, s.created_by, s.venda_id, tx);
           valeNumero = vale.numero;
         }
-        await tx`UPDATE alissonerp.contas_receber SET status='cancelado', updated_at=NOW() WHERE id=${s.cr_id}`;
+        await tx`UPDATE alissonerp.contas_receber SET situacao='cancelado', updated_at=NOW() WHERE id=${s.cr_id}`;
         await tx`
           INSERT INTO alissonerp.comunicacoes_crediario (conta_receber_id, tipo, mensagem, usuario_id)
           VALUES (${s.cr_id}, 'observacao',

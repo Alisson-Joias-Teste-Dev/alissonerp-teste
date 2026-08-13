@@ -4,9 +4,6 @@ import sql from "@/lib/db";
 import { recalcularTotaisPCP } from "@/lib/recalcular-totais-pcp";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getParametroNumber, PARAM } from "@/lib/parametros";
-// REGRA DE NEGOCIO: saldo de estoque centralizado em src/lib/estoque-saldo.ts
-// (pente-fino 10/08/2026, etapa 2) — nao reimplementar SUM(saldo) aqui.
-import { buscarSaldoEstoque } from "@/lib/estoque-saldo";
 import { logAudit } from "@/lib/audit";
 import { zodError } from "@/lib/schemas/common";
 import { saldoGramasParaCt } from "@/lib/pedra-unidade-estoque";
@@ -179,7 +176,11 @@ export async function POST(req: NextRequest) {
    * rota com erro de SQL.
    */
   if ((tipo_apontamento_id === 1 || tipo_apontamento_id === 2 || tipo_apontamento_id === 3 || tipo_apontamento_id === 8) && insumo_id) {
-    const saldoAtual = await buscarSaldoEstoque(sql, almoxarifadoId, insumo_id);
+    const saldo = await sql`
+      SELECT COALESCE(SUM(saldo), 0) AS saldo FROM alissonerp.vw_saldo_estoque
+      WHERE deposito_id = ${almoxarifadoId} AND insumo_id = ${insumo_id}
+    `;
+    const saldoAtual = Number(saldo[0]?.saldo ?? 0);
     const ehPedraCt = tipo_apontamento_id === 3 && peso_ct_final != null;
     // Pedra: saldo vem em grama → converter para ct antes de comparar com o pedido em ct.
     const disponivel = ehPedraCt ? saldoGramasParaCt(saldoAtual) : saldoAtual;
@@ -203,7 +204,7 @@ export async function POST(req: NextRequest) {
 
   const rows = await sql`
     INSERT INTO alissonerp.apontamentos_pcp
-      (tipo_apontamento_id, deposito_id, setor_id, insumo_id, pcp_id, quantidade,
+      (tipo_apontamento_id, deposito_id, setor_id, insumo_id, pcp_id, qtd,
        peso_g_pedra, peso_ct, foto_balanca, created_by)
     VALUES
       (${tipo_apontamento_id}, ${deposito_id}, ${setor_id ?? null}, ${insumo_id ?? null}, ${pcp_id},

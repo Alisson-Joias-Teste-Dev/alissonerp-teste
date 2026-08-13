@@ -6,7 +6,7 @@ import { isFullAccess } from "@/lib/roles";
 import { LIMITS, checkStringLength, payloadTooLargeResponse } from "@/lib/payload-limits";
 import { zodError, IdSchema, MoneySchema, DateSchema } from "@/lib/schemas/common";
 
-const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "administrativo", "financeiro", "gerente_loja"];
+const ROLES_FINANCEIRO = ["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"];
 
 const ContasPagarSchema = z.object({
   descricao: z.string().min(1, "descricao obrigatoria").max(LIMITS.TITULO_MAX),
@@ -34,13 +34,11 @@ export async function GET(req: NextRequest) {
 
   const contas = await sql`
     SELECT cp.*,
-      cp.status AS situacao,
-      cp.observacao AS obs,
       c.nome AS fornecedor_nome_ref
     FROM alissonerp.contas_pagar cp
     LEFT JOIN public.contatos c ON c.id_contato = cp.fornecedor_id
     WHERE 1=1
-      ${situacao ? sql`AND cp.status = ${situacao}` : sql``}
+      ${situacao ? sql`AND cp.situacao = ${situacao}` : sql``}
     ORDER BY cp.data_vencimento ASC NULLS LAST, cp.created_at DESC
     LIMIT 200
   `;
@@ -87,7 +85,7 @@ export async function POST(req: NextRequest) {
 
   const [conta] = await sql`
     INSERT INTO alissonerp.contas_pagar
-      (descricao, fornecedor_id, fornecedor_nome, valor, data_vencimento, categoria, observacao, compra_id, created_by)
+      (descricao, fornecedor_id, fornecedor_nome, valor, data_vencimento, categoria, obs, compra_id, created_by)
     VALUES (
       ${body.descricao.trim()}, ${body.fornecedor_id ?? null}, ${fornecedor_nome},
       ${body.valor}, ${body.data_vencimento ?? null}, ${body.categoria ?? null},

@@ -38,7 +38,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const [inventario] = await sql`
     SELECT
       i.id, i.local_estoque_id, le.nome AS local_nome,
-      i.status, i.observacao AS obs, i.categoria, i.data_abertura, i.data_conclusao,
+      i.status, i.obs, i.categoria, i.data_abertura, i.data_conclusao,
       i.motivo_cancelamento,
       uc.email AS criado_por_email,
       uf.email AS concluido_por_email,

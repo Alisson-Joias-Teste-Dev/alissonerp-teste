@@ -56,7 +56,7 @@ export async function POST(
   // Validar venda em rascunho
   const descontoThreshold = await getDescontoThreshold(vendaId);
   const [venda] = await sql`
-    SELECT v.id, v.status AS situacao, v.bloqueado,
+    SELECT v.id, v.situacao, v.bloqueado,
            v.aprovacao_credito_tarefa_id,
            v.aprovacao_desconto_tarefa_id,
            v.aprovacao_cartao_desconto_tarefa_id,
@@ -208,10 +208,6 @@ export async function POST(
     // REGRA DE NEGÓCIO (Fase 5, 15/07): limite do cartão vem de
     // configuracoes_sistema.limite_desconto_cartao_pct (fallback 20% no código
     // se a chave ainda não existir) — antes era o literal 20 hardcoded aqui.
-    // MERGE-NOTA: src/lib/aprovacao-regras.ts (fora do meu escopo de arquivos)
-    // ainda lê de alissonerp.configuracoes_sistema, não da tabela unificada
-    // configuracoes_unificado — mesmo problema achado em src/lib/pagamento-motoboy.ts.
-    // Sinalizado no relatório final; não corrigido aqui por estar fora da lista de arquivos.
     const limiteCartao = await buscarLimiteDescontoCartao();
 
     // BLINDAGEM: gate de cartão só se a venda tem pagamento em Cartão de Crédito

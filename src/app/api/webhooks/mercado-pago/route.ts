@@ -44,7 +44,7 @@ const WEBHOOK_NOME = "mercado-pago-payment";
 
 // User ID sistema — usado em created_by quando a transição vem de automação.
 // Cadeia (sem fallback admin aleatório, que corrompia audit trail):
-//  1. configuracoes_unificado.mp_system_user_id (preferido — admin dedicado pra automação)
+//  1. configuracoes_sistema.mp_system_user_id (preferido — admin dedicado pra automação)
 //  2. created_by da venda (autor original; é honesto: foi quem criou que iniciou o fluxo)
 //  3. null + log ERROR se nem isso existir → venda NÃO é concluída automaticamente
 //
@@ -53,7 +53,7 @@ const WEBHOOK_NOME = "mercado-pago-payment";
 // conclui manualmente quando configurar mp_system_user_id.
 async function getSystemUserId(vendaId: number): Promise<string | null> {
   const [row] = await sql`
-    SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'mp_system_user_id'
+    SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'mp_system_user_id'
   `;
   if (row?.valor) {
     let v: string;
@@ -65,7 +65,7 @@ async function getSystemUserId(vendaId: number): Promise<string | null> {
   const [venda] = await sql`SELECT created_by FROM alissonerp.vendas_erp WHERE id = ${vendaId}`;
   if (venda?.created_by) return String(venda.created_by);
 
-  console.error(`[webhook-mp] getSystemUserId venda=${vendaId} retornou NULL — sem mp_system_user_id em configuracoes_unificado e sem created_by na venda. Pagamento sera confirmado MAS venda NAO sera concluida automaticamente. Configure mp_system_user_id ou conclua manualmente.`);
+  console.error(`[webhook-mp] getSystemUserId venda=${vendaId} retornou NULL — sem mp_system_user_id em configuracoes_sistema e sem created_by na venda. Pagamento sera confirmado MAS venda NAO sera concluida automaticamente. Configure mp_system_user_id ou conclua manualmente.`);
   return null;
 }
 
@@ -590,7 +590,7 @@ export async function POST(req: NextRequest) {
     if (!result.quitada) {
       try {
         const [vendaCredito] = await sql`
-          SELECT aprovacao_credito_tipo, status AS situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}
+          SELECT aprovacao_credito_tipo, situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId}
         `;
         if (vendaCredito?.aprovacao_credito_tipo && vendaCredito.situacao === "rascunho") {
           // Verificar se todos os pagamentos não-A Receber estão confirmados

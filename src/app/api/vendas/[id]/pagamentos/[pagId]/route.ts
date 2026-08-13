@@ -43,7 +43,7 @@ export async function PATCH(
   if (isNaN(vendaId) || isNaN(pId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [pag] = await sql`
-    SELECT p.id, p.status, v.bloqueado, v.status AS venda_situacao
+    SELECT p.id, p.status, v.bloqueado, v.situacao AS venda_situacao
     FROM alissonerp.pagamentos_venda p
     JOIN alissonerp.vendas_erp v ON v.id = p.venda_id
     WHERE p.id = ${pId} AND p.venda_id = ${vendaId}
@@ -96,7 +96,7 @@ export async function PATCH(
     // pagamento quitado NÃO conclui mais a venda (status só muda na entrega).
     try {
       const [pvenda] = await sql`
-        SELECT v.status AS situacao, v.aprovacao_credito_tipo
+        SELECT v.situacao, v.aprovacao_credito_tipo
         FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
       `;
 
@@ -152,7 +152,7 @@ export async function DELETE(
   if (isNaN(vendaId) || isNaN(pId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [pag] = await sql`
-    SELECT p.id, p.status, p.forma, v.bloqueado, v.status AS venda_situacao,
+    SELECT p.id, p.status, p.forma, v.bloqueado, v.situacao AS venda_situacao,
            v.aprovacao_credito_tipo,
            (SELECT t.status FROM alissonerp.tarefas t WHERE t.id = v.aprovacao_credito_tarefa_id) AS credito_tarefa_status
     FROM alissonerp.pagamentos_venda p

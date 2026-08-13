@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
 
   const [row] = await sql`
     INSERT INTO alissonerp.lancamentos_avulso
-      (tipo_lancamento, insumo_id, deposito_id, deposito_destino_id, peso, observacao, created_by, local_estoque_id)
+      (tipo_lancamento, insumo_id, deposito_id, deposito_destino_id, peso, obs, created_by, local_estoque_id)
     VALUES (
       ${tipo_lancamento}::alissonerp.enum_tipo_lancamento,
       ${insumo_id},

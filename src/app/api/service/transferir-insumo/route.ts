@@ -5,9 +5,6 @@ import { uploadFile } from "@/lib/storage";
 import { validarPesoBalanca } from "@/lib/ia-validar-peso";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
-// REGRA DE NEGOCIO: saldo de estoque centralizado em src/lib/estoque-saldo.ts
-// (pente-fino 10/08/2026, etapa 2) — nao reimplementar SUM(saldo) aqui.
-import { buscarSaldoEstoque } from "@/lib/estoque-saldo";
 import { internalError } from "@/lib/api-error";
 import { zodError } from "@/lib/schemas/common";
 
@@ -92,7 +89,12 @@ export async function POST(req: NextRequest) {
     const unidade = isPedra ? "ct" : "g";
 
     // ── 3. Verificar saldo da origem ──────────────────────────────────────────
-    const saldoAtual = await buscarSaldoEstoque(sql, origemId, insumoId);
+    const saldoRows = await sql`
+      SELECT COALESCE(SUM(saldo), 0) AS saldo
+      FROM alissonerp.vw_saldo_estoque
+      WHERE deposito_id = ${origemId} AND insumo_id = ${insumoId}
+    `;
+    const saldoAtual = parseFloat(String(saldoRows[0]?.saldo ?? 0));
     if (saldoAtual < quantidadeEstoque) {
       return NextResponse.json(
         { error: `Saldo insuficiente. Disponível: ${saldoAtual.toFixed(4)}${unidade}, solicitado: ${quantidadeEstoque.toFixed(4)}${unidade}` },
@@ -138,12 +140,12 @@ export async function POST(req: NextRequest) {
       // nunca a quantidade digitada crua, senão a unidade do razão fica mista.
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, observacao, data_hora)
+          (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, obs, data_hora)
         VALUES (${insumoId}, ${origemId}, ${localOrigem}, 0, ${quantidadeEstoque}, 'SA', ${obs}, NOW())
       `;
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, observacao, data_hora)
+          (insumo_id, deposito_id, local_estoque_id, entrada, saida, marcador, obs, data_hora)
         VALUES (${insumoId}, ${destId}, ${localDest}, ${quantidadeEstoque}, 0, 'EA', ${obs}, NOW())
       `;
     });

@@ -469,9 +469,12 @@ const COLA: ColaItem[] = [
   { chip: <StatusChip s="cancelada" />, txt: "Recusado com motivo. Some da fila do aprovador, mas continua visível em \"Minhas solicitações\" — dá pra solicitar de novo." },
 ];
 
-export default function FreteAvulsoTreino() {
+interface TreinoProps { videoUrl: string | null; isDev: boolean; treinamentoKey: string }
+
+export default function FreteAvulsoTreino(props: TreinoProps) {
   return (
     <TreinamentoLayout
+      {...props}
       titulo="Frete Avulso (solicitação)"
       subtitulo="Quem solicita (qualquer papel que acessa Tarefas) informa quem paga o frete e o endereço; a corrida cai no pool de aprovadores certo (qualquer um decide) e, depois de liberada, num pool de motoboys (o primeiro que aceitar leva a corrida)."
       regraDeOuro={<>quem solicita {nb("nunca escolhe motoboy nem responsável")} — a solicitação sempre cai no pool certo, definido por {nb("quem paga")} (Loja ou Cliente). Sem ninguém configurado nas DUAS listas de Aprovadores, ela nem consegue enviar.</>}

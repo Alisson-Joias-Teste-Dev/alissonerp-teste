@@ -3,7 +3,7 @@
  *
  * Decisao de negocio:
  *   - Existe UM unico master admin (o dono). Imutavel via trigger fn_proteger_master_admin
- *     em alissonerp.configuracoes_unificado (chave MASTER_ADMIN_USER_ID).
+ *     em alissonerp.parametros_sistema (chave MASTER_ADMIN_USER_ID).
  *   - Master aprova qualquer coisa (inclusive proprias solicitacoes).
  *   - Outros admins/gerentes seguem regras configuradas em
  *     alissonerp.tarefas_regras_aprovacao — SEM hardcode de limites aqui.
@@ -28,10 +28,10 @@ export async function getMasterAdminId(): Promise<string> {
   if (cached && Date.now() < cached.expiresAt) return cached.masterId;
 
   const [row] = await sql<{ valor: string }[]>`
-    SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'MASTER_ADMIN_USER_ID' LIMIT 1
+    SELECT valor FROM alissonerp.parametros_sistema WHERE chave = 'MASTER_ADMIN_USER_ID' LIMIT 1
   `;
   if (!row?.valor) {
-    throw new Error("MASTER_ADMIN_USER_ID nao configurado em configuracoes_unificado");
+    throw new Error("MASTER_ADMIN_USER_ID nao configurado em parametros_sistema");
   }
   cached = { masterId: row.valor, expiresAt: Date.now() + CACHE_TTL_MS };
   return row.valor;

@@ -558,7 +558,7 @@ export async function approveVenda(
 ): Promise<{ ok: true; ordem_criada?: string; ja_aprovada?: boolean; tiny_erro?: string }> {
   const approveVendaThreshold = await getDescontoThreshold(vendaId);
   const [venda] = await sql`
-    SELECT v.id, v.status AS situacao, v.bloqueado, v.tiny_pedido_id,
+    SELECT v.id, v.situacao, v.bloqueado, v.tiny_pedido_id,
            v.desconto_aprovado_por,
            EXISTS(
              SELECT 1 FROM alissonerp.itens_venda_erp
@@ -663,8 +663,8 @@ export async function approveVenda(
   // 2. Atualiza situação para aprovado
   await sql`
     UPDATE alissonerp.vendas_erp
-    SET status = 'aprovado', updated_at = NOW()
-    WHERE id = ${vendaId} AND status NOT IN ('aprovado', 'concluido', 'confirmado', 'cancelado')
+    SET situacao = 'aprovado', updated_at = NOW()
+    WHERE id = ${vendaId} AND situacao NOT IN ('aprovado', 'concluido', 'confirmado', 'cancelado')
   `;
 
   // 3. Criar ordem (orçamento ou serviço) — best-effort
@@ -802,7 +802,7 @@ export async function estornarVenda(
     // 1. Bloqueia pagamento + venda para evitar race entre dois estornos simultâneos.
     // Captura a situacao para decidir se o estorno pode reverter o status (fluxo novo).
     const [vendaLock] = await tx`
-      SELECT id, status AS situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE
+      SELECT id, situacao FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE
     `;
     const situacaoAtual = vendaLock?.situacao as string | undefined;
     // Entregue/concluido = ponto final (trava de status, migration 297): o estorno
@@ -868,8 +868,8 @@ export async function estornarVenda(
       // pra vendedora recobrar o valor estornado (ou cancelar manualmente)
       await tx`
         UPDATE alissonerp.vendas_erp
-        SET status = 'rascunho', updated_at = NOW()
-        WHERE id = ${vendaId} AND status NOT IN ('cancelado')
+        SET situacao = 'rascunho', updated_at = NOW()
+        WHERE id = ${vendaId} AND situacao NOT IN ('cancelado')
       `;
       acao = "revertida_rascunho";
     } else {
@@ -878,8 +878,8 @@ export async function estornarVenda(
       // estoque comercial automaticamente em BEFORE UPDATE.
       await tx`
         UPDATE alissonerp.vendas_erp
-        SET status = 'cancelado', updated_at = NOW()
-        WHERE id = ${vendaId} AND status NOT IN ('cancelado')
+        SET situacao = 'cancelado', updated_at = NOW()
+        WHERE id = ${vendaId} AND situacao NOT IN ('cancelado')
       `;
       acao = "cancelada";
     }
@@ -890,9 +890,9 @@ export async function estornarVenda(
     // fazemos UPDATE manual abrangendo 'pendente' + 'pago'.
     const crResult = await tx`
       UPDATE alissonerp.contas_receber
-      SET status = 'cancelado', updated_at = NOW()
+      SET situacao = 'cancelado', updated_at = NOW()
       WHERE venda_erp_id = ${vendaId}
-        AND status IN ('pago', 'pendente')
+        AND situacao IN ('pago', 'pendente')
       RETURNING id
     `;
 
@@ -933,7 +933,7 @@ export async function estornarVenda(
 //   3) FALHA ABERTA. Qualquer erro inesperado → devolve ok:true e deixa a venda
 //      aprovar, registrando no log. Uma trava de conferência que derruba o
 //      sistema é pior que a falha que ela previne.
-//   4) CHAVE DE DESLIGAR sem deploy: `configuracoes_unificado.chave =
+//   4) CHAVE DE DESLIGAR sem deploy: `configuracoes_sistema.chave =
 //      'trava_saldo_nao_declarado'` com valor 'false'/'0'/'off' desliga na hora.
 //      Ausente = ligada (é o padrão).
 //
@@ -972,7 +972,7 @@ export async function verificarSaldoDeclarado(vendaId: number): Promise<SaldoDec
           WHERE p.venda_id = v.id AND p.status IN ('confirmado', 'pendente')
         ), 0)::numeric AS total_declarado,
         COALESCE((
-          SELECT cs.valor FROM alissonerp.configuracoes_unificado cs
+          SELECT cs.valor FROM alissonerp.configuracoes_sistema cs
           WHERE cs.chave = 'trava_saldo_nao_declarado'
         ), 'true') AS trava_ligada
       FROM alissonerp.vendas_erp v
@@ -986,7 +986,7 @@ export async function verificarSaldoDeclarado(vendaId: number): Promise<SaldoDec
       String(row.trava_ligada ?? "true").trim().toLowerCase(),
     );
     if (!ligada) {
-      console.error(`[verificarSaldoDeclarado] venda=${id}: trava DESLIGADA por configuracoes_unificado`);
+      console.error(`[verificarSaldoDeclarado] venda=${id}: trava DESLIGADA por configuracoes_sistema`);
       return saldoLiberado(Number(row.total_venda ?? 0), Number(row.total_declarado ?? 0));
     }
 

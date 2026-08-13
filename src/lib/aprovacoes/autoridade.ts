@@ -83,7 +83,7 @@ async function buscarUUIDsDaConfig(regra: RegraAutoridade, ctx?: ContextoAprovac
   if (chaves.length === 0) return [];
 
   const rows = await sql<{ chave: string; valor: string }[]>`
-    SELECT chave, valor FROM alissonerp.configuracoes_unificado WHERE chave = ANY(${chaves})
+    SELECT chave, valor FROM alissonerp.configuracoes_sistema WHERE chave = ANY(${chaves})
   `;
   const porChave = new Map(rows.map((r) => [r.chave, r.valor]));
   const valor = chaves.map((c) => porChave.get(c)).find((v): v is string => !!v);

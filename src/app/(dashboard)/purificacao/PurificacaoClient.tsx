@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Flame,
@@ -10,21 +10,30 @@ import {
   Clock,
   ChevronDown,
   ChevronUp,
+  Camera,
   Loader2,
   AlertTriangle,
   Trash2,
+  X,
   FlaskConical,
   Sparkles,
 } from "lucide-react";
 import LigacaoTab, { type LigaTipo, type Ligacao, type LigacaoStats } from "./LigacaoTab";
 import LimpezaTab from "./LimpezaTab";
 import { normalizeImageUrl } from "@/lib/storage-url";
-import { P, inputStyle, labelStyle, btnPrimary, btnSecondary } from "./_shared/estilos";
-import { formatPeso, formatDate, formatTeor, STATUS_LABEL, STATUS_COLOR, ROLES_CANCELAR } from "./_shared/formatadores";
-import { Section, Row, Overlay, ModalBox } from "./_shared/ui";
-import { useFotoBalancaIA } from "./_shared/useFotoBalancaIA";
-import { FotoBalancaIACampo } from "./_shared/FotoBalancaIACampo";
-import { ResultadoProcessoBox } from "./_shared/ResultadoProcessoBox";
+
+// ─── Paleta ───────────────────────────────────────────────────────────────────
+const P = {
+  bg:       "#f9fafb",
+  card:     "#ffffff",
+  border:   "#e5e7eb",
+  text:     "#111827",
+  muted:    "#6b7280",
+  amber:    "#d97706",
+  verde:    "#16a34a",
+  vermelho: "#dc2626",
+  azul:     "#2563eb",
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Teor {
@@ -88,6 +97,35 @@ interface Props {
     editar_teor_ligacao: boolean;
   };
 }
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatPeso(v: number | null | undefined): string {
+  if (v === null || v === undefined) return "—";
+  return isNaN(v) ? "—" : v.toFixed(2) + "g";
+}
+function formatDate(s: string | null | undefined): string {
+  if (!s) return "—";
+  return new Date(s).toLocaleDateString("pt-BR", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+function formatTeor(t: number): string {
+  return (t * 100).toFixed(2) + "%";
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  em_processo: "Em Processo",
+  concluida:   "Concluída",
+  cancelada:   "Cancelada",
+};
+const STATUS_COLOR: Record<string, string> = {
+  em_processo: "#d97706",
+  concluida:   "#16a34a",
+  cancelada:   "#6b7280",
+};
+
+const ROLES_CANCELAR = ["admin", "desenvolvedor"];
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function PurificacaoClient({ purificacoes: initial, teores, stats, ligacoes, ligaTipos, ligacaoStats, userRole, userId, permissoesPurif }: Props) {
@@ -344,6 +382,20 @@ function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label:
   );
 }
 
+// ─── Section ─────────────────────────────────────────────────────────────────
+function Section({ title, count, color, children }: { title: string; count: number; color: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+        <div style={{ width: 12, height: 12, borderRadius: "50%", background: color }} />
+        <h2 style={{ fontSize: 16, fontWeight: 700, color: P.text, margin: 0 }}>{title}</h2>
+        <span style={{ fontSize: 12, background: color + "20", color: color, borderRadius: 10, padding: "2px 8px", fontWeight: 600 }}>{count}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // ─── PurificacaoCard ──────────────────────────────────────────────────────────
 function PurificacaoCard({
   purif,
@@ -458,6 +510,14 @@ function PurificacaoCard({
   );
 }
 
+function Row({ label, value, bold, color }: { label: string; value: string; bold?: boolean; color?: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+      <span style={{ color: P.muted }}>{label}</span>
+      <span style={{ fontWeight: bold ? 700 : 500, color: color ?? P.text }}>{value}</span>
+    </div>
+  );
+}
 
 // ─── Modal Nova Purificação ───────────────────────────────────────────────────
 function ModalNovaPurificacao({
@@ -477,9 +537,13 @@ function ModalNovaPurificacao({
     { insumo_id: teores[0]?.insumo_id ?? 0, peso: "", teor: teores[0] ? String((teores[0].teor * 100).toFixed(2)) : "" },
   ]);
   const [observacao, setObservacao] = useState("");
-  const { fotoBase64, fotoFile, iaResult, iaLoading, handleFoto, chamarIA } = useFotoBalancaIA();
+  const [fotoBase64, setFotoBase64] = useState<string | null>(null);
+  const [fotoFile, setFotoFile] = useState<File | null>(null);
+  const [iaResult, setIaResult] = useState<{ peso_digitado: number; peso_balanca: number | null; confianca: string; match: boolean; mensagem: string } | null>(null);
+  const [iaLoading, setIaLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   function addItem() {
     setItens(prev => [...prev, { insumo_id: teores[0]?.insumo_id ?? 0, peso: "", teor: teores[0] ? String((teores[0].teor * 100).toFixed(2)) : "" }]);
@@ -500,6 +564,37 @@ function ModalNovaPurificacao({
       }
       return next;
     });
+  }
+
+  async function chamarIA(file: File, peso: number) {
+    setIaLoading(true);
+    setIaResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("peso", String(peso));
+      fd.append("tipo", "metal");
+      const res = await fetch("/api/pcp/validar-peso", { method: "POST", body: fd });
+      const data = await res.json() as { peso_digitado: number; peso_balanca: number | null; confianca: string; match: boolean; mensagem: string };
+      setIaResult(data);
+    } catch {
+      setIaResult({ peso_digitado: peso, peso_balanca: null, confianca: "nenhuma", match: false, mensagem: "Erro ao contatar IA" });
+    } finally {
+      setIaLoading(false);
+    }
+  }
+
+  function onFoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFotoFile(file);
+    setIaResult(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setFotoBase64(reader.result as string);
+      if (pesoTotal > 0) void chamarIA(file, pesoTotal);
+    };
+    reader.readAsDataURL(file);
   }
 
   // Calcular resumo em tempo real
@@ -642,17 +737,55 @@ function ModalNovaPurificacao({
           )}
 
           {/* Foto da balança (OBRIGATÓRIA) */}
-          <FotoBalancaIACampo
-            label="Foto da balança *"
-            textoSelecionada="Foto da balança selecionada ✓"
-            fotoBase64={fotoBase64}
-            fotoFile={fotoFile}
-            iaResult={iaResult}
-            iaLoading={iaLoading}
-            peso={pesoTotal}
-            onFoto={file => handleFoto(file, pesoTotal)}
-            onRevalidar={(file, peso) => void chamarIA(file, peso)}
-          />
+          <div>
+            <label style={labelStyle}>Foto da balança *</label>
+            <input type="file" accept="image/*" capture="environment" ref={fileRef} onChange={onFoto} style={{ display: "none" }} />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                background: P.bg,
+                border: `1px dashed ${fotoBase64 ? P.verde : P.vermelho}`,
+                borderRadius: 8, padding: "10px 16px", cursor: "pointer",
+                color: fotoBase64 ? P.verde : P.muted, fontSize: 13, width: "100%",
+              }}
+            >
+              <Camera size={16} />
+              {fotoBase64 ? "Foto da balança selecionada ✓" : "Selecionar foto da balança (obrigatório)"}
+            </button>
+            {fotoBase64 && (
+              <img src={fotoBase64} alt="preview" style={{ marginTop: 8, maxHeight: 120, borderRadius: 8, objectFit: "cover" }} />
+            )}
+            {/* Resultado da IA */}
+            {iaLoading && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 13, color: P.muted }}>
+                <Loader2 size={14} className="animate-spin" /> Validando peso com IA...
+              </div>
+            )}
+            {!iaLoading && iaResult && (
+              <div style={{
+                marginTop: 8, padding: "8px 12px", borderRadius: 8, fontSize: 13,
+                background: iaResult.match ? "#dcfce7" : "#fef9c3",
+                border: `1px solid ${iaResult.match ? P.verde : "#ca8a04"}`,
+                color: iaResult.match ? P.verde : "#854d0e",
+              }}>
+                {iaResult.peso_balanca !== null
+                  ? `IA leu: ${iaResult.peso_balanca.toFixed(2)}g · Informado: ${iaResult.peso_digitado.toFixed(2)}g · ${iaResult.match ? "✅ OK" : "⚠️ Divergência"}`
+                  : `⚠️ IA não conseguiu ler o peso — ${iaResult.mensagem}`
+                }
+              </div>
+            )}
+            {!iaLoading && fotoFile && pesoTotal > 0 && !iaResult && (
+              <button
+                type="button"
+                onClick={() => void chamarIA(fotoFile, pesoTotal)}
+                style={{ marginTop: 8, fontSize: 12, color: P.azul, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+              >
+                Revalidar com IA
+              </button>
+            )}
+          </div>
 
           {/* Observação */}
           <div>
@@ -704,12 +837,57 @@ function ModalConcluir({
 }) {
   const [pesoRetornado, setPesoRetornado] = useState("");
   const [observacao, setObservacao] = useState("");
-  const { fotoBase64, fotoFile, iaResult, iaLoading, handleFoto, chamarIA } = useFotoBalancaIA();
+  const [fotoBase64, setFotoBase64] = useState<string | null>(null);
+  const [fotoFile, setFotoFile] = useState<File | null>(null);
+  const [iaResult, setIaResult] = useState<{ peso_digitado: number; peso_balanca: number | null; confianca: string; match: boolean; mensagem: string } | null>(null);
+  const [iaLoading, setIaLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const pesoEsperado = Number(purif.peso_esperado_24k);
   const retornadoNum = parseFloat(pesoRetornado) || 0;
+  const perda = pesoEsperado > 0 ? pesoEsperado - retornadoNum : 0;
+  const perdaPct = pesoEsperado > 0 ? (perda / pesoEsperado) * 100 : 0;
+  // ehGanho: retornou MAIS que o esperado (perda negativa) = ganho de teor, bom resultado.
+  // Mostrado como "Ganho +Xg", nunca como "Perda -Xg". A API libera ganho sem travar (regra 15/06).
+  const ehGanho = retornadoNum > 0 && perda < 0;
+  const ganho = -perda;        // peso ganho (positivo) quando ehGanho
+  const ganhoPct = -perdaPct;  // % de ganho (positivo) quando ehGanho
+  const perdaAlta = perdaPct > 2;
+  // perdaBaixa: rendimento ótimo (perda pequena, sem ser ganho) — ganho tem seu próprio destaque.
+  const perdaBaixa = retornadoNum > 0 && perdaPct >= 0 && perdaPct < 1;
+
+  async function chamarIA(file: File, peso: number) {
+    setIaLoading(true);
+    setIaResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("peso", String(peso));
+      fd.append("tipo", "metal");
+      const res = await fetch("/api/pcp/validar-peso", { method: "POST", body: fd });
+      const data = await res.json() as { peso_digitado: number; peso_balanca: number | null; confianca: string; match: boolean; mensagem: string };
+      setIaResult(data);
+    } catch {
+      setIaResult({ peso_digitado: peso, peso_balanca: null, confianca: "nenhuma", match: false, mensagem: "Erro ao contatar IA" });
+    } finally {
+      setIaLoading(false);
+    }
+  }
+
+  function onFoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFotoFile(file);
+    setIaResult(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setFotoBase64(reader.result as string);
+      if (retornadoNum > 0) void chamarIA(file, retornadoNum);
+    };
+    reader.readAsDataURL(file);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -779,26 +957,95 @@ function ModalConcluir({
 
           {/* Resultado em tempo real */}
           {retornadoNum > 0 && (
-            <ResultadoProcessoBox
-              pesoEsperado={pesoEsperado}
-              pesoRealNum={retornadoNum}
-              labelRetorno="Retornado"
-              labelPerda="Perda processo"
-            />
+            <div style={{
+              background: perdaAlta ? "#fee2e2" : (perdaBaixa || ehGanho) ? "#dcfce7" : P.bg,
+              border: `1px solid ${perdaAlta ? P.vermelho : (perdaBaixa || ehGanho) ? P.verde : P.border}`,
+              borderRadius: 8,
+              padding: "10px 14px",
+              fontSize: 13,
+            }}>
+              <Row label="Esperado" value={formatPeso(pesoEsperado)} />
+              <Row label="Retornado" value={formatPeso(retornadoNum)} bold />
+              {/* Ganho de teor: retornou mais que o esperado → mostra "Ganho +Xg" em verde, nunca "Perda -Xg". */}
+              {ehGanho ? (
+                <Row
+                  label="Ganho de teor"
+                  value={`+${formatPeso(ganho)} (+${ganhoPct.toFixed(2)}%)`}
+                  color={P.verde}
+                  bold
+                />
+              ) : (
+                <Row
+                  label="Perda processo"
+                  value={`${formatPeso(perda)} (${perdaPct.toFixed(2)}%)`}
+                  color={perdaAlta ? P.vermelho : perdaBaixa ? P.verde : P.text}
+                  bold
+                />
+              )}
+              {ehGanho && (
+                <div style={{ color: P.verde, marginTop: 6, fontWeight: 600 }}>Ganho de teor — rendimento acima do esperado</div>
+              )}
+              {!ehGanho && perdaAlta && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, color: P.vermelho, marginTop: 6, fontWeight: 600 }}>
+                  <AlertTriangle size={14} /> Perda acima de 2% — verificar processo
+                </div>
+              )}
+              {!ehGanho && perdaBaixa && (
+                <div style={{ color: P.verde, marginTop: 6, fontWeight: 600 }}>Excelente rendimento (abaixo de 1%)</div>
+              )}
+            </div>
           )}
 
           {/* Foto da balança (OBRIGATÓRIA) */}
-          <FotoBalancaIACampo
-            label="Foto da balança *"
-            textoSelecionada="Foto da balança selecionada ✓"
-            fotoBase64={fotoBase64}
-            fotoFile={fotoFile}
-            iaResult={iaResult}
-            iaLoading={iaLoading}
-            peso={retornadoNum}
-            onFoto={file => handleFoto(file, retornadoNum)}
-            onRevalidar={(file, peso) => void chamarIA(file, peso)}
-          />
+          <div>
+            <label style={labelStyle}>Foto da balança *</label>
+            <input type="file" accept="image/*" capture="environment" ref={fileRef} onChange={onFoto} style={{ display: "none" }} />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                background: P.bg,
+                border: `1px dashed ${fotoBase64 ? P.verde : P.vermelho}`,
+                borderRadius: 8, padding: "10px 16px", cursor: "pointer",
+                color: fotoBase64 ? P.verde : P.muted, fontSize: 13, width: "100%",
+              }}
+            >
+              <Camera size={16} />
+              {fotoBase64 ? "Foto da balança selecionada ✓" : "Selecionar foto da balança (obrigatório)"}
+            </button>
+            {fotoBase64 && (
+              <img src={fotoBase64} alt="preview" style={{ marginTop: 8, maxHeight: 120, borderRadius: 8, objectFit: "cover" }} />
+            )}
+            {/* Resultado da IA */}
+            {iaLoading && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 13, color: P.muted }}>
+                <Loader2 size={14} className="animate-spin" /> Validando peso com IA...
+              </div>
+            )}
+            {!iaLoading && iaResult && (
+              <div style={{
+                marginTop: 8, padding: "8px 12px", borderRadius: 8, fontSize: 13,
+                background: iaResult.match ? "#dcfce7" : "#fef9c3",
+                border: `1px solid ${iaResult.match ? P.verde : "#ca8a04"}`,
+                color: iaResult.match ? P.verde : "#854d0e",
+              }}>
+                {iaResult.peso_balanca !== null
+                  ? `IA leu: ${iaResult.peso_balanca.toFixed(2)}g · Informado: ${iaResult.peso_digitado.toFixed(2)}g · ${iaResult.match ? "✅ OK" : "⚠️ Divergência"}`
+                  : `⚠️ IA não conseguiu ler o peso — ${iaResult.mensagem}`
+                }
+              </div>
+            )}
+            {!iaLoading && fotoFile && retornadoNum > 0 && !iaResult && (
+              <button
+                type="button"
+                onClick={() => void chamarIA(fotoFile, retornadoNum)}
+                style={{ marginTop: 8, fontSize: 12, color: P.azul, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+              >
+                Revalidar com IA
+              </button>
+            )}
+          </div>
 
           {/* Observação */}
           <div>
@@ -908,3 +1155,86 @@ function ModalConfirmCancel({
   );
 }
 
+// ─── Shared UI ────────────────────────────────────────────────────────────────
+function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 1000, padding: 16,
+      }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ModalBox({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div style={{
+      background: P.card, borderRadius: 16, padding: 24,
+      width: "100%", maxWidth: 520, maxHeight: "90vh",
+      overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: P.text }}>{title}</h2>
+        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: P.muted, padding: 4 }}>
+          <X size={20} />
+        </button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  border: `1px solid ${P.border}`,
+  borderRadius: 8,
+  padding: "8px 12px",
+  fontSize: 14,
+  color: P.text,
+  background: "#fff",
+  boxSizing: "border-box",
+  outline: "none",
+};
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: 12,
+  fontWeight: 600,
+  color: P.muted,
+  marginBottom: 6,
+  textTransform: "uppercase",
+  letterSpacing: "0.05em",
+};
+
+const btnPrimary: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  background: P.amber,
+  color: "#fff",
+  border: "none",
+  borderRadius: 8,
+  padding: "10px 20px",
+  fontWeight: 600,
+  cursor: "pointer",
+  fontSize: 14,
+};
+
+const btnSecondary: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  background: "#fff",
+  color: P.text,
+  border: `1px solid ${P.border}`,
+  borderRadius: 8,
+  padding: "10px 20px",
+  fontWeight: 600,
+  cursor: "pointer",
+  fontSize: 14,
+};

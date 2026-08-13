@@ -3,7 +3,7 @@
  *
  * A rota:
  *   - Exige autenticação (401)
- *   - Exige role financeiro: desenvolvedor, admin, diretor, administrativo, financeiro, gerente_loja
+ *   - Exige role financeiro: desenvolvedor, admin, diretor, gerente_loja, gerente_fabrica
  *     (admin/desenvolvedor/diretor também passam via isFullAccess)
  *   - Valida ID numérico (400)
  *   - Valida body: tipo (pix|boleto|ted) e dados (400)
@@ -181,9 +181,8 @@ describe("POST /api/financeiro/inter/enviar/[id]", () => {
     "desenvolvedor",
     "admin",
     "diretor",
-    "administrativo",
-    "financeiro",
     "gerente_loja",
+    "gerente_fabrica",
   ])("aceita role %s", async (role) => {
     mockHappyPathPrefix({ role });
     sqlMock.mockResolvedValueOnce([]); // UPDATE
@@ -291,10 +290,7 @@ describe("POST /api/financeiro/inter/enviar/[id]", () => {
     );
     expect(res.status).toBe(400);
     const data = await res.json();
-    // zodError devolve mensagem genérica + detalhe em `issues`.
-    expect(data.issues).toEqual(
-      expect.arrayContaining([expect.objectContaining({ path: "tipo" })]),
-    );
+    expect(data.error).toMatch(/tipo/i);
   });
 
   it("retorna 400 quando body sem 'dados' (e tipo válido)", async () => {
@@ -556,8 +552,7 @@ describe("POST /api/financeiro/inter/enviar/[id]", () => {
 
     expect(res.status).toBe(500);
     const data = await res.json();
-    // A resposta usa mensagem genérica (internalError); a real vai pro inter_erro.
-    expect(data.error).toBe("Falha ao enviar para o Inter");
+    expect(data.error).toMatch(/chave inválida/i);
 
     // 3ª chamada do sql é o UPDATE de erro
     const updateCall = sqlMock.mock.calls[2];
@@ -580,7 +575,7 @@ describe("POST /api/financeiro/inter/enviar/[id]", () => {
 
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe("Falha ao enviar para o Inter");
+    expect(data.error).toBe("falha-bruta");
 
     const values = sqlMock.mock.calls[2].slice(1) as unknown[];
     expect(values).toContain("falha-bruta");
@@ -598,7 +593,7 @@ describe("POST /api/financeiro/inter/enviar/[id]", () => {
 
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe("Falha ao enviar para o Inter");
+    expect(data.error).toMatch(/conta inexistente/i);
   });
 
   // ── 15. Sucesso: payload de retorno ────────────────────────────────────────

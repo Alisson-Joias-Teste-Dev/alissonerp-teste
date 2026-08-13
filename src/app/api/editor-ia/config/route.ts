@@ -5,7 +5,7 @@
  *
  * PUT /api/editor-ia/config
  *   Body: { gemini?: string, openai?: string }
- *   Grava as chaves em configuracoes_unificado.
+ *   Grava as chaves em configuracoes_sistema.
  *   Somente roles admin/desenvolvedor.
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -51,8 +51,8 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   const rows = await sql<Array<{ chave: string; valor: string | null; updated_at: string | null }>>`
-    SELECT chave, valor, atualizado_em AS updated_at
-      FROM alissonerp.configuracoes_unificado
+    SELECT chave, valor, updated_at
+      FROM alissonerp.configuracoes_sistema
      WHERE chave IN (${KEYS.gemini}, ${KEYS.openai})
   `;
 
@@ -118,13 +118,13 @@ export async function PUT(req: NextRequest) {
 
   for (const u of updates) {
     await sql`
-      INSERT INTO alissonerp.configuracoes_unificado (chave, valor, descricao, atualizado_por, atualizado_em)
+      INSERT INTO alissonerp.configuracoes_sistema (chave, valor, descricao, updated_by, updated_at)
            VALUES (${u.chave}, ${u.valor}, ${u.descricao}, ${user.id}, now())
       ON CONFLICT (chave) DO UPDATE
          SET valor = EXCLUDED.valor,
              descricao = EXCLUDED.descricao,
-             atualizado_por = EXCLUDED.atualizado_por,
-             atualizado_em = now()
+             updated_by = EXCLUDED.updated_by,
+             updated_at = now()
     `;
   }
 

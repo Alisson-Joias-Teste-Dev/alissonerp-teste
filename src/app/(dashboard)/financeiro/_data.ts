@@ -5,14 +5,14 @@ export async function getFinanceiroData() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const [usuario, pagar, receber, caixaPagamentos, caixaBaixas, comissoes, vendedores] = await Promise.all([
+  const [usuario, pagar, receber, extratos, lancamentos, caixaPagamentos, caixaBaixas, comissoes, vendedores] = await Promise.all([
     user ? sql`SELECT role FROM alissonerp.usuarios WHERE id = ${user.id}::uuid LIMIT 1` : Promise.resolve([]),
     sql`
       SELECT
         id, descricao, valor,
         data_vencimento::text AS data_vencimento,
         data_pagamento::text  AS data_pagamento,
-        status AS situacao, categoria, observacao AS obs,
+        situacao, categoria, obs,
         created_at::text AS created_at
       FROM alissonerp.contas_pagar
       ORDER BY data_vencimento ASC NULLS LAST, id DESC
@@ -23,7 +23,7 @@ export async function getFinanceiroData() {
         cr.id, cr.descricao, cr.valor,
         cr.data_vencimento::text  AS data_vencimento,
         cr.data_recebimento::text AS data_recebimento,
-        cr.status AS situacao, cr.categoria, cr.observacao AS obs,
+        cr.situacao, cr.categoria, cr.obs,
         cr.created_at::text AS created_at,
         cr.venda_erp_id,
         v.created_at::text  AS venda_created_at,
@@ -49,6 +49,29 @@ export async function getFinanceiroData() {
     `,
     sql`
       SELECT
+        id, banco, agencia, conta,
+        data_inicio::text AS data_inicio,
+        data_fim::text    AS data_fim,
+        arquivo_nome, processado, total_lancamentos,
+        created_at::text AS created_at
+      FROM alissonerp.fin_extratos_bancarios
+      ORDER BY id DESC
+      LIMIT 50
+    `,
+    sql`
+      SELECT
+        lb.id, lb.fitid, lb.tipo, lb.valor,
+        lb.data_transacao::text AS data_transacao,
+        lb.descricao, lb.memo, lb.conciliado,
+        lb.extrato_id,
+        e.banco
+      FROM alissonerp.fin_lancamentos_bancarios lb
+      LEFT JOIN alissonerp.fin_extratos_bancarios e ON e.id = lb.extrato_id
+      ORDER BY lb.data_transacao DESC, lb.id DESC
+      LIMIT 300
+    `,
+    sql`
+      SELECT
         p.id,
         p.forma,
         p.valor,
@@ -70,7 +93,7 @@ export async function getFinanceiroData() {
     sql`
       SELECT
         id, total, qtd_pagamentos,
-        realizado_nome, observacao AS obs,
+        realizado_nome, obs,
         created_at::text AS created_at
       FROM alissonerp.fin_caixa_baixas
       ORDER BY id DESC
@@ -101,6 +124,8 @@ export async function getFinanceiroData() {
     userRole: (usuario as any[])[0]?.role ?? null,
     pagar:           pagar as any[],
     receber:         receber as any[],
+    extratos:        extratos as any[],
+    lancamentos:     lancamentos as any[],
     caixaPagamentos: caixaPagamentos as any[],
     caixaBaixas:     caixaBaixas as any[],
     comissoes:       comissoes as any[],

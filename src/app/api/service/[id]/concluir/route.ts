@@ -216,7 +216,7 @@ async function _handler(
     if (usou_solda && consumoSolda > 0) {
       await tx`
         INSERT INTO alissonerp.movimentacoes_estoque
-          (insumo_id, deposito_id, saida, entrada, marcador, observacao, data_hora, valor_total, preco_compra, created_by, ordem_id, local_estoque_id)
+          (insumo_id, deposito_id, saida, entrada, marcador, obs, data_hora, valor_total, preco_compra, created_by, ordem_id, local_estoque_id)
         VALUES
           (1, ${operadorId}, ${consumoSolda}::real, 0,
            'SM'::alissonerp.enum_marcador_estoque,
@@ -230,7 +230,7 @@ async function _handler(
       if (pedra.origem === "estoque" && pedra.qtd > 0 && pedra.insumo_id) {
         await tx`
           INSERT INTO alissonerp.movimentacoes_estoque
-            (insumo_id, deposito_id, saida, entrada, marcador, observacao, data_hora, valor_total, preco_compra, created_by, ordem_id, local_estoque_id)
+            (insumo_id, deposito_id, saida, entrada, marcador, obs, data_hora, valor_total, preco_compra, created_by, ordem_id, local_estoque_id)
           VALUES
             (${pedra.insumo_id}, 1, ${pedra.peso_total ?? 0}::real, 0,
              'SP'::alissonerp.enum_marcador_estoque,
@@ -282,7 +282,7 @@ async function _handler(
     // 5f. INSERT auditoria fábrica — já aprovada para liberar protocolo de volta imediatamente
     await tx`
       INSERT INTO alissonerp.auditorias
-        (ordem_id, tipo_auditoria, status, rota_processo, parecer, created_at)
+        (ordem_id, tipo_auditoria, situacao, rota_processo, parecer, created_at)
       VALUES
         (${ordemId}, 'fabrica', 'aprovado', 'saida_pcp', 'Aprovação automática — módulo Service', NOW())
     `;

@@ -86,11 +86,9 @@ export default async function CrediarioPage() {
             -- SÓ crediário REAL (mesmo filtro whereCrediario do card "Pendente");
             -- sem ele, conta pendente que não é A Receber inflava e dava negativo falso.
             -- GLOBAL (sem whereVendedor). Pode ser NEGATIVO se o A Receber passa do limite.
-            -- configuracoes_sistema + parametros_sistema foram fundidas em
-            -- configuracoes_unificado (migração de schema) — lendo daqui já com o nome novo.
-            (SELECT valor::numeric FROM alissonerp.configuracoes_unificado WHERE chave='saldo_gerente_limite' LIMIT 1)
+            (SELECT valor::numeric FROM alissonerp.configuracoes_sistema WHERE chave='saldo_gerente_limite' LIMIT 1)
               - COALESCE((SELECT SUM(valor) FROM alissonerp.vw_crediario WHERE situacao='pendente' ${whereCrediario}), 0) AS saldo_atual,
-            (SELECT valor::numeric FROM alissonerp.configuracoes_unificado WHERE chave='saldo_gerente_limite' LIMIT 1) AS saldo_limite
+            (SELECT valor::numeric FROM alissonerp.configuracoes_sistema WHERE chave='saldo_gerente_limite' LIMIT 1) AS saldo_limite
         `,
   ]);
 

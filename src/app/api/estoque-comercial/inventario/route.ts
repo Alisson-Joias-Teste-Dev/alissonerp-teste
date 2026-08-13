@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
   const items = await sql`
     SELECT
       i.id, i.local_estoque_id, le.nome AS local_nome,
-      i.status, i.observacao AS obs, i.data_abertura, i.data_conclusao,
+      i.status, i.obs, i.data_abertura, i.data_conclusao,
       i.created_at, i.categoria,
       uc.email AS criado_por_email,
       uf.email AS concluido_por_email,

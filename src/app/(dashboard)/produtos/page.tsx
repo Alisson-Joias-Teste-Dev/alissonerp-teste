@@ -36,7 +36,7 @@ export default async function ProdutosPage() {
   let config: ProdutoVisibilidadeConfig = VISIBILIDADE_DEFAULT;
   try {
     const rows = await sql<{ valor: string }[]>`
-      SELECT valor FROM alissonerp.configuracoes_unificado WHERE chave = 'produto_visibilidade'
+      SELECT valor FROM alissonerp.configuracoes_sistema WHERE chave = 'produto_visibilidade'
     `;
     if (rows.length > 0) {
       config = { ...VISIBILIDADE_DEFAULT, ...JSON.parse(rows[0].valor) };
