@@ -1,9 +1,0 @@
-Tabelas encontradas:
-  public.vendedores
-  public.user_profiles
-  public.contatos
-search_path: "\$user", public, extensions
-public.vendedores count: 38
-vendedores (sem schema) count: 38
-public.contatos count: 2735
-public.user_profiles count: 27

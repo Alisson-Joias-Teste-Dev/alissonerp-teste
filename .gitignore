@@ -98,3 +98,25 @@ Thumbs.db
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# faxina 2026-08 — entulho que não deve voltar ao repositório
+/graphify-out/
+/uploads/
+/models/
+/c
+/_*.txt
+/Catalogo.html
+/painel-gestao-*.html
+/index.html
+/.serve.py
+# leftovers de outras ferramentas de IA
+/.aiox/
+/.antigravity/
+/.codex/
+/.cursor/
+# cadernos de anotação/sessão gerados por IA
+/MEMORY.md
+/CONTEXTO-ATUAL.md
+/ESTRUTURA_ATUAL.md
+/SESSAO_*.md
+/task-*.md
