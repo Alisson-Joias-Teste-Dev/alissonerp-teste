@@ -1849,14 +1849,7 @@ export default function CrediarioClient({ items, contagens, saldo, userRole, ven
     const abrir = (lista: CrediarioItem[]) => {
       const c = lista
         .filter(i => i.venda_id === vid && i.situacao === "pendente")
-        // Mesma razao da ordenacao em pendentesOrdenadas (~linha 1500):
-        // data_vencimento chega como Date no 1o render (SSR, vem do driver do
-        // banco) e como string quando recarregado via API. localeCompare so
-        // existe em string — no SSR quebrava a tela inteira ("localeCompare is
-        // not a function") ao abrir o deep-link. getTime() funciona nos dois.
-        // Se voltar a usar comparacao de texto aqui, o atalho "Receber no
-        // Crediario" quebra de novo logo apos o carregamento da pagina.
-        .sort((a, b) => new Date(a.data_vencimento ?? 0).getTime() - new Date(b.data_vencimento ?? 0).getTime())[0];
+        .sort((a, b) => (a.data_vencimento ?? "9999").localeCompare(b.data_vencimento ?? "9999"))[0];
       if (c) { setSelectedContaId(c.conta_receber_id); return true; }
       return false;
     };
