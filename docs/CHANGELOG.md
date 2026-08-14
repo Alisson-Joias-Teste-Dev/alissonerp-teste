@@ -2,6 +2,24 @@
 
 > 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
 
+## fix(crediário): atalho "Receber no Crediário" não quebra mais a tela (v2.83.8)
+
+O deep-link `/crediario?venda=<id>` (botão "Receber no Crediário" na tela da venda) ordenava as
+parcelas pendentes com `localeCompare`, que só existe em `string`. No primeiro render (SSR) o
+`data_vencimento` chega como `Date` — vem direto do driver do banco, sem `::text` na query de
+`page.tsx` — e só vira string quando a lista é recarregada pela API. Resultado: abrir o atalho logo
+após o carregamento da página derrubava a tela inteira com
+`(e.data_vencimento ?? "9999").localeCompare is not a function` (reportado pelo Ytalo, 14/08/2026).
+
+Fix: `new Date(...).getTime()`, que funciona nos dois formatos — o mesmo padrão já aplicado em
+`pendentesOrdenadas` (`CrediarioClient.tsx` ~linha 1500), onde o bug foi encontrado e corrigido
+antes; esta segunda ocorrência (~linha 1852) ficou de fora daquela correção. O motivo está
+comentado nas duas, pra não voltar.
+
+⚠️ O tipo declarado (`CrediarioItem.data_vencimento: string | null`) não corresponde ao que chega no
+SSR, então o `tsc` não pega esse tipo de erro — qualquer comparação de texto em campo de data desse
+componente precisa da mesma atenção.
+
 ## Pente-fino do front — limpeza de código morto validada em cópia isolada (v2.84.0 a v2.84.6)
 
 Espelho do pente-fino do banco, executado primeiro numa cópia isolada do projeto e só então
