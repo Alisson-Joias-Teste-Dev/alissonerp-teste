@@ -142,7 +142,11 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produtos_geral_preco pp ON pp.id_produto = p.id_produto
-      WHERE p.situacao = 'A'
+      -- 'A' + 'I': peca zerada costuma ser INATIVADA na operacao; sem trazer as
+      -- 'I' o filtro Zerados ficava cego pra elas (pedido do Alisson 19/08).
+      -- 'E' (excluida) segue fora. O filtro padrao da TELA e 'Ativos' — nenhum
+      -- numero muda sem o usuario pedir.
+      WHERE p.situacao IN ('A', 'I')
     `;
 
     // postgres.js devolve NUMERIC como STRING; sem normalizar, a matriz ordenava

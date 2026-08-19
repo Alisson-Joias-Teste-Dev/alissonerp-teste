@@ -140,6 +140,10 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   const [filterScope, setFilterScope] = useState<FilterScope>('positive');
 
+  // Situacao do cadastro: 'ativos' (default — numeros identicos aos de sempre),
+  // 'inativos' (pecas desativadas, ex.: zeradas e tiradas do ar) ou 'todos'.
+  const [situacaoFilter, setSituacaoFilter] = useState<'ativos' | 'inativos' | 'todos'>('ativos');
+
   // Mudou QUALQUER filtro -> volta pra pagina 1. Sem isso, quem estava na
   // Pag 3 e filtrava pra 40 itens via 'Nenhum registro encontrado' (slice
   // alem do fim) com os itens existindo.
@@ -185,7 +189,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     setLocalPage(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterScope, selectedCategories, selectedSuppliers, selectedWeightClasses, purchaseDateRange, hiddenRowIds]);
+  }, [filterScope, situacaoFilter, selectedCategories, selectedSuppliers, selectedWeightClasses, purchaseDateRange, hiddenRowIds]);
 
   // Editing State
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -719,6 +723,11 @@ const Dashboard: React.FC<DashboardProps> = ({
     classificarABC(allItems);
 
     const processedList = allItems.filter(item => {
+       // 0a. Situacao do cadastro (rota traz A+I; default mostra so Ativos)
+       const sitCadastro = String(item.original?.situacao ?? 'A').toUpperCase();
+       if (situacaoFilter === 'ativos' && sitCadastro !== 'A') return false;
+       if (situacaoFilter === 'inativos' && sitCadastro === 'A') return false;
+
        // 0. Hidden Rows Check
        if (hiddenRowIds.has(item.uniqueId)) return false;
 
@@ -909,7 +918,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       distributionStats,
       heatmap,
     };
-  }, [data, metrics, filterScope, selectedCategories, selectedWeightClasses, selectedSuppliers, sortConfig, purchaseDateRange, hiddenRowIds]);
+  }, [data, metrics, filterScope, situacaoFilter, selectedCategories, selectedWeightClasses, selectedSuppliers, sortConfig, purchaseDateRange, hiddenRowIds]);
 
   // Handlers
   const scrollToMatrix = () => {
@@ -1000,6 +1009,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     setSelectedSuppliers(Array.isArray(f.fornecedores) ? f.fornecedores as string[] : []);
     setSelectedWeightClasses(Array.isArray(f.classes_peso) ? f.classes_peso as string[] : []);
     setFilterScope((f.scope as FilterScope) ?? 'all');
+    setSituacaoFilter((f.situacao as 'ativos' | 'inativos' | 'todos') ?? 'ativos');
     setPurchaseDateRange({
       start: (f.data_inicio as string) ?? '',
       end: (f.data_fim as string) ?? ''
@@ -1023,6 +1033,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             fornecedores: selectedSuppliers,
             classes_peso: selectedWeightClasses,
             scope: filterScope,
+            situacao: situacaoFilter,
             data_inicio: purchaseDateRange.start,
             data_fim: purchaseDateRange.end
           }
@@ -1689,6 +1700,18 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <button onClick={() => setFilterScope('all')} className={`px-4 text-sm font-medium rounded-md transition-all ${filterScope === 'all' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Todos</button>
                 <button onClick={() => setFilterScope('critical')} className={`px-4 text-sm font-medium rounded-md transition-all ${filterScope === 'critical' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Críticos</button>
                 <button onClick={() => setFilterScope('zero')} className={`px-4 text-sm font-medium rounded-md transition-all ${filterScope === 'zero' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Zerados</button>
+              </div>
+            </div>
+
+            {/* Situacao do cadastro (Ativos default — pecas inativadas so aparecem pedindo) */}
+            <div className="flex flex-col">
+              <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">
+                <Circle size={14} /> Situação
+              </label>
+              <div className="flex h-10 bg-creme-50 p-1 rounded-lg border border-creme-200">
+                <button onClick={() => setSituacaoFilter('ativos')} className={`px-4 text-sm font-medium rounded-md transition-all ${situacaoFilter === 'ativos' ? 'bg-white text-esmeralda-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Ativos</button>
+                <button onClick={() => setSituacaoFilter('inativos')} className={`px-4 text-sm font-medium rounded-md transition-all ${situacaoFilter === 'inativos' ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Inativos</button>
+                <button onClick={() => setSituacaoFilter('todos')} className={`px-4 text-sm font-medium rounded-md transition-all ${situacaoFilter === 'todos' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>Todos</button>
               </div>
             </div>
 
