@@ -243,18 +243,6 @@ Regra de ferro daqui pra frente: **testar com build de produção** (`npm run bu
 
 **Backtest** (179 aprovações reais, 18/03 a 05/08/2026): barraria de 11 a 16 — cerca de 1 venda a cada 12 dias. Caso limítrofe conhecido: venda 15895, faltavam R$ 20 (provável frete) — para, e é o comportamento escolhido.
 
-## 6.2 Aprovação "Ação Marketing" (cortesia) — só o master admin (19/08/2026)
-
-**A regra.** Botão "Aprovar como Ação Marketing", visível SÓ pro master admin (`isMasterAdmin`, o Alisson — nunca por role/cargo), na tela da venda em `rascunho`. Ao clicar, `approveVenda()` lança **antes** um pagamento `forma='Ação Marketing'`, `status='confirmado'`, cobrindo o saldo aberto (`total_venda` − pagamentos já confirmados) — e só então segue o fluxo normal de aprovação (Tiny, `UPDATE situacao/status='aprovado'`, ordem, cofre). Como o saldo já fecha em zero, `verificarSaldoDeclarado()` (§6.1) passa e a trigger `fn_venda_gerar_conta_receber` **não cria conta a receber real**.
-
-**Por que existe.** O dono às vezes dá uma venda de brinde/cortesia a um cliente (caso que originou a regra: venda 30612, R$ 66.310,00). Sem isso, só dava pra "resolver" com ajuste manual direto no banco — o pedido explícito era aprovar pelo caminho normal do sistema, ficando registrado quem aprovou.
-
-**Onde está.** `ApproveVendaOpts.marketingCortesia` em `approveVenda()` (`src/lib/vendas-aprovar.ts`) — valida `isMasterAdmin(userId)` e faz o INSERT + `logAudit`, fonte única de verdade. A rota `PATCH /api/vendas/[id]` (`marketing_cortesia: boolean` no body) só repassa a flag. O botão em `VendaDetalheClient.tsx` chama `changeSituacao("aprovado", { marketing_cortesia: true })` e só renderiza com a prop `isMasterAdmin` (calculada no server, `page.tsx`, mesmo padrão do `podeConcluirSistema` em `ordens/page.tsx`).
-
-**Sem migration.** Reaproveita `pagamentos_venda.forma` (texto livre) e `source='manual'` (já existente no CHECK). Nenhuma trigger foi alterada.
-
-**O que NÃO faz.** Não passa pelo `solicitar-aprovacao` (crédito/desconto) — é aprovação direta e definitiva do dono. Não exige nenhum pagamento pré-lançado (a diferença de `podeAprovar` normal, que exige `venda.pagamentos.length > 0` — aqui existe `podeAprovarMarketing`, mesma regra sem essa exigência).
-
 ## 7. Inventário do estoque comercial (v2.80.0)
 
 - **Inventário é auditoria, NÃO ajusta estoque.** Concluir congela a contagem; `ajustes_gerados` é sempre 0. Divergências são tratadas manualmente item a item depois de investigar. (O helper `gerarAjustesDivergencias` existe em `src/lib/inventario-helpers.ts` mas está desligado de propósito.)

@@ -1,20 +1,6 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 19/08/2026 — Versão: v2.85.12 <!-- Revisado 19/08/2026 -->
-
-## feat(vendas): aprovação "Ação Marketing" (cortesia) — só o master admin (v2.85.12)
-
-Botão novo na tela da venda, visível SÓ pro master admin (Alisson, `isMasterAdmin`, não por
-role/cargo): "Aprovar como Ação Marketing". Aprova a venda pelo caminho normal (`approveVenda`),
-mas antes lança automaticamente um pagamento `forma='Ação Marketing'`/`status='confirmado'`
-cobrindo o saldo aberto — assim a trigger `fn_venda_gerar_conta_receber` (migration 316) vê saldo
-zerado e NÃO cria conta a receber real pro cliente. Sem migration: reaproveita a coluna livre
-`pagamentos_venda.forma` e `source='manual'` (já existentes). Autorização validada dentro de
-`approveVenda` (`ApproveVendaOpts.marketingCortesia`), fonte única de verdade — a rota
-(`PATCH /api/vendas/[id]`, campo `marketing_cortesia`) só repassa a flag. Registrado em
-`alissonerp.audit_log` via `logAudit`. Caso que originou a regra: venda 30612 (cortesia do
-Alisson pra um cliente). Arquivos: `src/lib/vendas-aprovar.ts`, `src/app/api/vendas/[id]/route.ts`,
-`src/app/(dashboard)/vendas/[id]/page.tsx`, `.../VendaDetalheClient.tsx`.
+> 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
 
 ## feat(gestao-estoque): data da primeira venda na rota de oportunidades (v2.83.16)
 

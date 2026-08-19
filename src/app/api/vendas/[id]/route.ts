@@ -40,8 +40,6 @@ const VendaPatchSchema = z.object({
   numero_rastreio: z.string().max(100).nullable().optional(),
   venda_garantia_id: IdSchema.nullable().optional(),
   client_updated_at: z.string().max(50).optional(),
-  /** Aprovação "Ação Marketing" (cortesia) — só o master admin, ver approveVenda(). */
-  marketing_cortesia: z.boolean().optional(),
 }).passthrough();
 
 // ─── GET /api/vendas/[id] ──────────────────────────────────────────────────────
@@ -481,7 +479,6 @@ export async function PATCH(
     venda_garantia_id?:    number | null;
     /** Guard de versão — opcional, retrocompatível */
     client_updated_at?:    string;
-    marketing_cortesia?:   boolean;
   };
 
   try {
@@ -807,10 +804,7 @@ export async function PATCH(
   let ordemCriadaAprovacao: string | null = null;
   if (body.situacao === "aprovado") {
     try {
-      const aprovResult = await approveVenda(vendaId, user.id, {
-        tinyBestEffort: true,
-        marketingCortesia: body.marketing_cortesia === true,
-      });
+      const aprovResult = await approveVenda(vendaId, user.id, { tinyBestEffort: true });
       tinyErroWarning = aprovResult.tiny_erro ?? null;
       ordemCriadaAprovacao = aprovResult.ordem_criada ?? null;
     } catch (e) {
