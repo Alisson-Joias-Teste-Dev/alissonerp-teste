@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React from "react";
 import { ShieldCheck, X, Unlock, ShieldAlert } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { ROLES_SERVICE_PANEL } from "@/lib/roles";
 
 interface SecurityModalProps {
   isOpen: boolean;
@@ -14,15 +15,13 @@ interface SecurityModalProps {
  * Adaptado para o ERP: não pede senha manual. Autoriza se o usuário logado
  * tiver role admin/desenvolvedor/gerente_loja/gerente_fabrica.
  */
-const ALLOWED_ROLES = new Set(["desenvolvedor", "admin", "gerente_fabrica", "gerente_loja"]);
+// Fonte unica de roles (src/lib/roles.ts) — CLAUDE.md §6 proibe lista hardcoded;
+// a copia local divergia quando um role novo era criado nas constantes centrais.
+const ALLOWED_ROLES = new Set<string>(ROLES_SERVICE_PANEL);
 
 const SecurityModal: React.FC<SecurityModalProps> = ({ isOpen, onClose, onConfirm }) => {
   const { role, nome } = useAuth();
   const autorizado = role ? ALLOWED_ROLES.has(role) : false;
-
-  useEffect(() => {
-    if (!isOpen) return;
-  }, [isOpen]);
 
   if (!isOpen) return null;
 

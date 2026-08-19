@@ -110,9 +110,12 @@ export async function GET(req: NextRequest) {
     const total_valor = preenchida.reduce((a, r) => a + r.valor_total, 0);
     const media_semanal_valor = preenchida.length ? total_valor / preenchida.length : 0;
 
-    // Delta: media dos ultimos 4 vs 4 anteriores
-    const ult4 = preenchida.slice(-4);
-    const ant4 = preenchida.slice(-8, -4);
+    // Delta: media dos ultimos 4 vs 4 anteriores — SO semanas FECHADAS.
+    // A semana corrente e parcial (segunda ate hoje): inclui-la fazia o KPI
+    // mostrar queda falsa toda segunda-feira, 'melhorando' sozinho ao longo
+    // da semana. O grafico continua mostrando a semana corrente.
+    const ult4 = preenchida.slice(-5, -1);
+    const ant4 = preenchida.slice(-9, -5);
     const mediaUlt4 = ult4.reduce((a, r) => a + r.valor_total, 0) / Math.max(1, ult4.length);
     const mediaAnt4 = ant4.reduce((a, r) => a + r.valor_total, 0) / Math.max(1, ant4.length);
     const delta_pct_vs_4sem_anteriores = mediaAnt4 > 0

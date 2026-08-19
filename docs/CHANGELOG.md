@@ -2,6 +2,41 @@
 
 > 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
 
+## fix(gestao-estoque): leva 2 do pente-fino — fornecedor/variacao ligados, 30+ consertos medios e leves (v2.83.10)
+
+Continuacao da v2.83.9 (mesma leva de teste). Modulo inteiro alinhado as fontes
+oficiais do ERP e limpo de codigo morto (~340 linhas removidas).
+
+**Fontes de dados corrigidas/ligadas:**
+- `erp_produtos` LIGADA a tela: fornecedor (filtro acende), pai/variacao, numeracao,
+  cor do metal; peso via COALESCE(erp, public) — mesma regra do /api/produtos.
+- `preco_curva` agora vem da view oficial `vw_produtos_geral_preco` (formula inline
+  divergente removida).
+- Oportunidades de fabricacao: saldo pela `vw_saldo_estoque_comercial_v2` (antes
+  public.estoque legado por SKU — sugeria fabricar peca que tem na loja e podia
+  duplicar linhas); totais do UNIVERSO real (antes somava so a pagina limitada).
+- NUMERIC normalizado no servidor: ordenacao numerica certa, promo riscada aparece,
+  precos formatados.
+
+**Numeros/regras:** curva ABC na base COMPLETA (filtro nao rebaixa best-seller) e
+corte Pareto classico (quem cruza 80% e A); delta semanal so com semanas fechadas
+(fim da queda falsa de segunda-feira); metal contido avaliado a 18k (nao 24k);
+idade sem fallback pra data de venda; heatmap com coluna "Outros"; desempate do
+maior risco sem estouro acima de R$ 1M; aba Estoque com filtro de data por texto
+(primeiro dia nao cai mais fora).
+
+**Seguranca:** gate da pagina pela role de `alissonerp.usuarios` (user_metadata e
+editavel pelo dono da conta); ai-chat com gate de modulo; imagem-proxy com whitelist
+estrita + redirects revalidados (SSRF); GET locais-estoque exige login.
+
+**UX/robustez:** pagina volta pra 1 ao filtrar; colunas escolhidas nao resetam a
+cada refresh; trocar de aba nao repete a query pesada; toasts com timer unico;
+preco promocional zero barrado; exportacao de catalogo destrava em erro; erros de
+rede agora avisam (fim dos catch silenciosos); roles do SecurityModal centralizados.
+
+**Limpeza:** Sidebar.tsx morto removido; rota /api/gestao-estoque/locais duplicada
+removida (client usa /api/locais-estoque); funcoes/tipos/props/branches mortos fora.
+
 ## fix(gestao-estoque): 6 bugs graves do pente-fino — vendas ERP incluidas, canceladas fora, telas corrigidas (v2.83.9)
 
 Pente-fino completo no modulo Gestao de Estoque (18/08, 67 suspeitas, 56 confirmadas).

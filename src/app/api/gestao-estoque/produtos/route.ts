@@ -18,7 +18,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
-import sql from "@/lib/db";
+import sql, { normalizeRow } from "@/lib/db";
 import { itensVendaValidos } from "@/lib/gestao-estoque/vendas-sql";
 
 export const dynamic = "force-dynamic";
@@ -87,7 +87,9 @@ export async function GET(req: NextRequest) {
         p.nome,
         p.sku,
         p.tipo_metal,
-        p.peso_precificado,
+        -- Peso da FONTE (alissonerp.erp_produtos) — mesma regra do /api/produtos:
+        -- o espelho public.produtos so replica INSERT, nao UPDATE.
+        COALESCE(ep.peso_precificado, p.peso_precificado) AS peso_precificado,
         p.preco_tiny,
         p.preco_sync,
         p.preco_total_sync,
@@ -99,6 +101,14 @@ export async function GET(req: NextRequest) {
         p.categoria_precificacao,
         p.markup,
         p.fator,
+        -- Ficha propria do ERP (alissonerp.erp_produtos): fornecedor habilita o
+        -- filtro de Fornecedor da tela; pai/variacao contextualiza a peca.
+        ep.fornecedor,
+        ep.eh_pai,
+        ep.eh_variacao,
+        ep.parent_sku,
+        ep.numeracao,
+        ep.cor_metal,
         vc.url_capa               AS imagem_capa,
         COALESCE(ec.saldo_fisico, 0)::int AS saldo_estoque,
         COALESCE(ec.saldo_fisico, 0)::int AS estoque,
@@ -118,19 +128,10 @@ export async function GET(req: NextRequest) {
         cpa.comissao_pct,
         cpa.max_desconto_pct,
         cpa.updated_at            AS curva_aplicada_em,
-        CASE
-          WHEN p.peso_precificado > 0
-            AND COALESCE(cpa.markup_aplicado::numeric, p.markup::numeric) > 0
-            AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
-          THEN ROUND(
-            p.peso_precificado::numeric
-            * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-            * COALESCE(cpa.markup_aplicado::numeric, p.markup::numeric)
-            * COALESCE(p.fator::numeric, 1)
-            / 10
-          )::int * 10
-          ELSE NULL
-        END AS preco_curva
+        -- preco_curva pela view unificada vw_produtos_geral_preco — MESMA fonte
+        -- do /api/produtos (regra 28/05/2026). A formula inline anterior podia
+        -- divergir do preco oficial exibido na tela de Produtos.
+        pp.preco_venda::int       AS preco_curva
       FROM public.produtos p
       LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       LEFT JOIN estoque_comercial ec  ON ec.produto_id = p.id_produto
@@ -139,10 +140,22 @@ export async function GET(req: NextRequest) {
       LEFT JOIN receita_12m r12       ON r12.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_curva_aplicada cpa ON cpa.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_preco_vigente vpv ON vpv.id_produto = p.id_produto
+      LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
+      LEFT JOIN alissonerp.vw_produtos_geral_preco pp ON pp.id_produto = p.id_produto
       WHERE p.situacao = 'A'
     `;
 
-    return NextResponse.json({ produtos: rows, total: rows.length });
+    // postgres.js devolve NUMERIC como STRING; sem normalizar, a matriz ordenava
+    // alfabeticamente ('9.5' > '10') e a promo riscada nunca renderizava
+    // (typeof val === 'number' falhava). Normaliza UMA vez aqui, no servidor.
+    const NUMERICOS = [
+      "peso_precificado", "preco_tiny", "preco_sync", "preco_total_sync",
+      "preco_pedras", "diferenca_percentual", "markup", "fator",
+      "qtd_vendida_90d", "receita_total_12m", "preco_vigente",
+      "markup_aplicado", "comissao_pct", "max_desconto_pct",
+    ];
+    const produtos = rows.map((r) => normalizeRow(r, NUMERICOS));
+    return NextResponse.json({ produtos, total: produtos.length });
   } catch (err) {
     console.error("[GET /api/gestao-estoque/produtos]", err);
     return NextResponse.json({ error: "Erro ao buscar produtos" }, { status: 500 });

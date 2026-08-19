@@ -2,8 +2,9 @@
 
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import BadgePromo from "@/components/ui/BadgePromo";
-import { TableRow, DashboardProps, SchemaName } from "@/lib/gestao-estoque/types";
+import { TableRow, DashboardProps } from "@/lib/gestao-estoque/types";
 import { updateRecord, saveTableConfig, loadTableConfig } from "@/lib/gestao-estoque/service";
+import { useErrorStore } from "@/stores/errorStore";
 import { 
   TrendingUp, 
   Scale, 
@@ -72,31 +73,27 @@ const Dashboard: React.FC<DashboardProps> = ({
   tableName, 
   loading,
   error,
-  page,
-  totalCount,
-  onNextPage,
-  onPrevPage,
   onRefresh,
-  onPromotion,
-  schema = 'public'
+  onPromotion
 }) => {
   // Local state for client-side pagination (when not provided by parent)
   const [localPage, setLocalPage] = useState(0);
   const PAGE_SIZE = 100;
   
-  const currentPage = page !== undefined ? page : localPage;
+  // Paginacao 100% client-side (a paginacao remota por props nunca foi ligada
+  // pelo unico consumidor — removida no pente-fino 18/08)
+  const currentPage = localPage;
   
-  const handlePrev = () => {
-    if (onPrevPage) onPrevPage();
-    else setLocalPage(p => Math.max(0, p - 1));
-  };
+  const handlePrev = () => setLocalPage(p => Math.max(0, p - 1));
 
-  const handleNext = () => {
-    if (onNextPage) onNextPage();
-    else setLocalPage(p => p + 1);
-  };
+  const handleNext = () => setLocalPage(p => p + 1);
 
   const [filterScope, setFilterScope] = useState<FilterScope>('positive');
+
+  // Mudou QUALQUER filtro -> volta pra pagina 1. Sem isso, quem estava na
+  // Pag 3 e filtrava pra 40 itens via 'Nenhum registro encontrado' (slice
+  // alem do fim) com os itens existindo.
+  // (o useEffect fica logo apos as declaracoes dos filtros, abaixo)
   
   // Purchase/Inventory Date Range State
   const [purchaseDateRange, setPurchaseDateRange] = useState({
@@ -133,6 +130,12 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // Row Exclusion State
   const [hiddenRowIds, setHiddenRowIds] = useState<Set<string>>(new Set());
+
+  // Reset da paginacao local quando qualquer filtro muda (ver comentario acima)
+  useEffect(() => {
+    setLocalPage(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterScope, selectedCategories, selectedSuppliers, selectedWeightClasses, purchaseDateRange, hiddenRowIds]);
 
   // Editing State
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -212,7 +215,10 @@ const Dashboard: React.FC<DashboardProps> = ({
         if (!res.ok) return;
         const data = await res.json() as GoldPrice;
         if (!cancel) setGoldPrice(data);
-      } catch { /* silent */ }
+      } catch {
+        // Sem cotacao o header apenas esconde o cartao; avisa baixinho.
+        useErrorStore.getState().push("Cotação do ouro indisponível", { level: "warning" });
+      }
     };
     load();
     const id = setInterval(load, 30 * 60 * 1000);
@@ -231,7 +237,9 @@ const Dashboard: React.FC<DashboardProps> = ({
           setWeeklySeries(data.semanas ?? []);
           setWeeklyAgg(data.agregados ?? null);
         }
-      } catch { /* silent */ }
+      } catch {
+        useErrorStore.getState().push("Falha ao carregar vendas semanais", { level: "warning" });
+      }
     };
     load();
     return () => { cancel = true; };
@@ -246,7 +254,9 @@ const Dashboard: React.FC<DashboardProps> = ({
         if (!res.ok) return;
         const data = await res.json() as { views: SavedView[] };
         if (!cancel) setUserViews(data.views ?? []);
-      } catch { /* silent */ }
+      } catch {
+        useErrorStore.getState().push("Falha ao carregar vistas salvas", { level: "warning" });
+      }
     };
     load();
     return () => { cancel = true; };
@@ -288,7 +298,9 @@ const Dashboard: React.FC<DashboardProps> = ({
           setOportunidades(data.produtos ?? []);
           setOportunidadesTotais(data.totais ?? null);
         }
-      } catch { /* silent */ }
+      } catch {
+        useErrorStore.getState().push("Falha ao carregar oportunidades de fabricação", { level: "warning" });
+      }
       finally { if (!cancel) setOppLoading(false); }
     };
     load();
@@ -386,11 +398,17 @@ const Dashboard: React.FC<DashboardProps> = ({
     return { priceKey, stockKey, weightKey, nameKey, statusKey, idKey, skuKey, categoryKey, dateKey, purchaseDateKey, supplierKey, allKeys: keys };
   }, [data, tableName]);
 
-  // Load Config on Mount (or table change)
+  // Load Config: roda UMA VEZ por tabela. `metrics` muda de identidade a cada
+  // refresh de dados; sem o guard, todo refresh re-aplicava a config salva e
+  // descartava colunas/ordenacao que o usuario mudou sem salvar.
+  const configLoadedRef = useRef<string | null>(null);
   useEffect(() => {
     let mounted = true;
     const loadConfig = async () => {
       if (!tableName) return;
+      if (configLoadedRef.current === tableName) return;
+      if (!metrics) return; // espera a 1a carga de dados pra montar defaults
+      configLoadedRef.current = tableName;
       
       const savedConfig = (await loadTableConfig(tableName)) as
         | { visibleColumns?: string[]; sortConfig?: { key: SortKey; direction: SortDirection } }
@@ -486,6 +504,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     let criticalCapital = 0;
     let criticalCount = 0;
     let maxCriticalScore = -1;
+    let maxCriticalValue = -1;
     let topCriticalItem: any = null;
     const staleThreshold = new Date();
     staleThreshold.setDate(staleThreshold.getDate() - 180);
@@ -524,7 +543,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     distributionMap.set('Outros', { weight: 0, value: 0, count: 0 });
 
     // Process and Filter Data
-    const processedList = data.map((row, idx) => {
+    const allItems = data.map((row, idx) => {
        // Unique ID for hiding logic (fallback to index if necessary, but stringified to match set)
        const uniqueId = idKey && row[idKey] ? String(row[idKey]) : `row-${idx}`;
 
@@ -553,10 +572,9 @@ const Dashboard: React.FC<DashboardProps> = ({
          if (isNaN(purchaseDate.getTime())) purchaseDate = null;
        } 
        
-       if (!purchaseDate && dateKey && row[dateKey]) { // Extended fallback
-         purchaseDate = new Date(row[dateKey]);
-         if (isNaN(purchaseDate.getTime())) purchaseDate = null;
-       }
+       // SEM fallback pra outra data: usar a data da ultima VENDA como "compra"
+       // fazia peca velha SEM registro de compra parecer recem-chegada (idade
+       // errada no score de criticidade e no cartao 'Parado > 180 dias').
 
        // Last Sale Date parsing
        let lastSaleDate: Date | null = null;
@@ -625,10 +643,33 @@ const Dashboard: React.FC<DashboardProps> = ({
          qtdVendida90d,
          receita12m: Number(row['receita_total_12m'] ?? 0),
          imagemCapa: (row['imagem_capa'] as string | undefined) ?? null,
-         // abcClass preenchido abaixo apos sort global (base = receita_total_12m)
+         // abcClass preenchido logo abaixo (base = receita_total_12m, lista COMPLETA)
          abcClass: 'C' as 'A' | 'B' | 'C',
        };
-    }).filter(item => {
+    });
+
+    // ── Classificacao ABC (Pareto sobre receita 12m) — na BASE COMPLETA ──
+    // A = SKUs que concentram os primeiros 80% da receita 12m
+    // B = proximos ate 95% | C = cauda + quem nao vendeu em 12m
+    // 1) Roda ANTES dos filtros: a classe e do PRODUTO, nao do recorte da tela
+    //    (filtrar por categoria nao pode rebaixar o best-seller pra B/C).
+    // 2) Corte classico: classifica pelo acumulado ANTES de somar o proprio
+    //    item — o item que CRUZA os 80% pertence a A (antes, um SKU com 85%
+    //    da receita sozinho virava B e ninguem recebia A).
+    const totalReceita12m = allItems.reduce((a, i) => a + (i.receita12m ?? 0), 0);
+    const vendidos12m = allItems.filter(i => (i.receita12m ?? 0) > 0)
+                                .sort((a, b) => (b.receita12m ?? 0) - (a.receita12m ?? 0));
+    let acumulado = 0;
+    for (const item of vendidos12m) {
+      const percAntes = totalReceita12m > 0 ? (acumulado / totalReceita12m) * 100 : 0;
+      acumulado += item.receita12m ?? 0;
+      if (percAntes < 80) item.abcClass = 'A';
+      else if (percAntes < 95) item.abcClass = 'B';
+      else item.abcClass = 'C';
+    }
+    // (Itens sem receita 12m ja nascem 'C'.)
+
+    const processedList = allItems.filter(item => {
        // 0. Hidden Rows Check
        if (hiddenRowIds.has(item.uniqueId)) return false;
 
@@ -704,10 +745,13 @@ const Dashboard: React.FC<DashboardProps> = ({
            criticalCount += item.stock;
            criticalCapital += itemTotalValue;
 
-           // Top risco = maior criticScore. Desempate por valorTotal.
-           const key = item.criticScore * 1_000_000 + itemTotalValue;
-           if (key > maxCriticalScore) {
-              maxCriticalScore = key;
+           // Top risco = maior criticScore; desempate por valorTotal.
+           // Comparacao em 2 campos (o truque score*1M+valor estourava quando
+           // um item passava de R$ 1 milhao e vencia com score menor).
+           if (item.criticScore > maxCriticalScore ||
+               (item.criticScore === maxCriticalScore && itemTotalValue > maxCriticalValue)) {
+              maxCriticalScore = item.criticScore;
+              maxCriticalValue = itemTotalValue;
               topCriticalItem = item;
            }
          }
@@ -752,24 +796,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         }))
         .filter(d => d.weight > 0 || d.value > 0);
 
-    // ── Classificacao ABC (Pareto sobre receita dos ultimos 12 meses) ──
-    // A = SKUs que concentram ate 80% da receita dos ultimos 12m
-    // B = proximos SKUs ate 95% da receita acumulada
-    // C = cauda (ultimos 5%) + TODOS que nao venderam em 12m
-    // Isso responde "quais produtos geram minha receita?" (ABC classico de varejo)
-    // Produtos sem venda em 12m sao C automaticamente (nao concorrem pelo topo).
-    const totalReceita12m = processedList.reduce((a, i) => a + (i.receita12m ?? 0), 0);
-    const vendidos12m = processedList.filter(i => (i.receita12m ?? 0) > 0)
-                                     .sort((a, b) => (b.receita12m ?? 0) - (a.receita12m ?? 0));
-    let acumulado = 0;
-    for (const item of vendidos12m) {
-      acumulado += item.receita12m ?? 0;
-      const perc = totalReceita12m > 0 ? (acumulado / totalReceita12m) * 100 : 0;
-      if (perc <= 80) item.abcClass = 'A';
-      else if (perc <= 95) item.abcClass = 'B';
-      else item.abcClass = 'C';
-    }
-    // (Os itens sem receita 12m ja foram inicializados como 'C' la em cima.)
+    // (Classificacao ABC roda la em cima, na base COMPLETA — antes dos filtros.)
 
     // ── Heatmap Categoria × Classe de Peso ──
     // Matriz: categoria (linhas) x classe de peso (colunas) → soma do totalValue
@@ -793,9 +820,14 @@ const Dashboard: React.FC<DashboardProps> = ({
       cell.count += item.stock;
       cell.weight += item.weight * item.stock;
     }
+    // 'Outros' (peso 0/nulo ou >100g) entrava no Total da linha mas nao tinha
+    // coluna — o Total parecia 'fantasma'. Se existir, vira coluna visivel.
+    const temOutrosHeatmap = Array.from(heatmapMap.values()).some(r => r.has('Outros'));
     const heatmap = {
       categorias: Array.from(heatmapCategorias).sort(),
-      classes: WEIGHT_CLASSES.map(w => w.label),
+      classes: temOutrosHeatmap
+        ? [...WEIGHT_CLASSES.map(w => w.label), 'Outros']
+        : WEIGHT_CLASSES.map(w => w.label),
       cells: heatmapMap,
       maxValue: 0 as number,
     };
@@ -984,8 +1016,12 @@ const Dashboard: React.FC<DashboardProps> = ({
         setActiveViewId(view.id);
         setShowSaveViewModal(false);
         setNewViewName('');
+      } else {
+        useErrorStore.getState().push("Não foi possível salvar a vista");
       }
-    } catch { /* silent */ }
+    } catch {
+      useErrorStore.getState().push("Não foi possível salvar a vista");
+    }
     finally { setIsSavingView(false); }
   };
 
@@ -995,8 +1031,12 @@ const Dashboard: React.FC<DashboardProps> = ({
       if (res.ok) {
         setUserViews(prev => prev.filter(v => v.id !== id));
         if (activeViewId === id) setActiveViewId(null);
+      } else {
+        useErrorStore.getState().push("Não foi possível excluir a vista");
       }
-    } catch { /* silent */ }
+    } catch {
+      useErrorStore.getState().push("Não foi possível excluir a vista");
+    }
   };
 
   const toggleRow = (uniqueId: string) => {
@@ -1054,6 +1094,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url); // libera o blob da memoria (sessao longa acumulava)
   };
 
   // --- Editing Logic ---
@@ -1086,7 +1127,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     setIsSaving(true);
     
     // Call service
-    const { success, error } = await updateRecord(schema as SchemaName, tableName, pkValue, editForm, pkField);
+    const { success, error } = await updateRecord(pkValue, editForm, pkField);
     
     setIsSaving(false);
 
@@ -1097,6 +1138,19 @@ const Dashboard: React.FC<DashboardProps> = ({
       alert(`Erro ao salvar: ${(error as { message?: string })?.message || 'Desconhecido'}`);
     }
   };
+
+  // Cores de badge ABC e Score — FONTE UNICA pra galeria e tabela (eram 2 copias
+  // que podiam divergir; pente-fino 18/08)
+  const abcCorClass = (abc: 'A' | 'B' | 'C') =>
+    abc === 'A' ? 'bg-emerald-500 text-white' :
+    abc === 'B' ? 'bg-yellow-400 text-yellow-900' :
+                  'bg-gray-200 text-gray-600';
+  const scoreCorClass = (score: number) =>
+    score >= 80 ? 'bg-red-600' :
+    score >= 60 ? 'bg-red-500' :
+    score >= 40 ? 'bg-orange-400' :
+    score >= 20 ? 'bg-yellow-400' :
+                  'bg-emerald-500';
 
   // Helper: Get Icon for Jewelry Category
   const getCategoryIcon = (catName: string) => {
@@ -1310,8 +1364,10 @@ const Dashboard: React.FC<DashboardProps> = ({
                 {formatCurrency(analysis.totalStockValue)}
               </p>
               {goldPrice && analysis.totalWeight > 0 && (
+                /* Joia e 18k (75% ouro): avaliar o peso pela cotacao 24k inflava
+                   o lastro em ~33% pra quem decide compra de ouro. */
                 <p className="text-[11px] text-gray-500 mt-1 font-mono">
-                  Metal bruto: {formatCurrency(analysis.totalWeight * goldPrice.preco_24k_g)}
+                  Metal contido (18k): {formatCurrency(analysis.totalWeight * goldPrice.preco_18k_g)}
                 </p>
               )}
             </div>
@@ -2280,12 +2336,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <span className="hidden lg:inline">{isMatrixFullscreen ? 'Sair' : 'Tela cheia'}</span>
                 </button>
 
-                {totalCount !== null && totalCount !== undefined && (
-                  <span className="text-sm text-gray-500 font-mono hidden md:inline-block border-l border-creme-200 pl-4">
-                    {totalCount.toLocaleString('pt-BR')} total
-                  </span>
-                )}
-
                 <div className="flex items-center gap-1 bg-creme-50 rounded-lg p-1 border border-creme-200">
                   <button
                     onClick={handlePrev}
@@ -2312,16 +2362,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4">
                   {tableData.map((row) => {
                     const img = row.imagemCapa ?? null;
-                    const scoreCor =
-                      (row.criticScore ?? 0) >= 80 ? 'bg-red-600' :
-                      (row.criticScore ?? 0) >= 60 ? 'bg-red-500' :
-                      (row.criticScore ?? 0) >= 40 ? 'bg-orange-400' :
-                      (row.criticScore ?? 0) >= 20 ? 'bg-yellow-400' :
-                                                    'bg-emerald-500';
-                    const abcCor =
-                      row.abcClass === 'A' ? 'bg-emerald-500 text-white' :
-                      row.abcClass === 'B' ? 'bg-yellow-400 text-yellow-900' :
-                                             'bg-gray-200 text-gray-600';
+                    const scoreCor = scoreCorClass(row.criticScore ?? 0);
+                    const abcCor = abcCorClass(row.abcClass);
                     return (
                       <button
                         key={row.uniqueId}
@@ -2731,10 +2773,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                           {/* ABC */}
                           <td className="px-1 py-2 text-center">
                             {(() => {
-                              const cor =
-                                row.abcClass === 'A' ? 'bg-emerald-500 text-white' :
-                                row.abcClass === 'B' ? 'bg-yellow-400 text-yellow-900' :
-                                                       'bg-gray-200 text-gray-600';
+                              const cor = abcCorClass(row.abcClass);
                               return (
                                 <span
                                   className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold font-mono ${cor}`}

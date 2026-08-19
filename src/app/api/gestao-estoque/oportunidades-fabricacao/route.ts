@@ -77,6 +77,15 @@ export async function GET(req: NextRequest) {
         -- com dedup de espelhos (bugs graves n3/n4 do pente-fino 18/08).
         ${itensVendaValidos()}
       ),
+      saldo_oficial AS (
+        -- Saldo pela MESMA fonte oficial do resto do modulo/ERP comercial
+        -- (vw_saldo_estoque_comercial_v2). Antes vinha de public.estoque (espelho
+        -- Tiny, por SKU sem unicidade): sugeria fabricar peca que TEM na loja,
+        -- escondia oportunidade real e o JOIN por SKU podia duplicar linhas.
+        SELECT produto_id, SUM(saldo_fisico)::int AS saldo
+        FROM alissonerp.vw_saldo_estoque_comercial_v2
+        GROUP BY produto_id
+      ),
       vendas_agg AS (
         SELECT
           produto_id,
@@ -101,6 +110,11 @@ export async function GET(req: NextRequest) {
         p.preco_sync,
         p.markup,
         COALESCE(e.saldo, 0)::int                AS saldo,
+        -- Totais do UNIVERSO (antes do LIMIT): o cabecalho mostrava 'X de X'
+        -- porque somava so a pagina ja limitada.
+        COUNT(*)            OVER ()                        AS total_qtd_skus,
+        SUM(va.qtd_vendida_total) OVER ()::numeric         AS total_qtd_vendida,
+        SUM(va.receita_total)     OVER ()::numeric         AS total_receita,
         va.qtd_vendida_total,
         va.qtd_vendas_distintas,
         va.receita_total,
@@ -109,7 +123,7 @@ export async function GET(req: NextRequest) {
         va.vendas_90d
       FROM public.produtos p
       JOIN vendas_agg va           ON va.produto_id = p.id_produto
-      LEFT JOIN public.estoque e   ON e.sku        = p.sku
+      LEFT JOIN saldo_oficial e    ON e.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       WHERE
         -- SEM estoque OU desativado
@@ -151,10 +165,14 @@ export async function GET(req: NextRequest) {
       vendas_90d: r.vendas_90d,
     }));
 
+    // Totais do universo real (window functions acima), nao da pagina limitada
+    const first = rows[0] as (typeof rows)[number] & {
+      total_qtd_skus?: string | number; total_qtd_vendida?: string; total_receita?: string;
+    } | undefined;
     const totais = {
-      qtd_skus: produtos.length,
-      qtd_vendida_total_historica: produtos.reduce((a, p) => a + p.qtd_vendida_total, 0),
-      receita_total_historica: produtos.reduce((a, p) => a + p.receita_total, 0),
+      qtd_skus: Number(first?.total_qtd_skus ?? 0),
+      qtd_vendida_total_historica: Number(first?.total_qtd_vendida ?? 0),
+      receita_total_historica: Number(first?.total_receita ?? 0),
     };
 
     return NextResponse.json({ produtos, totais });

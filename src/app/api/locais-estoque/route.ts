@@ -10,8 +10,13 @@ const LocalEstoquePostSchema = z.object({
   nome: z.string().min(1, "obrigatório").max(120),
 }).passthrough();
 
-// GET /api/locais-estoque — lista todos os locais ativos
+// GET /api/locais-estoque — lista todos os locais ativos (exige login;
+// a rota duplicada do gestao-estoque que foi absorvida aqui ja exigia)
 export async function GET() {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const rows = await sql`
     SELECT * FROM alissonerp.locais_estoque
     WHERE ativo = true
