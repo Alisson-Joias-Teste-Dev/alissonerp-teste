@@ -68,6 +68,56 @@ const WEIGHT_CLASSES = [
   { label: 'Pesadas 5', min: 60.0, max: 100.0 },
 ];
 
+/**
+ * Classificacao ABC (Pareto classico) sobre receita 12m — FONTE UNICA.
+ * O QUE: A = itens que concentram os primeiros 80% da receita; B ate 95%; C = cauda
+ * + quem nao vendeu. Classifica pelo acumulado ANTES de somar o proprio item
+ * (quem CRUZA o corte pertence a classe de cima).
+ * O PORQUE: usada tanto na visao por PECA quanto na visao por MODELO — duplicar
+ * o loop levaria as duas a divergir.
+ * IMPACTO se mudar: badges ABC de toda a matriz/galeria mudam de classe.
+ */
+function classificarABC(itens: Array<{ receita12m?: number; abcClass: 'A' | 'B' | 'C' }>) {
+  itens.forEach(i => { i.abcClass = 'C'; });
+  const total = itens.reduce((a, i) => a + (i.receita12m ?? 0), 0);
+  const vendidos = itens.filter(i => (i.receita12m ?? 0) > 0)
+                        .sort((a, b) => (b.receita12m ?? 0) - (a.receita12m ?? 0));
+  let acumulado = 0;
+  for (const item of vendidos) {
+    const percAntes = total > 0 ? (acumulado / total) * 100 : 0;
+    acumulado += item.receita12m ?? 0;
+    if (percAntes < 80) item.abcClass = 'A';
+    else if (percAntes < 95) item.abcClass = 'B';
+    else item.abcClass = 'C';
+  }
+}
+
+/** Comparador da matriz — mesmo criterio para visao por peca e por modelo. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function compararItens(a: any, b: any, sortConfig: { key: SortKey; direction: SortDirection }): number {
+  let valA, valB;
+  if (sortConfig.key === 'totalValue') { valA = a.totalValue; valB = b.totalValue; }
+  else if (sortConfig.key === 'stock') { valA = a.stock; valB = b.stock; }
+  else if (sortConfig.key === 'price') { valA = a.price; valB = b.price; }
+  else if (sortConfig.key === 'weight') { valA = a.weight; valB = b.weight; }
+  else if (sortConfig.key === 'criticScore') { valA = a.criticScore; valB = b.criticScore; }
+  else if (sortConfig.key === 'dio') {
+    // null (sem venda) sempre ultimo em asc, primeiro em desc — "pior" caso
+    valA = a.dio ?? Number.MAX_SAFE_INTEGER;
+    valB = b.dio ?? Number.MAX_SAFE_INTEGER;
+  }
+  else if (sortConfig.key === 'abcClass') { valA = a.abcClass; valB = b.abcClass; }
+  else {
+    valA = a.original[sortConfig.key];
+    valB = b.original[sortConfig.key];
+  }
+  if (valA === undefined || valA === null) valA = '';
+  if (valB === undefined || valB === null) valB = '';
+  if ((valA as number | string) < (valB as number | string)) return sortConfig.direction === 'asc' ? -1 : 1;
+  if ((valA as number | string) > (valB as number | string)) return sortConfig.direction === 'asc' ? 1 : -1;
+  return 0;
+}
+
 const Dashboard: React.FC<DashboardProps> = ({ 
   data, 
   tableName, 
@@ -173,6 +223,13 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // Modo de exibicao da matriz (tabela OU galeria visual)
   const [viewMode, setViewMode] = useState<'table' | 'gallery'>('table');
+
+  // Agrupamento da matriz (pedido do Alisson 18/08): 'modelo' = 1 linha por
+  // peca-PAI (aros/tamanhos somados; clique expande a grade); 'peca' = visao
+  // antiga, linha a linha. Default: modelo — e assim que um auditor de
+  // joalheria enxerga o estoque (o modelo vende, o tamanho e grade).
+  const [groupMode, setGroupMode] = useState<'modelo' | 'peca'>('modelo');
+  const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
   const [isMatrixFullscreen, setIsMatrixFullscreen] = useState(false);
 
   // Vistas nomeadas (filtros salvos)
@@ -656,18 +713,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     // 2) Corte classico: classifica pelo acumulado ANTES de somar o proprio
     //    item — o item que CRUZA os 80% pertence a A (antes, um SKU com 85%
     //    da receita sozinho virava B e ninguem recebia A).
-    const totalReceita12m = allItems.reduce((a, i) => a + (i.receita12m ?? 0), 0);
-    const vendidos12m = allItems.filter(i => (i.receita12m ?? 0) > 0)
-                                .sort((a, b) => (b.receita12m ?? 0) - (a.receita12m ?? 0));
-    let acumulado = 0;
-    for (const item of vendidos12m) {
-      const percAntes = totalReceita12m > 0 ? (acumulado / totalReceita12m) * 100 : 0;
-      acumulado += item.receita12m ?? 0;
-      if (percAntes < 80) item.abcClass = 'A';
-      else if (percAntes < 95) item.abcClass = 'B';
-      else item.abcClass = 'C';
-    }
-    // (Itens sem receita 12m ja nascem 'C'.)
+    classificarABC(allItems);
 
     const processedList = allItems.filter(item => {
        // 0. Hidden Rows Check
@@ -838,36 +884,8 @@ const Dashboard: React.FC<DashboardProps> = ({
       });
     });
 
-    // Sort List based on Sort Config
-    processedList.sort((a, b) => {
-        let valA, valB;
-
-        // Custom Sort Keys mapping
-        if (sortConfig.key === 'totalValue') { valA = a.totalValue; valB = b.totalValue; }
-        else if (sortConfig.key === 'stock') { valA = a.stock; valB = b.stock; }
-        else if (sortConfig.key === 'price') { valA = a.price; valB = b.price; }
-        else if (sortConfig.key === 'weight') { valA = a.weight; valB = b.weight; }
-        else if (sortConfig.key === 'criticScore') { valA = a.criticScore; valB = b.criticScore; }
-        else if (sortConfig.key === 'dio') {
-          // null (sem venda) sempre ultimo em asc, primeiro em desc — "pior" caso
-          valA = a.dio ?? Number.MAX_SAFE_INTEGER;
-          valB = b.dio ?? Number.MAX_SAFE_INTEGER;
-        }
-        else if (sortConfig.key === 'abcClass') { valA = a.abcClass; valB = b.abcClass; }
-        else {
-             // Generic column sort
-             valA = a.original[sortConfig.key];
-             valB = b.original[sortConfig.key];
-        }
-
-        // Handle nulls/undefined for generic sorting
-        if (valA === undefined || valA === null) valA = '';
-        if (valB === undefined || valB === null) valB = '';
-
-        if ((valA as number | string) < (valB as number | string)) return sortConfig.direction === 'asc' ? -1 : 1;
-        if ((valA as number | string) > (valB as number | string)) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-    });
+    // Sort List based on Sort Config (comparador unico — ver compararItens)
+    processedList.sort((a, b) => compararItens(a, b, sortConfig));
 
     return {
       totalStockValue,
@@ -1171,13 +1189,132 @@ const Dashboard: React.FC<DashboardProps> = ({
         : <ArrowDown size={12} className="text-alisson-gold ml-1" />;
   };
 
+  // ── Visao POR MODELO: agrupa variacoes na peca-pai ──────────────────────
+  // O QUE: soma estoque/receita/vendas das variacoes numa linha so; ABC e
+  // recalculada no nivel do MODELO; risco = pior peca do modelo; furo de
+  // grade = tamanho zerado que vendeu nos ultimos 12m.
+  // O PORQUE: a lista plana repetia o mesmo anel N vezes (1 por aro) e
+  // espalhava o estoque do modelo — impossivel auditar grade.
+  // IMPACTO se remover: matriz volta a ser plana e o painel de grade some.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const linhasMatriz = useMemo<any[]>(() => {
+    if (!analysis) return [];
+    if (groupMode === 'peca') return analysis.fullList;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const grupos = new Map<string, any[]>();
+    for (const item of analysis.fullList) {
+      const o = item.original ?? {};
+      const chave = o.eh_variacao
+        ? String(o.parent_sku || String(item.sku).split('-')[0])
+        : String(item.sku);
+      if (!grupos.has(chave)) grupos.set(chave, []);
+      grupos.get(chave)!.push(item);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const modelos: any[] = [];
+    grupos.forEach((membros, chave) => {
+      if (membros.length === 1 && !membros[0].original?.eh_pai) {
+        modelos.push(membros[0]); // peca sem variacao: linha simples, nada muda
+        return;
+      }
+      const base = membros.find(m => !m.original?.eh_variacao) ?? membros[0];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const soma = (f: (m: any) => number) => membros.reduce((a, m) => a + (Number(f(m)) || 0), 0);
+      const stock = soma(m => m.stock);
+      const receita12m = soma(m => m.receita12m);
+      const qtd90 = soma(m => m.qtdVendida90d);
+      const vendaDiaria = qtd90 > 0 ? qtd90 / 90 : 0;
+      const membrosOrd = [...membros].sort((a, b) =>
+        String(a.original?.numeracao ?? '').localeCompare(String(b.original?.numeracao ?? ''), 'pt-BR', { numeric: true }));
+      const furos = membrosOrd.filter(m =>
+        m.original?.eh_variacao && m.stock <= 0 && (m.receita12m ?? 0) > 0).length;
+      const ultimaVendaStr = membros.map(m => m.original?.data_ultima_venda)
+        .filter(Boolean).sort().pop() ?? null;
+      const ultimaCompraStr = membros.map(m => m.original?.data_ultima_compra)
+        .filter(Boolean).sort().pop() ?? null;
+      modelos.push({
+        ...base,
+        uniqueId: `modelo-${chave}`,
+        stock,
+        totalValue: soma(m => m.totalValue),
+        receita12m,
+        qtdVendida90d: qtd90,
+        dio: stock > 0 && vendaDiaria > 0 ? Math.round(stock / vendaDiaria) : null,
+        criticScore: Math.max(0, ...membros.map(m => m.criticScore ?? 0)),
+        isCritical: membros.some(m => m.isCritical),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        lastSaleDate: membros.reduce((mx: Date | null, m: any) =>
+          (m.lastSaleDate && (!mx || m.lastSaleDate > mx)) ? m.lastSaleDate : mx, null),
+        original: {
+          ...base.original,
+          saldo_estoque: stock,
+          estoque: stock,
+          receita_total_12m: receita12m,
+          qtd_vendida_90d: qtd90,
+          qtd_vendas: soma(m => Number(m.original?.qtd_vendas ?? 0)),
+          data_ultima_venda: ultimaVendaStr,
+          data_ultima_compra: ultimaCompraStr,
+          ultima_compra: ultimaCompraStr,
+        },
+        members: membrosOrd,
+        furos,
+      });
+    });
+
+    classificarABC(modelos); // ABC no nivel do MODELO
+    modelos.sort((a, b) => compararItens(a, b, sortConfig));
+    return modelos;
+  }, [analysis, groupMode, sortConfig]);
+
   // Prepare table data with pagination (Client-side slice)
   const tableData = useMemo(() => {
-    if (!analysis) return [];
     const start = currentPage * PAGE_SIZE;
     const end = start + PAGE_SIZE;
-    return analysis.fullList.slice(start, end);
-  }, [analysis, currentPage, PAGE_SIZE]);
+    return linhasMatriz.slice(start, end);
+  }, [linhasMatriz, currentPage, PAGE_SIZE]);
+
+  // Selecao/ocultacao no modo modelo agem sobre TODAS as pecas do modelo —
+  // promocao, CSV e exclusao continuam operando por peca real.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const linhaSelecionada = (row: any): boolean =>
+    row.members?.length
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? row.members.every((m: any) => selectedRows.has(m.uniqueId))
+      : selectedRows.has(row.uniqueId);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const toggleLinha = (row: any) => {
+    if (!row.members?.length) { toggleRow(row.uniqueId); return; }
+    setSelectedRows(prev => {
+      const n = new Set(prev);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const todos = row.members.every((m: any) => n.has(m.uniqueId));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      row.members.forEach((m: any) => { if (todos) n.delete(m.uniqueId); else n.add(m.uniqueId); });
+      return n;
+    });
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ocultarLinha = (row: any) => {
+    setHiddenRowIds(prev => {
+      const n = new Set(prev);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (row.members?.length) row.members.forEach((m: any) => n.add(m.uniqueId));
+      else n.add(row.uniqueId);
+      return n;
+    });
+  };
+
+  const toggleExpandModelo = (id: string) => {
+    setExpandedModels(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
 
 
   if (error) {
@@ -2162,6 +2299,23 @@ const Dashboard: React.FC<DashboardProps> = ({
                     Galeria
                   </button>
                 </div>
+                {/* Agrupamento: modelo (pai + grade) ou peca a peca */}
+                <div className="flex h-9 bg-creme-50 p-1 rounded-lg border border-creme-200">
+                  <button
+                    onClick={() => setGroupMode('modelo')}
+                    className={`px-3 text-xs font-semibold rounded-md transition-all ${groupMode === 'modelo' ? 'bg-white text-esmeralda-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                    title="1 linha por modelo — aros/tamanhos somados; clique na linha expande a grade"
+                  >
+                    Por modelo
+                  </button>
+                  <button
+                    onClick={() => setGroupMode('peca')}
+                    className={`px-3 text-xs font-semibold rounded-md transition-all ${groupMode === 'peca' ? 'bg-white text-esmeralda-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                    title="Visao plana — 1 linha por peca/variacao"
+                  >
+                    Por peça
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
@@ -2347,7 +2501,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <span className="text-sm font-mono w-16 text-center text-gray-700">Pág {currentPage + 1}</span>
                   <button
                     onClick={handleNext}
-                    disabled={loading || (analysis && (currentPage + 1) * PAGE_SIZE >= analysis.filteredCount)}
+                    disabled={loading || (currentPage + 1) * PAGE_SIZE >= linhasMatriz.length}
                     className="p-2 rounded hover:bg-white text-gray-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
                   >
                     <ChevronRight size={16} />
@@ -2367,8 +2521,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                     return (
                       <button
                         key={row.uniqueId}
-                        onClick={() => toggleRow(row.uniqueId)}
-                        className={`group relative flex flex-col bg-white border rounded-xl overflow-hidden transition-all text-left ${selectedRows.has(row.uniqueId) ? 'border-esmeralda-400 shadow-[0_0_0_2px_rgba(24,64,54,0.2)]' : 'border-creme-200 hover:border-esmeralda-300 hover:shadow-md'}`}
+                        onClick={() => toggleLinha(row)}
+                        className={`group relative flex flex-col bg-white border rounded-xl overflow-hidden transition-all text-left ${linhaSelecionada(row) ? 'border-esmeralda-400 shadow-[0_0_0_2px_rgba(24,64,54,0.2)]' : 'border-creme-200 hover:border-esmeralda-300 hover:shadow-md'}`}
                       >
                         {/* Imagem */}
                         <div className="relative w-full aspect-square bg-creme-100 overflow-hidden">
@@ -2395,7 +2549,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                               {row.criticScore ?? 0}
                             </span>
                           </div>
-                          {selectedRows.has(row.uniqueId) && (
+                          {linhaSelecionada(row) && (
                             <div className="absolute inset-0 bg-esmeralda-500/20 flex items-center justify-center">
                               <div className="bg-esmeralda-500 text-white p-2 rounded-full shadow-lg">
                                 <Check size={20} />
@@ -2449,6 +2603,12 @@ const Dashboard: React.FC<DashboardProps> = ({
                           : <Square size={16} />}
                       </button>
                     </th>
+
+                    {groupMode === 'modelo' && (
+                      <th className="px-1 py-2.5 border-b border-creme-200 text-center w-[64px] whitespace-nowrap" title="Grade de tamanhos — clique na seta da linha para expandir">
+                        Grade
+                      </th>
+                    )}
 
                     {visibleColumns.map(colKey => {
                       const lay = colLayout(colKey);
@@ -2523,24 +2683,27 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <tbody className="divide-y divide-creme-200">
                   {tableData.length === 0 ? (
                     <tr>
-                      <td colSpan={visibleColumns.length + 5} className="px-6 py-16 text-center text-gray-500 text-base">
+                      <td colSpan={visibleColumns.length + (groupMode === 'modelo' ? 6 : 5)} className="px-6 py-16 text-center text-gray-500 text-base">
                         Nenhum registro encontrado para este filtro.
                       </td>
                     </tr>
                   ) : (
                     tableData.map((row, idx) => {
                       const isEditing = editingId === row.uniqueId;
-                      const isSelected = selectedRows.has(row.uniqueId);
+                      const isSelected = linhaSelecionada(row);
+                      const ehModelo = groupMode === 'modelo' && (row.members?.length ?? 0) > 1;
+                      const expandido = ehModelo && expandedModels.has(row.uniqueId);
 
                       return (
-                        <tr key={idx} className={`transition-colors group ${isEditing ? 'bg-esmeralda-50/50' : isSelected ? 'bg-esmeralda-50/30' : 'hover:bg-creme-50'}`}>
+                        <React.Fragment key={row.uniqueId ?? idx}>
+                        <tr className={`transition-colors group ${isEditing ? 'bg-esmeralda-50/50' : isSelected ? 'bg-esmeralda-50/30' : 'hover:bg-creme-50'}`}>
                           {/* Coluna única fixa: checkbox visível, ações aparecem on-hover à direita */}
                           <td className="px-2 py-2 sticky left-0 z-20 bg-white group-hover:bg-creme-50 border-r border-creme-200 w-[52px]">
                             <div className="flex items-center justify-center gap-0.5 relative">
                               <button
-                                onClick={() => toggleRow(row.uniqueId)}
+                                onClick={() => toggleLinha(row)}
                                 className={`p-1 rounded transition-colors ${isSelected ? 'text-esmeralda-500' : 'text-gray-400 hover:text-gray-700'}`}
-                                title="Selecionar"
+                                title={ehModelo ? 'Selecionar o modelo inteiro (todas as variações)' : 'Selecionar'}
                               >
                                 {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
                               </button>
@@ -2567,15 +2730,17 @@ const Dashboard: React.FC<DashboardProps> = ({
                                   </>
                                 ) : (
                                   <>
+                                    {!ehModelo && (
+                                      <button
+                                        onClick={() => startEditing(row)}
+                                        className="p-1 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                        title="Editar"
+                                      >
+                                        <Pencil size={12} />
+                                      </button>
+                                    )}
                                     <button
-                                      onClick={() => startEditing(row)}
-                                      className="p-1 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                                      title="Editar"
-                                    >
-                                      <Pencil size={12} />
-                                    </button>
-                                    <button
-                                      onClick={() => hideRow(row.uniqueId)}
+                                      onClick={() => ocultarLinha(row)}
                                       className="p-1 rounded-md text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                                       title="Ocultar"
                                     >
@@ -2586,6 +2751,28 @@ const Dashboard: React.FC<DashboardProps> = ({
                               </div>
                             </div>
                           </td>
+
+                          {groupMode === 'modelo' && (
+                            <td className="px-1 py-2 text-center whitespace-nowrap">
+                              {ehModelo ? (
+                                <button
+                                  onClick={() => toggleExpandModelo(row.uniqueId)}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-mono text-gray-600 hover:bg-creme-100 transition-colors"
+                                  title={`${row.members.length} variações — clique para ${expandido ? 'recolher' : 'expandir'} a grade`}
+                                >
+                                  <ChevronDown size={13} className={`transition-transform ${expandido ? '' : '-rotate-90'}`} />
+                                  {row.members.length}
+                                  {row.furos > 0 && (
+                                    <span className="px-1 rounded bg-red-100 text-red-700 font-bold" title={`${row.furos} furo(s) de grade: tamanho zerado que vendeu em 12m`}>
+                                      {row.furos}
+                                    </span>
+                                  )}
+                                </button>
+                              ) : (
+                                <span className="text-gray-300 text-xs">—</span>
+                              )}
+                            </td>
+                          )}
 
                           {/* Dynamic columns */}
                           {visibleColumns.map(colKey => {
@@ -2839,6 +3026,45 @@ const Dashboard: React.FC<DashboardProps> = ({
                             {formatCurrencyShort(row.totalValue)}
                           </td>
                         </tr>
+
+                        {expandido && (
+                          <tr>
+                            <td colSpan={visibleColumns.length + 6} className="px-6 py-3 bg-creme-50 border-b border-creme-200">
+                              <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">
+                                Grade de tamanhos — estoque por variação
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                                {row.members.map((m: any) => {
+                                  const rotulo = m.original?.numeracao
+                                    ? `aro ${m.original.numeracao}`
+                                    : (m.original?.sufixo_variacao
+                                        ?? (String(m.sku).includes('-') ? String(m.sku).split('-').slice(1).join('-') : 'única'));
+                                  const furo = m.original?.eh_variacao && m.stock <= 0 && (m.receita12m ?? 0) > 0;
+                                  const diasUlt = m.lastSaleDate
+                                    ? Math.floor((Date.now() - m.lastSaleDate.getTime()) / 86400000)
+                                    : null;
+                                  return (
+                                    <span
+                                      key={m.uniqueId}
+                                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono border ${furo ? 'bg-red-50 border-red-200 text-red-700' : m.stock > 0 ? 'bg-white border-creme-200 text-gray-700' : 'bg-creme-100 border-creme-200 text-gray-400'}`}
+                                      title={`${m.sku}${diasUlt !== null ? ` · última venda há ${diasUlt}d` : ' · nunca vendeu'}`}
+                                    >
+                                      {rotulo} · <b>{m.stock}</b>
+                                      {furo && diasUlt !== null && <span className="font-sans">— vendeu há {diasUlt}d</span>}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                              {row.furos > 0 && (
+                                <p className="text-xs text-red-700 mt-2">
+                                  ⚠ {row.furos} furo{row.furos > 1 ? 's' : ''} de grade: tamanho zerado que vendeu nos últimos 12 meses — prioridade de fabricação.
+                                </p>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       );
                     })
                   )}

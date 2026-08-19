@@ -2,6 +2,21 @@
 
 > 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
 
+## feat(gestao-estoque): matriz "Por modelo" — grade de tamanhos expansivel com alerta de furo (v2.83.11)
+
+Pedido do Alisson (18/08): a matriz plana repetia o mesmo anel N vezes (1 por aro).
+
+- **1 linha por MODELO** (default): estoque/receita/vendas das variacoes SOMADOS;
+  ABC recalculada no nivel do modelo; risco = pior peca; DIO do modelo.
+- **Clique expande a grade**: chips por tamanho (aro X · saldo), em vermelho o
+  **furo de grade** (tamanho zerado que vendeu em 12m) com "vendeu ha Xd" —
+  alerta n1 de auditoria de joalheria; contador de furos na propria linha.
+- **Toggle "Por modelo / Por peça"** — visao plana antiga continua disponivel.
+- Selecionar/ocultar um modelo age sobre todas as variacoes (promocao e CSV
+  seguem por peca real); edicao inline so na visao por peca.
+- Reuso: classificarABC() e compararItens() viraram fonte unica (peca E modelo).
+- 100% na tela — sem mudanca de banco; usa pai/variacao/numeracao ligados na v2.83.10.
+
 ## fix(gestao-estoque): leva 2 do pente-fino — fornecedor/variacao ligados, 30+ consertos medios e leves (v2.83.10)
 
 Continuacao da v2.83.9 (mesma leva de teste). Modulo inteiro alinhado as fontes
