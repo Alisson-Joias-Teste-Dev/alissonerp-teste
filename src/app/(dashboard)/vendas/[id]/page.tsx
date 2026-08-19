@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import VendaDetalheClient from "./VendaDetalheClient";
 import { calcularTetoDesconto, FULL_ACCESS_ROLES_DESCONTO } from "@/lib/desconto/precificar-item";
 import { buscarFallbackDescontoSemCadastro } from "@/lib/aprovacao-regras";
+import { isMasterAdmin } from "@/lib/master-admin";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -50,6 +51,12 @@ export default async function VendaDetalhePage({ params }: Props) {
 
   const descontoAuthThreshold = maxDesconto;
 
+  // REGRA DE NEGÓCIO (19/08/2026): identifica o master admin (Alisson) pra
+  // liberar o botão "Aprovar como Ação Marketing" — é decisão pessoal do
+  // dono, nunca por role/cargo. Ver src/lib/master-admin.ts e approveVenda().
+  // IMPACTO SE REMOVIDO: botão de aprovação-cortesia deixa de aparecer.
+  const souMasterAdmin = user ? await isMasterAdmin(user.id) : false;
+
   return (
     <VendaDetalheClient
       vendaId={Number(id)}
@@ -58,6 +65,7 @@ export default async function VendaDetalhePage({ params }: Props) {
       isFullAccess={FULL_ACCESS.includes(role)}
       maxDesconto={maxDesconto}
       descontoAuthThreshold={descontoAuthThreshold}
+      isMasterAdmin={souMasterAdmin}
     />
   );
 }

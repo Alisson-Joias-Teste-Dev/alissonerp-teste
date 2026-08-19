@@ -30,6 +30,8 @@ import { verificarReposicaoAutomatica } from "@/lib/reposicao-automatica";
 import { getDescontoThreshold, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
 import { reverterAplicacaoVale } from "@/lib/vale-troca";
 import { orcamentoFichaToDados, nomeItemOrdem } from "@/lib/orcamento-ficha-to-dados";
+import { isMasterAdmin } from "@/lib/master-admin";
+import { logAudit } from "@/lib/audit";
 
 // ─── Tipos internos ──────────────────────────────────────────────────────────
 
@@ -549,6 +551,8 @@ export async function criarOrdemDeServico(
 
 export interface ApproveVendaOpts {
   tinyBestEffort?: boolean;
+  /** Aprovação "Ação Marketing" (cortesia) — ver bloco de regra de negócio abaixo. */
+  marketingCortesia?: boolean;
 }
 
 export async function approveVenda(
@@ -617,6 +621,43 @@ export async function approveVenda(
       VALUES ('approveVenda_bloqueado', ${JSON.stringify({ vendaId, userId, motivo: "desconto_pendente" })}::text::jsonb, 409, 'desconto >${approveVendaThreshold}% sem aprovação')
     `.catch((e) => console.error("[approveVenda] webhook_log falhou:", e));
     throw new Error(`Venda tem desconto acima de ${approveVendaThreshold}% aguardando aprovação. Solicite aprovação de desconto antes de prosseguir.`);
+  }
+
+  // ── Aprovação "Ação Marketing" (cortesia) — só o Alisson ──────────────────
+  // REGRA DE NEGÓCIO (19/08/2026 — decisão Jonathan): brinde/cortesia para
+  // cliente, aprovado pelo próprio Alisson (master admin) pelo caminho normal
+  // de aprovação. Lança AQUI (antes do guard de saldo abaixo) um pagamento
+  // cobrindo o saldo aberto com forma='Ação Marketing', já confirmado — assim
+  // verificarSaldoDeclarado() e a trigger fn_venda_gerar_conta_receber veem a
+  // venda como paga e NÃO nasce cobrança real pro cliente. Só o master admin
+  // pode disparar isso — é decisão pessoal do dono, nunca por role/cargo.
+  // IMPACTO SE REMOVIDO: perde-se a forma de aprovar venda de cortesia sem
+  // gerar conta a receber indevida; venda 30612 é o caso que originou a regra.
+  if (opts.marketingCortesia) {
+    if (!(await isMasterAdmin(userId))) {
+      throw new Error("Apenas o Alisson pode aprovar como Ação Marketing.");
+    }
+    const [saldoAtual] = await sql`
+      SELECT v.total_venda::numeric AS total_venda,
+             COALESCE((SELECT SUM(valor) FROM alissonerp.pagamentos_venda
+                       WHERE venda_id = ${vendaId} AND status = 'confirmado'), 0)::numeric AS pago
+      FROM alissonerp.vendas_erp v WHERE v.id = ${vendaId}
+    `;
+    const faltaCobrir = Number(saldoAtual.total_venda) - Number(saldoAtual.pago);
+    if (faltaCobrir > 0.01) {
+      const [pg] = await sql`
+        INSERT INTO alissonerp.pagamentos_venda (venda_id, forma, valor, status, source, data_confirmacao, created_at)
+        VALUES (${vendaId}, 'Ação Marketing', ${faltaCobrir}, 'confirmado', 'manual', NOW(), NOW())
+        RETURNING id
+      `;
+      await logAudit(sql, {
+        tabela: "pagamentos_venda",
+        operacao: "INSERT",
+        registro_id: pg.id,
+        usuario_id: userId,
+        dados_depois: { venda_id: vendaId, forma: "Ação Marketing", valor: faltaCobrir, status: "confirmado" },
+      });
+    }
   }
 
   // ── Bloquear aprovação se sobra saldo SEM forma de pagamento declarada ────

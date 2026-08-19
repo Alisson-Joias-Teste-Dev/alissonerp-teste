@@ -7,7 +7,7 @@ import {
   ArrowLeft, Search, X, Plus, Loader2, CheckCircle, XCircle, AlertCircle,
   Truck, Video, RefreshCw, Share2, Download,
   Check as CheckIcon, FileText, UserPlus, MapPin, Pencil,
-  RotateCcw, ArrowRight, PackageCheck, ScanLine, Bike, AlertTriangle, Factory,
+  RotateCcw, ArrowRight, PackageCheck, ScanLine, Bike, AlertTriangle, Factory, Gift,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { maskCpfCnpj, maskCelular, onlyDigits } from "@/lib/formatters";
@@ -477,6 +477,8 @@ interface Props {
   isFullAccess: boolean;
   maxDesconto: number;
   descontoAuthThreshold?: number;
+  /** Master admin (Alisson) — libera o botão "Aprovar como Ação Marketing". */
+  isMasterAdmin?: boolean;
 }
 
 interface PendingAuth {
@@ -486,7 +488,7 @@ interface PendingAuth {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAccess, maxDesconto, descontoAuthThreshold }: Props) {
+export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAccess, maxDesconto, descontoAuthThreshold, isMasterAdmin = false }: Props) {
   const router = useRouter();
 
   // Só a direção reatribui o vendedor da venda (afeta comissão). Consultora e
@@ -1949,13 +1951,13 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
   }
 
   // ── Status change ───────────────────────────────────────────────────────────
-  async function changeSituacao(s: string) {
+  async function changeSituacao(s: string, extra?: Record<string, unknown>) {
     if (!venda) return;
     setUpdating(true); setSaveErr(""); setSaveInfo("");
     try {
       const res = await fetch(`/api/vendas/${venda.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ situacao: s, client_updated_at: venda.updated_at }),
+        body: JSON.stringify({ situacao: s, client_updated_at: venda.updated_at, ...extra }),
       });
       // Lê como texto primeiro para evitar crash se resposta não for JSON
       // (ex.: erro de trigger do banco que vira HTML 500).
@@ -2233,6 +2235,16 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
     formaEnvioId !== "" &&
     itens.length > 0 &&
     venda.pagamentos.length > 0
+  );
+
+  // Validação para aprovar como "Ação Marketing" (cortesia) — mesma regra de
+  // podeAprovar, MENOS a exigência de pagamento: o próprio backend lança o
+  // pagamento "Ação Marketing" cobrindo o saldo (ver approveVenda()).
+  const podeAprovarMarketing = !!(
+    venda.cliente_id &&
+    vendedorSel !== "" &&
+    formaEnvioId !== "" &&
+    itens.length > 0
   );
 
   // Crédito A Receber — usa campo próprio (aprovacao_credito_tarefa_id)
@@ -4694,6 +4706,23 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
               <span className="text-xs flex items-center gap-1" style={{ color: "#9CA3AF" }}>
                 <Loader2 size={12} className="animate-spin" /> Salvando...
               </span>
+            )}
+            {/* REGRA DE NEGÓCIO (19/08/2026): botão visível SÓ pro master admin
+                (Alisson) — aprova a venda como cortesia/brinde de marketing,
+                sem gerar conta a receber real (backend lança o pagamento
+                "Ação Marketing" cobrindo o saldo antes de aprovar).
+                IMPACTO SE REMOVIDO: só sobra o ajuste manual no banco. */}
+            {isMasterAdmin && venda.situacao === "rascunho" && (
+              <button
+                onClick={() => changeSituacao("aprovado", { marketing_cortesia: true })}
+                disabled={updating || saving || !podeAprovarMarketing}
+                className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90 border"
+                style={{ borderColor: C.esmeralda, color: C.esmeralda, backgroundColor: "transparent" }}
+                title="Aprova a venda como cortesia/marketing, sem cobrar o cliente"
+              >
+                {updating ? <Loader2 size={14} className="animate-spin" /> : <Gift size={14} />}
+                Aprovar como Ação Marketing
+              </button>
             )}
             {proximasAcoes.map(acao => {
               const needsValidation = acao.value === "aprovado" || acao.value === "concluido";
