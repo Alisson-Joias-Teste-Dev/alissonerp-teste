@@ -2,6 +2,18 @@
 
 > 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
 
+## fix(gestao-estoque): filtro Fornecedor completo — fallback pro fornecedor do Tiny (v2.83.14)
+
+Investigacao do caso "Neto" (19/08, teste ao vivo na tela): filtro funcionava,
+mas so ~35 pecas tinham fornecedor na ficha do ERP — 15.419 em branco ("N/A").
+Compras comerciais nao servem de fonte (modulo novo: 20 compras). O espelho do
+Tiny JA traz fornecedor por produto (public.produtos.fornecedor_etl, usado pela
+rota de fabricacao).
+
+- Rota da tela: fornecedor = COALESCE(erp_produtos.fornecedor, fornecedor_etl)
+  — ficha manual manda; vazia, vale o do Tiny. Zero escrita no banco; ETL
+  mantem atualizado.
+
 ## feat(gestao-estoque): filtro Situacao — Ativos | Inativos | Todos (v2.83.13)
 
 Pedido do Alisson (19/08): peca zerada costuma ser INATIVADA — e sumia da tela,
