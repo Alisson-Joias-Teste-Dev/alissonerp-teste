@@ -2,6 +2,21 @@
 
 > 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
 
+## fix(banco): heranca de foto do pai na vw_produto_capa nunca funcionou — migration 372 (v2.83.15)
+
+Achado da analise de dados faltantes (19/08): a view comparava
+capa_propria.produto_id (id do public.produtos) com ep.parent_id (id INTERNO da
+erp_produtos) — espacos diferentes, o fallback "capa do pai" nunca casou. Com
+14.711 variacoes, centenas de pecas aparecem "sem foto" tendo foto no pai.
+
+- Migration 372 recria a view traduzindo parent_id -> produto_id antes de
+  buscar a capa do pai. Reversivel (CREATE OR REPLACE; original na 185).
+- **PENDENTE DE APLICACAO NO BANCO** (regra: migration criada != executada) —
+  aplicar com assinatura + PGAPPNAME. Beneficia todas as telas que usam a view.
+- Planilha de cadastro incompleto entregue ao Alisson (851 pecas com estoque ou
+  venda 12m: 18 sem preco, 140 sem peso, 758 sem foto, 334 sem fornecedor...).
+  Markup fora do escopo por decisao dele.
+
 ## fix(gestao-estoque): filtro Fornecedor completo — fallback pro fornecedor do Tiny (v2.83.14)
 
 Investigacao do caso "Neto" (19/08, teste ao vivo na tela): filtro funcionava,
