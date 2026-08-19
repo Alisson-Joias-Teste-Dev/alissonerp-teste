@@ -103,7 +103,11 @@ export async function GET(req: NextRequest) {
         p.fator,
         -- Ficha propria do ERP (alissonerp.erp_produtos): fornecedor habilita o
         -- filtro de Fornecedor da tela; pai/variacao contextualiza a peca.
-        ep.fornecedor,
+        -- Fornecedor: ficha do ERP manda; vazia, cai no fornecedor que o ETL do
+        -- Tiny ja grava em public.produtos (fornecedor_etl). Sem esse fallback o
+        -- filtro Fornecedor listava ~6 nomes num catalogo de 15 mil pecas
+        -- (investigacao 19/08 — caso "Neto": 1 SKU aparecia).
+        COALESCE(NULLIF(TRIM(ep.fornecedor), ''), NULLIF(TRIM(p.fornecedor_etl), '')) AS fornecedor,
         ep.eh_pai,
         ep.eh_variacao,
         ep.parent_sku,
