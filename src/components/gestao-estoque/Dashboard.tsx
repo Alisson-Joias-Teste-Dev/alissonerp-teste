@@ -229,6 +229,9 @@ const Dashboard: React.FC<DashboardProps> = ({
   // antiga, linha a linha. Default: modelo — e assim que um auditor de
   // joalheria enxerga o estoque (o modelo vende, o tamanho e grade).
   const [groupMode, setGroupMode] = useState<'modelo' | 'peca'>('modelo');
+  // Indicadores secundarios (preco/g, parado, reposicao) recolhidos por padrao —
+  // pedido do Alisson 18/08: tela harmonica, excesso so aparece se clicar.
+  const [maisIndicadores, setMaisIndicadores] = useState(false);
   const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
   const [isMatrixFullscreen, setIsMatrixFullscreen] = useState(false);
 
@@ -1379,7 +1382,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const formatCurrencyShort = (val: number) => {
     if (!Number.isFinite(val)) return 'R$ 0';
     const abs = Math.abs(val);
-    if (abs >= 1_000_000) return `R$ ${(val / 1_000_000).toFixed(1).replace('.', ',')}M`;
+    if (abs >= 1_000_000) return `R$ ${(val / 1_000_000).toFixed(2).replace('.', ',')} mi`;
     if (abs >= 10_000)    return `R$ ${(val / 1_000).toFixed(0)}k`;
     if (abs >= 1_000)     return `R$ ${(val / 1_000).toFixed(1).replace('.', ',')}k`;
     return `R$ ${Math.round(val)}`;
@@ -1476,38 +1479,23 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-4 flex-wrap">
-            {/* Cotacao ouro — 24k e a referencia de mercado */}
+            {/* Cotacao do dia — linha unica e discreta. O capital NAO aparece
+               aqui: mora no cartao "Capital em estoque" (era duplicado e os dois
+               brigavam por atencao — harmonizacao 18/08). */}
             {goldPrice && (
-              <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${goldPrice.estale ? 'bg-creme-50 border-creme-200' : 'bg-dourado-light/20 border-dourado-light'}`}
-                   title={`${goldPrice.fonte} · atualizado ${goldPrice.atualizado_em}${goldPrice.estale ? ' (cache estálico)' : ''}`}>
-                <div className="p-1.5 rounded-lg bg-dourado-light/50 text-dourado-dark">
-                  <Gem size={18} />
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] uppercase tracking-widest text-dourado-dark font-bold leading-none">Ouro 24k hoje</p>
-                  <p className="text-lg font-mono font-bold text-gray-900 tabular-nums leading-tight mt-1">
-                    {formatCurrency(goldPrice.preco_24k_g)}<span className="text-xs font-sans text-gray-500">/g</span>
-                  </p>
-                  <p className={`text-[11px] font-mono leading-none mt-0.5 ${goldPrice.variacao_pct_24h > 0 ? 'text-emerald-600' : goldPrice.variacao_pct_24h < 0 ? 'text-red-600' : 'text-gray-500'}`}>
-                    {goldPrice.variacao_pct_24h > 0 ? '▲' : goldPrice.variacao_pct_24h < 0 ? '▼' : '—'} {Math.abs(goldPrice.variacao_pct_24h).toFixed(2)}% · 18k {formatCurrency(goldPrice.preco_18k_g)}
-                  </p>
-                </div>
+              <div className="text-right"
+                   title={`${goldPrice.fonte} · atualizado ${goldPrice.atualizado_em}${goldPrice.estale ? ' (cache)' : ''}`}>
+                <p className="text-[10px] uppercase tracking-widest text-dourado-dark font-bold leading-none">Ouro hoje</p>
+                <p className="text-sm font-mono text-gray-900 tabular-nums mt-1">
+                  24k <span className="font-bold">{formatCurrency(goldPrice.preco_24k_g)}</span>/g
+                  <span className="text-gray-400"> · </span>
+                  18k <span className="font-bold">{formatCurrency(goldPrice.preco_18k_g)}</span>/g
+                  <span className={`ml-1 ${goldPrice.variacao_pct_24h > 0 ? 'text-emerald-600' : goldPrice.variacao_pct_24h < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                    {goldPrice.variacao_pct_24h > 0 ? '▲' : goldPrice.variacao_pct_24h < 0 ? '▼' : '—'} {Math.abs(goldPrice.variacao_pct_24h).toFixed(2).replace('.', ',')}%
+                  </span>
+                </p>
               </div>
             )}
-
-            <div className="text-right">
-              <p className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold">Capital exposto</p>
-              <p className="text-2xl lg:text-3xl font-mono font-bold text-esmeralda-500 tabular-nums leading-none mt-1">
-                {formatCurrency(analysis.totalStockValue)}
-              </p>
-              {goldPrice && analysis.totalWeight > 0 && (
-                /* Joia e 18k (75% ouro): avaliar o peso pela cotacao 24k inflava
-                   o lastro em ~33% pra quem decide compra de ouro. */
-                <p className="text-[11px] text-gray-500 mt-1 font-mono">
-                  Metal contido (18k): {formatCurrency(analysis.totalWeight * goldPrice.preco_18k_g)}
-                </p>
-              )}
-            </div>
             {onRefresh && (
               <button
                 onClick={onRefresh}
@@ -1745,11 +1733,14 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <DollarSign size={20} />
               </div>
             </div>
-            <p className="text-3xl lg:text-4xl font-mono font-bold text-esmeralda-500 tabular-nums leading-none">
-              {formatCurrency(analysis.totalStockValue)}
+            {/* Compacto: R$ 6,03 mi — o valor cheio estourava o cartao.
+               Tooltip (passar o mouse) mostra centavo a centavo. */}
+            <p className="text-3xl lg:text-4xl font-mono font-bold text-esmeralda-500 tabular-nums leading-none cursor-default"
+               title={formatCurrency(analysis.totalStockValue)}>
+              {formatCurrencyShort(analysis.totalStockValue)}
             </p>
             <p className="text-sm text-gray-500 mt-3">
-              <span className="font-semibold text-gray-900">{formatNumber(analysis.totalItems)}</span> unidades em{' '}
+              <span className="font-semibold text-gray-900">{formatNumber(analysis.totalItems)}</span> pç em{' '}
               <span className="font-semibold text-gray-900">{formatNumber(analysis.productsInStock)}</span> SKUs ativos
             </p>
           </div>
@@ -1765,8 +1756,11 @@ const Dashboard: React.FC<DashboardProps> = ({
             <p className="text-3xl lg:text-4xl font-mono font-bold text-gray-900 tabular-nums leading-none">
               {analysis.totalWeight > 0 ? formatNumber(analysis.totalWeight) : '—'} <span className="text-xl text-gray-500 font-sans">g</span>
             </p>
-            <p className="text-sm text-gray-500 mt-3">
-              Equivalente a <span className="font-semibold text-gray-900">{formatNumber(analysis.totalWeight / 1000)}&nbsp;kg</span> de metal
+            <p className="text-sm text-gray-500 mt-3"
+               title={goldPrice ? `${formatNumber(analysis.totalWeight)} g × 18k ${formatCurrency(goldPrice.preco_18k_g)}/g` : undefined}>
+              {goldPrice
+                ? <>metal 18k ≈ <span className="font-semibold text-gray-900">{formatCurrencyShort(analysis.totalWeight * goldPrice.preco_18k_g)}</span></>
+                : <>Equivalente a <span className="font-semibold text-gray-900">{formatNumber(analysis.totalWeight / 1000)}&nbsp;kg</span> de metal</>}
             </p>
           </div>
 
@@ -1778,17 +1772,18 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <TrendingUp size={20} />
               </div>
             </div>
-            <p className="text-3xl lg:text-4xl font-mono font-bold text-gray-900 tabular-nums leading-none">
-              {weeklyAgg ? formatCurrency(weeklyAgg.total_valor) : '—'}
+            <p className="text-3xl lg:text-4xl font-mono font-bold text-gray-900 tabular-nums leading-none cursor-default"
+               title={weeklyAgg ? formatCurrency(weeklyAgg.total_valor) : undefined}>
+              {weeklyAgg ? formatCurrencyShort(weeklyAgg.total_valor) : '—'}
             </p>
             <div className="flex items-end justify-between gap-2 mt-3">
               <p className="text-sm text-gray-500">
                 {weeklyAgg ? (
                   <>
                     <span className={weeklyAgg.delta_pct_vs_4sem_anteriores >= 0 ? 'text-emerald-600 font-semibold' : 'text-red-600 font-semibold'}>
-                      {weeklyAgg.delta_pct_vs_4sem_anteriores >= 0 ? '▲' : '▼'} {Math.abs(weeklyAgg.delta_pct_vs_4sem_anteriores).toFixed(1)}%
+                      {weeklyAgg.delta_pct_vs_4sem_anteriores >= 0 ? '▲' : '▼'} {Math.abs(weeklyAgg.delta_pct_vs_4sem_anteriores).toFixed(1).replace('.', ',')}%
                     </span>
-                    {' '}vs 4 sem anteriores
+                    {' '}vs 4 sem fechadas
                   </>
                 ) : 'Carregando série…'}
               </p>
@@ -1796,52 +1791,57 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
 
-          {/* Preço médio / grama */}
-          <div className="bg-white border border-creme-200 rounded-2xl p-6 hover:border-purple-300 transition-colors">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs uppercase tracking-[0.15em] font-semibold text-gray-500">Preço médio / grama</p>
-              <div className="p-2 rounded-lg bg-purple-50 text-purple-600">
-                <DollarSign size={20} />
-              </div>
-            </div>
-            <p className="text-3xl lg:text-4xl font-mono font-bold text-gray-900 tabular-nums leading-none">
-              {formatCurrency(analysis.avgPricePerGram)}
-            </p>
-            <p className="text-sm text-gray-500 mt-3">
-              {goldPrice && analysis.avgPricePerGram > 0 ? (
-                <>Multiplicador <span className="font-semibold text-gray-900">{(analysis.avgPricePerGram / goldPrice.preco_24k_g).toFixed(2)}×</span> sobre o ouro 24k</>
-              ) : 'Saída média por grama comercializada'}
-            </p>
-          </div>
-        </section>
-
-        {/* KPI ALERT ROW — tres cartoes de situacao (clicaveis) */}
-        <section className="order-4 grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5">
-          {/* Alerta crítico */}
+          {/* Alerta critico — promovido pro hero (dinheiro em risco e essencial;
+             preco medio/grama desceu pros indicadores recolhidos) */}
           <button
             onClick={handleCriticalClick}
             className={`text-left bg-white border rounded-2xl p-6 transition-all ${filterScope === 'critical' ? 'border-red-400 shadow-[0_0_30px_rgba(248,113,113,0.15)] ring-1 ring-red-200' : 'border-creme-200 hover:border-red-300'}`}
           >
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
-                </span>
-                <p className="text-xs uppercase tracking-widest font-bold text-red-600">Alerta crítico</p>
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs uppercase tracking-[0.15em] font-semibold text-red-600">Risco crítico</p>
+              <div className="p-2 rounded-lg bg-red-50 text-red-600">
+                <AlertCircle size={20} />
               </div>
-              <AlertCircle size={18} className="text-red-500" />
             </div>
-            <p className="text-3xl font-mono font-bold text-red-600 tabular-nums leading-none">
-              {formatCurrency(analysis.criticalCapital)}
+            <p className="text-3xl lg:text-4xl font-mono font-bold text-red-600 tabular-nums leading-none cursor-default"
+               title={formatCurrency(analysis.criticalCapital)}>
+              {formatCurrencyShort(analysis.criticalCapital)}
             </p>
-            <div className="flex items-center gap-4 mt-4 text-sm">
-              <span className="text-gray-600"><span className="font-semibold text-red-600">{analysis.criticalCount}</span> peças</span>
-              <span className="text-gray-400">·</span>
-              <span className="text-gray-600">Ticket <span className="font-semibold text-gray-900">{formatCurrency(analysis.avgCriticalPrice)}</span></span>
-            </div>
-            <p className="text-[11px] uppercase tracking-wider text-gray-400 mt-3">Score ≥ 60 · Clique para filtrar</p>
+            <p className="text-sm text-gray-500 mt-3">
+              <span className="font-semibold text-red-600">{analysis.criticalCount}</span> pç · score ≥ 60 · clique filtra
+            </p>
           </button>
+        </section>
+
+        {/* MAIS INDICADORES — secundarios recolhidos por padrao (harmonizacao
+           18/08): preco/g, parado >180d e reposicao so aparecem ao clicar. */}
+        <section className="order-4">
+          <button
+            onClick={() => setMaisIndicadores(!maisIndicadores)}
+            className="w-full flex items-center gap-2 px-4 py-2.5 bg-white border border-creme-200 rounded-xl text-sm text-gray-600 hover:border-esmeralda-300 hover:text-esmeralda-500 transition-colors"
+          >
+            <ChevronDown size={14} className={`transition-transform ${maisIndicadores ? '' : '-rotate-90'}`} />
+            <span className="font-semibold">Mais indicadores</span>
+            <span className="text-xs text-gray-400">preço médio/grama · parado &gt;180d · em reposição</span>
+          </button>
+          {maisIndicadores && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5 mt-3">
+          {/* Preço médio / grama */}
+          <div className="bg-white border border-creme-200 rounded-2xl p-6 hover:border-purple-300 transition-colors">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs uppercase tracking-widest font-bold text-gray-600">Preço médio / grama</p>
+              <DollarSign size={18} className="text-purple-500" />
+            </div>
+            <p className="text-3xl font-mono font-bold text-gray-900 tabular-nums leading-none cursor-default"
+               title={formatCurrency(analysis.avgPricePerGram)}>
+              {formatCurrency(analysis.avgPricePerGram)}
+            </p>
+            <p className="text-sm text-gray-500 mt-4">
+              {goldPrice && analysis.avgPricePerGram > 0 ? (
+                <>Multiplicador <span className="font-semibold text-gray-900">{(analysis.avgPricePerGram / goldPrice.preco_24k_g).toFixed(2).replace('.', ',')}×</span> sobre o ouro 24k</>
+              ) : 'Saída média por grama comercializada'}
+            </p>
+          </div>
 
           {/* Estoque parado */}
           <button
@@ -1852,8 +1852,9 @@ const Dashboard: React.FC<DashboardProps> = ({
               <p className="text-xs uppercase tracking-widest font-bold text-orange-600">Parado &gt; 180 dias</p>
               <CalendarDays size={18} className="text-orange-500" />
             </div>
-            <p className="text-3xl font-mono font-bold text-orange-600 tabular-nums leading-none">
-              {formatCurrency(analysis.idleCapital)}
+            <p className="text-3xl font-mono font-bold text-orange-600 tabular-nums leading-none cursor-default"
+               title={formatCurrency(analysis.idleCapital)}>
+              {formatCurrencyShort(analysis.idleCapital)}
             </p>
             <div className="flex items-center gap-4 mt-4 text-sm">
               <span className="text-gray-600"><span className="font-semibold text-orange-600">{formatNumber(analysis.idleItemsCount)}</span> peças sem giro</span>
@@ -1881,6 +1882,8 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <p className="text-[11px] uppercase tracking-wider text-gray-400 mt-3">Oportunidade de produção</p>
           </div>
+          </div>
+          )}
         </section>
 
         {/* TOP CRITICAL ITEM — faixa destacada */}

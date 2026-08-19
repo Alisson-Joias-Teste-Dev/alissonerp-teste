@@ -2,6 +2,22 @@
 
 > 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
 
+## fix(gestao-estoque): topo harmonizado — numeros compactos, sem duplicacao, secundarios recolhidos (v2.83.12)
+
+Pedido do Alisson (18/08, com print da tela): numeros estourando os cartoes,
+capital repetido em 2 lugares, excesso de informacao aberta.
+
+- **Numeros compactos com padrao unico**: R$ 6,03 mi / R$ 285 mil nos cartoes;
+  valor completo no tooltip (passar o mouse). Nada estoura mais o cartao.
+- **Fim das duplicacoes**: capital so no cartao (saiu do topo); cotacao do ouro
+  virou linha discreta 24k + 18k juntas; "metal 18k ≈ R$" virou legenda do
+  cartao Peso em Ouro.
+- **Hero com o que importa**: Capital · Peso em ouro · Vendas 12 sem · Risco
+  critico (promovido, vermelho, clique filtra).
+- **"Mais indicadores" recolhido**: preco medio/grama, parado >180d e reposicao
+  so aparecem ao clicar.
+- Percentuais e multiplicadores com virgula (pt-BR); rotulo "vs 4 sem fechadas".
+
 ## feat(gestao-estoque): matriz "Por modelo" — grade de tamanhos expansivel com alerta de furo (v2.83.11)
 
 Pedido do Alisson (18/08): a matriz plana repetia o mesmo anel N vezes (1 por aro).
