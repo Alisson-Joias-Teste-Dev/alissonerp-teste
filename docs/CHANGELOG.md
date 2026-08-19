@@ -2,6 +2,13 @@
 
 > 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
 
+## feat(gestao-estoque): data da primeira venda na rota de oportunidades (v2.83.16)
+
+Base da ordem de compra por ritmo historico (regra do Alisson 19/08): total
+vendido na historia ÷ tempo desde a primeira venda ate hoje -> previsao 2 meses.
+A rota de oportunidades passa a devolver `data_primeira_venda` (MIN(data_venda)
+das duas origens de venda).
+
 ## fix(banco): heranca de foto do pai na vw_produto_capa nunca funcionou — migration 372 (v2.83.15)
 
 Achado da analise de dados faltantes (19/08): a view comparava

@@ -68,6 +68,7 @@ export async function GET(req: NextRequest) {
       qtd_vendida_total: string;
       qtd_vendas_distintas: number;
       receita_total: string;
+      data_primeira_venda: Date | null;
       data_ultima_venda: Date | null;
       vendas_365d: number;
       vendas_90d: number;
@@ -92,6 +93,10 @@ export async function GET(req: NextRequest) {
           COUNT(DISTINCT venda_key)::int         AS qtd_vendas_distintas,
           COALESCE(SUM(quantidade), 0)::numeric  AS qtd_vendida_total,
           COALESCE(SUM(preco_total), 0)::numeric AS receita_total,
+          -- Primeira venda = inicio da "vida" da peca no mercado. Base da ordem
+          -- de compra por ritmo historico (regra do Alisson 19/08: total vendido
+          -- na historia ÷ tempo desde a primeira entrada ate hoje).
+          MIN(data_venda)                        AS data_primeira_venda,
           MAX(data_venda)                        AS data_ultima_venda,
           COUNT(DISTINCT CASE WHEN data_venda >= CURRENT_DATE - INTERVAL '365 days' THEN venda_key END)::int AS vendas_365d,
           COUNT(DISTINCT CASE WHEN data_venda >= CURRENT_DATE - INTERVAL '90 days'  THEN venda_key END)::int AS vendas_90d
@@ -118,6 +123,7 @@ export async function GET(req: NextRequest) {
         va.qtd_vendida_total,
         va.qtd_vendas_distintas,
         va.receita_total,
+        va.data_primeira_venda,
         va.data_ultima_venda,
         va.vendas_365d,
         va.vendas_90d
@@ -160,6 +166,7 @@ export async function GET(req: NextRequest) {
       qtd_vendida_total: Number(r.qtd_vendida_total) || 0,
       qtd_vendas_distintas: r.qtd_vendas_distintas,
       receita_total: Number(r.receita_total) || 0,
+      data_primeira_venda: r.data_primeira_venda ? (r.data_primeira_venda instanceof Date ? r.data_primeira_venda.toISOString() : String(r.data_primeira_venda)) : null,
       data_ultima_venda: r.data_ultima_venda ? (r.data_ultima_venda instanceof Date ? r.data_ultima_venda.toISOString() : String(r.data_ultima_venda)) : null,
       vendas_365d: r.vendas_365d,
       vendas_90d: r.vendas_90d,
