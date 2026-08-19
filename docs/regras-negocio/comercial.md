@@ -243,6 +243,40 @@ Regra de ferro daqui pra frente: **testar com build de produção** (`npm run bu
 
 **Backtest** (179 aprovações reais, 18/03 a 05/08/2026): barraria de 11 a 16 — cerca de 1 venda a cada 12 dias. Caso limítrofe conhecido: venda 15895, faltavam R$ 20 (provável frete) — para, e é o comportamento escolhido.
 
+## 6.2 "Ação Marketing" (cortesia) — aprovação do Alisson via tarefa (19/08/2026)
+
+**A regra.** "Ação Marketing" é uma forma de pagamento normal no formulário (`PagamentoForm.tsx`,
+texto livre em `pagamentos_venda.forma`, sem CHECK) — qualquer vendedora escolhe, igual
+Pix/Dinheiro/A Receber, e nasce `status='pendente'`. Ao pedir aprovação da venda, se sobrar
+pagamento "Ação Marketing" pendente, o sistema cria automaticamente uma **tarefa pro master admin
+(Alisson)** — mesma arquitetura já usada por desconto acima do limite (§6) e por "A Receber"/
+crédito (`vendas-credito-aprovar.ts`): coluna própria em `vendas_erp.aprovacao_marketing_tarefa_id`
+(migration 373), pra não bloquear/colidir com as outras aprovações pendentes na mesma venda.
+
+**Diferença do crédito.** Lá o aprovador é resolvido pela config (`resolverAprovadores`, gerente ou
+diretor conforme saldo disponível). Aqui o aprovador é **sempre** o master admin
+(`getMasterAdminId()`, `src/lib/master-admin.ts`) — fixo, sem tier, sem CATÁLOGO config-first. É
+decisão de negócio (só o dono decide brinde/cortesia), não uma regra configurável.
+
+**Como aprova.** Alisson abre a tarefa pela tela normal (`/tarefas/[id]`) e decide como qualquer
+outra. No dispatcher (`PATCH /api/tarefas/[id]/aprovacao`), o bloco `tipo === "acao_marketing"`
+**confirma o pagamento** (`status='confirmado'`) **antes** de chamar `approveVenda()` — como o
+saldo já está coberto, a trigger `fn_venda_gerar_conta_receber` não cria conta a receber real.
+
+**Por que não precisa de `podeDecidir`.** `eventoDaTarefa()` (`src/lib/aprovacoes/evento-da-tarefa.ts`)
+devolve `null` pra `tipo === "acao_marketing"` de propósito — mesmo padrão de
+`inventario_solicitacao`, não é evento do CATÁLOGO. O portão genérico do PATCH, sem evento, só
+libera quem está gravado como `aprovador_id` (o Alisson) — ninguém mais decide essa tarefa.
+
+**Guard em `approveVenda()`.** Bloqueia a aprovação direta (fora da tarefa) enquanto sobrar
+pagamento "Ação Marketing" `pendente` — mesmo estilo dos guards de desconto/cartão que já existem
+ali. Fecha a brecha de alguém aprovar a venda direto (PATCH `/api/vendas/[id]`) sem passar pelo
+Alisson. Esse guard nunca pega o caminho legítimo: a tarefa CONFIRMA o pagamento antes de chamar
+`approveVenda`.
+
+**O que NÃO faz.** Não recria o botão "aprovar direto" da primeira tentativa (v2.85.12, revertida)
+— a decisão do Alisson agora é sempre pela tela de tarefas, igual às outras aprovações.
+
 ## 7. Inventário do estoque comercial (v2.80.0)
 
 - **Inventário é auditoria, NÃO ajusta estoque.** Concluir congela a contagem; `ajustes_gerados` é sempre 0. Divergências são tratadas manualmente item a item depois de investigar. (O helper `gerarAjustesDivergencias` existe em `src/lib/inventario-helpers.ts` mas está desligado de propósito.)

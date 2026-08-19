@@ -91,6 +91,8 @@ export async function GET(
       (SELECT t.status FROM alissonerp.tarefas t WHERE t.id = ve.aprovacao_desconto_tarefa_id) AS aprovacao_desconto_status,
       ve.aprovacao_cartao_desconto_tarefa_id,
       (SELECT t.status FROM alissonerp.tarefas t WHERE t.id = ve.aprovacao_cartao_desconto_tarefa_id) AS aprovacao_cartao_desconto_status,
+      ve.aprovacao_marketing_tarefa_id,
+      (SELECT t.status FROM alissonerp.tarefas t WHERE t.id = ve.aprovacao_marketing_tarefa_id) AS aprovacao_marketing_status,
       (SELECT u.nome FROM alissonerp.tarefas t JOIN alissonerp.usuarios u ON u.id = t.responsavel_id WHERE t.id = ve.aprovacao_credito_tarefa_id) AS aprovacao_credito_responsavel_nome,
       (SELECT at.id FROM alissonerp.aprovacoes_tarefa at WHERE at.tarefa_id = ve.aprovacao_credito_tarefa_id AND at.status = 'pendente' LIMIT 1) AS aprovacao_desconto_aprov_id,
       ve.desconto_aprovado_por,

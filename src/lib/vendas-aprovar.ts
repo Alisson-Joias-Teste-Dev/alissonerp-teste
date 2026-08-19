@@ -30,6 +30,8 @@ import { verificarReposicaoAutomatica } from "@/lib/reposicao-automatica";
 import { getDescontoThreshold, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
 import { reverterAplicacaoVale } from "@/lib/vale-troca";
 import { orcamentoFichaToDados, nomeItemOrdem } from "@/lib/orcamento-ficha-to-dados";
+import { getMasterAdminId } from "@/lib/master-admin";
+import { criarNotificacao } from "@/lib/notificacoes";
 
 // ─── Tipos internos ──────────────────────────────────────────────────────────
 
@@ -619,6 +621,24 @@ export async function approveVenda(
     throw new Error(`Venda tem desconto acima de ${approveVendaThreshold}% aguardando aprovação. Solicite aprovação de desconto antes de prosseguir.`);
   }
 
+  // ── Bloquear aprovação direta se tem "Ação Marketing" pendente ──────────
+  // REGRA DE NEGÓCIO (19/08/2026): "Ação Marketing" é forma de pagamento que
+  // exige aprovação do master admin (Alisson) pela tarefa — ver
+  // submeterVendaParaAprovacaoMarketing() e PATCH /api/tarefas/[id]/aprovacao.
+  // Mesmo desenho dos guards de desconto/cartão acima: bloqueia o caminho
+  // direto pra forçar passar pela tarefa. A tarefa, ao aprovar, CONFIRMA o
+  // pagamento antes de chamar approveVenda — então esse guard nunca pega o
+  // caminho legítimo (o pagamento já não está mais 'pendente' nesse ponto).
+  // IMPACTO SE REMOVIDO: qualquer um poderia aprovar a venda direto mesmo com
+  // "Ação Marketing" pendente, pulando a decisão do Alisson.
+  const [marketingPendente] = await sql`
+    SELECT COUNT(*)::int AS c FROM alissonerp.pagamentos_venda
+    WHERE venda_id = ${vendaId} AND forma = 'Ação Marketing' AND status = 'pendente'
+  `;
+  if (Number(marketingPendente?.c ?? 0) > 0) {
+    throw new Error(`Venda tem pagamento "Ação Marketing" pendente de aprovação do Alisson. Peça aprovação pela tela de aprovações.`);
+  }
+
   // ── Bloquear aprovação se sobra saldo SEM forma de pagamento declarada ────
   // REGRA DE NEGÓCIO (06/08/2026): não se aprova venda com saldo que ninguém
   // declarou como vai ser pago. A venda 15861 foi aprovada com R$ 2.000 de Pix
@@ -754,6 +774,129 @@ export async function approveVenda(
     ok: true,
     ...(ordemCriada ? { ordem_criada: ordemCriada } : {}),
     ...(tinyErro ? { tiny_erro: tinyErro } : {}),
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// submeterVendaParaAprovacaoMarketing
+//
+// REGRA DE NEGÓCIO (19/08/2026): "Ação Marketing" (cortesia/brinde) é uma
+// forma de pagamento igual às outras no formulário — qualquer um lança. Ao
+// pedir aprovação da venda, se houver pagamento "Ação Marketing" pendente,
+// cria tarefa DIRETO pro master admin (Alisson) — sem tier, sem config-first
+// (diferente do crédito/"A Receber", que roteia por resolverAprovadores).
+// Espelha submeterVendaParaAprovacaoCredito (vendas-credito-aprovar.ts), com
+// coluna própria (aprovacao_marketing_tarefa_id, migration 373) pra não
+// bloquear/colidir com desconto ou crédito pendentes na mesma venda.
+// IMPACTO SE REMOVIDO: "Ação Marketing" fica sem caminho de aprovação — o
+// guard em approveVenda acima bloqueia pra sempre.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface SubmissaoMarketingResult {
+  precisa_aprovacao: boolean;
+  tarefa_id?: number;
+  message?: string;
+  erro?: string;
+}
+
+export async function submeterVendaParaAprovacaoMarketing(
+  vendaId: number,
+  userId: string,
+): Promise<SubmissaoMarketingResult> {
+  const [totais] = await sql`
+    SELECT COALESCE(SUM(valor) FILTER (WHERE forma = 'Ação Marketing' AND status = 'pendente'), 0)::numeric AS marketing_pendente
+    FROM alissonerp.pagamentos_venda WHERE venda_id = ${vendaId}
+  `;
+  if (!totais || Number(totais.marketing_pendente) <= 0) {
+    return { precisa_aprovacao: false };
+  }
+
+  const [venda] = await sql`
+    SELECT v.id, v.numero_venda, v.total_venda,
+           c.nome AS cliente_nome, c.celular AS cliente_celular
+    FROM alissonerp.vendas_erp v
+    LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
+    WHERE v.id = ${vendaId}
+  `;
+  if (!venda) throw new Error(`Venda ${vendaId} não encontrada`);
+
+  // Mesma prevenção do crédito: sem celular, approveVenda falharia lá na
+  // frente (código de entrega vai por WhatsApp) e a venda ficaria presa.
+  const celularCliente = String(venda.cliente_celular ?? "").trim();
+  if (!celularCliente) {
+    return {
+      precisa_aprovacao: false,
+      erro: "Cadastre o celular do cliente antes de pedir aprovação — o código de entrega é enviado por WhatsApp.",
+    };
+  }
+
+  const aprovadorId = await getMasterAdminId();
+
+  const [solicitante] = await sql`
+    SELECT nome FROM alissonerp.usuarios WHERE id = ${userId}::uuid
+  `;
+
+  const result = await sql.begin(async (tx: any) => {
+    await tx`SELECT id FROM alissonerp.vendas_erp WHERE id = ${vendaId} FOR UPDATE`;
+
+    // Duplicidade ESCOPADA por tipo — não usar checagem genérica de
+    // status='aguardando_aprovacao' sem filtro (colidiria com tarefa de
+    // desconto/crédito pendente na mesma venda, de outro tipo).
+    const [jaExiste] = await tx`
+      SELECT id FROM alissonerp.tarefas
+      WHERE venda_id = ${vendaId} AND tipo = 'acao_marketing' AND status = 'aguardando_aprovacao'
+      LIMIT 1
+    `;
+    if (jaExiste) {
+      return { tarefa_id: jaExiste.id, jaExistia: true };
+    }
+
+    const titulo = `Aprovação Ação Marketing — ${venda.numero_venda} (R$ ${Number(venda.total_venda).toFixed(2)})`;
+    const descricao =
+      `Venda ${venda.numero_venda} — ${venda.cliente_nome ?? "sem cliente"}\n` +
+      `Valor total: R$ ${Number(venda.total_venda).toFixed(2)}\n` +
+      `Solicitado por: ${solicitante?.nome ?? "desconhecido"}`;
+
+    const [tarefa] = await tx`
+      INSERT INTO alissonerp.tarefas
+        (titulo, descricao, responsavel_id, criado_por, prioridade, status, venda_id, tags, tipo)
+      VALUES
+        (${titulo}, ${descricao}, ${aprovadorId}::uuid, ${userId}::uuid,
+         'alta', 'aguardando_aprovacao', ${vendaId}, ${tx.array(["aprov_marketing"])}, 'acao_marketing')
+      RETURNING id
+    `;
+
+    await tx`
+      INSERT INTO alissonerp.aprovacoes_tarefa (tarefa_id, solicitante_id, aprovador_id, status)
+      VALUES (${tarefa.id}, ${userId}::uuid, ${aprovadorId}::uuid, 'pendente')
+    `;
+
+    await tx`
+      UPDATE alissonerp.vendas_erp
+      SET aprovacao_marketing_tarefa_id = ${tarefa.id}, updated_at = NOW()
+      WHERE id = ${vendaId}
+    `;
+
+    return { tarefa_id: tarefa.id, jaExistia: false };
+  });
+
+  if (!result.jaExistia) {
+    // Notificação fora da tx — best-effort, não reverte a criação da tarefa.
+    await criarNotificacao({
+      usuarioId: aprovadorId,
+      tipo: "aprovacao",
+      titulo: `Aprovação Ação Marketing — venda ${venda.numero_venda}`,
+      mensagem: `${solicitante?.nome ?? "Alguém"} pediu aprovação de "Ação Marketing" na venda ${venda.numero_venda} (R$ ${Number(venda.total_venda).toFixed(2)}).`,
+      remetenteId: userId,
+      link: `/tarefas/${result.tarefa_id}`,
+      vendaId,
+    }).catch((e) => console.error("[submeterVendaParaAprovacaoMarketing] notificação falhou:", e));
+  }
+
+  return {
+    precisa_aprovacao: true,
+    tarefa_id: result.tarefa_id,
+    ...(result.jaExistia ? { message: "Já existe uma aprovação pendente para esta venda" } : {}),
   };
 }
 

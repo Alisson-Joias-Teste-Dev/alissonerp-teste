@@ -133,6 +133,8 @@ interface Venda {
   aprovacao_desconto_status?: string | null;
   aprovacao_cartao_desconto_tarefa_id?: number | null;
   aprovacao_cartao_desconto_status?: string | null;
+  aprovacao_marketing_tarefa_id?: number | null;
+  aprovacao_marketing_status?: string | null;
   aprovacao_desconto_aprov_id?: number | null;
   desconto_aprovado_por_nome?: string | null;
   desconto_aprovado_em?: string | null;
@@ -1750,7 +1752,7 @@ export default function VendaDetalheClient({ vendaId, role, vendedorId, isFullAc
       const res = await fetch(`/api/vendas/${venda.id}/solicitar-aprovacao`, { method: "POST" });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
-      if (d.aguardando_aprovacao_credito) {
+      if (d.aguardando_aprovacao_credito || d.aguardando_aprovacao_marketing) {
         alert(d.message ?? "Venda enviada para aprovação");
       } else if (d.ordem_criada) {
         alert(`Venda aprovada! Ordem ${d.ordem_criada} criada.`);
@@ -2237,6 +2239,10 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
 
   // Crédito A Receber — usa campo próprio (aprovacao_credito_tarefa_id)
   const temAReceber = venda.pagamentos.some(p => p.forma === "A Receber" && p.status === "pendente");
+  // Ação Marketing (cortesia) — usa campo próprio (aprovacao_marketing_tarefa_id),
+  // aprovação sempre do master admin (Alisson), nunca por cargo.
+  const temAcaoMarketingPendente = venda.pagamentos.some(p => p.forma === "Ação Marketing" && p.status === "pendente");
+  const aguardandoAprovacaoMarketing = !!venda.aprovacao_marketing_tarefa_id && venda.aprovacao_marketing_status === "aguardando_aprovacao";
   // A tarefa de aprovação de crédito termina com status "aprovada" (gerente/diretor
   // aprovou). Tarefas antigas usavam "concluida" — aceitar ambos evita que a venda já
   // aprovada continue exibindo "Solicitar Aprovação" em vez do link do Crediário.
@@ -2502,6 +2508,26 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
           </div>
           {venda.aprovacao_credito_tarefa_id && (
             <a href={`/tarefas/${venda.aprovacao_credito_tarefa_id}`}
+              className="text-xs font-semibold px-3 py-1 rounded-lg shrink-0"
+              style={{ backgroundColor: "#FDE68A", color: "#713F12" }}>
+              Ver Tarefa →
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* ── Banner aprovação de "Ação Marketing" pendente ── */}
+      {aguardandoAprovacaoMarketing && (
+        <div className="mb-3 px-4 py-3 rounded-lg border flex items-center justify-between gap-2"
+          style={{ backgroundColor: "#FEF9C3", borderColor: "#FDE68A", color: "#713F12" }}>
+          <div className="flex items-center gap-2">
+            <Loader2 size={16} className="animate-spin shrink-0" />
+            <p className="text-sm font-medium">
+              Aguardando aprovação do Alisson (Ação Marketing)
+            </p>
+          </div>
+          {venda.aprovacao_marketing_tarefa_id && (
+            <a href={`/tarefas/${venda.aprovacao_marketing_tarefa_id}`}
               className="text-xs font-semibold px-3 py-1 rounded-lg shrink-0"
               style={{ backgroundColor: "#FDE68A", color: "#713F12" }}>
               Ver Tarefa →
@@ -4698,11 +4724,11 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
             {proximasAcoes.map(acao => {
               const needsValidation = acao.value === "aprovado" || acao.value === "concluido";
               const isConcluirBloqueado = acao.value === "concluido" && temPagamentoPendente;
-              const isDisabled = updating || saving || (needsValidation && !podeAprovar) || isConcluirBloqueado || aguardandoAprovacaoCredito || (acao.value === "aprovado" && temManualMpPendente);
+              const isDisabled = updating || saving || (needsValidation && !podeAprovar) || isConcluirBloqueado || aguardandoAprovacaoCredito || aguardandoAprovacaoMarketing || (acao.value === "aprovado" && temManualMpPendente);
 
-              // Quando tem A Receber → usar solicitarAprovacao em vez de changeSituacao
-              // Consultora sem desconto alto aprova direto; só vai para aprovação se tiver A Receber ou desconto alto
-              const usarSolicitarAprovacao = acao.value === "aprovado" && (temAReceber || (!isFullAccess && !["gerente_loja", "gerente_fabrica", "diretor"].includes(role) && temDescontoAlto));
+              // Quando tem A Receber ou "Ação Marketing" pendente → usar solicitarAprovacao em vez de changeSituacao
+              // Consultora sem desconto alto aprova direto; só vai para aprovação se tiver A Receber, Ação Marketing ou desconto alto
+              const usarSolicitarAprovacao = acao.value === "aprovado" && (temAReceber || temAcaoMarketingPendente || (!isFullAccess && !["gerente_loja", "gerente_fabrica", "diretor"].includes(role) && temDescontoAlto));
               const btnLabel = aguardandoAprovacaoCredito && acao.value === "aprovado"
                 ? "Aguardando Aprovação..."
                 : usarSolicitarAprovacao ? "Enviar para Aprovação" : acao.label;

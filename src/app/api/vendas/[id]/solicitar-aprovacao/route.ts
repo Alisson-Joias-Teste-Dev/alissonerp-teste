@@ -16,7 +16,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { submeterVendaParaAprovacaoCredito } from "@/lib/vendas-credito-aprovar";
 import { HttpError } from "@/lib/devolucoes";
-import { approveVenda, verificarSaldoDeclarado } from "@/lib/vendas-aprovar";
+import { approveVenda, verificarSaldoDeclarado, submeterVendaParaAprovacaoMarketing } from "@/lib/vendas-aprovar";
 import { avaliarRegras, criarTarefaAprovacao, getDescontoThreshold, buscarLimiteDescontoCartao } from "@/lib/aprovacao-regras";
 import { ForbiddenError } from "@/lib/auth-server";
 import { requireVendaOwnership, NotFoundError } from "@/lib/auth-vendas";
@@ -60,6 +60,7 @@ export async function POST(
            v.aprovacao_credito_tarefa_id,
            v.aprovacao_desconto_tarefa_id,
            v.aprovacao_cartao_desconto_tarefa_id,
+           v.aprovacao_marketing_tarefa_id,
            v.desconto_aprovado_por,
            v.desconto_cartao_aprovado_por,
            EXISTS(
@@ -294,6 +295,39 @@ export async function POST(
     `;
 
     return NextResponse.json({ ok: true, aguardando_aprovacao_cartao: true, tarefa_id: tarefaId });
+  }
+
+  // ── Aprovação de "Ação Marketing" — campo próprio, não afeta desconto/cartão/crédito ─
+  // REGRA DE NEGÓCIO (19/08/2026): "Ação Marketing" é forma de pagamento que
+  // sempre exige aprovação do master admin (Alisson) — ver
+  // submeterVendaParaAprovacaoMarketing (src/lib/vendas-aprovar.ts).
+  if (venda.aprovacao_marketing_tarefa_id) {
+    return NextResponse.json({
+      ok: true,
+      aguardando_aprovacao_marketing: true,
+      message: "Já existe uma aprovação pendente para esta venda",
+    });
+  }
+  const [marketingPendente] = await sql`
+    SELECT COALESCE(SUM(valor), 0) AS total
+    FROM alissonerp.pagamentos_venda
+    WHERE venda_id = ${vendaId} AND forma = 'Ação Marketing' AND status = 'pendente'
+  `;
+  if (parseFloat(marketingPendente.total) > 0) {
+    try {
+      const result = await submeterVendaParaAprovacaoMarketing(vendaId, user.id);
+      if (result.erro) {
+        return NextResponse.json({ error: result.erro }, { status: 409 });
+      }
+      return NextResponse.json({
+        ok: true,
+        aguardando_aprovacao_marketing: result.precisa_aprovacao,
+        tarefa_id: result.tarefa_id,
+        message: result.message,
+      });
+    } catch (err) {
+      return internalError("[POST /api/vendas/[id]/solicitar-aprovacao] acao_marketing", err);
+    }
   }
 
   // Verificar se já tem aprovação de crédito pendente (campo próprio, não afeta desconto/cartão)

@@ -1,6 +1,36 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
+> 📋 Última atualização automática: 19/08/2026 — Versão: v2.85.14 <!-- Revisado 19/08/2026 -->
+
+## feat(vendas): "Ação Marketing" como forma de pagamento — aprovação do Alisson via tarefa (v2.85.14)
+
+**O quê:** "Ação Marketing" (cortesia/brinde) é uma forma de pagamento nova no formulário —
+qualquer vendedora escolhe, igual Pix/Dinheiro/A Receber. Ao pedir aprovação de uma venda com
+"Ação Marketing" pendente, vira automaticamente uma **tarefa para o master admin (Alisson)** —
+mesma arquitetura já usada por desconto acima do limite e por "A Receber"/crédito. Ele aprova pela
+tela normal de tarefas; ao aprovar, o backend confirma o pagamento e chama `approveVenda()` — como
+o pagamento já está confirmado, a trigger `fn_venda_gerar_conta_receber` não gera cobrança real.
+
+**Por quê:** tentativa anterior (v2.85.12, revertida) criou um botão especial só pro Alisson que
+aprovava a venda sozinho, num clique — não era esse o pedido. O correto é reaproveitar o sistema
+de tarefas de aprovação que já existe, não criar um mecanismo novo. Caso que originou a regra:
+venda 30612 (cortesia do Alisson pra um cliente).
+
+**Como:**
+- Migration 373: coluna própria `vendas_erp.aprovacao_marketing_tarefa_id` (mesmo padrão de
+  `aprovacao_credito_tarefa_id`/migration 138 e `aprovacao_desconto_tarefa_id`/migration 202 — cada
+  tipo de aprovação não bloqueia o outro).
+- `submeterVendaParaAprovacaoMarketing()` (`src/lib/vendas-aprovar.ts`) espelha
+  `submeterVendaParaAprovacaoCredito`, mas o aprovador é **sempre** o master admin
+  (`getMasterAdminId()`) — sem tier, sem config-first (diferente do crédito, que roteia por
+  `resolverAprovadores`).
+- Novo guard em `approveVenda()`: bloqueia aprovação direta se sobrar pagamento "Ação Marketing"
+  `pendente` — força passar pela tarefa (mesmo estilo dos guards de desconto/cartão já existentes).
+- Novo bloco em `PATCH /api/tarefas/[id]/aprovacao` (mesmo estilo de `cartao_desconto`/crédito) —
+  não precisa de `podeDecidir`: o portão genérico já restringe a decisão a quem está gravado como
+  aprovador (o Alisson), porque `eventoDaTarefa` devolve `null` pra esse tipo de propósito.
+- Frontend: banner "Aguardando aprovação do Alisson (Ação Marketing)" com link pra tarefa, mesmo
+  padrão visual do banner de crédito.
 
 ## feat(gestao-estoque): data da primeira venda na rota de oportunidades (v2.83.16)
 

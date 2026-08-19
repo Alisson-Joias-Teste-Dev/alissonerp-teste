@@ -28,6 +28,7 @@ import { ENTREGA_SEM_PAGAMENTO_TIPO, processarAprovacaoEntregaSemPagamento } fro
 import { liberarFreteAvulsoNoTx, recusarFreteAvulsoNoTx } from "@/lib/entrega-venda";
 import { aprovarFechamentoFreteNoTx, recusarFechamentoFreteNoTx } from "@/lib/frete-fechamento";
 import { podeDecidir, eventoDaTarefa } from "@/lib/aprovacoes";
+import { approveVenda } from "@/lib/vendas-aprovar";
 
 /**
  * REGRA DE NEGÓCIO (BLOCO 1, jul/2026 — guard de idempotência): sinaliza que o
@@ -883,6 +884,87 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[cartao_desconto] ERRO`, { ...logCtx, erro: msg });
       return internalError(`[PATCH /api/tarefas/${id}/aprovacao] cartao_desconto`, err);
+    }
+  }
+
+  // REGRA DE NEGÓCIO (19/08/2026): "Ação Marketing" (cortesia) — aprovador é
+  // SEMPRE o master admin (Alisson), fixo, sem config-first (ver
+  // submeterVendaParaAprovacaoMarketing em vendas-aprovar.ts). Por isso este
+  // bloco NÃO chama podeDecidir — o portão genérico já bastou: eventoDaTarefa
+  // devolve null pra este tipo (não modelado no CATÁLOGO de propósito), então
+  // só quem está gravado como aprovador (o Alisson) passa pelo portão acima.
+  // Ao aprovar: CONFIRMA o pagamento "Ação Marketing" ANTES de chamar
+  // approveVenda — a trigger fn_venda_gerar_conta_receber só cria cobrança
+  // real se sobrar saldo NÃO confirmado, então isso evita a cobrança.
+  // IMPACTO SE REMOVIDO: tarefa fica aprovada mas a venda nunca aprova (o
+  // guard em approveVenda bloqueia enquanto o pagamento estiver 'pendente').
+  if (tarefaInfo?.tipo === "acao_marketing" && tarefaInfo?.venda_id) {
+    const vendaIdMkt = Number(tarefaInfo.venda_id);
+    const [aprovMkt] = await sql`SELECT solicitante_id FROM alissonerp.aprovacoes_tarefa WHERE tarefa_id = ${Number(id)} LIMIT 1`;
+    try {
+      if (body.decisao === "rejeitado") {
+        await sql`
+          UPDATE alissonerp.vendas_erp
+          SET aprovacao_marketing_tarefa_id = NULL, updated_at = NOW()
+          WHERE id = ${vendaIdMkt}
+        `;
+        if (aprovMkt?.solicitante_id) {
+          await criarNotificacao({
+            usuarioId: String(aprovMkt.solicitante_id),
+            tipo: "aprovacao",
+            titulo: "Ação Marketing não aprovada",
+            mensagem: body.motivo ?? "A aprovação de 'Ação Marketing' foi recusada para esta venda.",
+            remetenteId: user.id,
+            link: `/vendas/${vendaIdMkt}`,
+            vendaId: vendaIdMkt,
+          }).catch(() => {});
+        }
+        return NextResponse.json({ ok: true, acao_marketing: { decisao: "rejeitado" } });
+      }
+
+      await sql`
+        UPDATE alissonerp.pagamentos_venda
+        SET status = 'confirmado', data_confirmacao = NOW()
+        WHERE venda_id = ${vendaIdMkt} AND forma = 'Ação Marketing' AND status = 'pendente'
+      `;
+      let erroAprovacao: string | undefined;
+      let ordemCriada: string | undefined;
+      try {
+        const aprov = await approveVenda(vendaIdMkt, user.id, { tinyBestEffort: true });
+        ordemCriada = aprov.ordem_criada;
+      } catch (err) {
+        // Mesmo tratamento do crédito: a decisão do Alisson continua válida
+        // mesmo se approveVenda falhar por motivo operacional (ex.: cliente
+        // sem celular) — não volta a tarefa pra fila.
+        erroAprovacao = err instanceof Error ? err.message : String(err);
+      }
+      if (!erroAprovacao) {
+        await sql`
+          UPDATE alissonerp.vendas_erp
+          SET aprovacao_marketing_tarefa_id = NULL, updated_at = NOW()
+          WHERE id = ${vendaIdMkt}
+        `;
+      }
+      if (aprovMkt?.solicitante_id) {
+        await criarNotificacao({
+          usuarioId: String(aprovMkt.solicitante_id),
+          tipo: "aprovacao",
+          titulo: "Ação Marketing aprovada!",
+          mensagem: erroAprovacao
+            ? `Aprovado, mas a venda não fechou automaticamente: ${erroAprovacao}. Corrija o cadastro e aprove a venda manualmente.`
+            : "A venda foi aprovada como Ação Marketing — sem cobrança do cliente.",
+          remetenteId: user.id,
+          link: `/vendas/${vendaIdMkt}`,
+          vendaId: vendaIdMkt,
+        }).catch(() => {});
+      }
+      return NextResponse.json({
+        ok: true,
+        acao_marketing: { decisao: "aprovado", ordem_criada: ordemCriada ?? null },
+        ...(erroAprovacao ? { aviso: `Aprovado, mas a venda não fechou automaticamente: ${erroAprovacao}` } : {}),
+      });
+    } catch (err) {
+      return internalError(`[PATCH /api/tarefas/${id}/aprovacao] acao_marketing`, err);
     }
   }
 

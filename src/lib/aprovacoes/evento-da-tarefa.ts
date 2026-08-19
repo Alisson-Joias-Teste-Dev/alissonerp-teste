@@ -189,5 +189,15 @@ export function eventoDaTarefa(
     return "fechamento_frete_negativo";
   }
 
+  // 'acao_marketing' (19/08/2026): devolve null DE PROPÓSITO, igual
+  // 'inventario_solicitacao' acima — não é evento do CATÁLOGO config-first.
+  // O aprovador é SEMPRE o master admin (Alisson), fixo (ver
+  // submeterVendaParaAprovacaoMarketing, vendas-aprovar.ts) — o portão
+  // genérico do PATCH já resolve isso por `ehAprovadorGravado`, sem precisar
+  // de `podeDecidir`.
+  if (tipo === "acao_marketing") {
+    return null;
+  }
+
   return null;
 }

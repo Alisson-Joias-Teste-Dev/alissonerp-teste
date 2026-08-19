@@ -204,7 +204,7 @@ export interface PagamentoFormProps {
 /** Métodos de pagamento fixos (não dependem de gateways do banco) */
 const FORMAS_PAGAMENTO_BASE = [
   "Dinheiro", "Cartão de Crédito", "Pix", "Ouro",
-  "Vale-Troca", "A Receber", "Múltiplas", "Manual (MP)", "Manual (PagBank)",
+  "Vale-Troca", "A Receber", "Ação Marketing", "Múltiplas", "Manual (MP)", "Manual (PagBank)",
 ];
 
 /**
