@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Grid, LayoutDashboard, Layers, Sparkles } from "lucide-react";
 import DataGrid from "@/components/gestao-estoque/DataGrid";
 import Dashboard from "@/components/gestao-estoque/Dashboard";
@@ -13,6 +13,7 @@ import {
   fetchDashboardData,
   deleteRecord,
 } from "@/lib/gestao-estoque/service";
+import { useErrorStore } from "@/stores/errorStore";
 import type { PromotionConflito } from "@/components/gestao-estoque/PromotionModal";
 import {
   SchemaName,
@@ -39,6 +40,14 @@ export default function GestaoEstoqueClient() {
   const [page, setPage] = useState(0);
   const [notification, setNotification] =
     useState<{ msg: string; type: "success" | "error" } | null>(null);
+  // Timer UNICO de limpeza do toast: sem cancelar o anterior, um toast novo
+  // sumia antes da hora (timer do velho disparava) e havia setState pos-unmount.
+  const notifTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agendarLimpezaNotificacao = (ms: number) => {
+    if (notifTimerRef.current) clearTimeout(notifTimerRef.current);
+    notifTimerRef.current = setTimeout(() => setNotification(null), ms);
+  };
+  useEffect(() => () => { if (notifTimerRef.current) clearTimeout(notifTimerRef.current); }, []);
 
   const [isSecurityOpen, setIsSecurityOpen] = useState(false);
   const [pendingAction, setPendingAction] =
@@ -54,42 +63,39 @@ export default function GestaoEstoqueClient() {
   const [selectedLocal, setSelectedLocal] = useState<number | null>(null);
 
   useEffect(() => {
-    fetch("/api/gestao-estoque/locais")
+    // Rota compartilhada do ERP (a copia /api/gestao-estoque/locais foi removida)
+    fetch("/api/locais-estoque")
       .then(r => r.ok ? r.json() : [])
       .then(data => Array.isArray(data) && data.length > 1 ? setLocais(data) : null)
-      .catch(() => null);
+      .catch(() =>
+        // aviso leve: sem a lista de locais a tela segue funcionando com "Todos"
+        useErrorStore.getState().push("Falha ao carregar locais de estoque", { level: "warning" }));
   }, []);
 
-  const getSearchableColumns = (cols: string[]) => {
-    const likelyText = [
-      "name", "title", "description", "email", "sku", "code", "slug",
-      "nome", "titulo", "descricao", "status", "type", "modelo", "marca", "category",
-    ];
-    return cols.filter((c) => likelyText.some((lc) => c.toLowerCase().includes(lc)));
-  };
+  // O QUE: numera cada carregamento; so a resposta do MAIS RECENTE escreve na tela.
+  // O PORQUE: a query do dashboard e pesada (ate 60s). Trocar filtro/aba rapido
+  // deixava a resposta VELHA chegar depois e sobrescrever a nova - painel exibia
+  // numeros do local errado (bug grave n5 do pente-fino 18/08).
+  // IMPACTO se remover: dado obsoleto mostrado como atual, sem nenhum aviso.
+  const reqSeqRef = useRef(0);
 
-  const loadData = useCallback(async () => {
+  // Chave do ultimo dashboard carregado (local selecionado). Trocar de aba
+  // Analises <-> Estoque NAO refaz a query mais pesada do modulo (ate 60s)
+  // se os dados desse local ja estao em memoria; 'Atualizar' força (force).
+  const dashLoadedKeyRef = useRef<string | null>(null);
+
+  const loadData = useCallback(async (force: boolean | unknown = false) => {
+    const reqId = ++reqSeqRef.current;
     setLoading(true);
     setError(null);
 
     if (viewMode === "grid") {
-      let searchCols: string[] = [];
-      if (searchTerm && columns.length > 0) {
-        searchCols = getSearchableColumns(columns);
-        if (searchCols.length === 0) {
-          searchCols = ["name", "title", "nome", "descricao", "sku", "code"];
-        }
-      }
-
+      // (a lista de colunas de busca era computacao morta: a busca real e o
+      // parametro 'busca' da /api/produtos — limpeza do pente-fino 18/08)
       const { data: fetchedData, error: fetchError, count: fetchedCount } =
-        await fetchTableData(
-          FIXED_SCHEMA,
-          FIXED_TABLE,
-          page,
-          DEFAULT_PAGE_SIZE,
-          searchTerm,
-          searchCols
-        );
+        await fetchTableData(page, DEFAULT_PAGE_SIZE, searchTerm);
+
+      if (reqId !== reqSeqRef.current) return; // resposta velha: descarta
 
       if (fetchError) {
         console.error("Erro:", fetchError);
@@ -112,12 +118,21 @@ export default function GestaoEstoqueClient() {
         }
       }
     } else {
-      const { data: dashData, error: dashError } = await fetchDashboardData(FIXED_SCHEMA, FIXED_TABLE, selectedLocal);
+      const dashKey = String(selectedLocal ?? "todos");
+      if (!force && dashLoadedKeyRef.current === dashKey) {
+        // dados deste local ja em memoria — so trocar de aba nao paga a query de novo
+        if (reqId === reqSeqRef.current) setLoading(false);
+        return;
+      }
+      const { data: dashData, error: dashError } = await fetchDashboardData(selectedLocal);
+      if (reqId !== reqSeqRef.current) return; // resposta velha: descarta
       if (dashError) {
         const msg = (dashError as { message?: string })?.message ?? JSON.stringify(dashError);
         setError(msg);
         setDashboardData([]);
+        dashLoadedKeyRef.current = null;
       } else {
+        dashLoadedKeyRef.current = dashKey;
         setDashboardData(dashData || []);
         if (dashData && dashData.length > 0) {
           const allKeys = new Set<string>();
@@ -131,7 +146,7 @@ export default function GestaoEstoqueClient() {
         }
       }
     }
-    setLoading(false);
+    if (reqId === reqSeqRef.current) setLoading(false);
   }, [page, viewMode, searchTerm, columns, selectedLocal]);
 
   useEffect(() => {
@@ -160,10 +175,10 @@ export default function GestaoEstoqueClient() {
     if (!pendingAction) return;
 
     if (pendingAction.type === "delete") {
-      const { success, error } = await deleteRecord(FIXED_SCHEMA, FIXED_TABLE, pendingAction.row);
+      const { success, error } = await deleteRecord(pendingAction.row);
       if (success) {
         setNotification({ msg: "Produto inativado (soft delete).", type: "success" });
-        loadData();
+        loadData(true); // escrita: força recarregar
       } else {
         const msg = (error as { message?: string })?.message ?? String(error);
         setNotification({ msg: `Falha ao inativar: ${msg}`, type: "error" });
@@ -175,7 +190,7 @@ export default function GestaoEstoqueClient() {
       });
     }
 
-    setTimeout(() => setNotification(null), 3000);
+    agendarLimpezaNotificacao(3000);
     setPendingAction(null);
   };
 
@@ -204,7 +219,7 @@ export default function GestaoEstoqueClient() {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         setNotification({ msg: body.error ?? "Falha ao criar promocao", type: "error" });
-        setTimeout(() => setNotification(null), 3000);
+        agendarLimpezaNotificacao(3000);
         return null;
       }
       const data = await res.json();
@@ -213,12 +228,12 @@ export default function GestaoEstoqueClient() {
         msg: `Campanha "${data.nome_campanha}" criada com ${data.itens_count} itens.`,
         type: "success",
       });
-      setTimeout(() => setNotification(null), 4000);
-      loadData();
+      agendarLimpezaNotificacao(4000);
+      loadData(true); // escrita: força recarregar
       return null;
     } catch (err) {
       setNotification({ msg: `Erro de rede: ${String(err)}`, type: "error" });
-      setTimeout(() => setNotification(null), 3000);
+      agendarLimpezaNotificacao(3000);
       return null;
     } finally {
       setPromoLoading(false);
@@ -335,7 +350,6 @@ export default function GestaoEstoqueClient() {
               loading={loading}
               error={error}
               tableName={FIXED_TABLE}
-              schema={FIXED_SCHEMA}
               onRefresh={loadData}
               onPromotion={handlePromotionRequest}
             />

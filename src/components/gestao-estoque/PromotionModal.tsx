@@ -183,7 +183,9 @@ const PromotionModal: React.FC<PromotionModalProps> = ({
     const itens: PromotionItemPayload[] = [];
     Object.entries(promoPrices).forEach(([id, raw]) => {
       const v = parseFloat(raw);
-      if (!Number.isFinite(v) || v < 0) return;
+      // v > 0: preco promocional ZERO dava peca de graca na loja se a API
+      // nao barrasse (dinheiro — validar no client tambem)
+      if (!Number.isFinite(v) || v <= 0) return;
       const produtoId = Number(id);
       if (!Number.isFinite(produtoId)) return;
       itens.push({ produto_id: produtoId, preco_promo: v });
@@ -215,6 +217,9 @@ const PromotionModal: React.FC<PromotionModalProps> = ({
     if (selectedItems.length === 0) return;
     setExportLoading(true);
     setExportProgress({ current: 0, total: selectedItems.length });
+    // try/finally: estouro de memoria do jsPDF (catalogo grande no celular)
+    // deixava o botao preso em 'Gerando...' pra sempre
+    try {
 
     // 1. Pre-fetch das imagens em paralelo (com progress)
     const imageField = (item: TableRow): string | null => {
@@ -487,8 +492,10 @@ const PromotionModal: React.FC<PromotionModalProps> = ({
     }
 
     doc.save(`catalogo_alisson_${new Date().toISOString().slice(0, 10)}.pdf`);
-    setExportLoading(false);
-    setExportProgress({ current: 0, total: 0 });
+    } finally {
+      setExportLoading(false);
+      setExportProgress({ current: 0, total: 0 });
+    }
   };
 
   return (

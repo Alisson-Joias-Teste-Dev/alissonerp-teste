@@ -40,10 +40,23 @@ const AIChat: React.FC<AIChatProps> = ({ isOpen, onClose, contextData, tableName
       const res = await fetch("/api/gestao-estoque/ai-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: msg, contextData, tableName, schema }),
+        // O QUE: envia so 50 linhas de contexto. O PORQUE: o servidor usa apenas
+        // as 50 primeiras (slice) e REJEITA acima de 200 (HTTP 413) - mandar a
+        // lista inteira do dashboard (milhares) deixava o chat mudo pra sempre.
+        // IMPACTO se remover o slice: toda pergunta volta "Sem resposta.".
+        body: JSON.stringify({ message: msg, contextData: contextData.slice(0, 50), tableName, schema }),
       });
-      const j = await res.json();
-      setMessages([...novasMensagens, { role: "assistant", content: j.text ?? "Sem resposta." }]);
+      const j = await res.json().catch(() => ({}));
+      // O QUE: mostra o erro real quando o servidor recusa (413/400/429).
+      // O PORQUE: antes o erro era engolido e virava "Sem resposta." generico.
+      if (!res.ok) {
+        setMessages([
+          ...novasMensagens,
+          { role: "assistant", content: j.error ?? `Falha na consulta (HTTP ${res.status}). Tente de novo.` },
+        ]);
+      } else {
+        setMessages([...novasMensagens, { role: "assistant", content: j.text ?? "Sem resposta." }]);
+      }
     } catch (err) {
       setMessages([
         ...novasMensagens,

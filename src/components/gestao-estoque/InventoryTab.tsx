@@ -23,96 +23,34 @@ const InventoryTab: React.FC<InventoryTabProps> = ({ data, loading, error, table
   const { entradas, saidas } = useMemo(() => {
     if (!data || data.length === 0) return { entradas: [], saidas: [] };
 
-    // Setup date boundaries for comparison (Local Time)
-    const start = new Date(`${startDate}T00:00:00`);
-    const end = new Date(`${endDate}T23:59:59.999`);
-
-    const isDateInRange = (val: any) => {
+    // Comparacao por TEXTO (YYYY-MM-DD): datas do banco sao date-only; converter
+    // pra Date misturava UTC com hora local de Fortaleza (UTC-3) e o PRIMEIRO
+    // dia do periodo escolhido caia fora do filtro.
+    const isDateInRange = (val: unknown) => {
       if (!val) return false;
-      const d = new Date(val);
-      if (isNaN(d.getTime())) return false;
-      return d >= start && d <= end;
+      const dia = String(val).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}/.test(dia)) return false;
+      return dia >= startDate && dia <= endDate;
     };
 
     const inItems: TableRow[] = [];
     const outItems: TableRow[] = [];
 
-    const isSalesTable = tableName && /venda|pedido|order|saida/i.test(tableName);
-    const isPurchaseTable = tableName && /compra|entrada|purchase/i.test(tableName);
-
+    // O QUE: reposicao (data_ultima_compra) = ENTRADA; venda (data_ultima_venda)
+    // = SAIDA. O PORQUE: a heuristica generica antiga pegava a 1a coluna de data
+    // e jogava a VENDA em Entradas — Saidas ficava 0 pra sempre (grave n2 do
+    // pente-fino 18/08; a heuristica morta foi removida na leva 2).
+    // IMPACTO se inverter: a tela volta a mostrar o movimento do estoque errado.
     data.forEach(row => {
-      // Find all columns that look like dates
-      const dateCols = Object.keys(row).filter(k => {
-        const val = row[k];
-        if (!val || typeof val !== 'string') return false;
-        // Check if it's a valid date string (e.g., ISO format or YYYY-MM-DD)
-        return /^\d{4}-\d{2}-\d{2}/.test(val) || (!isNaN(Date.parse(val)) && val.length > 8 && (val.includes('-') || val.includes('/')));
-      });
-
-      if (dateCols.length === 0) return; // No dates found in this row
-
-      // Try to identify specific date columns
-      const createdCol = dateCols.find(k => /created|criado|data_entrada|inserted/i.test(k)) || dateCols[0];
-      const updatedCol = dateCols.find(k => /updated|atualizado|data_saida|modified/i.test(k));
-
-      const createdDate = createdCol ? row[createdCol] : null;
-      const updatedDate = updatedCol ? row[updatedCol] : null;
-
-      const createdInRange = createdDate && isDateInRange(createdDate);
-      const updatedInRange = updatedDate && isDateInRange(updatedDate);
-      const anyDateInRange = dateCols.some(c => isDateInRange(row[c]));
-
-      // Try to identify status/type
-      const typeCol = Object.keys(row).find(k => /tipo|type|status/i.test(k));
-      const typeVal = typeCol ? String(row[typeCol]).toLowerCase() : '';
-      const isExplicitSaida = typeVal.includes('said') || typeVal.includes('out') || typeVal.includes('venda') || typeVal.includes('vendido');
-      const isExplicitEntrada = typeVal.includes('entrad') || typeVal.includes('in') || typeVal.includes('compra') || typeVal.includes('novo');
-
-      if (isSalesTable) {
-        if (anyDateInRange) outItems.push(row);
-      } else if (isPurchaseTable) {
-        if (anyDateInRange) inItems.push(row);
-      } else {
-        // Generic table (e.g., produtos)
-        let addedToIn = false;
-        let addedToOut = false;
-
-        if (isExplicitSaida && anyDateInRange) {
-          outItems.push(row);
-          addedToOut = true;
-        } else if (isExplicitEntrada && anyDateInRange) {
-          inItems.push(row);
-          addedToIn = true;
-        } else {
-          // If created in range, it's an entry
-          if (createdInRange) {
-            inItems.push(row);
-            addedToIn = true;
-          }
-          // If updated in range AND it's not just the creation event, it's an exit/update
-          if (updatedInRange && (!createdDate || updatedDate !== createdDate)) {
-            outItems.push(row);
-            addedToOut = true;
-          }
-        }
-
-        // Fallback: If we still haven't classified it, but it has a date in range
-        if (!addedToIn && !addedToOut && anyDateInRange) {
-          // If the column name suggests an update, it's a saida, otherwise entrada
-          const matchingCol = dateCols.find(c => isDateInRange(row[c]));
-          if (matchingCol && /updated|atualizado|saida/i.test(matchingCol)) {
-            outItems.push(row);
-          } else {
-            inItems.push(row);
-          }
-        }
-      }
+      const compraVal = row['data_ultima_compra'] ?? row['ultima_compra'];
+      if (compraVal && isDateInRange(compraVal)) inItems.push(row);
+      if (row['data_ultima_venda'] && isDateInRange(row['data_ultima_venda'])) outItems.push(row);
     });
 
     return { entradas: inItems, saidas: outItems };
-  }, [data, startDate, endDate, tableName]);
+  }, [data, startDate, endDate]);
 
-  const renderTable = (items: TableRow[], type: 'in' | 'out') => {
+  const renderTable = (items: TableRow[]) => {
     if (items.length === 0) {
       return (
         <div className="text-center py-8 text-gray-500 text-sm">
@@ -138,7 +76,8 @@ const InventoryTab: React.FC<InventoryTabProps> = ({ data, loading, error, table
               <tr key={i} className="border-b border-creme-200 hover:bg-white border border-creme-200 transition-colors">
                 {cols.map(col => (
                   <td key={col} className="p-3 text-gray-700 truncate max-w-[150px]">
-                    {String(row[col] || '-')}
+                    {/* ?? e nao ||: saldo/peso/preco 0 e valor real, nao ausencia */}
+                    {String(row[col] ?? '-')}
                   </td>
                 ))}
               </tr>
@@ -206,7 +145,7 @@ const InventoryTab: React.FC<InventoryTabProps> = ({ data, loading, error, table
             <span className="text-2xl font-bold text-green-400">{entradas.length}</span>
           </div>
           <div className="p-0 flex-1 overflow-y-auto max-h-[600px]">
-            {renderTable(entradas, 'in')}
+            {renderTable(entradas)}
           </div>
         </div>
 
@@ -222,7 +161,7 @@ const InventoryTab: React.FC<InventoryTabProps> = ({ data, loading, error, table
             <span className="text-2xl font-bold text-red-400">{saidas.length}</span>
           </div>
           <div className="p-0 flex-1 overflow-y-auto max-h-[600px]">
-            {renderTable(saidas, 'out')}
+            {renderTable(saidas)}
           </div>
         </div>
       </div>

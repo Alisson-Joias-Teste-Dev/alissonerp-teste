@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { TableRow } from "@/lib/gestao-estoque/types";
+import { TableRow, DEFAULT_PAGE_SIZE } from "@/lib/gestao-estoque/types";
 import {
   AlertCircle,
   ChevronLeft,
@@ -62,22 +62,6 @@ const DataGrid: React.FC<DataGridProps> = ({
 
     return () => clearTimeout(delayDebounceFn);
   }, [localSearch, onSearch, searchTerm]);
-
-  if (!tableName) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center text-gray-500 bg-transparent">
-        <div className="w-20 h-20 border border-creme-200 bg-creme-50 rounded-full flex items-center justify-center mb-6 shadow-2xl">
-          <AlertCircle className="text-gray-600" size={32} />
-        </div>
-        <h2 className="text-2xl font-serif text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-500 mb-2">
-          Selecione uma Fonte de Dados
-        </h2>
-        <p className="text-sm font-light text-gray-600">
-          Escolha uma tabela do menu lateral para iniciar a visualização.
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div className="flex-1 flex flex-col h-screen overflow-hidden relative">
@@ -148,7 +132,10 @@ const DataGrid: React.FC<DataGridProps> = ({
             </span>
             <button
               onClick={onNextPage}
-              disabled={loading || (data.length === 0 && page > 0)}
+              disabled={loading ||
+                /* desabilita JA na ultima pagina (antes so depois de cair numa vazia) */
+                (totalCount !== null && (page + 1) * DEFAULT_PAGE_SIZE >= totalCount) ||
+                (data.length === 0 && page > 0)}
               className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-creme-100 text-gray-600 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
             >
               <ChevronRight size={16} />

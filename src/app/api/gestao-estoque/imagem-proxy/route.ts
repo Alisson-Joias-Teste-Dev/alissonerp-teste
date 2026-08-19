@@ -8,8 +8,8 @@
  * para esse endpoint, e o servidor faz o fetch real (sem restricao CORS).
  *
  * Seguranca:
- *  - so aceita https://
- *  - whitelist de hosts (S3 Tiny + Supabase Storage)
+ *  - so aceita https:// (na URL inicial e em cada redirect)
+ *  - whitelist de hosts (S3 do Tiny + servidor proprio) — match exato ou subdominio
  *  - timeout 10s
  *  - cache 1 dia (imagens de produto raramente mudam)
  */
@@ -30,9 +30,20 @@ const HOSTS_PERMITIDOS = [
 ];
 
 function hostPermitido(url: URL): boolean {
+  // Match EXATO ou subdominio real ('.'+h). O endsWith(h) cru foi removido:
+  // 'evils3.amazonaws.com' terminava com 's3.amazonaws.com' e passava.
   return HOSTS_PERMITIDOS.some(h =>
-    url.hostname === h || url.hostname.endsWith('.' + h) || url.hostname.endsWith(h)
+    url.hostname === h || url.hostname.endsWith('.' + h)
   );
+}
+
+/**
+ * Valida a URL contra as regras do proxy (https + host permitido).
+ * Usada na URL inicial E em cada redirect — sem revalidar o destino do
+ * redirect, um host permitido podia redirecionar para rede interna (SSRF).
+ */
+function urlPermitida(u: URL): boolean {
+  return u.protocol === 'https:' && hostPermitido(u);
 }
 
 export async function GET(req: NextRequest) {
@@ -71,11 +82,34 @@ export async function GET(req: NextRequest) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
-    const upstream = await fetch(targetUrl, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'AlissonERP-ImageProxy/1.0' },
-    });
+    // redirect manual: seguimos no maximo 3 saltos, revalidando CADA destino
+    // contra a whitelist (fetch padrao seguia 3xx sem validar = furo SSRF).
+    let atual = new URL(targetUrl);
+    let upstream: Response | null = null;
+    for (let salto = 0; salto < 3; salto++) {
+      const r: Response = await fetch(atual.toString(), {
+        signal: controller.signal,
+        redirect: 'manual',
+        headers: { 'User-Agent': 'AlissonERP-ImageProxy/1.0' },
+      });
+      if (r.status >= 300 && r.status < 400) {
+        const loc = r.headers.get('location');
+        if (!loc) { upstream = r; break; }
+        const destino = new URL(loc, atual);
+        if (!urlPermitida(destino)) {
+          clearTimeout(timeout);
+          return NextResponse.json({ error: `redirect não permitido: ${destino.hostname}` }, { status: 403 });
+        }
+        atual = destino;
+        continue;
+      }
+      upstream = r;
+      break;
+    }
     clearTimeout(timeout);
+    if (!upstream) {
+      return NextResponse.json({ error: "redirects demais" }, { status: 502 });
+    }
 
     if (!upstream.ok) {
       return NextResponse.json({ error: `upstream ${upstream.status}` }, { status: upstream.status });

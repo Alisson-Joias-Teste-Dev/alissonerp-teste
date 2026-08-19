@@ -2,6 +2,95 @@
 
 > 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
 
+## fix(gestao-estoque): topo harmonizado — numeros compactos, sem duplicacao, secundarios recolhidos (v2.83.12)
+
+Pedido do Alisson (18/08, com print da tela): numeros estourando os cartoes,
+capital repetido em 2 lugares, excesso de informacao aberta.
+
+- **Numeros compactos com padrao unico**: R$ 6,03 mi / R$ 285 mil nos cartoes;
+  valor completo no tooltip (passar o mouse). Nada estoura mais o cartao.
+- **Fim das duplicacoes**: capital so no cartao (saiu do topo); cotacao do ouro
+  virou linha discreta 24k + 18k juntas; "metal 18k ≈ R$" virou legenda do
+  cartao Peso em Ouro.
+- **Hero com o que importa**: Capital · Peso em ouro · Vendas 12 sem · Risco
+  critico (promovido, vermelho, clique filtra).
+- **"Mais indicadores" recolhido**: preco medio/grama, parado >180d e reposicao
+  so aparecem ao clicar.
+- Percentuais e multiplicadores com virgula (pt-BR); rotulo "vs 4 sem fechadas".
+
+## feat(gestao-estoque): matriz "Por modelo" — grade de tamanhos expansivel com alerta de furo (v2.83.11)
+
+Pedido do Alisson (18/08): a matriz plana repetia o mesmo anel N vezes (1 por aro).
+
+- **1 linha por MODELO** (default): estoque/receita/vendas das variacoes SOMADOS;
+  ABC recalculada no nivel do modelo; risco = pior peca; DIO do modelo.
+- **Clique expande a grade**: chips por tamanho (aro X · saldo), em vermelho o
+  **furo de grade** (tamanho zerado que vendeu em 12m) com "vendeu ha Xd" —
+  alerta n1 de auditoria de joalheria; contador de furos na propria linha.
+- **Toggle "Por modelo / Por peça"** — visao plana antiga continua disponivel.
+- Selecionar/ocultar um modelo age sobre todas as variacoes (promocao e CSV
+  seguem por peca real); edicao inline so na visao por peca.
+- Reuso: classificarABC() e compararItens() viraram fonte unica (peca E modelo).
+- 100% na tela — sem mudanca de banco; usa pai/variacao/numeracao ligados na v2.83.10.
+
+## fix(gestao-estoque): leva 2 do pente-fino — fornecedor/variacao ligados, 30+ consertos medios e leves (v2.83.10)
+
+Continuacao da v2.83.9 (mesma leva de teste). Modulo inteiro alinhado as fontes
+oficiais do ERP e limpo de codigo morto (~340 linhas removidas).
+
+**Fontes de dados corrigidas/ligadas:**
+- `erp_produtos` LIGADA a tela: fornecedor (filtro acende), pai/variacao, numeracao,
+  cor do metal; peso via COALESCE(erp, public) — mesma regra do /api/produtos.
+- `preco_curva` agora vem da view oficial `vw_produtos_geral_preco` (formula inline
+  divergente removida).
+- Oportunidades de fabricacao: saldo pela `vw_saldo_estoque_comercial_v2` (antes
+  public.estoque legado por SKU — sugeria fabricar peca que tem na loja e podia
+  duplicar linhas); totais do UNIVERSO real (antes somava so a pagina limitada).
+- NUMERIC normalizado no servidor: ordenacao numerica certa, promo riscada aparece,
+  precos formatados.
+
+**Numeros/regras:** curva ABC na base COMPLETA (filtro nao rebaixa best-seller) e
+corte Pareto classico (quem cruza 80% e A); delta semanal so com semanas fechadas
+(fim da queda falsa de segunda-feira); metal contido avaliado a 18k (nao 24k);
+idade sem fallback pra data de venda; heatmap com coluna "Outros"; desempate do
+maior risco sem estouro acima de R$ 1M; aba Estoque com filtro de data por texto
+(primeiro dia nao cai mais fora).
+
+**Seguranca:** gate da pagina pela role de `alissonerp.usuarios` (user_metadata e
+editavel pelo dono da conta); ai-chat com gate de modulo; imagem-proxy com whitelist
+estrita + redirects revalidados (SSRF); GET locais-estoque exige login.
+
+**UX/robustez:** pagina volta pra 1 ao filtrar; colunas escolhidas nao resetam a
+cada refresh; trocar de aba nao repete a query pesada; toasts com timer unico;
+preco promocional zero barrado; exportacao de catalogo destrava em erro; erros de
+rede agora avisam (fim dos catch silenciosos); roles do SecurityModal centralizados.
+
+**Limpeza:** Sidebar.tsx morto removido; rota /api/gestao-estoque/locais duplicada
+removida (client usa /api/locais-estoque); funcoes/tipos/props/branches mortos fora.
+
+## fix(gestao-estoque): 6 bugs graves do pente-fino — vendas ERP incluidas, canceladas fora, telas corrigidas (v2.83.9)
+
+Pente-fino completo no modulo Gestao de Estoque (18/08, 67 suspeitas, 56 confirmadas).
+Esta versao corrige os 6 GRAVES; os 50 medios/leves ficam documentados para proxima leva.
+
+- **Vendas do ERP entram nos numeros:** receita 12m/ABC, DIO 90d, ultima venda,
+  oportunidades de fabricacao e serie semanal agora unem legado (Tiny) + ERP nativo
+  (`vendas_erp`/`itens_venda_erp`), com dedup de espelhos identico a
+  `vw_dash_vendas_todas`. Fonte unica nova: `src/lib/gestao-estoque/vendas-sql.ts`.
+  (Era o debito conhecido do doc vendas-duplicadas §5 item 1 — quitado.)
+- **Vendas canceladas fora da conta:** filtro canonico `status IS NOT NULL AND != 4`
+  (legado) e `situacao IN aprovado/enviado/concluido` (ERP) nas 3 rotas do modulo.
+- **ALISSON AI destravado:** client enviava a lista inteira de produtos e o servidor
+  recusava (413) — toda pergunta virava "Sem resposta.". Agora envia 50 linhas (o que
+  o servidor usa) e mostra o erro real quando houver.
+- **Aba Estoque corrigida:** venda aparecia como ENTRADA e "Saidas" ficava 0 pra sempre.
+  Mapeamento explicito: `data_ultima_compra` = entrada, `data_ultima_venda` = saida.
+- **Filtro Categoria filtrava metal:** deteccao priorizava `tipo_metal`; agora nome
+  exato `categoria` vence. Vistas salvas com metais no campo categoria precisam ser
+  resalvadas.
+- **Resposta velha nao sobrescreve mais a nova:** carregamentos numerados no client;
+  so o mais recente escreve na tela (query pesada de ate 60s ao trocar local/aba).
+
 ## Pente-fino do front — limpeza de código morto validada em cópia isolada (v2.84.0 a v2.84.6)
 
 Espelho do pente-fino do banco, executado primeiro numa cópia isolada do projeto e só então

@@ -2,8 +2,9 @@
 
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import BadgePromo from "@/components/ui/BadgePromo";
-import { TableRow, DashboardProps, SchemaName } from "@/lib/gestao-estoque/types";
+import { TableRow, DashboardProps } from "@/lib/gestao-estoque/types";
 import { updateRecord, saveTableConfig, loadTableConfig } from "@/lib/gestao-estoque/service";
+import { useErrorStore } from "@/stores/errorStore";
 import { 
   TrendingUp, 
   Scale, 
@@ -67,36 +68,82 @@ const WEIGHT_CLASSES = [
   { label: 'Pesadas 5', min: 60.0, max: 100.0 },
 ];
 
+/**
+ * Classificacao ABC (Pareto classico) sobre receita 12m — FONTE UNICA.
+ * O QUE: A = itens que concentram os primeiros 80% da receita; B ate 95%; C = cauda
+ * + quem nao vendeu. Classifica pelo acumulado ANTES de somar o proprio item
+ * (quem CRUZA o corte pertence a classe de cima).
+ * O PORQUE: usada tanto na visao por PECA quanto na visao por MODELO — duplicar
+ * o loop levaria as duas a divergir.
+ * IMPACTO se mudar: badges ABC de toda a matriz/galeria mudam de classe.
+ */
+function classificarABC(itens: Array<{ receita12m?: number; abcClass: 'A' | 'B' | 'C' }>) {
+  itens.forEach(i => { i.abcClass = 'C'; });
+  const total = itens.reduce((a, i) => a + (i.receita12m ?? 0), 0);
+  const vendidos = itens.filter(i => (i.receita12m ?? 0) > 0)
+                        .sort((a, b) => (b.receita12m ?? 0) - (a.receita12m ?? 0));
+  let acumulado = 0;
+  for (const item of vendidos) {
+    const percAntes = total > 0 ? (acumulado / total) * 100 : 0;
+    acumulado += item.receita12m ?? 0;
+    if (percAntes < 80) item.abcClass = 'A';
+    else if (percAntes < 95) item.abcClass = 'B';
+    else item.abcClass = 'C';
+  }
+}
+
+/** Comparador da matriz — mesmo criterio para visao por peca e por modelo. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function compararItens(a: any, b: any, sortConfig: { key: SortKey; direction: SortDirection }): number {
+  let valA, valB;
+  if (sortConfig.key === 'totalValue') { valA = a.totalValue; valB = b.totalValue; }
+  else if (sortConfig.key === 'stock') { valA = a.stock; valB = b.stock; }
+  else if (sortConfig.key === 'price') { valA = a.price; valB = b.price; }
+  else if (sortConfig.key === 'weight') { valA = a.weight; valB = b.weight; }
+  else if (sortConfig.key === 'criticScore') { valA = a.criticScore; valB = b.criticScore; }
+  else if (sortConfig.key === 'dio') {
+    // null (sem venda) sempre ultimo em asc, primeiro em desc — "pior" caso
+    valA = a.dio ?? Number.MAX_SAFE_INTEGER;
+    valB = b.dio ?? Number.MAX_SAFE_INTEGER;
+  }
+  else if (sortConfig.key === 'abcClass') { valA = a.abcClass; valB = b.abcClass; }
+  else {
+    valA = a.original[sortConfig.key];
+    valB = b.original[sortConfig.key];
+  }
+  if (valA === undefined || valA === null) valA = '';
+  if (valB === undefined || valB === null) valB = '';
+  if ((valA as number | string) < (valB as number | string)) return sortConfig.direction === 'asc' ? -1 : 1;
+  if ((valA as number | string) > (valB as number | string)) return sortConfig.direction === 'asc' ? 1 : -1;
+  return 0;
+}
+
 const Dashboard: React.FC<DashboardProps> = ({ 
   data, 
   tableName, 
   loading,
   error,
-  page,
-  totalCount,
-  onNextPage,
-  onPrevPage,
   onRefresh,
-  onPromotion,
-  schema = 'public'
+  onPromotion
 }) => {
   // Local state for client-side pagination (when not provided by parent)
   const [localPage, setLocalPage] = useState(0);
   const PAGE_SIZE = 100;
   
-  const currentPage = page !== undefined ? page : localPage;
+  // Paginacao 100% client-side (a paginacao remota por props nunca foi ligada
+  // pelo unico consumidor — removida no pente-fino 18/08)
+  const currentPage = localPage;
   
-  const handlePrev = () => {
-    if (onPrevPage) onPrevPage();
-    else setLocalPage(p => Math.max(0, p - 1));
-  };
+  const handlePrev = () => setLocalPage(p => Math.max(0, p - 1));
 
-  const handleNext = () => {
-    if (onNextPage) onNextPage();
-    else setLocalPage(p => p + 1);
-  };
+  const handleNext = () => setLocalPage(p => p + 1);
 
   const [filterScope, setFilterScope] = useState<FilterScope>('positive');
+
+  // Mudou QUALQUER filtro -> volta pra pagina 1. Sem isso, quem estava na
+  // Pag 3 e filtrava pra 40 itens via 'Nenhum registro encontrado' (slice
+  // alem do fim) com os itens existindo.
+  // (o useEffect fica logo apos as declaracoes dos filtros, abaixo)
   
   // Purchase/Inventory Date Range State
   const [purchaseDateRange, setPurchaseDateRange] = useState({
@@ -134,6 +181,12 @@ const Dashboard: React.FC<DashboardProps> = ({
   // Row Exclusion State
   const [hiddenRowIds, setHiddenRowIds] = useState<Set<string>>(new Set());
 
+  // Reset da paginacao local quando qualquer filtro muda (ver comentario acima)
+  useEffect(() => {
+    setLocalPage(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterScope, selectedCategories, selectedSuppliers, selectedWeightClasses, purchaseDateRange, hiddenRowIds]);
+
   // Editing State
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<TableRow>({});
@@ -170,6 +223,16 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // Modo de exibicao da matriz (tabela OU galeria visual)
   const [viewMode, setViewMode] = useState<'table' | 'gallery'>('table');
+
+  // Agrupamento da matriz (pedido do Alisson 18/08): 'modelo' = 1 linha por
+  // peca-PAI (aros/tamanhos somados; clique expande a grade); 'peca' = visao
+  // antiga, linha a linha. Default: modelo — e assim que um auditor de
+  // joalheria enxerga o estoque (o modelo vende, o tamanho e grade).
+  const [groupMode, setGroupMode] = useState<'modelo' | 'peca'>('modelo');
+  // Indicadores secundarios (preco/g, parado, reposicao) recolhidos por padrao —
+  // pedido do Alisson 18/08: tela harmonica, excesso so aparece se clicar.
+  const [maisIndicadores, setMaisIndicadores] = useState(false);
+  const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
   const [isMatrixFullscreen, setIsMatrixFullscreen] = useState(false);
 
   // Vistas nomeadas (filtros salvos)
@@ -212,7 +275,10 @@ const Dashboard: React.FC<DashboardProps> = ({
         if (!res.ok) return;
         const data = await res.json() as GoldPrice;
         if (!cancel) setGoldPrice(data);
-      } catch { /* silent */ }
+      } catch {
+        // Sem cotacao o header apenas esconde o cartao; avisa baixinho.
+        useErrorStore.getState().push("Cotação do ouro indisponível", { level: "warning" });
+      }
     };
     load();
     const id = setInterval(load, 30 * 60 * 1000);
@@ -231,7 +297,9 @@ const Dashboard: React.FC<DashboardProps> = ({
           setWeeklySeries(data.semanas ?? []);
           setWeeklyAgg(data.agregados ?? null);
         }
-      } catch { /* silent */ }
+      } catch {
+        useErrorStore.getState().push("Falha ao carregar vendas semanais", { level: "warning" });
+      }
     };
     load();
     return () => { cancel = true; };
@@ -246,7 +314,9 @@ const Dashboard: React.FC<DashboardProps> = ({
         if (!res.ok) return;
         const data = await res.json() as { views: SavedView[] };
         if (!cancel) setUserViews(data.views ?? []);
-      } catch { /* silent */ }
+      } catch {
+        useErrorStore.getState().push("Falha ao carregar vistas salvas", { level: "warning" });
+      }
     };
     load();
     return () => { cancel = true; };
@@ -288,7 +358,9 @@ const Dashboard: React.FC<DashboardProps> = ({
           setOportunidades(data.produtos ?? []);
           setOportunidadesTotais(data.totais ?? null);
         }
-      } catch { /* silent */ }
+      } catch {
+        useErrorStore.getState().push("Falha ao carregar oportunidades de fabricação", { level: "warning" });
+      }
       finally { if (!cancel) setOppLoading(false); }
     };
     load();
@@ -342,8 +414,15 @@ const Dashboard: React.FC<DashboardProps> = ({
     
     const statusKey = keys.find(k => /status|situacao|situation|active|published/i.test(k));
 
-    // Improved Category Detection (Name or Content)
-    let categoryKey = keys.find(k => /category|categoria|grupo|familia|type|tipo/i.test(k));
+    // O QUE: acha a coluna de categoria com prioridade pro nome EXATO.
+    // O PORQUE: o regex frouxo casava 'tipo_metal' (vem antes de 'categoria' na
+    // ordem do SELECT) e o filtro rotulado Categoria filtrava por METAL - bug
+    // grave n6 do pente-fino 18/08. 'categoria_precificacao' (letra da curva)
+    // tambem NAO e categoria de produto.
+    // IMPACTO se remover a prioridade: dropdown Categoria volta a listar metais.
+    let categoryKey = keys.find(k => /^(categoria|category)$/i.test(k)) ||
+                      keys.find(k => /category|categoria|grupo|familia/i.test(k) && k !== 'categoria_precificacao') ||
+                      keys.find(k => /type|tipo/i.test(k));
 
     // Fallback: Value-based heuristic (Check first few rows for jewelry keywords)
     if (!categoryKey) {
@@ -379,11 +458,17 @@ const Dashboard: React.FC<DashboardProps> = ({
     return { priceKey, stockKey, weightKey, nameKey, statusKey, idKey, skuKey, categoryKey, dateKey, purchaseDateKey, supplierKey, allKeys: keys };
   }, [data, tableName]);
 
-  // Load Config on Mount (or table change)
+  // Load Config: roda UMA VEZ por tabela. `metrics` muda de identidade a cada
+  // refresh de dados; sem o guard, todo refresh re-aplicava a config salva e
+  // descartava colunas/ordenacao que o usuario mudou sem salvar.
+  const configLoadedRef = useRef<string | null>(null);
   useEffect(() => {
     let mounted = true;
     const loadConfig = async () => {
       if (!tableName) return;
+      if (configLoadedRef.current === tableName) return;
+      if (!metrics) return; // espera a 1a carga de dados pra montar defaults
+      configLoadedRef.current = tableName;
       
       const savedConfig = (await loadTableConfig(tableName)) as
         | { visibleColumns?: string[]; sortConfig?: { key: SortKey; direction: SortDirection } }
@@ -479,6 +564,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     let criticalCapital = 0;
     let criticalCount = 0;
     let maxCriticalScore = -1;
+    let maxCriticalValue = -1;
     let topCriticalItem: any = null;
     const staleThreshold = new Date();
     staleThreshold.setDate(staleThreshold.getDate() - 180);
@@ -517,7 +603,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     distributionMap.set('Outros', { weight: 0, value: 0, count: 0 });
 
     // Process and Filter Data
-    const processedList = data.map((row, idx) => {
+    const allItems = data.map((row, idx) => {
        // Unique ID for hiding logic (fallback to index if necessary, but stringified to match set)
        const uniqueId = idKey && row[idKey] ? String(row[idKey]) : `row-${idx}`;
 
@@ -546,10 +632,9 @@ const Dashboard: React.FC<DashboardProps> = ({
          if (isNaN(purchaseDate.getTime())) purchaseDate = null;
        } 
        
-       if (!purchaseDate && dateKey && row[dateKey]) { // Extended fallback
-         purchaseDate = new Date(row[dateKey]);
-         if (isNaN(purchaseDate.getTime())) purchaseDate = null;
-       }
+       // SEM fallback pra outra data: usar a data da ultima VENDA como "compra"
+       // fazia peca velha SEM registro de compra parecer recem-chegada (idade
+       // errada no score de criticidade e no cartao 'Parado > 180 dias').
 
        // Last Sale Date parsing
        let lastSaleDate: Date | null = null;
@@ -618,10 +703,22 @@ const Dashboard: React.FC<DashboardProps> = ({
          qtdVendida90d,
          receita12m: Number(row['receita_total_12m'] ?? 0),
          imagemCapa: (row['imagem_capa'] as string | undefined) ?? null,
-         // abcClass preenchido abaixo apos sort global (base = receita_total_12m)
+         // abcClass preenchido logo abaixo (base = receita_total_12m, lista COMPLETA)
          abcClass: 'C' as 'A' | 'B' | 'C',
        };
-    }).filter(item => {
+    });
+
+    // ── Classificacao ABC (Pareto sobre receita 12m) — na BASE COMPLETA ──
+    // A = SKUs que concentram os primeiros 80% da receita 12m
+    // B = proximos ate 95% | C = cauda + quem nao vendeu em 12m
+    // 1) Roda ANTES dos filtros: a classe e do PRODUTO, nao do recorte da tela
+    //    (filtrar por categoria nao pode rebaixar o best-seller pra B/C).
+    // 2) Corte classico: classifica pelo acumulado ANTES de somar o proprio
+    //    item — o item que CRUZA os 80% pertence a A (antes, um SKU com 85%
+    //    da receita sozinho virava B e ninguem recebia A).
+    classificarABC(allItems);
+
+    const processedList = allItems.filter(item => {
        // 0. Hidden Rows Check
        if (hiddenRowIds.has(item.uniqueId)) return false;
 
@@ -697,10 +794,13 @@ const Dashboard: React.FC<DashboardProps> = ({
            criticalCount += item.stock;
            criticalCapital += itemTotalValue;
 
-           // Top risco = maior criticScore. Desempate por valorTotal.
-           const key = item.criticScore * 1_000_000 + itemTotalValue;
-           if (key > maxCriticalScore) {
-              maxCriticalScore = key;
+           // Top risco = maior criticScore; desempate por valorTotal.
+           // Comparacao em 2 campos (o truque score*1M+valor estourava quando
+           // um item passava de R$ 1 milhao e vencia com score menor).
+           if (item.criticScore > maxCriticalScore ||
+               (item.criticScore === maxCriticalScore && itemTotalValue > maxCriticalValue)) {
+              maxCriticalScore = item.criticScore;
+              maxCriticalValue = itemTotalValue;
               topCriticalItem = item;
            }
          }
@@ -745,24 +845,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         }))
         .filter(d => d.weight > 0 || d.value > 0);
 
-    // ── Classificacao ABC (Pareto sobre receita dos ultimos 12 meses) ──
-    // A = SKUs que concentram ate 80% da receita dos ultimos 12m
-    // B = proximos SKUs ate 95% da receita acumulada
-    // C = cauda (ultimos 5%) + TODOS que nao venderam em 12m
-    // Isso responde "quais produtos geram minha receita?" (ABC classico de varejo)
-    // Produtos sem venda em 12m sao C automaticamente (nao concorrem pelo topo).
-    const totalReceita12m = processedList.reduce((a, i) => a + (i.receita12m ?? 0), 0);
-    const vendidos12m = processedList.filter(i => (i.receita12m ?? 0) > 0)
-                                     .sort((a, b) => (b.receita12m ?? 0) - (a.receita12m ?? 0));
-    let acumulado = 0;
-    for (const item of vendidos12m) {
-      acumulado += item.receita12m ?? 0;
-      const perc = totalReceita12m > 0 ? (acumulado / totalReceita12m) * 100 : 0;
-      if (perc <= 80) item.abcClass = 'A';
-      else if (perc <= 95) item.abcClass = 'B';
-      else item.abcClass = 'C';
-    }
-    // (Os itens sem receita 12m ja foram inicializados como 'C' la em cima.)
+    // (Classificacao ABC roda la em cima, na base COMPLETA — antes dos filtros.)
 
     // ── Heatmap Categoria × Classe de Peso ──
     // Matriz: categoria (linhas) x classe de peso (colunas) → soma do totalValue
@@ -786,9 +869,14 @@ const Dashboard: React.FC<DashboardProps> = ({
       cell.count += item.stock;
       cell.weight += item.weight * item.stock;
     }
+    // 'Outros' (peso 0/nulo ou >100g) entrava no Total da linha mas nao tinha
+    // coluna — o Total parecia 'fantasma'. Se existir, vira coluna visivel.
+    const temOutrosHeatmap = Array.from(heatmapMap.values()).some(r => r.has('Outros'));
     const heatmap = {
       categorias: Array.from(heatmapCategorias).sort(),
-      classes: WEIGHT_CLASSES.map(w => w.label),
+      classes: temOutrosHeatmap
+        ? [...WEIGHT_CLASSES.map(w => w.label), 'Outros']
+        : WEIGHT_CLASSES.map(w => w.label),
       cells: heatmapMap,
       maxValue: 0 as number,
     };
@@ -799,36 +887,8 @@ const Dashboard: React.FC<DashboardProps> = ({
       });
     });
 
-    // Sort List based on Sort Config
-    processedList.sort((a, b) => {
-        let valA, valB;
-
-        // Custom Sort Keys mapping
-        if (sortConfig.key === 'totalValue') { valA = a.totalValue; valB = b.totalValue; }
-        else if (sortConfig.key === 'stock') { valA = a.stock; valB = b.stock; }
-        else if (sortConfig.key === 'price') { valA = a.price; valB = b.price; }
-        else if (sortConfig.key === 'weight') { valA = a.weight; valB = b.weight; }
-        else if (sortConfig.key === 'criticScore') { valA = a.criticScore; valB = b.criticScore; }
-        else if (sortConfig.key === 'dio') {
-          // null (sem venda) sempre ultimo em asc, primeiro em desc — "pior" caso
-          valA = a.dio ?? Number.MAX_SAFE_INTEGER;
-          valB = b.dio ?? Number.MAX_SAFE_INTEGER;
-        }
-        else if (sortConfig.key === 'abcClass') { valA = a.abcClass; valB = b.abcClass; }
-        else {
-             // Generic column sort
-             valA = a.original[sortConfig.key];
-             valB = b.original[sortConfig.key];
-        }
-
-        // Handle nulls/undefined for generic sorting
-        if (valA === undefined || valA === null) valA = '';
-        if (valB === undefined || valB === null) valB = '';
-
-        if ((valA as number | string) < (valB as number | string)) return sortConfig.direction === 'asc' ? -1 : 1;
-        if ((valA as number | string) > (valB as number | string)) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-    });
+    // Sort List based on Sort Config (comparador unico — ver compararItens)
+    processedList.sort((a, b) => compararItens(a, b, sortConfig));
 
     return {
       totalStockValue,
@@ -977,8 +1037,12 @@ const Dashboard: React.FC<DashboardProps> = ({
         setActiveViewId(view.id);
         setShowSaveViewModal(false);
         setNewViewName('');
+      } else {
+        useErrorStore.getState().push("Não foi possível salvar a vista");
       }
-    } catch { /* silent */ }
+    } catch {
+      useErrorStore.getState().push("Não foi possível salvar a vista");
+    }
     finally { setIsSavingView(false); }
   };
 
@@ -988,8 +1052,12 @@ const Dashboard: React.FC<DashboardProps> = ({
       if (res.ok) {
         setUserViews(prev => prev.filter(v => v.id !== id));
         if (activeViewId === id) setActiveViewId(null);
+      } else {
+        useErrorStore.getState().push("Não foi possível excluir a vista");
       }
-    } catch { /* silent */ }
+    } catch {
+      useErrorStore.getState().push("Não foi possível excluir a vista");
+    }
   };
 
   const toggleRow = (uniqueId: string) => {
@@ -1047,6 +1115,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url); // libera o blob da memoria (sessao longa acumulava)
   };
 
   // --- Editing Logic ---
@@ -1079,7 +1148,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     setIsSaving(true);
     
     // Call service
-    const { success, error } = await updateRecord(schema as SchemaName, tableName, pkValue, editForm, pkField);
+    const { success, error } = await updateRecord(pkValue, editForm, pkField);
     
     setIsSaving(false);
 
@@ -1090,6 +1159,19 @@ const Dashboard: React.FC<DashboardProps> = ({
       alert(`Erro ao salvar: ${(error as { message?: string })?.message || 'Desconhecido'}`);
     }
   };
+
+  // Cores de badge ABC e Score — FONTE UNICA pra galeria e tabela (eram 2 copias
+  // que podiam divergir; pente-fino 18/08)
+  const abcCorClass = (abc: 'A' | 'B' | 'C') =>
+    abc === 'A' ? 'bg-emerald-500 text-white' :
+    abc === 'B' ? 'bg-yellow-400 text-yellow-900' :
+                  'bg-gray-200 text-gray-600';
+  const scoreCorClass = (score: number) =>
+    score >= 80 ? 'bg-red-600' :
+    score >= 60 ? 'bg-red-500' :
+    score >= 40 ? 'bg-orange-400' :
+    score >= 20 ? 'bg-yellow-400' :
+                  'bg-emerald-500';
 
   // Helper: Get Icon for Jewelry Category
   const getCategoryIcon = (catName: string) => {
@@ -1110,13 +1192,132 @@ const Dashboard: React.FC<DashboardProps> = ({
         : <ArrowDown size={12} className="text-alisson-gold ml-1" />;
   };
 
+  // ── Visao POR MODELO: agrupa variacoes na peca-pai ──────────────────────
+  // O QUE: soma estoque/receita/vendas das variacoes numa linha so; ABC e
+  // recalculada no nivel do MODELO; risco = pior peca do modelo; furo de
+  // grade = tamanho zerado que vendeu nos ultimos 12m.
+  // O PORQUE: a lista plana repetia o mesmo anel N vezes (1 por aro) e
+  // espalhava o estoque do modelo — impossivel auditar grade.
+  // IMPACTO se remover: matriz volta a ser plana e o painel de grade some.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const linhasMatriz = useMemo<any[]>(() => {
+    if (!analysis) return [];
+    if (groupMode === 'peca') return analysis.fullList;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const grupos = new Map<string, any[]>();
+    for (const item of analysis.fullList) {
+      const o = item.original ?? {};
+      const chave = o.eh_variacao
+        ? String(o.parent_sku || String(item.sku).split('-')[0])
+        : String(item.sku);
+      if (!grupos.has(chave)) grupos.set(chave, []);
+      grupos.get(chave)!.push(item);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const modelos: any[] = [];
+    grupos.forEach((membros, chave) => {
+      if (membros.length === 1 && !membros[0].original?.eh_pai) {
+        modelos.push(membros[0]); // peca sem variacao: linha simples, nada muda
+        return;
+      }
+      const base = membros.find(m => !m.original?.eh_variacao) ?? membros[0];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const soma = (f: (m: any) => number) => membros.reduce((a, m) => a + (Number(f(m)) || 0), 0);
+      const stock = soma(m => m.stock);
+      const receita12m = soma(m => m.receita12m);
+      const qtd90 = soma(m => m.qtdVendida90d);
+      const vendaDiaria = qtd90 > 0 ? qtd90 / 90 : 0;
+      const membrosOrd = [...membros].sort((a, b) =>
+        String(a.original?.numeracao ?? '').localeCompare(String(b.original?.numeracao ?? ''), 'pt-BR', { numeric: true }));
+      const furos = membrosOrd.filter(m =>
+        m.original?.eh_variacao && m.stock <= 0 && (m.receita12m ?? 0) > 0).length;
+      const ultimaVendaStr = membros.map(m => m.original?.data_ultima_venda)
+        .filter(Boolean).sort().pop() ?? null;
+      const ultimaCompraStr = membros.map(m => m.original?.data_ultima_compra)
+        .filter(Boolean).sort().pop() ?? null;
+      modelos.push({
+        ...base,
+        uniqueId: `modelo-${chave}`,
+        stock,
+        totalValue: soma(m => m.totalValue),
+        receita12m,
+        qtdVendida90d: qtd90,
+        dio: stock > 0 && vendaDiaria > 0 ? Math.round(stock / vendaDiaria) : null,
+        criticScore: Math.max(0, ...membros.map(m => m.criticScore ?? 0)),
+        isCritical: membros.some(m => m.isCritical),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        lastSaleDate: membros.reduce((mx: Date | null, m: any) =>
+          (m.lastSaleDate && (!mx || m.lastSaleDate > mx)) ? m.lastSaleDate : mx, null),
+        original: {
+          ...base.original,
+          saldo_estoque: stock,
+          estoque: stock,
+          receita_total_12m: receita12m,
+          qtd_vendida_90d: qtd90,
+          qtd_vendas: soma(m => Number(m.original?.qtd_vendas ?? 0)),
+          data_ultima_venda: ultimaVendaStr,
+          data_ultima_compra: ultimaCompraStr,
+          ultima_compra: ultimaCompraStr,
+        },
+        members: membrosOrd,
+        furos,
+      });
+    });
+
+    classificarABC(modelos); // ABC no nivel do MODELO
+    modelos.sort((a, b) => compararItens(a, b, sortConfig));
+    return modelos;
+  }, [analysis, groupMode, sortConfig]);
+
   // Prepare table data with pagination (Client-side slice)
   const tableData = useMemo(() => {
-    if (!analysis) return [];
     const start = currentPage * PAGE_SIZE;
     const end = start + PAGE_SIZE;
-    return analysis.fullList.slice(start, end);
-  }, [analysis, currentPage, PAGE_SIZE]);
+    return linhasMatriz.slice(start, end);
+  }, [linhasMatriz, currentPage, PAGE_SIZE]);
+
+  // Selecao/ocultacao no modo modelo agem sobre TODAS as pecas do modelo —
+  // promocao, CSV e exclusao continuam operando por peca real.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const linhaSelecionada = (row: any): boolean =>
+    row.members?.length
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? row.members.every((m: any) => selectedRows.has(m.uniqueId))
+      : selectedRows.has(row.uniqueId);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const toggleLinha = (row: any) => {
+    if (!row.members?.length) { toggleRow(row.uniqueId); return; }
+    setSelectedRows(prev => {
+      const n = new Set(prev);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const todos = row.members.every((m: any) => n.has(m.uniqueId));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      row.members.forEach((m: any) => { if (todos) n.delete(m.uniqueId); else n.add(m.uniqueId); });
+      return n;
+    });
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ocultarLinha = (row: any) => {
+    setHiddenRowIds(prev => {
+      const n = new Set(prev);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (row.members?.length) row.members.forEach((m: any) => n.add(m.uniqueId));
+      else n.add(row.uniqueId);
+      return n;
+    });
+  };
+
+  const toggleExpandModelo = (id: string) => {
+    setExpandedModels(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
 
 
   if (error) {
@@ -1181,7 +1382,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const formatCurrencyShort = (val: number) => {
     if (!Number.isFinite(val)) return 'R$ 0';
     const abs = Math.abs(val);
-    if (abs >= 1_000_000) return `R$ ${(val / 1_000_000).toFixed(1).replace('.', ',')}M`;
+    if (abs >= 1_000_000) return `R$ ${(val / 1_000_000).toFixed(2).replace('.', ',')} mi`;
     if (abs >= 10_000)    return `R$ ${(val / 1_000).toFixed(0)}k`;
     if (abs >= 1_000)     return `R$ ${(val / 1_000).toFixed(1).replace('.', ',')}k`;
     return `R$ ${Math.round(val)}`;
@@ -1278,36 +1479,23 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-4 flex-wrap">
-            {/* Cotacao ouro — 24k e a referencia de mercado */}
+            {/* Cotacao do dia — linha unica e discreta. O capital NAO aparece
+               aqui: mora no cartao "Capital em estoque" (era duplicado e os dois
+               brigavam por atencao — harmonizacao 18/08). */}
             {goldPrice && (
-              <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${goldPrice.estale ? 'bg-creme-50 border-creme-200' : 'bg-dourado-light/20 border-dourado-light'}`}
-                   title={`${goldPrice.fonte} · atualizado ${goldPrice.atualizado_em}${goldPrice.estale ? ' (cache estálico)' : ''}`}>
-                <div className="p-1.5 rounded-lg bg-dourado-light/50 text-dourado-dark">
-                  <Gem size={18} />
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] uppercase tracking-widest text-dourado-dark font-bold leading-none">Ouro 24k hoje</p>
-                  <p className="text-lg font-mono font-bold text-gray-900 tabular-nums leading-tight mt-1">
-                    {formatCurrency(goldPrice.preco_24k_g)}<span className="text-xs font-sans text-gray-500">/g</span>
-                  </p>
-                  <p className={`text-[11px] font-mono leading-none mt-0.5 ${goldPrice.variacao_pct_24h > 0 ? 'text-emerald-600' : goldPrice.variacao_pct_24h < 0 ? 'text-red-600' : 'text-gray-500'}`}>
-                    {goldPrice.variacao_pct_24h > 0 ? '▲' : goldPrice.variacao_pct_24h < 0 ? '▼' : '—'} {Math.abs(goldPrice.variacao_pct_24h).toFixed(2)}% · 18k {formatCurrency(goldPrice.preco_18k_g)}
-                  </p>
-                </div>
+              <div className="text-right"
+                   title={`${goldPrice.fonte} · atualizado ${goldPrice.atualizado_em}${goldPrice.estale ? ' (cache)' : ''}`}>
+                <p className="text-[10px] uppercase tracking-widest text-dourado-dark font-bold leading-none">Ouro hoje</p>
+                <p className="text-sm font-mono text-gray-900 tabular-nums mt-1">
+                  24k <span className="font-bold">{formatCurrency(goldPrice.preco_24k_g)}</span>/g
+                  <span className="text-gray-400"> · </span>
+                  18k <span className="font-bold">{formatCurrency(goldPrice.preco_18k_g)}</span>/g
+                  <span className={`ml-1 ${goldPrice.variacao_pct_24h > 0 ? 'text-emerald-600' : goldPrice.variacao_pct_24h < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                    {goldPrice.variacao_pct_24h > 0 ? '▲' : goldPrice.variacao_pct_24h < 0 ? '▼' : '—'} {Math.abs(goldPrice.variacao_pct_24h).toFixed(2).replace('.', ',')}%
+                  </span>
+                </p>
               </div>
             )}
-
-            <div className="text-right">
-              <p className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold">Capital exposto</p>
-              <p className="text-2xl lg:text-3xl font-mono font-bold text-esmeralda-500 tabular-nums leading-none mt-1">
-                {formatCurrency(analysis.totalStockValue)}
-              </p>
-              {goldPrice && analysis.totalWeight > 0 && (
-                <p className="text-[11px] text-gray-500 mt-1 font-mono">
-                  Metal bruto: {formatCurrency(analysis.totalWeight * goldPrice.preco_24k_g)}
-                </p>
-              )}
-            </div>
             {onRefresh && (
               <button
                 onClick={onRefresh}
@@ -1545,11 +1733,14 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <DollarSign size={20} />
               </div>
             </div>
-            <p className="text-3xl lg:text-4xl font-mono font-bold text-esmeralda-500 tabular-nums leading-none">
-              {formatCurrency(analysis.totalStockValue)}
+            {/* Compacto: R$ 6,03 mi — o valor cheio estourava o cartao.
+               Tooltip (passar o mouse) mostra centavo a centavo. */}
+            <p className="text-3xl lg:text-4xl font-mono font-bold text-esmeralda-500 tabular-nums leading-none cursor-default"
+               title={formatCurrency(analysis.totalStockValue)}>
+              {formatCurrencyShort(analysis.totalStockValue)}
             </p>
             <p className="text-sm text-gray-500 mt-3">
-              <span className="font-semibold text-gray-900">{formatNumber(analysis.totalItems)}</span> unidades em{' '}
+              <span className="font-semibold text-gray-900">{formatNumber(analysis.totalItems)}</span> pç em{' '}
               <span className="font-semibold text-gray-900">{formatNumber(analysis.productsInStock)}</span> SKUs ativos
             </p>
           </div>
@@ -1565,8 +1756,11 @@ const Dashboard: React.FC<DashboardProps> = ({
             <p className="text-3xl lg:text-4xl font-mono font-bold text-gray-900 tabular-nums leading-none">
               {analysis.totalWeight > 0 ? formatNumber(analysis.totalWeight) : '—'} <span className="text-xl text-gray-500 font-sans">g</span>
             </p>
-            <p className="text-sm text-gray-500 mt-3">
-              Equivalente a <span className="font-semibold text-gray-900">{formatNumber(analysis.totalWeight / 1000)}&nbsp;kg</span> de metal
+            <p className="text-sm text-gray-500 mt-3"
+               title={goldPrice ? `${formatNumber(analysis.totalWeight)} g × 18k ${formatCurrency(goldPrice.preco_18k_g)}/g` : undefined}>
+              {goldPrice
+                ? <>metal 18k ≈ <span className="font-semibold text-gray-900">{formatCurrencyShort(analysis.totalWeight * goldPrice.preco_18k_g)}</span></>
+                : <>Equivalente a <span className="font-semibold text-gray-900">{formatNumber(analysis.totalWeight / 1000)}&nbsp;kg</span> de metal</>}
             </p>
           </div>
 
@@ -1578,17 +1772,18 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <TrendingUp size={20} />
               </div>
             </div>
-            <p className="text-3xl lg:text-4xl font-mono font-bold text-gray-900 tabular-nums leading-none">
-              {weeklyAgg ? formatCurrency(weeklyAgg.total_valor) : '—'}
+            <p className="text-3xl lg:text-4xl font-mono font-bold text-gray-900 tabular-nums leading-none cursor-default"
+               title={weeklyAgg ? formatCurrency(weeklyAgg.total_valor) : undefined}>
+              {weeklyAgg ? formatCurrencyShort(weeklyAgg.total_valor) : '—'}
             </p>
             <div className="flex items-end justify-between gap-2 mt-3">
               <p className="text-sm text-gray-500">
                 {weeklyAgg ? (
                   <>
                     <span className={weeklyAgg.delta_pct_vs_4sem_anteriores >= 0 ? 'text-emerald-600 font-semibold' : 'text-red-600 font-semibold'}>
-                      {weeklyAgg.delta_pct_vs_4sem_anteriores >= 0 ? '▲' : '▼'} {Math.abs(weeklyAgg.delta_pct_vs_4sem_anteriores).toFixed(1)}%
+                      {weeklyAgg.delta_pct_vs_4sem_anteriores >= 0 ? '▲' : '▼'} {Math.abs(weeklyAgg.delta_pct_vs_4sem_anteriores).toFixed(1).replace('.', ',')}%
                     </span>
-                    {' '}vs 4 sem anteriores
+                    {' '}vs 4 sem fechadas
                   </>
                 ) : 'Carregando série…'}
               </p>
@@ -1596,52 +1791,57 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
 
-          {/* Preço médio / grama */}
-          <div className="bg-white border border-creme-200 rounded-2xl p-6 hover:border-purple-300 transition-colors">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs uppercase tracking-[0.15em] font-semibold text-gray-500">Preço médio / grama</p>
-              <div className="p-2 rounded-lg bg-purple-50 text-purple-600">
-                <DollarSign size={20} />
-              </div>
-            </div>
-            <p className="text-3xl lg:text-4xl font-mono font-bold text-gray-900 tabular-nums leading-none">
-              {formatCurrency(analysis.avgPricePerGram)}
-            </p>
-            <p className="text-sm text-gray-500 mt-3">
-              {goldPrice && analysis.avgPricePerGram > 0 ? (
-                <>Multiplicador <span className="font-semibold text-gray-900">{(analysis.avgPricePerGram / goldPrice.preco_24k_g).toFixed(2)}×</span> sobre o ouro 24k</>
-              ) : 'Saída média por grama comercializada'}
-            </p>
-          </div>
-        </section>
-
-        {/* KPI ALERT ROW — tres cartoes de situacao (clicaveis) */}
-        <section className="order-4 grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5">
-          {/* Alerta crítico */}
+          {/* Alerta critico — promovido pro hero (dinheiro em risco e essencial;
+             preco medio/grama desceu pros indicadores recolhidos) */}
           <button
             onClick={handleCriticalClick}
             className={`text-left bg-white border rounded-2xl p-6 transition-all ${filterScope === 'critical' ? 'border-red-400 shadow-[0_0_30px_rgba(248,113,113,0.15)] ring-1 ring-red-200' : 'border-creme-200 hover:border-red-300'}`}
           >
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
-                </span>
-                <p className="text-xs uppercase tracking-widest font-bold text-red-600">Alerta crítico</p>
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs uppercase tracking-[0.15em] font-semibold text-red-600">Risco crítico</p>
+              <div className="p-2 rounded-lg bg-red-50 text-red-600">
+                <AlertCircle size={20} />
               </div>
-              <AlertCircle size={18} className="text-red-500" />
             </div>
-            <p className="text-3xl font-mono font-bold text-red-600 tabular-nums leading-none">
-              {formatCurrency(analysis.criticalCapital)}
+            <p className="text-3xl lg:text-4xl font-mono font-bold text-red-600 tabular-nums leading-none cursor-default"
+               title={formatCurrency(analysis.criticalCapital)}>
+              {formatCurrencyShort(analysis.criticalCapital)}
             </p>
-            <div className="flex items-center gap-4 mt-4 text-sm">
-              <span className="text-gray-600"><span className="font-semibold text-red-600">{analysis.criticalCount}</span> peças</span>
-              <span className="text-gray-400">·</span>
-              <span className="text-gray-600">Ticket <span className="font-semibold text-gray-900">{formatCurrency(analysis.avgCriticalPrice)}</span></span>
-            </div>
-            <p className="text-[11px] uppercase tracking-wider text-gray-400 mt-3">Score ≥ 60 · Clique para filtrar</p>
+            <p className="text-sm text-gray-500 mt-3">
+              <span className="font-semibold text-red-600">{analysis.criticalCount}</span> pç · score ≥ 60 · clique filtra
+            </p>
           </button>
+        </section>
+
+        {/* MAIS INDICADORES — secundarios recolhidos por padrao (harmonizacao
+           18/08): preco/g, parado >180d e reposicao so aparecem ao clicar. */}
+        <section className="order-4">
+          <button
+            onClick={() => setMaisIndicadores(!maisIndicadores)}
+            className="w-full flex items-center gap-2 px-4 py-2.5 bg-white border border-creme-200 rounded-xl text-sm text-gray-600 hover:border-esmeralda-300 hover:text-esmeralda-500 transition-colors"
+          >
+            <ChevronDown size={14} className={`transition-transform ${maisIndicadores ? '' : '-rotate-90'}`} />
+            <span className="font-semibold">Mais indicadores</span>
+            <span className="text-xs text-gray-400">preço médio/grama · parado &gt;180d · em reposição</span>
+          </button>
+          {maisIndicadores && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5 mt-3">
+          {/* Preço médio / grama */}
+          <div className="bg-white border border-creme-200 rounded-2xl p-6 hover:border-purple-300 transition-colors">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs uppercase tracking-widest font-bold text-gray-600">Preço médio / grama</p>
+              <DollarSign size={18} className="text-purple-500" />
+            </div>
+            <p className="text-3xl font-mono font-bold text-gray-900 tabular-nums leading-none cursor-default"
+               title={formatCurrency(analysis.avgPricePerGram)}>
+              {formatCurrency(analysis.avgPricePerGram)}
+            </p>
+            <p className="text-sm text-gray-500 mt-4">
+              {goldPrice && analysis.avgPricePerGram > 0 ? (
+                <>Multiplicador <span className="font-semibold text-gray-900">{(analysis.avgPricePerGram / goldPrice.preco_24k_g).toFixed(2).replace('.', ',')}×</span> sobre o ouro 24k</>
+              ) : 'Saída média por grama comercializada'}
+            </p>
+          </div>
 
           {/* Estoque parado */}
           <button
@@ -1652,8 +1852,9 @@ const Dashboard: React.FC<DashboardProps> = ({
               <p className="text-xs uppercase tracking-widest font-bold text-orange-600">Parado &gt; 180 dias</p>
               <CalendarDays size={18} className="text-orange-500" />
             </div>
-            <p className="text-3xl font-mono font-bold text-orange-600 tabular-nums leading-none">
-              {formatCurrency(analysis.idleCapital)}
+            <p className="text-3xl font-mono font-bold text-orange-600 tabular-nums leading-none cursor-default"
+               title={formatCurrency(analysis.idleCapital)}>
+              {formatCurrencyShort(analysis.idleCapital)}
             </p>
             <div className="flex items-center gap-4 mt-4 text-sm">
               <span className="text-gray-600"><span className="font-semibold text-orange-600">{formatNumber(analysis.idleItemsCount)}</span> peças sem giro</span>
@@ -1681,6 +1882,8 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <p className="text-[11px] uppercase tracking-wider text-gray-400 mt-3">Oportunidade de produção</p>
           </div>
+          </div>
+          )}
         </section>
 
         {/* TOP CRITICAL ITEM — faixa destacada */}
@@ -2099,6 +2302,23 @@ const Dashboard: React.FC<DashboardProps> = ({
                     Galeria
                   </button>
                 </div>
+                {/* Agrupamento: modelo (pai + grade) ou peca a peca */}
+                <div className="flex h-9 bg-creme-50 p-1 rounded-lg border border-creme-200">
+                  <button
+                    onClick={() => setGroupMode('modelo')}
+                    className={`px-3 text-xs font-semibold rounded-md transition-all ${groupMode === 'modelo' ? 'bg-white text-esmeralda-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                    title="1 linha por modelo — aros/tamanhos somados; clique na linha expande a grade"
+                  >
+                    Por modelo
+                  </button>
+                  <button
+                    onClick={() => setGroupMode('peca')}
+                    className={`px-3 text-xs font-semibold rounded-md transition-all ${groupMode === 'peca' ? 'bg-white text-esmeralda-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                    title="Visao plana — 1 linha por peca/variacao"
+                  >
+                    Por peça
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
@@ -2273,12 +2493,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <span className="hidden lg:inline">{isMatrixFullscreen ? 'Sair' : 'Tela cheia'}</span>
                 </button>
 
-                {totalCount !== null && totalCount !== undefined && (
-                  <span className="text-sm text-gray-500 font-mono hidden md:inline-block border-l border-creme-200 pl-4">
-                    {totalCount.toLocaleString('pt-BR')} total
-                  </span>
-                )}
-
                 <div className="flex items-center gap-1 bg-creme-50 rounded-lg p-1 border border-creme-200">
                   <button
                     onClick={handlePrev}
@@ -2290,7 +2504,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <span className="text-sm font-mono w-16 text-center text-gray-700">Pág {currentPage + 1}</span>
                   <button
                     onClick={handleNext}
-                    disabled={loading || (analysis && (currentPage + 1) * PAGE_SIZE >= analysis.filteredCount)}
+                    disabled={loading || (currentPage + 1) * PAGE_SIZE >= linhasMatriz.length}
                     className="p-2 rounded hover:bg-white text-gray-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
                   >
                     <ChevronRight size={16} />
@@ -2305,21 +2519,13 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4">
                   {tableData.map((row) => {
                     const img = row.imagemCapa ?? null;
-                    const scoreCor =
-                      (row.criticScore ?? 0) >= 80 ? 'bg-red-600' :
-                      (row.criticScore ?? 0) >= 60 ? 'bg-red-500' :
-                      (row.criticScore ?? 0) >= 40 ? 'bg-orange-400' :
-                      (row.criticScore ?? 0) >= 20 ? 'bg-yellow-400' :
-                                                    'bg-emerald-500';
-                    const abcCor =
-                      row.abcClass === 'A' ? 'bg-emerald-500 text-white' :
-                      row.abcClass === 'B' ? 'bg-yellow-400 text-yellow-900' :
-                                             'bg-gray-200 text-gray-600';
+                    const scoreCor = scoreCorClass(row.criticScore ?? 0);
+                    const abcCor = abcCorClass(row.abcClass);
                     return (
                       <button
                         key={row.uniqueId}
-                        onClick={() => toggleRow(row.uniqueId)}
-                        className={`group relative flex flex-col bg-white border rounded-xl overflow-hidden transition-all text-left ${selectedRows.has(row.uniqueId) ? 'border-esmeralda-400 shadow-[0_0_0_2px_rgba(24,64,54,0.2)]' : 'border-creme-200 hover:border-esmeralda-300 hover:shadow-md'}`}
+                        onClick={() => toggleLinha(row)}
+                        className={`group relative flex flex-col bg-white border rounded-xl overflow-hidden transition-all text-left ${linhaSelecionada(row) ? 'border-esmeralda-400 shadow-[0_0_0_2px_rgba(24,64,54,0.2)]' : 'border-creme-200 hover:border-esmeralda-300 hover:shadow-md'}`}
                       >
                         {/* Imagem */}
                         <div className="relative w-full aspect-square bg-creme-100 overflow-hidden">
@@ -2346,7 +2552,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                               {row.criticScore ?? 0}
                             </span>
                           </div>
-                          {selectedRows.has(row.uniqueId) && (
+                          {linhaSelecionada(row) && (
                             <div className="absolute inset-0 bg-esmeralda-500/20 flex items-center justify-center">
                               <div className="bg-esmeralda-500 text-white p-2 rounded-full shadow-lg">
                                 <Check size={20} />
@@ -2400,6 +2606,12 @@ const Dashboard: React.FC<DashboardProps> = ({
                           : <Square size={16} />}
                       </button>
                     </th>
+
+                    {groupMode === 'modelo' && (
+                      <th className="px-1 py-2.5 border-b border-creme-200 text-center w-[64px] whitespace-nowrap" title="Grade de tamanhos — clique na seta da linha para expandir">
+                        Grade
+                      </th>
+                    )}
 
                     {visibleColumns.map(colKey => {
                       const lay = colLayout(colKey);
@@ -2474,24 +2686,27 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <tbody className="divide-y divide-creme-200">
                   {tableData.length === 0 ? (
                     <tr>
-                      <td colSpan={visibleColumns.length + 5} className="px-6 py-16 text-center text-gray-500 text-base">
+                      <td colSpan={visibleColumns.length + (groupMode === 'modelo' ? 6 : 5)} className="px-6 py-16 text-center text-gray-500 text-base">
                         Nenhum registro encontrado para este filtro.
                       </td>
                     </tr>
                   ) : (
                     tableData.map((row, idx) => {
                       const isEditing = editingId === row.uniqueId;
-                      const isSelected = selectedRows.has(row.uniqueId);
+                      const isSelected = linhaSelecionada(row);
+                      const ehModelo = groupMode === 'modelo' && (row.members?.length ?? 0) > 1;
+                      const expandido = ehModelo && expandedModels.has(row.uniqueId);
 
                       return (
-                        <tr key={idx} className={`transition-colors group ${isEditing ? 'bg-esmeralda-50/50' : isSelected ? 'bg-esmeralda-50/30' : 'hover:bg-creme-50'}`}>
+                        <React.Fragment key={row.uniqueId ?? idx}>
+                        <tr className={`transition-colors group ${isEditing ? 'bg-esmeralda-50/50' : isSelected ? 'bg-esmeralda-50/30' : 'hover:bg-creme-50'}`}>
                           {/* Coluna única fixa: checkbox visível, ações aparecem on-hover à direita */}
                           <td className="px-2 py-2 sticky left-0 z-20 bg-white group-hover:bg-creme-50 border-r border-creme-200 w-[52px]">
                             <div className="flex items-center justify-center gap-0.5 relative">
                               <button
-                                onClick={() => toggleRow(row.uniqueId)}
+                                onClick={() => toggleLinha(row)}
                                 className={`p-1 rounded transition-colors ${isSelected ? 'text-esmeralda-500' : 'text-gray-400 hover:text-gray-700'}`}
-                                title="Selecionar"
+                                title={ehModelo ? 'Selecionar o modelo inteiro (todas as variações)' : 'Selecionar'}
                               >
                                 {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
                               </button>
@@ -2518,15 +2733,17 @@ const Dashboard: React.FC<DashboardProps> = ({
                                   </>
                                 ) : (
                                   <>
+                                    {!ehModelo && (
+                                      <button
+                                        onClick={() => startEditing(row)}
+                                        className="p-1 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                        title="Editar"
+                                      >
+                                        <Pencil size={12} />
+                                      </button>
+                                    )}
                                     <button
-                                      onClick={() => startEditing(row)}
-                                      className="p-1 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                                      title="Editar"
-                                    >
-                                      <Pencil size={12} />
-                                    </button>
-                                    <button
-                                      onClick={() => hideRow(row.uniqueId)}
+                                      onClick={() => ocultarLinha(row)}
                                       className="p-1 rounded-md text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                                       title="Ocultar"
                                     >
@@ -2537,6 +2754,28 @@ const Dashboard: React.FC<DashboardProps> = ({
                               </div>
                             </div>
                           </td>
+
+                          {groupMode === 'modelo' && (
+                            <td className="px-1 py-2 text-center whitespace-nowrap">
+                              {ehModelo ? (
+                                <button
+                                  onClick={() => toggleExpandModelo(row.uniqueId)}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-mono text-gray-600 hover:bg-creme-100 transition-colors"
+                                  title={`${row.members.length} variações — clique para ${expandido ? 'recolher' : 'expandir'} a grade`}
+                                >
+                                  <ChevronDown size={13} className={`transition-transform ${expandido ? '' : '-rotate-90'}`} />
+                                  {row.members.length}
+                                  {row.furos > 0 && (
+                                    <span className="px-1 rounded bg-red-100 text-red-700 font-bold" title={`${row.furos} furo(s) de grade: tamanho zerado que vendeu em 12m`}>
+                                      {row.furos}
+                                    </span>
+                                  )}
+                                </button>
+                              ) : (
+                                <span className="text-gray-300 text-xs">—</span>
+                              )}
+                            </td>
+                          )}
 
                           {/* Dynamic columns */}
                           {visibleColumns.map(colKey => {
@@ -2724,10 +2963,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                           {/* ABC */}
                           <td className="px-1 py-2 text-center">
                             {(() => {
-                              const cor =
-                                row.abcClass === 'A' ? 'bg-emerald-500 text-white' :
-                                row.abcClass === 'B' ? 'bg-yellow-400 text-yellow-900' :
-                                                       'bg-gray-200 text-gray-600';
+                              const cor = abcCorClass(row.abcClass);
                               return (
                                 <span
                                   className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold font-mono ${cor}`}
@@ -2793,6 +3029,45 @@ const Dashboard: React.FC<DashboardProps> = ({
                             {formatCurrencyShort(row.totalValue)}
                           </td>
                         </tr>
+
+                        {expandido && (
+                          <tr>
+                            <td colSpan={visibleColumns.length + 6} className="px-6 py-3 bg-creme-50 border-b border-creme-200">
+                              <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">
+                                Grade de tamanhos — estoque por variação
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                                {row.members.map((m: any) => {
+                                  const rotulo = m.original?.numeracao
+                                    ? `aro ${m.original.numeracao}`
+                                    : (m.original?.sufixo_variacao
+                                        ?? (String(m.sku).includes('-') ? String(m.sku).split('-').slice(1).join('-') : 'única'));
+                                  const furo = m.original?.eh_variacao && m.stock <= 0 && (m.receita12m ?? 0) > 0;
+                                  const diasUlt = m.lastSaleDate
+                                    ? Math.floor((Date.now() - m.lastSaleDate.getTime()) / 86400000)
+                                    : null;
+                                  return (
+                                    <span
+                                      key={m.uniqueId}
+                                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono border ${furo ? 'bg-red-50 border-red-200 text-red-700' : m.stock > 0 ? 'bg-white border-creme-200 text-gray-700' : 'bg-creme-100 border-creme-200 text-gray-400'}`}
+                                      title={`${m.sku}${diasUlt !== null ? ` · última venda há ${diasUlt}d` : ' · nunca vendeu'}`}
+                                    >
+                                      {rotulo} · <b>{m.stock}</b>
+                                      {furo && diasUlt !== null && <span className="font-sans">— vendeu há {diasUlt}d</span>}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                              {row.furos > 0 && (
+                                <p className="text-xs text-red-700 mt-2">
+                                  ⚠ {row.furos} furo{row.furos > 1 ? 's' : ''} de grade: tamanho zerado que vendeu nos últimos 12 meses — prioridade de fabricação.
+                                </p>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       );
                     })
                   )}

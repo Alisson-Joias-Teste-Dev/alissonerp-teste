@@ -7,17 +7,14 @@
  * ESCRITA: via /api/produtos/[id] (PATCH) — respeita validações do ERP
  * DELETE:  soft delete (situacao='I'), jamais DELETE físico
  */
-import type { TableRow, SchemaName } from "./types";
+import type { TableRow } from "./types";
 
 // ─── READ ────────────────────────────────────────────────────────────────────
 
 export async function fetchTableData(
-  _schema: SchemaName,
-  _table: string,
   page = 0,
   pageSize = 50,
-  searchTerm = "",
-  _searchColumns: string[] = []
+  searchTerm = ""
 ): Promise<{ data: TableRow[] | null; error: unknown; count: number | null }> {
   try {
     const params = new URLSearchParams({
@@ -37,8 +34,6 @@ export async function fetchTableData(
 }
 
 export async function fetchDashboardData(
-  _schema: SchemaName,
-  _table: string,
   localId?: number | null
 ): Promise<{ data: TableRow[] | null; error: unknown }> {
   try {
@@ -54,19 +49,9 @@ export async function fetchDashboardData(
   }
 }
 
-export async function fetchColumnTotal(
-  _schema: SchemaName,
-  _table: string,
-  _column: string
-): Promise<{ total: number | null; error: unknown }> {
-  return { total: null, error: null }; // não usado no fluxo atual
-}
-
 // ─── WRITE ────────────────────────────────────────────────────────────────────
 
 export async function updateRecord(
-  _schema: SchemaName,
-  _table: string,
   id: string | number,
   updates: Partial<TableRow>,
   _pkField = "id"
@@ -93,8 +78,6 @@ export async function updateRecord(
 
 /** Soft delete: seta situacao='I' via PATCH. Hard DELETE é proibido. */
 export async function deleteRecord(
-  _schema: SchemaName,
-  _table: string,
   row: TableRow
 ): Promise<{ success: boolean; error: unknown }> {
   const id = (row.id_produto ?? row.id) as string | number | undefined;
@@ -112,10 +95,6 @@ export async function deleteRecord(
   } catch (err) {
     return { success: false, error: err };
   }
-}
-
-export async function discoverTables(_schema: SchemaName): Promise<string[]> {
-  return ["produtos"];
 }
 
 export async function saveTableConfig(tableName: string, config: unknown): Promise<boolean> {

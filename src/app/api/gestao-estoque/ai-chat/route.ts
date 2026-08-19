@@ -5,7 +5,8 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { authOr401 } from "@/lib/auth-server";
+import { temAcessoModulo } from "@/lib/permissoes";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import {
   LIMITS,
@@ -26,9 +27,13 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GESTAO_ESTOQUE_AI_MODEL || "gemini-2.5-flash";
 
 export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  const [user, errRes] = await authOr401(req);
+  if (errRes) return errRes;
+  // Mesmo gate das rotas irmas do modulo: sem acesso a 'produtos', sem chat —
+  // cada pergunta consome tokens Gemini pagos.
+  if (!(await temAcessoModulo(user.role, "produtos", "ler"))) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
 
   // Cada chat consome tokens Gemini. 3/min e 30/hora por user.
   try {
