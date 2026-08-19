@@ -130,10 +130,22 @@ export async function PATCH(
     }
 
     const [pagAtual] = await sql`
-      SELECT id, status FROM alissonerp.pagamentos_venda
+      SELECT id, status, forma FROM alissonerp.pagamentos_venda
       WHERE id = ${pagId} AND venda_id = ${sol.venda_id}
     `;
     if (!pagAtual) return NextResponse.json({ error: "Pagamento não existe mais" }, { status: 409 });
+
+    // REGRA DE NEGÓCIO (19/08/2026): "Ação Marketing" NUNCA confirma por esta
+    // porta (aprovação genérica de "solicitação de alteração") — só via
+    // aprovação do master admin (Alisson) na tarefa própria (tipo
+    // acao_marketing). Esta porta usa aprovador config-first genérico
+    // (alteracao_venda), que não é necessariamente o Alisson.
+    if (pagAtual.forma === "Ação Marketing" && novoStatus === "confirmado") {
+      return NextResponse.json(
+        { error: "Pagamento \"Ação Marketing\" só é confirmado pela aprovação do Alisson (tarefa própria), não por esta solicitação." },
+        { status: 409 },
+      );
+    }
 
     // Tudo numa transação: UPDATE pagamento + marca solicitação + audit.
     try {

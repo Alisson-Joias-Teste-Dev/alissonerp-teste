@@ -113,6 +113,19 @@ export async function POST(
     );
   }
 
+  // REGRA DE NEGÓCIO (19/08/2026): "Ação Marketing" NUNCA confirma por aqui —
+  // só via aprovação do master admin (Alisson) na tarefa. Mesmo desenho do
+  // bloqueio de "A Receber" acima. Bug relatado (venda 30612): esta rota
+  // confirmava direto, pulando a aprovação por completo.
+  if ((pagamentoPre.forma as string) === "Ação Marketing") {
+    return NextResponse.json(
+      {
+        error: "Pagamento \"Ação Marketing\" só é confirmado pela aprovação do Alisson. Peça aprovação da venda.",
+      },
+      { status: 409 },
+    );
+  }
+
   let saldoDevolvido = false;
   let novoCreditoId: number | null = null;
   let valorEfetivo = 0;

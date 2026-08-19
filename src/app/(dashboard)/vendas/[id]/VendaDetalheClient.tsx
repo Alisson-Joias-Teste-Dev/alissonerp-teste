@@ -3698,6 +3698,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                 const isNaEntrega = pag.forma === "Na Entrega";
                 const isPix = pag.forma === "Pix";
                 const isCartao = pag.forma === "Cartão de Crédito";
+                const isAcaoMarketing = pag.forma === "Ação Marketing";
                 const creditoAprovado = isAReceber && creditoFoiAprovado;
                 return (
                   <div key={pag.id} className="rounded-lg border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
@@ -3759,10 +3760,26 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                             aguardando aprovação
                           </span>
                         )}
+                        {/* Badge aguardando aprovação do Alisson (Ação Marketing) */}
+                        {isAcaoMarketing && aguardandoAprovacaoMarketing && (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                            style={{ backgroundColor: "#FEF9C3", color: "#713F12" }}>
+                            aguardando aprovação do Alisson
+                          </span>
+                        )}
                         <span className="text-sm font-semibold tabular-nums" style={{ color: C.esmeralda }}>{fmt(pag.valor)}</span>
 
                         {/* A Receber pendente + sem aprovação → botão solicitar aprovação */}
                         {isAReceber && pag.status === "pendente" && !aguardandoAprovacaoCredito && !creditoAprovado && (
+                          <button onClick={solicitarAprovacao} disabled={updating}
+                            className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-50"
+                            style={{ backgroundColor: "#D97706", color: "#fff" }}>
+                            Solicitar Aprovação
+                          </button>
+                        )}
+
+                        {/* Ação Marketing pendente → NUNCA confirma direto — só via aprovação do Alisson */}
+                        {isAcaoMarketing && pag.status === "pendente" && !aguardandoAprovacaoMarketing && (
                           <button onClick={solicitarAprovacao} disabled={updating}
                             className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-50"
                             style={{ backgroundColor: "#D97706", color: "#fff" }}>
@@ -3819,7 +3836,7 @@ mensagemBloqueio: (d.error as string | undefined) ?? "Esta alteração precisa d
                         )}
 
                         {/* Outros pagamentos pendentes → confirmar manual */}
-                        {!isAReceber && !isNaEntrega && pag.forma !== "Manual (MP)" && !isPix && !isCartao && pag.status === "pendente" &&
+                        {!isAReceber && !isNaEntrega && !isAcaoMarketing && pag.forma !== "Manual (MP)" && !isPix && !isCartao && pag.status === "pendente" &&
                           (isFullAccess || ["gerente_loja", "diretor"].includes(role)) && (
                           <button onClick={() => confirmarPagamento(pag.id, pag.forma)} disabled={updating}
                             className="text-xs px-2 py-1 rounded-lg font-medium disabled:opacity-50"

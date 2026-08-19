@@ -277,6 +277,19 @@ Alisson. Esse guard nunca pega o caminho legítimo: a tarefa CONFIRMA o pagament
 **O que NÃO faz.** Não recria o botão "aprovar direto" da primeira tentativa (v2.85.12, revertida)
 — a decisão do Alisson agora é sempre pela tela de tarefas, igual às outras aprovações.
 
+**🔴 Bug corrigido (19/08/2026, mesmo dia): confirmação manual do PAGAMENTO bypassava tudo.** O
+guard acima só protege a APROVAÇÃO DA VENDA — mas existem 3 portas separadas que confirmam um
+PAGAMENTO individual sem passar pela venda: botão "Confirmar" na tela da venda (chama `PATCH
+/api/vendas/[id]/pagamentos/[pagId]`), a rota `POST .../pagamentos/[pagId]/confirmar` (idem padrão
+de bloqueio do "A Receber"), e a aprovação de "solicitação de alteração" tipo `pagamento_status`
+(`solicitacoes-alteracao/[id]/route.ts`, aprovador config-first genérico, não necessariamente o
+Alisson). Testado ao vivo na venda 30612: o botão "Confirmar" confirmou o pagamento na hora, sem
+nenhuma tarefa nascer. Corrigido nas 3 portas (guard idêntico ao de "A Receber" em `confirmar/
+route.ts`) + o botão "Confirmar" do front agora exclui `forma === "Ação Marketing"` (mostra
+"Solicitar Aprovação" em vez, como o "A Receber"). **Lição:** ao adicionar aprovação obrigatória
+pra uma forma de pagamento nova, mapear TODOS os caminhos que fazem `UPDATE pagamentos_venda SET
+status='confirmado'`, não só o de aprovar a venda.
+
 ## 7. Inventário do estoque comercial (v2.80.0)
 
 - **Inventário é auditoria, NÃO ajusta estoque.** Concluir congela a contagem; `ajustes_gerados` é sempre 0. Divergências são tratadas manualmente item a item depois de investigar. (O helper `gerarAjustesDivergencias` existe em `src/lib/inventario-helpers.ts` mas está desligado de propósito.)

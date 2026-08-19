@@ -1,6 +1,20 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 19/08/2026 — Versão: v2.85.14 <!-- Revisado 19/08/2026 -->
+> 📋 Última atualização automática: 19/08/2026 — Versão: v2.85.15 <!-- Revisado 19/08/2026 -->
+
+## fix(vendas): botão "Confirmar" pagamento bypassava a aprovação da "Ação Marketing" (v2.85.15)
+
+**O bug:** a v2.85.14 só travou a APROVAÇÃO DA VENDA quando havia "Ação Marketing" pendente — mas
+existem 3 portas separadas que confirmam um PAGAMENTO individual sem passar pela venda: o botão
+"Confirmar" na tela da venda, a rota `POST .../pagamentos/[pagId]/confirmar`, e a aprovação de
+"solicitação de alteração" (`pagamento_status`, aprovador genérico, não necessariamente o Alisson).
+Testado ao vivo na venda 30612: o botão confirmou o pagamento na hora, sem nenhuma tarefa nascer.
+
+**A correção:** guard idêntico ao já usado pra "A Receber" nas 3 rotas (`pagamentos/[pagId]/route.ts`,
+`.../confirmar/route.ts`, `solicitacoes-alteracao/[id]/route.ts`) — bloqueiam confirmar "Ação
+Marketing" com 409, pra qualquer role. O botão "Confirmar" do front agora exclui essa forma (mostra
+"Solicitar Aprovação" em vez, igual "A Receber"). Pagamento de teste da venda 30612 revertido pra
+`pendente` no banco (assinatura #448).
 
 ## feat(vendas): "Ação Marketing" como forma de pagamento — aprovação do Alisson via tarefa (v2.85.14)
 

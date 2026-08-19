@@ -43,7 +43,7 @@ export async function PATCH(
   if (isNaN(vendaId) || isNaN(pId)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [pag] = await sql`
-    SELECT p.id, p.status, v.bloqueado, v.situacao AS venda_situacao
+    SELECT p.id, p.status, p.forma, v.bloqueado, v.situacao AS venda_situacao
     FROM alissonerp.pagamentos_venda p
     JOIN alissonerp.vendas_erp v ON v.id = p.venda_id
     WHERE p.id = ${pId} AND p.venda_id = ${vendaId}
@@ -66,6 +66,20 @@ export async function PATCH(
   const parsed = PagamentoPatchSchema.safeParse(raw);
   if (!parsed.success) return zodError(parsed.error);
   const body = parsed.data;
+
+  // REGRA DE NEGÓCIO (19/08/2026): "Ação Marketing" NUNCA confirma por aqui —
+  // só via aprovação do master admin (Alisson), que confirma o pagamento
+  // dentro do próprio fluxo de tarefa (PATCH /api/tarefas/[id]/aprovacao).
+  // Vale pra QUALQUER role, inclusive admin/diretor — bug relatado 19/08/2026
+  // (venda 30612): o botão "Confirmar" desta tela confirmava direto, pulando
+  // a aprovação por completo. IMPACTO SE REMOVIDO: qualquer um confirma
+  // cortesia sem o Alisson decidir.
+  if (pag.forma === "Ação Marketing" && body.status === "confirmado") {
+    return NextResponse.json(
+      { error: "Pagamento \"Ação Marketing\" só é confirmado pela aprovação do Alisson. Peça aprovação da venda." },
+      { status: 409 },
+    );
+  }
 
   // Gate financeiro — vendedora/gerente abre solicitação ao tentar mexer no financeiro.
   // Frontend usa o flag `solicitar` pra abrir o modal de "Solicitar alteração".
