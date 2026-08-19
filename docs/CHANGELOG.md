@@ -2,6 +2,21 @@
 
 > 📋 Última atualização automática: 19/08/2026 — Versão: v2.85.15 <!-- Revisado 19/08/2026 -->
 
+## fix(produtos): controla_estoque e tem_pedra_preciosa voltam certos no cadastro de pedra (v2.83.9)
+
+**O bug:** o revert de emergência de 13/08 (87806d16, que restaurou produção depois da queda do
+banco-nunca-aplicado) desfez sem querer um ajuste de 12/08 (67e055dc) em `peca-avulsa/route.ts` e
+`pedras-bulk/route.ts`: faltava marcar a pedra recém-criada com `controla_estoque=false` em
+`estoque_comercial_config` (pedra solta usa saldo próprio em `public.estoque`, não reserva/baixa de
+venda comercial). No cadastro **em lote** o revert também trouxe de volta `tem_pedra_preciosa=true`
+(campo é de JOIA com pedra engastada, não da pedra solta) — a avulsa não foi afetada nesse ponto.
+
+**A correção:** restaurados os dois blocos nos dois arquivos + `tem_pedra_preciosa=false` no lote.
+Extra: lote passou a gravar `tipo_de_pedra` (etiqueta), que só a avulsa gravava. Pedras cadastradas
+ANTES desse conserto continuam com os campos errados — backfill em
+`docs/seguranca/RODAR-pedra-controla-estoque-backfill-2026-08-19.sql` (não aplicado ainda, precisa
+rodar no banco).
+
 ## fix(vendas): botão "Confirmar" pagamento bypassava a aprovação da "Ação Marketing" (v2.85.15)
 
 **O bug:** a v2.85.14 só travou a APROVAÇÃO DA VENDA quando havia "Ação Marketing" pendente — mas
