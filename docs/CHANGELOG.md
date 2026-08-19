@@ -2,6 +2,20 @@
 
 > 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
 
+## feat(gestao-estoque): filtro Situacao — Ativos | Inativos | Todos (v2.83.13)
+
+Pedido do Alisson (19/08): peca zerada costuma ser INATIVADA — e sumia da tela,
+inclusive do escopo "Zerados" filtrado por fornecedor.
+
+- Rota passa a trazer situacao 'A' + 'I' ('E' segue fora).
+- Novo filtro segmentado "Situacao" ao lado do Escopo; DEFAULT = Ativos
+  (nenhum numero muda sem o usuario pedir).
+- Zerados + Fornecedor + Inativos = relatorio de "o que zerou e foi desativado
+  desse fornecedor" — combinacao que motivou o pedido.
+- Curva ABC agora considera receita 12m tambem das inativadas (inativa que
+  vendia muito aparece como A — sinal de refabricar, nao de esconder).
+- Vistas salvas gravam e restauram a situacao escolhida.
+
 ## fix(gestao-estoque): topo harmonizado — numeros compactos, sem duplicacao, secundarios recolhidos (v2.83.12)
 
 Pedido do Alisson (18/08, com print da tela): numeros estourando os cartoes,
