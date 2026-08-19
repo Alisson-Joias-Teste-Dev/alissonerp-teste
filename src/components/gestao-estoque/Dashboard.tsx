@@ -342,8 +342,15 @@ const Dashboard: React.FC<DashboardProps> = ({
     
     const statusKey = keys.find(k => /status|situacao|situation|active|published/i.test(k));
 
-    // Improved Category Detection (Name or Content)
-    let categoryKey = keys.find(k => /category|categoria|grupo|familia|type|tipo/i.test(k));
+    // O QUE: acha a coluna de categoria com prioridade pro nome EXATO.
+    // O PORQUE: o regex frouxo casava 'tipo_metal' (vem antes de 'categoria' na
+    // ordem do SELECT) e o filtro rotulado Categoria filtrava por METAL - bug
+    // grave n6 do pente-fino 18/08. 'categoria_precificacao' (letra da curva)
+    // tambem NAO e categoria de produto.
+    // IMPACTO se remover a prioridade: dropdown Categoria volta a listar metais.
+    let categoryKey = keys.find(k => /^(categoria|category)$/i.test(k)) ||
+                      keys.find(k => /category|categoria|grupo|familia/i.test(k) && k !== 'categoria_precificacao') ||
+                      keys.find(k => /type|tipo/i.test(k));
 
     // Fallback: Value-based heuristic (Check first few rows for jewelry keywords)
     if (!categoryKey) {

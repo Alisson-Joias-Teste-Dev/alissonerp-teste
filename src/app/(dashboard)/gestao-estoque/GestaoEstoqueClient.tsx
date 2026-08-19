@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Grid, LayoutDashboard, Layers, Sparkles } from "lucide-react";
 import DataGrid from "@/components/gestao-estoque/DataGrid";
 import Dashboard from "@/components/gestao-estoque/Dashboard";
@@ -68,7 +68,15 @@ export default function GestaoEstoqueClient() {
     return cols.filter((c) => likelyText.some((lc) => c.toLowerCase().includes(lc)));
   };
 
+  // O QUE: numera cada carregamento; so a resposta do MAIS RECENTE escreve na tela.
+  // O PORQUE: a query do dashboard e pesada (ate 60s). Trocar filtro/aba rapido
+  // deixava a resposta VELHA chegar depois e sobrescrever a nova - painel exibia
+  // numeros do local errado (bug grave n5 do pente-fino 18/08).
+  // IMPACTO se remover: dado obsoleto mostrado como atual, sem nenhum aviso.
+  const reqSeqRef = useRef(0);
+
   const loadData = useCallback(async () => {
+    const reqId = ++reqSeqRef.current;
     setLoading(true);
     setError(null);
 
@@ -90,6 +98,8 @@ export default function GestaoEstoqueClient() {
           searchTerm,
           searchCols
         );
+
+      if (reqId !== reqSeqRef.current) return; // resposta velha: descarta
 
       if (fetchError) {
         console.error("Erro:", fetchError);
@@ -113,6 +123,7 @@ export default function GestaoEstoqueClient() {
       }
     } else {
       const { data: dashData, error: dashError } = await fetchDashboardData(FIXED_SCHEMA, FIXED_TABLE, selectedLocal);
+      if (reqId !== reqSeqRef.current) return; // resposta velha: descarta
       if (dashError) {
         const msg = (dashError as { message?: string })?.message ?? JSON.stringify(dashError);
         setError(msg);
@@ -131,7 +142,7 @@ export default function GestaoEstoqueClient() {
         }
       }
     }
-    setLoading(false);
+    if (reqId === reqSeqRef.current) setLoading(false);
   }, [page, viewMode, searchTerm, columns, selectedLocal]);
 
   useEffect(() => {

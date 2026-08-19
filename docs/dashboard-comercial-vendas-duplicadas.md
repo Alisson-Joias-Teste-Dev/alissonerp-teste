@@ -138,10 +138,12 @@ manualmente direto no banco** — divergência banco × git). A partir de agora 
 
 Identificados nesta investigação e **conscientemente adiados** (não é descuido):
 
-1. **Telas de "mais vendidos" / análise de estoque** (`gestao-estoque/produtos`,
-   `oportunidades-fabricacao`, `vendas-semanais`) leem `public.vendas` + `public.itens_venda`. Com o
-   n8n desativado, deixarão de enxergar as vendas novas do ERP. **Decisão (Jonathan, 15/06):** não
-   tratar agora. Correção futura: apontar para `vendas_erp`/`itens_venda_erp`.
+1. ~~**Telas de "mais vendidos" / análise de estoque** leem só `public.vendas` +
+   `public.itens_venda`~~ — **QUITADO em 18/08/2026 (v2.83.9):** as 3 rotas
+   (`gestao-estoque/produtos`, `oportunidades-fabricacao`, `vendas-semanais`) agora
+   unem legado + `vendas_erp`/`itens_venda_erp` com dedup de espelhos, via fonte
+   única `src/lib/gestao-estoque/vendas-sql.ts` (mesmo critério da
+   `vw_dash_vendas_todas`).
 2. **Join quebrado em Orçamento:** `api/orcamento` faz `LEFT JOIN public.vendas ON
    v.id = o.venda_gerada_id`, mas `venda_gerada_id` guarda **id de `vendas_erp`** (77/77 batem no ERP,
    0 no `public.vendas`). Bug latente, sem impacto crítico; documentado para correção futura.

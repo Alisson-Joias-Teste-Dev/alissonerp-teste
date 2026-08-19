@@ -41,6 +41,18 @@ const InventoryTab: React.FC<InventoryTabProps> = ({ data, loading, error, table
     const isPurchaseTable = tableName && /compra|entrada|purchase/i.test(tableName);
 
     data.forEach(row => {
+      // O QUE: mapeamento explicito para a tabela 'produtos' (a unica usada hoje):
+      // reposicao (data_ultima_compra) = ENTRADA; venda (data_ultima_venda) = SAIDA.
+      // O PORQUE: a heuristica generica abaixo pegava a 1a coluna de data
+      // (data_ultima_venda) como criacao e jogava a VENDA no cartao de Entradas -
+      // o cartao Saidas ficava 0 pra sempre (bug grave n2 do pente-fino 18/08).
+      // IMPACTO se remover: a tela volta a inverter o movimento do estoque.
+      if (tableName === 'produtos') {
+        const compraVal = row['data_ultima_compra'] ?? row['ultima_compra'];
+        if (compraVal && isDateInRange(compraVal)) inItems.push(row);
+        if (row['data_ultima_venda'] && isDateInRange(row['data_ultima_venda'])) outItems.push(row);
+        return;
+      }
       // Find all columns that look like dates
       const dateCols = Object.keys(row).filter(k => {
         const val = row[k];

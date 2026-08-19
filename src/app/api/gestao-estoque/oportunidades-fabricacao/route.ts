@@ -32,6 +32,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
+import { itensVendaValidos } from "@/lib/gestao-estoque/vendas-sql";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
@@ -71,19 +72,22 @@ export async function GET(req: NextRequest) {
       vendas_365d: number;
       vendas_90d: number;
     }>>`
-      WITH vendas_agg AS (
+      WITH itens_validos AS (
+        -- Fonte unica de vendas contaveis: legado sem canceladas + ERP nativo,
+        -- com dedup de espelhos (bugs graves n3/n4 do pente-fino 18/08).
+        ${itensVendaValidos()}
+      ),
+      vendas_agg AS (
         SELECT
-          iv.produto_id,
-          COUNT(DISTINCT iv.venda_id)::int                                AS qtd_vendas_distintas,
-          COALESCE(SUM(iv.quantidade), 0)::numeric                         AS qtd_vendida_total,
-          COALESCE(SUM(iv.preco_total), 0)::numeric                        AS receita_total,
-          MAX(v.data_venda)                                                AS data_ultima_venda,
-          COUNT(DISTINCT CASE WHEN v.data_venda >= CURRENT_DATE - INTERVAL '365 days' THEN v.id END)::int AS vendas_365d,
-          COUNT(DISTINCT CASE WHEN v.data_venda >= CURRENT_DATE - INTERVAL '90 days'  THEN v.id END)::int AS vendas_90d
-        FROM public.itens_venda iv
-        JOIN public.vendas v ON v.id = iv.venda_id
-        WHERE iv.produto_id IS NOT NULL
-        GROUP BY iv.produto_id
+          produto_id,
+          COUNT(DISTINCT venda_key)::int         AS qtd_vendas_distintas,
+          COALESCE(SUM(quantidade), 0)::numeric  AS qtd_vendida_total,
+          COALESCE(SUM(preco_total), 0)::numeric AS receita_total,
+          MAX(data_venda)                        AS data_ultima_venda,
+          COUNT(DISTINCT CASE WHEN data_venda >= CURRENT_DATE - INTERVAL '365 days' THEN venda_key END)::int AS vendas_365d,
+          COUNT(DISTINCT CASE WHEN data_venda >= CURRENT_DATE - INTERVAL '90 days'  THEN venda_key END)::int AS vendas_90d
+        FROM itens_validos
+        GROUP BY produto_id
       )
       SELECT
         p.id_produto,

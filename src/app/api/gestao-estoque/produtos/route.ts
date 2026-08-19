@@ -3,11 +3,15 @@
  * Retorna todos os produtos ATIVOS (pais+simples+variações) em UMA query,
  * com agregações pré-calculadas:
  *  - saldo_estoque     via JOIN com public.estoque (SKU)
- *  - qtd_vendas        total de vendas distintas do historico (itens_venda)
- *  - data_ultima_venda MAX(data_venda) em public.vendas
+ *  - qtd_vendas        total de vendas distintas do historico (legado + ERP)
+ *  - data_ultima_venda MAX(data_venda) nas duas origens de venda
  *  - qtd_vendida_90d   soma de quantidade nos ultimos 90 dias (base do DIO)
  *  - receita_total_12m soma de preco_total nos ultimos 365 dias (base do ABC)
  *  - data_ultima_compra data de reposicao populada pelo ETL em public.produtos
+ *
+ * Vendas = itens_validos de src/lib/gestao-estoque/vendas-sql.ts (legado sem
+ * canceladas + ERP nativo, com dedup) - correcao dos bugs graves n3 e n4
+ * do pente-fino de 18/08/2026.
  *
  * SQL direto via postgres lib. Retorno integral usado pelo Dashboard analítico.
  */
@@ -15,6 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
+import { itensVendaValidos } from "@/lib/gestao-estoque/vendas-sql";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -45,37 +50,37 @@ export async function GET(req: NextRequest) {
           : sql`SELECT produto_id, saldo::int AS saldo_fisico FROM alissonerp.vw_saldo_estoque_comercial`
         }
       ),
+      itens_validos AS (
+        -- Fonte unica de vendas contaveis: legado sem canceladas + ERP nativo,
+        -- com dedup de espelhos. NUNCA voltar a ler so public.itens_venda aqui
+        -- (bugs graves n3/n4 do pente-fino 18/08). Ver vendas-sql.ts.
+        ${itensVendaValidos()}
+      ),
       ultima_venda AS (
         SELECT
-          iv.produto_id,
-          MAX(v.data_venda)        AS data_ultima_venda,
-          COUNT(DISTINCT v.id)::int AS qtd_vendas
-        FROM public.itens_venda iv
-        JOIN public.vendas v ON v.id = iv.venda_id
-        WHERE iv.produto_id IS NOT NULL
-        GROUP BY iv.produto_id
+          produto_id,
+          MAX(data_venda)                AS data_ultima_venda,
+          COUNT(DISTINCT venda_key)::int AS qtd_vendas
+        FROM itens_validos
+        GROUP BY produto_id
       ),
       vendas_90d AS (
         -- Quantidade vendida nos ultimos 90 dias (base do calculo de DIO)
         SELECT
-          iv.produto_id,
-          SUM(iv.quantidade)::numeric AS qtd_vendida_90d
-        FROM public.itens_venda iv
-        JOIN public.vendas v ON v.id = iv.venda_id
-        WHERE iv.produto_id IS NOT NULL
-          AND v.data_venda >= (CURRENT_DATE - INTERVAL '90 days')
-        GROUP BY iv.produto_id
+          produto_id,
+          SUM(quantidade)::numeric AS qtd_vendida_90d
+        FROM itens_validos
+        WHERE data_venda >= (CURRENT_DATE - INTERVAL '90 days')
+        GROUP BY produto_id
       ),
       receita_12m AS (
         -- Receita total nos ultimos 12 meses (base real da classificacao ABC)
         SELECT
-          iv.produto_id,
-          SUM(iv.preco_total)::numeric AS receita_total_12m
-        FROM public.itens_venda iv
-        JOIN public.vendas v ON v.id = iv.venda_id
-        WHERE iv.produto_id IS NOT NULL
-          AND v.data_venda >= (CURRENT_DATE - INTERVAL '365 days')
-        GROUP BY iv.produto_id
+          produto_id,
+          SUM(preco_total)::numeric AS receita_total_12m
+        FROM itens_validos
+        WHERE data_venda >= (CURRENT_DATE - INTERVAL '365 days')
+        GROUP BY produto_id
       )
       SELECT
         p.id_produto,

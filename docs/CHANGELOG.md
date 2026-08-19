@@ -2,6 +2,29 @@
 
 > 📋 Última atualização automática: 10/08/2026 — Versão: v2.85.11 <!-- Revisado 10/08/2026 -->
 
+## fix(gestao-estoque): 6 bugs graves do pente-fino — vendas ERP incluidas, canceladas fora, telas corrigidas (v2.83.9)
+
+Pente-fino completo no modulo Gestao de Estoque (18/08, 67 suspeitas, 56 confirmadas).
+Esta versao corrige os 6 GRAVES; os 50 medios/leves ficam documentados para proxima leva.
+
+- **Vendas do ERP entram nos numeros:** receita 12m/ABC, DIO 90d, ultima venda,
+  oportunidades de fabricacao e serie semanal agora unem legado (Tiny) + ERP nativo
+  (`vendas_erp`/`itens_venda_erp`), com dedup de espelhos identico a
+  `vw_dash_vendas_todas`. Fonte unica nova: `src/lib/gestao-estoque/vendas-sql.ts`.
+  (Era o debito conhecido do doc vendas-duplicadas §5 item 1 — quitado.)
+- **Vendas canceladas fora da conta:** filtro canonico `status IS NOT NULL AND != 4`
+  (legado) e `situacao IN aprovado/enviado/concluido` (ERP) nas 3 rotas do modulo.
+- **ALISSON AI destravado:** client enviava a lista inteira de produtos e o servidor
+  recusava (413) — toda pergunta virava "Sem resposta.". Agora envia 50 linhas (o que
+  o servidor usa) e mostra o erro real quando houver.
+- **Aba Estoque corrigida:** venda aparecia como ENTRADA e "Saidas" ficava 0 pra sempre.
+  Mapeamento explicito: `data_ultima_compra` = entrada, `data_ultima_venda` = saida.
+- **Filtro Categoria filtrava metal:** deteccao priorizava `tipo_metal`; agora nome
+  exato `categoria` vence. Vistas salvas com metais no campo categoria precisam ser
+  resalvadas.
+- **Resposta velha nao sobrescreve mais a nova:** carregamentos numerados no client;
+  so o mais recente escreve na tela (query pesada de ate 60s ao trocar local/aba).
+
 ## Pente-fino do front — limpeza de código morto validada em cópia isolada (v2.84.0 a v2.84.6)
 
 Espelho do pente-fino do banco, executado primeiro numa cópia isolada do projeto e só então

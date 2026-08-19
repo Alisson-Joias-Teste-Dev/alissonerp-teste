@@ -21,6 +21,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOr401 } from "@/lib/auth-server";
 import { temAcessoModulo } from "@/lib/permissoes";
 import sql from "@/lib/db";
+import { vendaLegadaNaoEspelhada } from "@/lib/gestao-estoque/vendas-sql";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -45,19 +46,35 @@ export async function GET(req: NextRequest) {
       valor_total: string;
     }[]>`
       WITH base AS (
+        -- Vendas contaveis das DUAS origens (bugs graves n3/n4 do pente-fino
+        -- 18/08): legado sem canceladas e sem espelhos + vendas nativas do ERP.
+        -- Por VENDA (LEFT JOIN): venda sem item ainda conta na qtd, como antes.
         SELECT
-          date_trunc('week', v.data_venda)::date AS semana,
-          v.id                                     AS venda_id,
-          COALESCE(SUM(iv.quantidade), 0)::numeric AS qtd_itens_venda,
+          date_trunc('week', v.data_venda)::date    AS semana,
+          'leg-' || v.id                            AS venda_key,
+          COALESCE(SUM(iv.quantidade), 0)::numeric  AS qtd_itens_venda,
           COALESCE(SUM(iv.preco_total), 0)::numeric AS valor_venda
         FROM public.vendas v
         LEFT JOIN public.itens_venda iv ON iv.venda_id = v.id
         WHERE v.data_venda >= (CURRENT_DATE - (${semanas}::int * INTERVAL '7 days'))
+          AND v.status IS NOT NULL AND v.status != 4
+          AND ${vendaLegadaNaoEspelhada()}
         GROUP BY 1, v.id
+        UNION ALL
+        SELECT
+          date_trunc('week', ve.data_venda)::date    AS semana,
+          'erp-' || ve.id                            AS venda_key,
+          COALESCE(SUM(ive.quantidade), 0)::numeric  AS qtd_itens_venda,
+          COALESCE(SUM(ive.total_item), 0)::numeric  AS valor_venda
+        FROM alissonerp.vendas_erp ve
+        LEFT JOIN alissonerp.itens_venda_erp ive ON ive.venda_id = ve.id
+        WHERE ve.data_venda >= (CURRENT_DATE - (${semanas}::int * INTERVAL '7 days'))
+          AND ve.situacao IN ('aprovado', 'enviado', 'concluido')
+        GROUP BY 1, ve.id
       )
       SELECT
         semana,
-        COUNT(DISTINCT venda_id)::int   AS qtd_vendas,
+        COUNT(DISTINCT venda_key)::int  AS qtd_vendas,
         COALESCE(SUM(qtd_itens_venda), 0)::int AS qtd_itens,
         COALESCE(SUM(valor_venda), 0)::numeric  AS valor_total
       FROM base
