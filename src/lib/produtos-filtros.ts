@@ -22,6 +22,22 @@ function has(opts: FiltrosOpts | undefined, k: FiltroKind): boolean {
   return !(opts?.exclude ?? []).includes(k);
 }
 
+/**
+ * REGRA DE NEGOCIO (21/08/2026 — Jonathan): a VERDADE do produto e
+ * alissonerp.erp_produtos. Todos os filtros leem COALESCE(ep.<col>, p.<col>) porque
+ * a copia public.produtos so e preenchida pelo gatilho no INSERT — nunca na edicao.
+ * Sem isso, 6.372 produtos que o ERP tem como inativos apareciam como "Ativo" no
+ * filtro, e busca por nome/SKU editado nao achava a peca.
+ * O fallback p.<col> responde pelos 532 produtos legados sem linha em erp_produtos.
+ * EXCECOES, que continuam vindo da copia:
+ *  · NOME — automacao externa (n8n/Tiny) mantem lá a convencao de catalogo com
+ *    prefixo de codigo (decisao do Jonathan, 21/08/2026).
+ *  · SITUACAO — erp_produtos.situacao tem 6.369 linhas 'I'/'E' de um backfill de
+ *    12/03/2026 que contradizem o ativo=true da propria linha (613 ja vendidas).
+ *    Ler do ERP tiraria ~6.370 produtos da busca de venda e do site.
+ * CONTRATO: toda query que usa estes filtros DEVE ter LEFT JOIN alissonerp.erp_produtos ep.
+ * IMPACTO SE REVERTIDO: filtros voltam a olhar dado congelado no cadastro.
+ */
 export function buildFiltrosProdutos(sp: Sp, opts: FiltrosOpts = {}) {
   const busca        = sp.get("busca")?.trim() ?? "";
   const skuPrefix    = sp.get("sku_prefix")?.trim() ?? "";
@@ -37,16 +53,16 @@ export function buildFiltrosProdutos(sp: Sp, opts: FiltrosOpts = {}) {
   const comVariacoes = sp.get("com_variacoes")?.trim() ?? "";
 
   const wBusca = has(opts, "busca") && busca
-    ? sql`AND (p.nome ILIKE ${"%" + busca + "%"} OR p.sku ILIKE ${"%" + busca + "%"})`
+    ? sql`AND (p.nome ILIKE ${"%" + busca + "%"} OR COALESCE(ep.sku, p.sku) ILIKE ${"%" + busca + "%"})`
     : sql``;
 
   const wSkuPrefix = has(opts, "sku_prefix") && skuPrefix
-    ? sql`AND p.sku ILIKE ${skuPrefix + "%"}`
+    ? sql`AND COALESCE(ep.sku, p.sku) ILIKE ${skuPrefix + "%"}`
     : sql``;
 
   const wPedra = has(opts, "tem_pedra") && (
-    tem_pedra === "true"  ? sql`AND p.tem_pedra_preciosa = true`  :
-    tem_pedra === "false" ? sql`AND p.tem_pedra_preciosa = false` :
+    tem_pedra === "true"  ? sql`AND COALESCE(ep.tem_pedra_preciosa, p.tem_pedra_preciosa) = true`  :
+    tem_pedra === "false" ? sql`AND COALESCE(ep.tem_pedra_preciosa, p.tem_pedra_preciosa) = false` :
     sql``
   );
 
@@ -56,13 +72,13 @@ export function buildFiltrosProdutos(sp: Sp, opts: FiltrosOpts = {}) {
 
   const wCategoria = has(opts, "categoria") && categoria
     ? subcategoria
-      ? sql`AND TRIM(p.categoria) = ${`${categoria} -> ${subcategoria}`}`
-      : sql`AND (TRIM(p.categoria) = ${categoria} OR TRIM(p.categoria) ILIKE ${`${categoria} -> %`})`
+      ? sql`AND TRIM(COALESCE(ep.categoria, p.categoria)) = ${`${categoria} -> ${subcategoria}`}`
+      : sql`AND (TRIM(COALESCE(ep.categoria, p.categoria)) = ${categoria} OR TRIM(COALESCE(ep.categoria, p.categoria)) ILIKE ${`${categoria} -> %`})`
     : sql``;
 
   const wTipoMetal = has(opts, "tipo_metal") && (
-    tipo_metal === "__sem__" ? sql`AND (p.tipo_metal IS NULL OR TRIM(p.tipo_metal) = '')` :
-    tipo_metal                ? sql`AND p.tipo_metal = ${tipo_metal}` :
+    tipo_metal === "__sem__" ? sql`AND (COALESCE(ep.tipo_metal, p.tipo_metal) IS NULL OR TRIM(COALESCE(ep.tipo_metal, p.tipo_metal)) = '')` :
+    tipo_metal                ? sql`AND COALESCE(ep.tipo_metal, p.tipo_metal) = ${tipo_metal}` :
     sql``
   );
 
@@ -79,7 +95,7 @@ export function buildFiltrosProdutos(sp: Sp, opts: FiltrosOpts = {}) {
           WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'
         ), 0) >= 1
         OR EXISTS (SELECT 1 FROM alissonerp.vw_estoque_directus_saldo v
-                   WHERE v.insumo_sku = p.sku AND v.saldo >= 1)
+                   WHERE v.insumo_sku = COALESCE(ep.sku, p.sku) AND v.saldo >= 1)
         OR (
           SELECT COALESCE(SUM(CASE WHEN m2.tipo = 'entrada' THEN m2.quantidade ELSE -m2.quantidade END), 0)
           FROM alissonerp.erp_produtos pai_ep
@@ -93,18 +109,18 @@ export function buildFiltrosProdutos(sp: Sp, opts: FiltrosOpts = {}) {
   // "Esconder insumos" também cobre mostruário e matérias-primas (itens de
   // suporte/exposição que não são joias do acervo comercial).
   const wEsconderInsumos = has(opts, "esconder_insumos") && esconderInsumos
-    ? sql`AND (p.sku IS NULL OR p.sku NOT ILIKE 'IS%')
-          AND (p.sku IS NULL OR p.sku NOT ILIKE 'MO%')
-          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Insumos%')
-          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Matérias Primas%')
-          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Mostruário%')
-          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Mostruario%')`
+    ? sql`AND (COALESCE(ep.sku, p.sku) IS NULL OR COALESCE(ep.sku, p.sku) NOT ILIKE 'IS%')
+          AND (COALESCE(ep.sku, p.sku) IS NULL OR COALESCE(ep.sku, p.sku) NOT ILIKE 'MO%')
+          AND (COALESCE(ep.categoria, p.categoria) IS NULL OR COALESCE(ep.categoria, p.categoria) NOT ILIKE 'Insumos%')
+          AND (COALESCE(ep.categoria, p.categoria) IS NULL OR COALESCE(ep.categoria, p.categoria) NOT ILIKE 'Matérias Primas%')
+          AND (COALESCE(ep.categoria, p.categoria) IS NULL OR COALESCE(ep.categoria, p.categoria) NOT ILIKE 'Mostruário%')
+          AND (COALESCE(ep.categoria, p.categoria) IS NULL OR COALESCE(ep.categoria, p.categoria) NOT ILIKE 'Mostruario%')`
     : sql``;
 
   // Pedras são itens comercializados em R$/unidade sem lastro em metal —
   // não devem aparecer em "sem metal", "sem peso" nem "sem preço" (seu preço
   // vem de preco_tiny, e peso é cosmético — ct×0.2 muito pequeno).
-  const wNaoPedra = sql`(p.categoria IS NULL OR p.categoria NOT ILIKE 'Pedras%')`;
+  const wNaoPedra = sql`(COALESCE(ep.categoria, p.categoria) IS NULL OR COALESCE(ep.categoria, p.categoria) NOT ILIKE 'Pedras%')`;
 
   // Produtos com personalização ativa (SKUs PZxxxx sob encomenda) têm peso/preço
   // calculados dinamicamente por letra — não devem aparecer em "sem peso" nem
@@ -115,16 +131,16 @@ export function buildFiltrosProdutos(sp: Sp, opts: FiltrosOpts = {}) {
       AND pp.ativo = true
   )`;
 
-  const wSemCat   = sql`(p.categoria IS NULL OR TRIM(p.categoria) = '')`;
-  const wSemMetal = sql`(p.tipo_metal IS NULL OR TRIM(p.tipo_metal) = '') AND ${wNaoPedra}`;
-  const wSemPeso  = sql`(p.peso_precificado IS NULL OR p.peso_precificado = 0)
+  const wSemCat   = sql`(COALESCE(ep.categoria, p.categoria) IS NULL OR TRIM(COALESCE(ep.categoria, p.categoria)) = '')`;
+  const wSemMetal = sql`(COALESCE(ep.tipo_metal, p.tipo_metal) IS NULL OR TRIM(COALESCE(ep.tipo_metal, p.tipo_metal)) = '') AND ${wNaoPedra}`;
+  const wSemPeso  = sql`(COALESCE(ep.peso_precificado, p.peso_precificado) IS NULL OR COALESCE(ep.peso_precificado, p.peso_precificado) = 0)
                     AND ${wNaoPedra}
                     AND ${wNaoPersonalizado}`;
   // "Sem preço" = TODOS os preços nulos ou zero (comparação numérica).
   // Antes comparava ::text = '0' que falhava para "0.00" gravado como string.
-  const wSemPreco = sql`COALESCE(p.preco_sync::numeric,       0) = 0
-                    AND COALESCE(p.preco_total_sync::numeric, 0) = 0
-                    AND COALESCE(p.preco_tiny::numeric,       0) = 0
+  const wSemPreco = sql`COALESCE(ep.preco_sync::numeric,       p.preco_sync::numeric,       0) = 0
+                    AND COALESCE(ep.preco_total_sync::numeric, p.preco_total_sync::numeric, 0) = 0
+                    AND COALESCE(ep.preco_tiny::numeric,       p.preco_tiny::numeric,       0) = 0
                     AND ${wNaoPedra}
                     AND ${wNaoPersonalizado}`;
   const wPendencia = has(opts, "pendencia") && (

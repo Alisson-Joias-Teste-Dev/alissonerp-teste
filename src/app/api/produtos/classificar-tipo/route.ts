@@ -68,6 +68,7 @@ export async function GET(req: NextRequest) {
       COUNT(*) FILTER (WHERE NOT ${regraInsumo()} AND NOT ${regraJoia()})::text AS semclass,
       COUNT(*)::text AS total
     FROM public.produtos p
+    LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
   `;
 
   // Tabela existe?
@@ -83,6 +84,7 @@ export async function GET(req: NextRequest) {
     distribAtual = await sql<{ tipo_item: string | null; total: number }[]>`
       SELECT t.tipo_item, COUNT(*)::int AS total
       FROM public.produtos p
+      LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_tipo_item t ON t.produto_id = p.id_produto
       GROUP BY 1
       ORDER BY 2 DESC
@@ -139,6 +141,7 @@ export async function POST(req: NextRequest) {
     const distrib = await sql<{ tipo_item: string | null; total: number }[]>`
       SELECT t.tipo_item, COUNT(*)::int AS total
       FROM public.produtos p
+      LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_tipo_item t ON t.produto_id = p.id_produto
       WHERE p.situacao = 'A'
       GROUP BY 1

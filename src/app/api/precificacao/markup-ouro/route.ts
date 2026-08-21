@@ -41,12 +41,14 @@ export async function GET(req: NextRequest) {
         const pesoMin = Number(rangeMatch[1]);
         const pesoMax = Number(rangeMatch[2]);
         const [row] = await sql<{ total: string }[]>`
+          -- Peso/situacao da verdade (erp_produtos); copia só cobre legado sem ERP.
           SELECT COUNT(*) AS total
-          FROM public.produtos
-          WHERE COALESCE(peso_precificado, 0) >= ${pesoMin}
-            AND COALESCE(peso_precificado, 0) <= ${pesoMax}
-            AND situacao = 'A'
-            AND COALESCE(peso_precificado, 0) > 0
+          FROM public.produtos p
+          LEFT JOIN alissonerp.erp_produtos e ON e.produto_id = p.id_produto
+          WHERE COALESCE(e.peso_precificado, p.peso_precificado, 0) >= ${pesoMin}
+            AND COALESCE(e.peso_precificado, p.peso_precificado, 0) <= ${pesoMax}
+            AND p.situacao = 'A'
+            AND COALESCE(e.peso_precificado, p.peso_precificado, 0) > 0
         `;
         totalMap[cat.categoryName] = Number(row?.total ?? 0);
       }),

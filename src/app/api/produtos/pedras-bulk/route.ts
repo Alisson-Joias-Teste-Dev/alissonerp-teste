@@ -294,8 +294,9 @@ export async function GET(req: NextRequest) {
         COUNT(*)::int                                                           AS total,
         COUNT(*) FILTER (WHERE COALESCE(e.saldo, 0) >= 1)::int                  AS com_estoque
       FROM public.produtos p
-      LEFT JOIN public.estoque e ON e.sku = p.sku
-      WHERE p.categoria ILIKE 'Pedras%'
+      LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
+      LEFT JOIN public.estoque e ON e.sku = COALESCE(erpv.sku, p.sku)
+      WHERE COALESCE(erpv.categoria, p.categoria) ILIKE 'Pedras%'
         AND p.situacao = 'A'
     `;
 
@@ -305,17 +306,19 @@ export async function GET(req: NextRequest) {
         TRIM(REGEXP_REPLACE(p.nome, '\\s+[0-9.,]+\\s*mm\\s*$', '', 'i')) AS nome_raiz,
         COUNT(*)::int AS qtd
       FROM public.produtos p
-      WHERE p.categoria ILIKE 'Pedras%'
+      LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
+      WHERE COALESCE(erpv.categoria, p.categoria) ILIKE 'Pedras%'
         AND p.situacao = 'A'
       GROUP BY 1
       ORDER BY 2 DESC
     `;
 
     const ultimos = await sql<{ sku: string; nome: string; preco_tiny: number | null; saldo: number | null }[]>`
-      SELECT p.sku, p.nome, p.preco_tiny, COALESCE(e.saldo, 0) AS saldo
+      SELECT COALESCE(erpv.sku, p.sku) AS sku, p.nome, COALESCE(erpv.preco_tiny, p.preco_tiny) AS preco_tiny, COALESCE(e.saldo, 0) AS saldo
       FROM public.produtos p
-      LEFT JOIN public.estoque e ON e.sku = p.sku
-      WHERE p.categoria ILIKE 'Pedras%'
+      LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
+      LEFT JOIN public.estoque e ON e.sku = COALESCE(erpv.sku, p.sku)
+      WHERE COALESCE(erpv.categoria, p.categoria) ILIKE 'Pedras%'
         AND p.situacao = 'A'
       ORDER BY p.id_produto DESC
       LIMIT 20

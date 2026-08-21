@@ -100,11 +100,11 @@ export async function POST(req: NextRequest) {
 
     // ── Buscar produtos alvo (ativos com peso + filtros da tela) ──
     const produtos = (await sql`
-      SELECT p.id_produto, p.peso_precificado
+      SELECT p.id_produto, COALESCE(ep.peso_precificado, p.peso_precificado) AS peso_precificado
       FROM public.produtos p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
-      WHERE p.peso_precificado IS NOT NULL
-        AND p.peso_precificado > 0
+      WHERE COALESCE(ep.peso_precificado, p.peso_precificado) IS NOT NULL
+        AND COALESCE(ep.peso_precificado, p.peso_precificado) > 0
         ${w.wBusca} ${w.wSkuPrefix} ${w.wPedra} ${w.wSituacao}
         ${w.wCategoria} ${w.wTipoMetal} ${w.wEstoque}
         ${w.wEsconderInsumos} ${w.wPendencia}

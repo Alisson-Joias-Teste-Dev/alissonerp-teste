@@ -37,9 +37,11 @@ export async function GET(req: NextRequest) {
   if (from.length === 0) return NextResponse.json({ error: "from é obrigatório" }, { status: 400 });
 
   const [{ total }] = await sql<{ total: string }[]>`
+    -- Metal da verdade (erp_produtos); copia só cobre legado sem linha no ERP.
     SELECT COUNT(*)::text AS total
-    FROM public.produtos
-    WHERE tipo_metal = ANY(${from})
+    FROM public.produtos p
+    LEFT JOIN alissonerp.erp_produtos e ON e.produto_id = p.id_produto
+    WHERE COALESCE(e.tipo_metal, p.tipo_metal) = ANY(${from})
   `;
   return NextResponse.json({ from, to, totalAfetados: Number(total) });
 }

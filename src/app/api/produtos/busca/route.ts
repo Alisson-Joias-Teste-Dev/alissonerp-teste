@@ -19,12 +19,13 @@ export async function GET(req: NextRequest) {
   if (q.length < 2) return NextResponse.json([]);
 
   const rows = comEstoque ? await sql`
-    SELECT p.id_produto, p.nome, p.sku, s.disponivel::int
+    SELECT p.id_produto, p.nome, COALESCE(erpv.sku, p.sku) AS sku, s.disponivel::int
     FROM public.produtos p
+    LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
     JOIN alissonerp.vw_saldo_estoque_comercial_v2 s ON s.produto_id = p.id_produto
       AND s.local_estoque_id = ${localId}
     WHERE
-      (p.nome ILIKE ${"%" + q + "%"} OR p.sku ILIKE ${"%" + q + "%"})
+      (p.nome ILIKE ${"%" + q + "%"} OR COALESCE(erpv.sku, p.sku) ILIKE ${"%" + q + "%"})
       AND s.disponivel > 0
     ORDER BY p.nome
     LIMIT ${limit}

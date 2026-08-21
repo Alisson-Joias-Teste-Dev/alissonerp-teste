@@ -61,13 +61,14 @@ export async function GET(
     SELECT
       p.id_produto,
       p.nome,
-      p.sku,
-      p.peso_precificado,
-      p.tipo_metal,
+      COALESCE(erpv.sku, p.sku) AS sku,
+      COALESCE(erpv.peso_precificado, p.peso_precificado) AS peso_precificado,
+      COALESCE(erpv.tipo_metal, p.tipo_metal) AS tipo_metal,
       ep.sufixo_variacao,
       ep.numeracao
     FROM alissonerp.erp_produtos ep
     JOIN public.produtos p ON p.id_produto = ep.produto_id
+    LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
     WHERE ep.parent_id = ${erpProduto.id as number}
       AND p.situacao = 'A'
     ORDER BY

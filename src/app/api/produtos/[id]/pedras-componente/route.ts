@@ -151,6 +151,7 @@ export async function GET(
       pe.nome                  AS pedra_nome
     FROM alissonerp.produto_pedras_componente pc
     JOIN public.produtos pe ON pe.id_produto = pc.pedra_produto_id
+    LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = pe.id_produto
     LEFT JOIN alissonerp.vw_pedras_preco vp ON vp.id_produto = pc.pedra_produto_id
     WHERE pc.produto_id = ${produtoId}
     ORDER BY pe.nome

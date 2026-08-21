@@ -102,22 +102,27 @@ async function simularOuro(faixa_id: number, markup_novo: number, tipoArredondam
     preco_na_cotacao: string | null;
     markup: string | null;
   }[]>`
+    -- Campos do produto vem de alissonerp.erp_produtos (a verdade); a copia
+    -- public.produtos só e preenchida no INSERT pelo gatilho, entao dado editado
+    -- nunca chegava aqui. Fallback p.* cobre os 532 legados sem linha no ERP.
+    -- NOME segue vindo da copia (decisao do Jonathan, 21/08/2026).
     SELECT
-      id_produto::text,
-      nome,
-      sku,
-      peso_precificado,
-      fator,
-      custo_na_cotacao,
-      preco_sync,
-      preco_na_cotacao,
-      markup
-    FROM public.produtos
-    WHERE COALESCE(peso_precificado, 0) >= ${pesoMin}
-      AND COALESCE(peso_precificado, 0) <= ${pesoMax}
-      AND situacao = 'A'
-      AND COALESCE(peso_precificado, 0) > 0
-    ORDER BY COALESCE(preco_sync, preco_na_cotacao) DESC NULLS LAST
+      p.id_produto::text,
+      p.nome,
+      COALESCE(e.sku, p.sku) AS sku,
+      COALESCE(e.peso_precificado, p.peso_precificado) AS peso_precificado,
+      COALESCE(e.fator, p.fator) AS fator,
+      COALESCE(e.custo_na_cotacao, p.custo_na_cotacao) AS custo_na_cotacao,
+      COALESCE(e.preco_sync, p.preco_sync) AS preco_sync,
+      COALESCE(e.preco_na_cotacao, p.preco_na_cotacao) AS preco_na_cotacao,
+      COALESCE(e.markup, p.markup) AS markup
+    FROM public.produtos p
+    LEFT JOIN alissonerp.erp_produtos e ON e.produto_id = p.id_produto
+    WHERE COALESCE(e.peso_precificado, p.peso_precificado, 0) >= ${pesoMin}
+      AND COALESCE(e.peso_precificado, p.peso_precificado, 0) <= ${pesoMax}
+      AND p.situacao = 'A'
+      AND COALESCE(e.peso_precificado, p.peso_precificado, 0) > 0
+    ORDER BY COALESCE(e.preco_sync, p.preco_sync, e.preco_na_cotacao, p.preco_na_cotacao) DESC NULLS LAST
   `;
 
   // Buscar cotação atual
@@ -248,10 +253,17 @@ async function simularPedra(faixa_id: number, markup_novo: number, tipoArredonda
     preco_total_sync: string | null;
     markup: string | null;
   }[]>`
-    SELECT id_produto::text, nome, sku, peso_precificado, preco_sync, preco_pedras, preco_total_sync, markup
-    FROM public.produtos
-    WHERE id_produto = ANY(${produtoIds})
-      AND situacao = 'A'
+    SELECT p.id_produto::text, p.nome,
+           COALESCE(e.sku, p.sku) AS sku,
+           COALESCE(e.peso_precificado, p.peso_precificado) AS peso_precificado,
+           COALESCE(e.preco_sync, p.preco_sync) AS preco_sync,
+           COALESCE(e.preco_pedras, p.preco_pedras) AS preco_pedras,
+           COALESCE(e.preco_total_sync, p.preco_total_sync) AS preco_total_sync,
+           COALESCE(e.markup, p.markup) AS markup
+    FROM public.produtos p
+    LEFT JOIN alissonerp.erp_produtos e ON e.produto_id = p.id_produto
+    WHERE p.id_produto = ANY(${produtoIds})
+      AND p.situacao = 'A'
   `;
 
   const simulacao = produtos.map((p) => {

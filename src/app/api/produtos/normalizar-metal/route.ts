@@ -38,20 +38,28 @@ export async function GET(req: NextRequest) {
   if (regra !== "ouro") return NextResponse.json({ error: "Regra desconhecida" }, { status: 400 });
 
   const [{ total }] = await sql<{ total: string }[]>`
+    -- Situacao/metal da verdade (erp_produtos) — a copia public só e preenchida no
+    -- INSERT, entao a normalizacao mirava um conjunto desatualizado. Nome segue da
+    -- copia (decisao do Jonathan, 21/08/2026).
     SELECT COUNT(*)::text AS total
-    FROM public.produtos
-    WHERE situacao = 'A'
-      AND (tipo_metal IS NULL OR TRIM(tipo_metal) = '')
-      AND nome ILIKE '%ouro%'
+    FROM public.produtos p
+    LEFT JOIN alissonerp.erp_produtos e ON e.produto_id = p.id_produto
+    WHERE p.situacao = 'A'
+      AND (COALESCE(e.tipo_metal, p.tipo_metal) IS NULL OR TRIM(COALESCE(e.tipo_metal, p.tipo_metal)) = '')
+      AND p.nome ILIKE '%ouro%'
   `;
 
   const amostra = await sql`
-    SELECT id_produto, sku, nome, tipo_metal
-    FROM public.produtos
-    WHERE situacao = 'A'
-      AND (tipo_metal IS NULL OR TRIM(tipo_metal) = '')
-      AND nome ILIKE '%ouro%'
-    ORDER BY nome
+    SELECT p.id_produto,
+           COALESCE(e.sku, p.sku) AS sku,
+           p.nome,
+           COALESCE(e.tipo_metal, p.tipo_metal) AS tipo_metal
+    FROM public.produtos p
+    LEFT JOIN alissonerp.erp_produtos e ON e.produto_id = p.id_produto
+    WHERE p.situacao = 'A'
+      AND (COALESCE(e.tipo_metal, p.tipo_metal) IS NULL OR TRIM(COALESCE(e.tipo_metal, p.tipo_metal)) = '')
+      AND p.nome ILIKE '%ouro%'
+    ORDER BY p.nome
     LIMIT 15
   `;
 

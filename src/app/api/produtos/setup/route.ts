@@ -20,8 +20,15 @@ export async function GET(req: NextRequest) {
 
   try {
     const [skuRow] = await sql<{ next: string }[]>`
+      -- Proximo SKU olha as DUAS tabelas: a copia public tem SKUs arquivados pelo
+      -- Tiny com prefixo "_arch_..." que o regex nao casa, e o ERP tem o codigo limpo.
+      -- Sem a uniao, o MAX vinha menor e o sistema gerava SKU repetido.
       SELECT (COALESCE(MAX(sku::integer), 1603) + 1)::text AS next
-      FROM public.produtos
+      FROM (
+        SELECT sku FROM alissonerp.erp_produtos
+        UNION ALL
+        SELECT sku FROM public.produtos
+      ) t
       WHERE sku ~ '^[0-9]{1,5}$'
     `;
 
@@ -29,7 +36,11 @@ export async function GET(req: NextRequest) {
       SELECT
         'AJ' || LPAD((COALESCE(MAX(CAST(SUBSTRING(sku FROM 3) AS INTEGER)), 1000) + 1)::text, 4, '0') AS next,
         COALESCE(MAX(CAST(SUBSTRING(sku FROM 3) AS INTEGER)), 1000) >= 9999 AS esgotado
-      FROM public.produtos
+      FROM (
+        SELECT sku FROM alissonerp.erp_produtos
+        UNION ALL
+        SELECT sku FROM public.produtos
+      ) t
       WHERE sku ~ '^AJ[0-9]{4}$'
     `;
 

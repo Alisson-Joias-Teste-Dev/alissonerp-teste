@@ -1,6 +1,6 @@
 /**
  * GET  /api/produtos/[id]  — detalhe com composição + erp_produtos (medidas, pai/var)
- * PATCH /api/produtos/[id] — campos editáveis: tem_pedra_preciosa (public.produtos)
+ * PATCH /api/produtos/[id] — campos editáveis: tem_pedra_preciosa (alissonerp.erp_produtos)
  *                            + observacao_erp, medidas (erp_produtos upsert)
  */
 
@@ -74,32 +74,45 @@ export async function GET(
     const erpDisponivel = tableRow?.exists === true;
 
     // ── SELECT produto ────────────────────────────────────────────────────────
+  // REGRA DE NEGOCIO (21/08/2026 — Jonathan): a VERDADE do produto e
+  // alissonerp.erp_produtos. A ficha GRAVA lá (PATCH abaixo) e o preco oficial
+  // (vw_produto_preco) CALCULA de lá — mas esta leitura vinha da copia
+  // public.produtos, que o gatilho trg_espelhar_erp_para_public só preenche no
+  // INSERT. Resultado: toda edicao virava invisivel na tela (bug do AJ4829, que
+  // exibia fator 1,94 enquanto o preco usava 1).
+  // O COALESCE(ep.x, p.x) faz o ERP mandar sempre; a copia só responde pelos 532
+  // produtos legados que nunca ganharam linha em erp_produtos (sem ela eles
+  // desapareceriam da tela).
+  // IMPACTO SE REVERTIDO: a ficha volta a mostrar valor congelado no cadastro.
     const [produto] = erpDisponivel
       ? await sql`
           SELECT
             p.id_produto,
+            -- NOME: por decisao do Jonathan (21/08/2026) o nome continua vindo da copia
+            -- public.produtos, nao do ERP. Uma automacao externa (n8n/Tiny) mantem lá a
+            -- convencao de catalogo com prefixo de codigo ("BR008 - ..."), e 105 produtos
+            -- tem nome diferente nas duas tabelas. Só o nome fica assim; todo o resto do
+            -- produto vem de alissonerp.erp_produtos.
+            -- IMPACTO SE TROCADO: 105 nomes mudam na tela e 4 perdem o prefixo de codigo.
             p.nome,
-            p.sku,
-            p.tipo_metal,
-            -- Peso da FONTE (alissonerp.erp_produtos) — mesma regra do /api/produtos:
-            -- o espelho public.produtos so replica INSERT, nao UPDATE, entao ao editar
-            -- o peso pela tela o public ficava com o valor antigo (fix v2.85.17).
+            COALESCE(ep.sku, p.sku) AS sku,
+            COALESCE(ep.tipo_metal, p.tipo_metal) AS tipo_metal,
             COALESCE(ep.peso_precificado, p.peso_precificado) AS peso_precificado,
-            p.preco_tiny,
-            p.preco_sync,
-            p.preco_pedras,
-            p.preco_total_sync,
-            p.diferenca_percentual,
-            p.tem_pedra_preciosa,
-            p.situacao,
+            COALESCE(ep.preco_tiny, p.preco_tiny) AS preco_tiny,
+            COALESCE(ep.preco_sync, p.preco_sync) AS preco_sync,
+            COALESCE(ep.preco_pedras, p.preco_pedras) AS preco_pedras,
+            COALESCE(ep.preco_total_sync, p.preco_total_sync) AS preco_total_sync,
+            COALESCE(ep.diferenca_percentual, p.diferenca_percentual) AS diferenca_percentual,
+            COALESCE(ep.tem_pedra_preciosa, p.tem_pedra_preciosa) AS tem_pedra_preciosa,
+            p.situacao AS situacao,
             vc.url_capa  AS foto_produto,
             COALESCE(vi.imagens, '[]'::jsonb) AS imagens,
             NULL::text   AS descricao,
             NULL::text   AS referencia,
-            p.categoria_precificacao AS categoria,
-            p.categoria              AS categoria_geral,
-            p.markup,
-            p.fator,
+            COALESCE(ep.categoria_precificacao, p.categoria_precificacao) AS categoria,
+            COALESCE(ep.categoria, p.categoria) AS categoria_geral,
+            COALESCE(ep.markup, p.markup) AS markup,
+            COALESCE(ep.fator, p.fator) AS fator,
             -- Preço calculado pela view oficial vw_produto_preco (curva dinâmica).
             -- preco_venda = ouro + pedras. preco_ouro_curva = apenas ouro.
             pp.preco_venda::int     AS preco_venda_calculado,
@@ -131,7 +144,7 @@ export async function GET(
               FROM alissonerp.erp_produtos filhos
               WHERE filhos.parent_id = ep.id
             ) ELSE 0 END AS qtd_variacoes,
-            p.id_api_produto,
+            COALESCE(ep.id_api_produto, p.id_api_produto) AS id_api_produto,
             ts.status AS tiny_sync_status,
             ts.erro   AS tiny_sync_erro,
             ep.preco_servico,
@@ -246,7 +259,9 @@ export async function GET(
           ep.largura_aro,
           ep.altura_aro,
           ep.base,
-          p.peso_precificado,
+          -- Peso/situacao da VERDADE (erp_produtos, tabela guia deste JOIN) — a copia
+          -- public.produtos só é atualizada no cadastro (ver comentario do GET).
+          ep.peso_precificado,
           pp.preco_venda AS preco,
           p.situacao
         FROM alissonerp.erp_produtos ep
@@ -322,7 +337,7 @@ export async function PATCH(
     ? body.foto_base64
     : null;
 
-  // Campos que vão para public.produtos
+  // Campos do produto (gravados em alissonerp.erp_produtos — a verdade)
   const pubUpdate: Record<string, unknown> = {};
   if (typeof body.tem_pedra_preciosa === "boolean") {
     pubUpdate.tem_pedra_preciosa = body.tem_pedra_preciosa;
@@ -459,53 +474,71 @@ export async function PATCH(
   }
 
   try {
-    // ── public.produtos — fonte real lida pelo site e pela precificacao ─────
-    // O QUE: estes 9 campos gravam em public.produtos (nao mais em erp_produtos).
-    // PORQUE: nada le fator/markup/categoria/situacao/tem_pedra/preco_tiny/
-    //   preco_pedras/tipo_metal/nome de alissonerp.erp_produtos — a edicao ficava
-    //   presa la e "sumia" ao reabrir (fix v2.85.17, bug relatado 21/08/2026).
-    // IMPACTO SE REVERTIDO: Fator, Peso->preco, Markup etc voltam a nao salvar.
-    // peso_precificado fica de fora de proposito: /api/produtos e /api/gestao-
-    // estoque/produtos ja leem COALESCE(ep.peso_precificado, p.peso_precificado)
-    // — mudar o alvo dele aqui quebraria essas 2 telas.
+    // ── alissonerp.erp_produtos (a verdade do produto) ────────────────────
+    // O QUE: os campos do produto gravam em alissonerp.erp_produtos.
+    // PORQUE: e a tabela de onde vw_produto_preco CALCULA o preco oficial e de onde
+    //   a tela LE (COALESCE(ep.x, p.x) no GET acima). O v2.85.17 anterior (commit
+    //   e4ab840e) tinha trocado 9 destes UPDATEs para public.produtos; isso fazia o
+    //   fator/markup salvarem na copia e o PRECO nao mudar mais — testado no banco:
+    //   fator=3 gravado na copia mantinha o preco oficial em R$ 2.000.
+    //   Decisao do Jonathan (21/08/2026): grava, le, cria e calcula tudo na
+    //   erp_produtos; a copia public.produtos so e lida como fallback dos 532
+    //   produtos legados que nunca ganharam linha no ERP.
+    // IMPACTO SE REVERTIDO: editar fator/markup/situacao volta a nao mexer no preco.
     if (pubUpdate.tem_pedra_preciosa !== undefined) {
       await sql`
-        UPDATE public.produtos
+        UPDATE alissonerp.erp_produtos
         SET tem_pedra_preciosa = ${pubUpdate.tem_pedra_preciosa as boolean}
-        WHERE id_produto = ${produtoId}
+        WHERE produto_id = ${produtoId}
       `;
       await recalcularPrecoPedras(produtoId);
     }
+    // NOME grava nas DUAS tabelas — unico campo assim.
+    // PORQUE: a LEITURA do nome ficou na copia public.produtos (decisao do Jonathan,
+    //   21/08/2026: uma automacao externa n8n/Tiny mantem lá a convencao de catalogo
+    //   com prefixo de codigo, "BR008 - ..."). Se gravasse so no ERP, editar o nome
+    //   pela ficha ficaria invisivel na tela. Se gravasse so na copia, erp_produtos
+    //   ficaria defasada e o produto-tiny-sync (que le produtos_compat) mandaria o
+    //   nome velho pro Tiny.
+    // IMPACTO SE REDUZIDO A UMA TABELA: o nome editado desaparece da tela (copia) ou
+    //   vai velho pro Tiny (ERP).
     if (pubUpdate.nome !== undefined) {
-      await sql`UPDATE public.produtos SET nome = ${pubUpdate.nome as string} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET nome = ${pubUpdate.nome as string} WHERE produto_id = ${produtoId}`;
+      await sql`UPDATE public.produtos        SET nome = ${pubUpdate.nome as string} WHERE id_produto  = ${produtoId}`;
     }
     if (pubUpdate.tipo_metal !== undefined) {
-      await sql`UPDATE public.produtos SET tipo_metal = ${pubUpdate.tipo_metal as string | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET tipo_metal = ${pubUpdate.tipo_metal as string | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.categoria !== undefined) {
-      await sql`UPDATE public.produtos SET categoria = ${pubUpdate.categoria as string | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET categoria = ${pubUpdate.categoria as string | null} WHERE produto_id = ${produtoId}`;
     }
+    // SITUACAO vem da COPIA public.produtos, nao do ERP (checado no banco 21/08/2026):
+    // erp_produtos.situacao tem 6.369 linhas com 'I'/'E' que contradizem o proprio
+    // ativo=true da mesma linha, todas de um backfill de 12/03/2026, e 613 delas ja
+    // foram VENDIDAS. Ler do ERP tiraria ~6.370 produtos da busca de venda e do site.
+    // Por isso a situacao (como o nome) le da copia e GRAVA nas duas tabelas.
     if (pubUpdate.situacao !== undefined) {
-      await sql`UPDATE public.produtos SET situacao = ${pubUpdate.situacao as string} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET situacao = ${pubUpdate.situacao as string} WHERE produto_id = ${produtoId}`;
+      await sql`UPDATE public.produtos        SET situacao = ${pubUpdate.situacao as string} WHERE id_produto  = ${produtoId}`;
     }
-    // peso_precificado: continua em erp_produtos de proposito — ver comentario acima.
+    // Precificação — campos de entrada. Trigger em erp_produtos recalcula preco_sync.
     if (pubUpdate.peso_precificado !== undefined) {
       await sql`UPDATE alissonerp.erp_produtos SET peso_precificado = ${pubUpdate.peso_precificado as number | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.markup !== undefined) {
-      await sql`UPDATE public.produtos SET markup = ${pubUpdate.markup as number | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET markup = ${pubUpdate.markup as number | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.fator !== undefined) {
-      await sql`UPDATE public.produtos SET fator = ${pubUpdate.fator as number | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET fator = ${pubUpdate.fator as number | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.categoria_precificacao !== undefined) {
-      await sql`UPDATE public.produtos SET categoria_precificacao = ${pubUpdate.categoria_precificacao as string | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET categoria_precificacao = ${pubUpdate.categoria_precificacao as string | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.preco_tiny !== undefined) {
-      await sql`UPDATE public.produtos SET preco_tiny = ${pubUpdate.preco_tiny as number | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET preco_tiny = ${pubUpdate.preco_tiny as number | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.preco_pedras !== undefined) {
-      await sql`UPDATE public.produtos SET preco_pedras = ${pubUpdate.preco_pedras as number | null} WHERE id_produto = ${produtoId}`;
+      await sql`UPDATE alissonerp.erp_produtos SET preco_pedras = ${pubUpdate.preco_pedras as number | null} WHERE produto_id = ${produtoId}`;
     }
     // tipo_item: upsert ou delete em alissonerp.produto_tipo_item
     if (tipoItem !== undefined) {
@@ -733,7 +766,7 @@ export async function PATCH(
               // via trigger); pedras recalculam por variação a partir do BOM.
               // IMPACTO SE REDUZIDO: volta a divergência pai/filhos.
               const IDENT_PUB = new Set(["sku", "id_produto", "id_api_produto"]);
-              // public.produtos: replica tudo que mudou, menos nome (tratado à parte).
+              // Campos do produto: replica tudo que mudou, menos nome (tratado à parte).
               const pubRepl: Record<string, unknown> = {};
               for (const [k, v] of Object.entries(pubUpdate)) {
                 if (k === "nome" || IDENT_PUB.has(k)) continue;
@@ -828,7 +861,13 @@ export async function PATCH(
       if (precoCompraUsd !== undefined) {
         // Identifica pedra e recalcula preco_tiny
         const [prodCat] = await sql<{ categoria: string | null; peso_precificado: string | null }[]>`
-          SELECT categoria, peso_precificado FROM public.produtos WHERE id_produto = ${produtoId} LIMIT 1
+          -- Categoria/peso da VERDADE (erp_produtos); copia só responde por produto
+          -- legado sem linha no ERP.
+          SELECT COALESCE(e.categoria, p.categoria) AS categoria,
+                 COALESCE(e.peso_precificado, p.peso_precificado) AS peso_precificado
+          FROM public.produtos p
+          LEFT JOIN alissonerp.erp_produtos e ON e.produto_id = p.id_produto
+          WHERE p.id_produto = ${produtoId} LIMIT 1
         `;
         const ehPedra = (prodCat?.categoria ?? "").toLowerCase().startsWith("pedras");
         if (ehPedra && precoCompraUsd != null) {
@@ -867,8 +906,12 @@ export async function PATCH(
     const [produto] = tblCheck?.exists
       ? await sql`
           SELECT
-            p.id_produto, p.nome, p.sku,
-            p.tem_pedra_preciosa, p.preco_pedras, p.preco_total_sync,
+            p.id_produto,
+            p.nome,
+            COALESCE(ep.sku, p.sku) AS sku,
+            COALESCE(ep.tem_pedra_preciosa, p.tem_pedra_preciosa) AS tem_pedra_preciosa,
+            COALESCE(ep.preco_pedras, p.preco_pedras) AS preco_pedras,
+            COALESCE(ep.preco_total_sync, p.preco_total_sync) AS preco_total_sync,
             ep.largura_aro, ep.altura_aro, ep.base, ep.observacao_erp
           FROM public.produtos p
           LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
@@ -897,7 +940,15 @@ export async function PATCH(
           tentativas = 0,
           updated_at = NOW()
       `;
-      const operacao = (await sql`SELECT id_api_produto FROM public.produtos WHERE id_produto = ${produtoId}`)[0]?.id_api_produto
+      // id_api_produto decide se o Tiny recebe INSERT ou UPDATE. A copia
+      // public.produtos tem 724 valores defasados — ler dela mandava criar produto
+      // duplicado no Tiny. Verdade = erp_produtos.
+      const operacao = (await sql`
+        SELECT COALESCE(e.id_api_produto, p.id_api_produto) AS id_api_produto
+        FROM public.produtos p
+        LEFT JOIN alissonerp.erp_produtos e ON e.produto_id = p.id_produto
+        WHERE p.id_produto = ${produtoId}
+      `)[0]?.id_api_produto
         ? 'update' : 'create';
       tinySyncResult = await syncProdutoToTiny(produtoId, operacao);
     } catch (err) {

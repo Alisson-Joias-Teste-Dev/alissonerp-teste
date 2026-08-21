@@ -29,9 +29,10 @@ export async function GET() {
     // (view produtos_compat) com fallback pro public; onde as duas tem, e identico.
     const produtos = await sql`
       SELECT p.id_produto,
-             COALESCE(pc.id_api_produto, p.id_api_produto) AS id_api_produto,
-             p.sku, p.nome
+             COALESCE(pc.id_api_produto, COALESCE(erpv.id_api_produto, p.id_api_produto)) AS id_api_produto,
+             COALESCE(erpv.sku, p.sku) AS sku, p.nome
       FROM public.produtos p
+      LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
       LEFT JOIN alissonerp.produtos_compat pc ON pc.id_produto = p.id_produto
       WHERE p.situacao = 'A'
       ORDER BY id_api_produto

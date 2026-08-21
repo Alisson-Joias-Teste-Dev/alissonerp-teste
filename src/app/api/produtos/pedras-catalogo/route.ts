@@ -35,9 +35,10 @@ export async function GET(req: NextRequest) {
           vp.id_produto     AS id,
           vp.nome,
           vp.preco_venda    AS preco_unitario,
-          p.peso_precificado AS peso_g
+          COALESCE(erpv.peso_precificado, p.peso_precificado) AS peso_g
         FROM alissonerp.vw_pedras_preco vp
         JOIN public.produtos p ON p.id_produto = vp.id_produto
+        LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
         WHERE vp.preco_venda IS NOT NULL
           AND vp.preco_venda > 0
           AND vp.nome ILIKE ${"%" + q + "%"}
@@ -49,9 +50,10 @@ export async function GET(req: NextRequest) {
           vp.id_produto     AS id,
           vp.nome,
           vp.preco_venda    AS preco_unitario,
-          p.peso_precificado AS peso_g
+          COALESCE(erpv.peso_precificado, p.peso_precificado) AS peso_g
         FROM alissonerp.vw_pedras_preco vp
         JOIN public.produtos p ON p.id_produto = vp.id_produto
+        LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
         WHERE vp.preco_venda IS NOT NULL
           AND vp.preco_venda > 0
         ORDER BY vp.nome

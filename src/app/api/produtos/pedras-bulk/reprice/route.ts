@@ -78,11 +78,16 @@ export async function POST(req: NextRequest) {
       const novoPreco = Math.round(Number(it.preco_venda));
 
       const [prod] = await sql<{ id_produto: string; sku: string; preco_tiny: string | null }[]>`
-        SELECT id_produto, sku, preco_tiny
-        FROM public.produtos
-        WHERE LOWER(TRIM(nome)) = LOWER(${nome})
-          AND categoria ILIKE 'Pedras%'
-          AND situacao = 'A'
+        -- Categoria/situacao/preco da verdade (erp_produtos); o NOME segue vindo da
+        -- copia (decisao do Jonathan, 21/08/2026), por isso o match e por p.nome.
+        SELECT p.id_produto,
+               COALESCE(e.sku, p.sku) AS sku,
+               COALESCE(e.preco_tiny, p.preco_tiny) AS preco_tiny
+        FROM public.produtos p
+        LEFT JOIN alissonerp.erp_produtos e ON e.produto_id = p.id_produto
+        WHERE LOWER(TRIM(p.nome)) = LOWER(${nome})
+          AND COALESCE(e.categoria, p.categoria) ILIKE 'Pedras%'
+          AND p.situacao = 'A'
         LIMIT 1
       `;
       if (!prod) {

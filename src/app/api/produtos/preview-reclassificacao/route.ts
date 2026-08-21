@@ -19,10 +19,10 @@ export async function GET(req: NextRequest) {
     const faixas = await sql`
       WITH base AS (
         SELECT
-          p.id_produto, p.sku, p.nome, p.categoria,
-          COALESCE(NULLIF(p.preco_sync,'0')::numeric,
-                   NULLIF(p.preco_total_sync,'0')::numeric,
-                   NULLIF(p.preco_tiny,'0')::numeric,
+          p.id_produto, COALESCE(ep.sku, p.sku) AS sku, p.nome, COALESCE(ep.categoria, p.categoria) AS categoria,
+          COALESCE(NULLIF(COALESCE(ep.preco_sync, p.preco_sync) AS preco_sync,'0')::numeric,
+                   NULLIF(COALESCE(ep.preco_total_sync, p.preco_total_sync) AS preco_total_sync,'0')::numeric,
+                   NULLIF(COALESCE(ep.preco_tiny, p.preco_tiny) AS preco_tiny,'0')::numeric,
                    0) AS preco
         FROM public.produtos p
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
@@ -48,10 +48,10 @@ export async function GET(req: NextRequest) {
     const porLadoECategoria = await sql`
       WITH base AS (
         SELECT
-          p.id_produto, p.categoria,
-          COALESCE(NULLIF(p.preco_sync,'0')::numeric,
-                   NULLIF(p.preco_total_sync,'0')::numeric,
-                   NULLIF(p.preco_tiny,'0')::numeric,
+          p.id_produto, COALESCE(ep.categoria, p.categoria) AS categoria,
+          COALESCE(NULLIF(COALESCE(ep.preco_sync, p.preco_sync) AS preco_sync,'0')::numeric,
+                   NULLIF(COALESCE(ep.preco_total_sync, p.preco_total_sync) AS preco_total_sync,'0')::numeric,
+                   NULLIF(COALESCE(ep.preco_tiny, p.preco_tiny) AS preco_tiny,'0')::numeric,
                    0) AS preco
         FROM public.produtos p
         LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
@@ -68,31 +68,31 @@ export async function GET(req: NextRequest) {
 
     // Amostras de casos estranhos
     const insumosAlto = await sql`
-      SELECT p.sku, p.nome, p.categoria,
-             p.preco_tiny, p.preco_sync, p.preco_total_sync
+      SELECT COALESCE(ep.sku, p.sku) AS sku, p.nome, COALESCE(ep.categoria, p.categoria) AS categoria,
+             COALESCE(ep.preco_tiny, p.preco_tiny) AS preco_tiny, COALESCE(ep.preco_sync, p.preco_sync) AS preco_sync, COALESCE(ep.preco_total_sync, p.preco_total_sync) AS preco_total_sync
       FROM public.produtos p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       WHERE p.situacao='A' AND (ep.eh_variacao = false OR ep.id IS NULL)
-        AND p.categoria ILIKE 'Insumos%'
-        AND COALESCE(NULLIF(p.preco_sync,'0')::numeric,
-                     NULLIF(p.preco_total_sync,'0')::numeric,
-                     NULLIF(p.preco_tiny,'0')::numeric, 0) >= 300
+        AND COALESCE(ep.categoria, p.categoria) ILIKE 'Insumos%'
+        AND COALESCE(NULLIF(COALESCE(ep.preco_sync, p.preco_sync),'0')::numeric,
+                     NULLIF(COALESCE(ep.preco_total_sync, p.preco_total_sync),'0')::numeric,
+                     NULLIF(COALESCE(ep.preco_tiny, p.preco_tiny),'0')::numeric, 0) >= 300
       ORDER BY 5 DESC NULLS LAST
       LIMIT 20
     `;
 
     const joiasBaixo = await sql`
-      SELECT p.sku, p.nome, p.categoria,
-             p.preco_tiny, p.preco_sync, p.preco_total_sync
+      SELECT COALESCE(ep.sku, p.sku) AS sku, p.nome, COALESCE(ep.categoria, p.categoria) AS categoria,
+             COALESCE(ep.preco_tiny, p.preco_tiny) AS preco_tiny, COALESCE(ep.preco_sync, p.preco_sync) AS preco_sync, COALESCE(ep.preco_total_sync, p.preco_total_sync) AS preco_total_sync
       FROM public.produtos p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       WHERE p.situacao='A' AND (ep.eh_variacao = false OR ep.id IS NULL)
-        AND p.categoria NOT ILIKE 'Insumos%'
-        AND p.categoria NOT ILIKE 'Mostruário%'
-        AND p.categoria NOT ILIKE 'Serviços%'
-        AND COALESCE(NULLIF(p.preco_sync,'0')::numeric,
-                     NULLIF(p.preco_total_sync,'0')::numeric,
-                     NULLIF(p.preco_tiny,'0')::numeric, 0) < 300
+        AND COALESCE(ep.categoria, p.categoria) NOT ILIKE 'Insumos%'
+        AND COALESCE(ep.categoria, p.categoria) NOT ILIKE 'Mostruário%'
+        AND COALESCE(ep.categoria, p.categoria) NOT ILIKE 'Serviços%'
+        AND COALESCE(NULLIF(COALESCE(ep.preco_sync, p.preco_sync),'0')::numeric,
+                     NULLIF(COALESCE(ep.preco_total_sync, p.preco_total_sync),'0')::numeric,
+                     NULLIF(COALESCE(ep.preco_tiny, p.preco_tiny),'0')::numeric, 0) < 300
       ORDER BY 5 DESC NULLS LAST
       LIMIT 20
     `;

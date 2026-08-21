@@ -38,10 +38,10 @@ export async function GET(req: NextRequest) {
       ? await sql`
           SELECT
             p.id_produto,
-            p.sku,
+            COALESCE(erpv.sku, p.sku) AS sku,
             p.nome,
-            p.categoria,
-            p.qtd_estoque,
+            COALESCE(erpv.categoria, p.categoria) AS categoria,
+            COALESCE(erpv.qtd_estoque, p.qtd_estoque) AS qtd_estoque,
             pp.max_caracteres,
             pp.min_caracteres,
             pp.tipo,
@@ -50,20 +50,21 @@ export async function GET(req: NextRequest) {
             pp.peso_por_letra,
             pp.label
           FROM public.produtos p
+          LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
           JOIN alissonerp.produto_personalizacao pp ON pp.produto_id = p.id_produto
           WHERE pp.ativo = true
             AND p.situacao = 'A'
-            AND (p.nome ILIKE ${"%" + q + "%"} OR p.sku ILIKE ${"%" + q + "%"})
+            AND (p.nome ILIKE ${"%" + q + "%"} OR COALESCE(erpv.sku, p.sku) ILIKE ${"%" + q + "%"})
           ORDER BY p.nome ASC
           LIMIT ${limit}
         `
       : await sql`
           SELECT
             p.id_produto,
-            p.sku,
+            COALESCE(erpv.sku, p.sku) AS sku,
             p.nome,
-            p.categoria,
-            p.qtd_estoque,
+            COALESCE(erpv.categoria, p.categoria) AS categoria,
+            COALESCE(erpv.qtd_estoque, p.qtd_estoque) AS qtd_estoque,
             pp.max_caracteres,
             pp.min_caracteres,
             pp.tipo,
@@ -72,6 +73,7 @@ export async function GET(req: NextRequest) {
             pp.peso_por_letra,
             pp.label
           FROM public.produtos p
+          LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
           JOIN alissonerp.produto_personalizacao pp ON pp.produto_id = p.id_produto
           WHERE pp.ativo = true
             AND p.situacao = 'A'

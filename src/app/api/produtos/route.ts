@@ -130,14 +130,25 @@ export async function GET(req: NextRequest) {
   const orderDir = sp.get("dir") === "desc" ? sql`DESC` : sql`ASC`;
 
   // ── WHERE fragments ────────────────────────────────────────────────────────
+  // REGRA DE NEGOCIO (21/08/2026 — Jonathan): a VERDADE do produto e
+  // alissonerp.erp_produtos (alias ep). A copia public.produtos (alias p) só e
+  // preenchida pelo gatilho trg_espelhar_erp_para_public no INSERT — edicao nunca
+  // chega nela. Por isso TODO campo de produto aqui le COALESCE(ep.x, p.x):
+  // o ERP manda, e a copia só responde pelos 532 produtos legados que nunca
+  // ganharam linha em erp_produtos (sem o fallback eles sumiriam da lista).
+  // EXCECOES que seguem lendo a copia: NOME (automacao externa n8n/Tiny mantem lá a
+  // convencao de catalogo) e SITUACAO (erp_produtos.situacao tem 6.369 linhas 'I'/'E'
+  // de um backfill de 12/03/2026 que contradizem o ativo=true da propria linha — 613
+  // dessas ja foram vendidas; ler do ERP tiraria ~6.370 produtos da venda e do site).
+  // IMPACTO SE REVERTIDO: a lista volta a mostrar o dado do dia do cadastro.
 
   const wBusca = busca
-    ? sql`AND (p.nome ILIKE ${"%" + busca + "%"} OR p.sku ILIKE ${"%" + busca + "%"})`
+    ? sql`AND (p.nome ILIKE ${"%" + busca + "%"} OR COALESCE(ep.sku, p.sku) ILIKE ${"%" + busca + "%"})`
     : sql``;
 
   const skuPrefix = sp.get("sku_prefix")?.trim() ?? "";
   const wSkuPrefix = skuPrefix
-    ? sql`AND p.sku ILIKE ${skuPrefix + "%"}`
+    ? sql`AND COALESCE(ep.sku, p.sku) ILIKE ${skuPrefix + "%"}`
     : sql``;
 
   // Tipo de item (joia/insumo) — vem de alissonerp.produto_tipo_item
@@ -152,12 +163,12 @@ export async function GET(req: NextRequest) {
   const esconderInsumos = sp.get("esconder_insumos") === "true";
   // Esconder insumos também cobre mostruário e matérias-primas
   const wEsconderInsumos = esconderInsumos
-    ? sql`AND (p.sku IS NULL OR p.sku NOT ILIKE 'IS%')
-          AND (p.sku IS NULL OR p.sku NOT ILIKE 'MO%')
-          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Insumos%')
-          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Matérias Primas%')
-          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Mostruário%')
-          AND (p.categoria IS NULL OR p.categoria NOT ILIKE 'Mostruario%')`
+    ? sql`AND (COALESCE(ep.sku, p.sku) IS NULL OR COALESCE(ep.sku, p.sku) NOT ILIKE 'IS%')
+          AND (COALESCE(ep.sku, p.sku) IS NULL OR COALESCE(ep.sku, p.sku) NOT ILIKE 'MO%')
+          AND (COALESCE(ep.categoria, p.categoria) IS NULL OR COALESCE(ep.categoria, p.categoria) NOT ILIKE 'Insumos%')
+          AND (COALESCE(ep.categoria, p.categoria) IS NULL OR COALESCE(ep.categoria, p.categoria) NOT ILIKE 'Matérias Primas%')
+          AND (COALESCE(ep.categoria, p.categoria) IS NULL OR COALESCE(ep.categoria, p.categoria) NOT ILIKE 'Mostruário%')
+          AND (COALESCE(ep.categoria, p.categoria) IS NULL OR COALESCE(ep.categoria, p.categoria) NOT ILIKE 'Mostruario%')`
     : sql``;
 
   const pendencia = sp.get("pendencia")?.trim() ?? "";
@@ -168,15 +179,15 @@ export async function GET(req: NextRequest) {
     WHERE pp.produto_id = p.id_produto
       AND pp.ativo = true
   )`;
-  const wSemCat   = sql`(p.categoria IS NULL OR TRIM(p.categoria) = '')`;
-  const wSemMetal = sql`(p.tipo_metal IS NULL OR TRIM(p.tipo_metal) = '')`;
-  const wSemPeso  = sql`(p.peso_precificado IS NULL OR p.peso_precificado = 0)
+  const wSemCat   = sql`(COALESCE(ep.categoria, p.categoria) IS NULL OR TRIM(COALESCE(ep.categoria, p.categoria)) = '')`;
+  const wSemMetal = sql`(COALESCE(ep.tipo_metal, p.tipo_metal) IS NULL OR TRIM(COALESCE(ep.tipo_metal, p.tipo_metal)) = '')`;
+  const wSemPeso  = sql`(COALESCE(ep.peso_precificado, p.peso_precificado) IS NULL OR COALESCE(ep.peso_precificado, p.peso_precificado) = 0)
                     AND ${wNaoPersonalizado}`;
   // "Sem preço" = TODOS os preços são nulos ou zero (comparação numérica).
   // Antes comparava ::text = '0' e falhava para "0.00" gravado como string.
-  const wSemPreco = sql`COALESCE(p.preco_sync::numeric,       0) = 0
-                    AND COALESCE(p.preco_total_sync::numeric, 0) = 0
-                    AND COALESCE(p.preco_tiny::numeric,       0) = 0
+  const wSemPreco = sql`COALESCE(ep.preco_sync::numeric,       p.preco_sync::numeric,       0) = 0
+                    AND COALESCE(ep.preco_total_sync::numeric, p.preco_total_sync::numeric, 0) = 0
+                    AND COALESCE(ep.preco_tiny::numeric,       p.preco_tiny::numeric,       0) = 0
                     AND ${wNaoPersonalizado}`;
   const wPendencia =
     pendencia === "sem_categoria" ? sql`AND ${wSemCat}` :
@@ -187,8 +198,8 @@ export async function GET(req: NextRequest) {
     sql``;
 
   const wPedra =
-    tem_pedra === "true"  ? sql`AND p.tem_pedra_preciosa = true`  :
-    tem_pedra === "false" ? sql`AND p.tem_pedra_preciosa = false` :
+    tem_pedra === "true"  ? sql`AND COALESCE(ep.tem_pedra_preciosa, p.tem_pedra_preciosa) = true`  :
+    tem_pedra === "false" ? sql`AND COALESCE(ep.tem_pedra_preciosa, p.tem_pedra_preciosa) = false` :
     sql``;
 
   // Filtro com/sem variacoes (usa erp_produtos.eh_pai; a query ja faz LEFT JOIN ep)
@@ -202,15 +213,15 @@ export async function GET(req: NextRequest) {
 
   // tipo_metal: "__sem__" = somente sem metal definido; valor = match exato
   const wTipoMetal =
-    tipo_metal === "__sem__" ? sql`AND (p.tipo_metal IS NULL OR TRIM(p.tipo_metal) = '')` :
-    tipo_metal                ? sql`AND p.tipo_metal = ${tipo_metal}` :
+    tipo_metal === "__sem__" ? sql`AND (COALESCE(ep.tipo_metal, p.tipo_metal) IS NULL OR TRIM(COALESCE(ep.tipo_metal, p.tipo_metal)) = '')` :
+    tipo_metal                ? sql`AND COALESCE(ep.tipo_metal, p.tipo_metal) = ${tipo_metal}` :
     sql``;
 
   // Categoria — pai + filho ("Anel" casa "Anel" e "Anel -> Feminino"; subcategoria afina)
   const wCategoria = categoria
     ? subcategoria
-      ? sql`AND TRIM(p.categoria) = ${`${categoria} -> ${subcategoria}`}`
-      : sql`AND (TRIM(p.categoria) = ${categoria} OR TRIM(p.categoria) ILIKE ${`${categoria} -> %`})`
+      ? sql`AND TRIM(COALESCE(ep.categoria, p.categoria)) = ${`${categoria} -> ${subcategoria}`}`
+      : sql`AND (TRIM(COALESCE(ep.categoria, p.categoria)) = ${categoria} OR TRIM(COALESCE(ep.categoria, p.categoria)) ILIKE ${`${categoria} -> %`})`
     : sql``;
 
   // Apenas com saldo disponível >= 1 (usa a mesma view do módulo de Estoque).
@@ -220,14 +231,14 @@ export async function GET(req: NextRequest) {
 
   const orderFieldIdent =
     orderField === "nome"                 ? sql`p.nome`               :
-    orderField === "sku"                  ? sql`p.sku`                :
-    orderField === "preco_sync"           ? sql`p.preco_sync`         :
-    orderField === "diferenca_percentual" ? sql`p.diferenca_percentual` :
-    orderField === "preco_tiny"           ? sql`p.preco_tiny`         :
-    orderField === "peso_precificado"     ? sql`p.peso_precificado`   :
-    orderField === "tipo_metal"           ? sql`p.tipo_metal`         :
+    orderField === "sku"                  ? sql`COALESCE(ep.sku, p.sku)`                :
+    orderField === "preco_sync"           ? sql`COALESCE(ep.preco_sync, p.preco_sync)`         :
+    orderField === "diferenca_percentual" ? sql`COALESCE(ep.diferenca_percentual, p.diferenca_percentual)` :
+    orderField === "preco_tiny"           ? sql`COALESCE(ep.preco_tiny, p.preco_tiny)`         :
+    orderField === "peso_precificado"     ? sql`COALESCE(ep.peso_precificado, p.peso_precificado)`   :
+    orderField === "tipo_metal"           ? sql`COALESCE(ep.tipo_metal, p.tipo_metal)`         :
     orderField === "situacao"             ? sql`p.situacao`           :
-    orderField === "qtd_estoque"          ? sql`p.qtd_estoque`        :
+    orderField === "qtd_estoque"          ? sql`COALESCE(ep.qtd_estoque, p.qtd_estoque)`        :
     sql`p.id_produto`;
 
   try {
@@ -269,9 +280,15 @@ export async function GET(req: NextRequest) {
       const produtos = await sql`
         SELECT
           p.id_produto,
+          -- NOME: por decisao do Jonathan (21/08/2026) o nome continua vindo da copia
+            -- public.produtos, nao do ERP. Uma automacao externa (n8n/Tiny) mantem lá a
+            -- convencao de catalogo com prefixo de codigo ("BR008 - ..."), e 105 produtos
+            -- tem nome diferente nas duas tabelas. Só o nome fica assim; todo o resto do
+            -- produto vem de alissonerp.erp_produtos.
+            -- IMPACTO SE TROCADO: 105 nomes mudam na tela e 4 perdem o prefixo de codigo.
           p.nome,
-          p.sku,
-          p.tipo_metal,
+          COALESCE(ep.sku, p.sku) AS sku,
+          COALESCE(ep.tipo_metal, p.tipo_metal) AS tipo_metal,
           -- Peso da FONTE (alissonerp.erp_produtos) — mesma origem usada no calculo
           -- do preco (vw_produtos_geral_preco). O espelho public.produtos so replica
           -- INSERT, nao UPDATE, entao ao editar o peso o public ficava com o valor
@@ -281,14 +298,14 @@ export async function GET(req: NextRequest) {
           -- é arredondado pelo trigger arredondar_peso_para_cima).
           (SELECT peso_ct FROM alissonerp.produto_pedra_extras
             WHERE produto_id = p.id_produto LIMIT 1) AS peso_ct,
-          p.preco_tiny,
-          p.preco_sync,
-          p.preco_pedras,
-          p.preco_total_sync,
-          p.diferenca_percentual,
-          p.tem_pedra_preciosa,
-          p.situacao,
-          p.categoria,
+          COALESCE(ep.preco_tiny, p.preco_tiny) AS preco_tiny,
+          COALESCE(ep.preco_sync, p.preco_sync) AS preco_sync,
+          COALESCE(ep.preco_pedras, p.preco_pedras) AS preco_pedras,
+          COALESCE(ep.preco_total_sync, p.preco_total_sync) AS preco_total_sync,
+          COALESCE(ep.diferenca_percentual, p.diferenca_percentual) AS diferenca_percentual,
+          COALESCE(ep.tem_pedra_preciosa, p.tem_pedra_preciosa) AS tem_pedra_preciosa,
+          p.situacao AS situacao,
+          COALESCE(ep.categoria, p.categoria) AS categoria,
           vc.url_capa AS foto_produto,
           COALESCE(vi.imagens, '[]'::jsonb) AS imagens,
           -- Saldo único via view oficial do estoque (físico - reservado = disponível).
@@ -408,6 +425,7 @@ export async function GET(req: NextRequest) {
     const [countRow] = await sql<{ total: string }[]>`
       SELECT COUNT(*) AS total
       FROM public.produtos p
+      LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_saldo_estoque_comercial est ON est.produto_id = p.id_produto
       LEFT JOIN alissonerp.estoque_comercial_config ecc ON ecc.produto_id = p.id_produto
@@ -421,20 +439,20 @@ export async function GET(req: NextRequest) {
       SELECT
         p.id_produto,
         p.nome,
-        p.sku,
-        p.tipo_metal,
-        p.peso_precificado,
+        COALESCE(ep.sku, p.sku) AS sku,
+        COALESCE(ep.tipo_metal, p.tipo_metal) AS tipo_metal,
+        COALESCE(ep.peso_precificado, p.peso_precificado) AS peso_precificado,
         -- Pedras: peso fiel em ct (ver branch erp_produtos acima).
         (SELECT peso_ct FROM alissonerp.produto_pedra_extras
           WHERE produto_id = p.id_produto LIMIT 1) AS peso_ct,
-        p.preco_tiny,
-        p.preco_sync,
-        p.preco_pedras,
-        p.preco_total_sync,
-        p.diferenca_percentual,
-        p.tem_pedra_preciosa,
-        p.situacao,
-        p.categoria,
+        COALESCE(ep.preco_tiny, p.preco_tiny) AS preco_tiny,
+        COALESCE(ep.preco_sync, p.preco_sync) AS preco_sync,
+        COALESCE(ep.preco_pedras, p.preco_pedras) AS preco_pedras,
+        COALESCE(ep.preco_total_sync, p.preco_total_sync) AS preco_total_sync,
+        COALESCE(ep.diferenca_percentual, p.diferenca_percentual) AS diferenca_percentual,
+        COALESCE(ep.tem_pedra_preciosa, p.tem_pedra_preciosa) AS tem_pedra_preciosa,
+        p.situacao AS situacao,
+        COALESCE(ep.categoria, p.categoria) AS categoria,
         vc.url_capa   AS foto_produto,
         COALESCE(vi.imagens, '[]'::jsonb) AS imagens,
         COALESCE(est.disponivel, 0)::int AS saldo_estoque,
@@ -498,6 +516,7 @@ export async function GET(req: NextRequest) {
         ) AS pedras_nome_principal,
         COALESCE(ecc.controla_estoque, true) AS controla_estoque
       FROM public.produtos p
+      LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_capa vc ON vc.produto_id = p.id_produto
       LEFT JOIN alissonerp.vw_produto_imagens vi ON vi.produto_id = p.id_produto
       LEFT JOIN alissonerp.produto_tipo_item ti ON ti.produto_id = p.id_produto

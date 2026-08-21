@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
 
     const rows = await sql<{ categoria: string | null; produtos: number }[]>`
       SELECT
-        NULLIF(TRIM(p.categoria), '') AS categoria,
+        NULLIF(TRIM(COALESCE(ep.categoria, p.categoria)), '') AS categoria,
         COUNT(*)::int                 AS produtos
       FROM public.produtos p
       LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto

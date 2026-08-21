@@ -1,6 +1,67 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 21/08/2026 — Versão: v2.85.17 <!-- Revisado 21/08/2026 -->
+> 📋 Última atualização automática: 21/08/2026 — Versão: v2.85.18 <!-- Revisado 21/08/2026 -->
+
+## fix(produtos): campos do produto passam a ser lidos da tabela do ERP (v2.85.18)
+
+**O quê:** ficha, lista, filtros, ordenação, precificação, export e utilitários de produto passam a
+mostrar o dado de **`alissonerp.erp_produtos`** — a mesma tabela em que o ERP grava e de onde o preço
+oficial é calculado. **Exceção: o NOME continua vindo de `public.produtos`** (decisão do Jonathan,
+21/08/2026). Junto, o fator de 4 SKUs foi corrigido no banco: AJ4829 1 → 1,94 (preço R$ 1.030 →
+R$ 2.000) e AJ5308/AJ5309/AJ5310 1 → 0,95 (preço ~5% menor) — assinatura #454 em `log_mudancas_banco`.
+
+**Por quê:** o gatilho `trg_espelhar_erp_para_public` é `AFTER INSERT` + `ON CONFLICT DO NOTHING`, ou
+seja: copia `erp_produtos` → `public.produtos` **só no cadastro**, nunca na edição. Toda alteração
+feita depois ficava apenas na tabela do ERP, enquanto ~200 pontos de leitura mostravam o valor do dia
+do cadastro. Divergências medidas em 21/08/2026 (16.865 produtos comparados): `situacao` **6.372**
+(5.900 inativos + 470 excluídos apareciam como "Ativo"), `preco_total_sync` 1.125, `id_api_produto`
+724, `peso_precificado` **628**, `tipo_de_pedra` 164, `sku` 107, `nome` 105, `categoria` 6, `fator` 5.
+Foi o caso do AJ4829: a ficha exibia fator 1,94 e o preço usava 1 — nenhuma edição do fator aparecia
+na tela, embora o preço obedecesse.
+
+**Como:** cada campo virou `COALESCE(ep.<col>, p.<col>)` com `LEFT JOIN alissonerp.erp_produtos ep` —
+o ERP manda sempre e a cópia só responde pelos **532 produtos legados** que nunca ganharam linha em
+`erp_produtos` (sem esse fallback eles desapareceriam da tela; importá-los não foi autorizado). Não
+foi trocado o `FROM` para `produtos_compat` exatamente por isso. Arquivos: `api/produtos/[id]`,
+`api/produtos`, `lib/produtos-filtros` (filtros compartilhados por 6 rotas), `api/produtos/busca`,
+`export`, `categorias`, `categorias-distinct`, `metais`, `pedras-catalogo`, `personalizaveis`,
+`classificar-tipo`, `preview-reclassificacao`, `normalizar-metal`, `rename-metal`, `setup`,
+`upgrade-config`, `bulk-edit`, `[id]/variacoes`, `[id]/pedras-componente`, `pedras-bulk`,
+`pedras-bulk/reprice`, `api/precificacao/curva/aplicar`, `api/precificacao/simular`,
+`api/precificacao/markup-ouro`.
+
+**Duas EXCEÇÕES que seguem lendo a cópia:**
+- **`nome`** — uma automação externa (n8n/Tiny, fora do nosso código) mantém lá a convenção de
+  catálogo com prefixo de código (`"BR008 - Brinco Pérola 3mm"`); 107 produtos têm nome diferente
+  nas duas tabelas. Decisão do Jonathan.
+- **`situacao`** — `erp_produtos.situacao` tem **6.369 linhas** `'I'`/`'E'` de um backfill de
+  12/03/2026 que **contradizem o `ativo=true` da própria linha**, e **613 delas já foram vendidas**.
+  Ler do ERP tiraria ~6.370 produtos da busca de venda e do site. Achado confirmado no banco a
+  partir do apontamento do v2.85.17.
+
+Os dois campos gravam nas **duas** tabelas, senão a edição some da tela (cópia) ou vai velha pro
+Tiny (ERP).
+
+**Efeitos visíveis:** o "Aplicar em Produtos" passa a calcular o markup sobre o peso certo em
+**623 produtos ativos**; 107 SKUs voltam ao código limpo (a cópia tinha `_arch_<id>_<sku>` do Tiny).
+Nenhum preço muda por causa da leitura — o cálculo já usava a tabela certa.
+
+**Blindagem extra:** o gerador de próximo SKU (`api/produtos/setup`) passou a olhar as **duas**
+tabelas (`UNION ALL`) — a cópia tem SKUs arquivados com prefixo `_arch_` que o regex não casava, o
+que podia gerar SKU repetido. Hoje as duas pontas dão o mesmo número (AJ5317).
+
+**Pendente (não feito nesta entrega):** lotes de venda/estoque (~22 arquivos) e integrações
+(~19 arquivos: site, API v1, Woo, RFID, gestão de estoque); reaplicar a curva nos 623 produtos com
+peso corrigido (muda preço — decisão do Jonathan); e o campo `% custo ouro` da curva, que existe só
+no simulador e não entra no preço oficial.
+
+**Reverte parte do v2.85.17 (commit `e4ab840e`):** aquele fix tinha mudado 9 `UPDATE`s do
+`PATCH /api/produtos/[id]` para gravar em `public.produtos`. Com a leitura e o cálculo na
+`erp_produtos`, isso fazia **o preço parar de responder ao fator/markup** — testado no banco com
+rollback: `fator = 3` gravado na cópia mantinha o preço oficial do AJ4829 em R$ 2.000. Os 9 voltaram
+para `alissonerp.erp_produtos` (decisão do Jonathan, 21/08/2026: gravar, ler, criar e calcular tudo
+na tabela do ERP). O que foi **mantido** daquele commit: o `COALESCE` do peso no GET e o reparo de
+719 produtos, que alinhou `fator` e `markup` (divergência dos dois hoje = zero).
 
 ## fix(produtos): edição de Fator/Markup/Peço-preço na tela de produto não salvava (v2.85.17)
 
@@ -37,6 +98,12 @@ ninguém lê de volta. Não foram tocados agora para manter o remendo pequeno e 
 
 **Impacto se revertido:** Fator, Markup, Situação, Tem-pedra etc voltam a "sumir" ao salvar pela
 tela de produto.
+
+> ⚠️ **Parcialmente revertido pelo v2.85.18:** os 9 `UPDATE`s voltaram para
+> `alissonerp.erp_produtos`, porque `vw_produto_preco` calcula o preço de lá — gravar na cópia fazia
+> o preço ignorar o fator. `nome` e `situacao` passaram a gravar nas **duas** tabelas. O apontamento
+> sobre a `situacao` vir de backfill foi confirmado e virou exceção de leitura.
+
 
 ## feat(dashboard-comercial): vendedora "Loja Alisson" fora de todos os cálculos (v2.85.16)
 

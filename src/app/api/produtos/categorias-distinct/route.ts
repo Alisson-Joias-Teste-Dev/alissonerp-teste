@@ -50,9 +50,12 @@ export async function GET(req: NextRequest) {
   const joiasOnly = req.nextUrl.searchParams.get("joias_only") === "1";
 
   const rows = await sql<{ categoria: string }[]>`
-    SELECT DISTINCT TRIM(categoria) AS categoria
-    FROM public.produtos
-    WHERE categoria IS NOT NULL AND TRIM(categoria) <> ''
+    -- Categoria da verdade (erp_produtos); copia só cobre legado sem linha no ERP.
+    SELECT DISTINCT TRIM(COALESCE(e.categoria, p.categoria)) AS categoria
+    FROM public.produtos p
+    LEFT JOIN alissonerp.erp_produtos e ON e.produto_id = p.id_produto
+    WHERE COALESCE(e.categoria, p.categoria) IS NOT NULL
+      AND TRIM(COALESCE(e.categoria, p.categoria)) <> ''
     ORDER BY 1 ASC
   `;
 

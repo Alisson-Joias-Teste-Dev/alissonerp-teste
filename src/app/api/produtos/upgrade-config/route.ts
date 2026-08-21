@@ -63,9 +63,10 @@ export async function GET(req: NextRequest) {
     const rows = await sql`
       SELECT puc.produto_id, puc.valor_por_grama, puc.quebra_percentual,
              puc.ativo, puc.created_at, puc.updated_at,
-             p.nome AS produto_nome, p.sku AS produto_sku
+             p.nome AS produto_nome, COALESCE(erpv.sku, p.sku) AS produto_sku
       FROM alissonerp.produto_upgrade_config puc
       JOIN public.produtos p ON p.id_produto = puc.produto_id
+      LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
       WHERE puc.ativo = true
       ORDER BY p.nome
     `;

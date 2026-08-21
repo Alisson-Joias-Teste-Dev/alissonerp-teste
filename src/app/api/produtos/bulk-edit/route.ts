@@ -71,11 +71,12 @@ export async function POST(req: NextRequest) {
   // quais zerar). Mesma regra do PATCH single.
   if (up.situacao === "I") {
     const bloqueados = await sql<{ produto_id: number; sku: string | null; nome: string | null; saldo: number }[]>`
-      SELECT v.produto_id, p.sku, p.nome, COALESCE(SUM(v.saldo_fisico),0)::int AS saldo
+      SELECT v.produto_id, COALESCE(erpv.sku, p.sku) AS sku, p.nome, COALESCE(SUM(v.saldo_fisico),0)::int AS saldo
       FROM alissonerp.vw_saldo_estoque_comercial_v2 v
       JOIN public.produtos p ON p.id_produto = v.produto_id
+      LEFT JOIN alissonerp.erp_produtos erpv ON erpv.produto_id = p.id_produto
       WHERE v.produto_id = ANY(${ids}::bigint[])
-      GROUP BY v.produto_id, p.sku, p.nome
+      GROUP BY v.produto_id, COALESCE(erpv.sku, p.sku), p.nome
       HAVING SUM(v.saldo_fisico) > 0
     `;
     if (bloqueados.length > 0) {
