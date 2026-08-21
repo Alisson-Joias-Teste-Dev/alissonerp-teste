@@ -3513,6 +3513,16 @@ export default function OrcamentoClient({
                   />
                 </div>
               )}
+              {activeProfile === ProfileType.Anatomica && (
+                <div>
+                  <label className="text-[10px] text-gray-500 font-medium block mb-1">Boleamento (%)</label>
+                  <MedidaStepper
+                    num={activeParams.domePercentage}
+                    setNum={(n) => updateParam("domePercentage", n)}
+                    min={0} max={100} step={5}
+                  />
+                </div>
+              )}
               {activeProfile === ProfileType.QuadradoCanal && (<>
                 <div>
                   <label className="text-[10px] text-gray-500 font-medium block mb-1">Larg. canal</label>

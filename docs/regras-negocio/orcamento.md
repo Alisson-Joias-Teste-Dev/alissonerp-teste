@@ -58,3 +58,10 @@ cálculo de peso perderia o sentido.
 **Antes de valer pra venda:** 1 peça real não é base segura para confiar no
 número pra sempre — comparar com mais peças pesadas na balança, em aros
 diferentes, antes de tirar da homolog.
+
+**Controle de Boleamento por peça:** o editor de orçamento ganhou um campo
+"Boleamento (%)" quando o formato é Anatômica (ao lado de Largura/Espessura),
+pra calibrar contra uma peça real na mão — sobe/desce e o peso estimado na
+tela reage na hora (`weightEst`, já existia; só faltava o campo pra mexer no
+Boleamento por peça — antes só dava pra mudar o padrão global, em
+Configurações).
