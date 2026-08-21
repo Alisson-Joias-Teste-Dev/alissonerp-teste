@@ -1,6 +1,42 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 21/08/2026 — Versão: v2.85.16 <!-- Revisado 21/08/2026 -->
+> 📋 Última atualização automática: 21/08/2026 — Versão: v2.85.17 <!-- Revisado 21/08/2026 -->
+
+## fix(produtos): edição de Fator/Markup/Peço-preço na tela de produto não salvava (v2.85.17)
+
+**O quê:** ao editar Fator, Markup, Categoria de preço, Situação, Tem pedra, Preço Tiny, Preço
+pedras, Tipo de metal ou Nome pela tela de produto (`ProdutoDrawer`) e salvar, o valor "voltava"
+ao antigo — ex: Fator editado pra `0.97`, ao reabrir aparecia `1` de novo.
+
+**Por quê (causa raiz):** o sistema está no meio de uma migração inacabada de onde os dados de
+produto moram (`public.produtos` → `alissonerp.erp_produtos`, migrations 320-323, jul/2026). A
+rota que salva (`PATCH /api/produtos/[id]`) já gravava esses 9 campos em `erp_produtos`, mas o
+preço do site, a tela de precificação e a própria tela de produto ao reabrir continuam lendo de
+`public.produtos` — nada sincroniza um lado no outro pra UPDATE (só existe sincronia automática
+pra produto novo/INSERT). O valor editado ficava gravado, só que no lugar errado.
+
+**Como:** `PATCH /api/produtos/[id]` volta a gravar esses 9 campos direto em `public.produtos`
+(fonte real). Exceção proposital: **peso_precificado continua indo pra `erp_produtos`** — duas
+outras telas (`/api/produtos`, `/api/gestao-estoque/produtos`) já dependem dele estar lá primeiro
+(`COALESCE(ep.peso_precificado, p.peso_precificado)`); mudar o alvo do peso quebraria essas duas.
+A leitura da própria tela de produto (`GET /api/produtos/[id]`) ganhou esse mesmo `COALESCE` pro
+peso, que estava faltando ali.
+
+**Reparo dos dados já afetados:** 719 produtos com edição real presa em `erp_produtos` (datas
+espalhadas, não de uma tacada só) tiveram o valor levado pra `public.produtos` — entre eles Fator
+(34 produtos), Preço pedras (778), Tem pedra (473). **Não** incluído no reparo: `situação` (6.370
+produtos divergentes, mas 100% vindos de um backfill de migração de 12/03/2026 — contradiziam até
+o próprio `ativo=true` da linha; copiar teria desativado 6.370 produtos por engano) e `nome`
+(maioria também do mesmo backfill). Linhas do dia do backfill (12/03/2026) ficaram de fora do
+reparo em qualquer campo, como rede de segurança.
+
+**Fora do escopo desta correção (mesma causa raiz, aceito por decisão explícita 21/08/2026):**
+`POST /api/precificacao/curva/aplicar` (reajuste de markup em massa) e `recalcularPrecoPedras()`
+(`src/lib/recalcular-preco-pedras.ts`) têm o mesmo defeito — gravam em `erp_produtos`, que
+ninguém lê de volta. Não foram tocados agora para manter o remendo pequeno e de baixo risco.
+
+**Impacto se revertido:** Fator, Markup, Situação, Tem-pedra etc voltam a "sumir" ao salvar pela
+tela de produto.
 
 ## feat(dashboard-comercial): vendedora "Loja Alisson" fora de todos os cálculos (v2.85.16)
 

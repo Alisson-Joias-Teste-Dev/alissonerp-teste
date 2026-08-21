@@ -81,7 +81,10 @@ export async function GET(
             p.nome,
             p.sku,
             p.tipo_metal,
-            p.peso_precificado,
+            -- Peso da FONTE (alissonerp.erp_produtos) — mesma regra do /api/produtos:
+            -- o espelho public.produtos so replica INSERT, nao UPDATE, entao ao editar
+            -- o peso pela tela o public ficava com o valor antigo (fix v2.85.17).
+            COALESCE(ep.peso_precificado, p.peso_precificado) AS peso_precificado,
             p.preco_tiny,
             p.preco_sync,
             p.preco_pedras,
@@ -456,45 +459,53 @@ export async function PATCH(
   }
 
   try {
-    // ── public.produtos ────────────────────────────────────────────────────
+    // ── public.produtos — fonte real lida pelo site e pela precificacao ─────
+    // O QUE: estes 9 campos gravam em public.produtos (nao mais em erp_produtos).
+    // PORQUE: nada le fator/markup/categoria/situacao/tem_pedra/preco_tiny/
+    //   preco_pedras/tipo_metal/nome de alissonerp.erp_produtos — a edicao ficava
+    //   presa la e "sumia" ao reabrir (fix v2.85.17, bug relatado 21/08/2026).
+    // IMPACTO SE REVERTIDO: Fator, Peso->preco, Markup etc voltam a nao salvar.
+    // peso_precificado fica de fora de proposito: /api/produtos e /api/gestao-
+    // estoque/produtos ja leem COALESCE(ep.peso_precificado, p.peso_precificado)
+    // — mudar o alvo dele aqui quebraria essas 2 telas.
     if (pubUpdate.tem_pedra_preciosa !== undefined) {
       await sql`
-        UPDATE alissonerp.erp_produtos
+        UPDATE public.produtos
         SET tem_pedra_preciosa = ${pubUpdate.tem_pedra_preciosa as boolean}
-        WHERE produto_id = ${produtoId}
+        WHERE id_produto = ${produtoId}
       `;
       await recalcularPrecoPedras(produtoId);
     }
     if (pubUpdate.nome !== undefined) {
-      await sql`UPDATE alissonerp.erp_produtos SET nome = ${pubUpdate.nome as string} WHERE produto_id = ${produtoId}`;
+      await sql`UPDATE public.produtos SET nome = ${pubUpdate.nome as string} WHERE id_produto = ${produtoId}`;
     }
     if (pubUpdate.tipo_metal !== undefined) {
-      await sql`UPDATE alissonerp.erp_produtos SET tipo_metal = ${pubUpdate.tipo_metal as string | null} WHERE produto_id = ${produtoId}`;
+      await sql`UPDATE public.produtos SET tipo_metal = ${pubUpdate.tipo_metal as string | null} WHERE id_produto = ${produtoId}`;
     }
     if (pubUpdate.categoria !== undefined) {
-      await sql`UPDATE alissonerp.erp_produtos SET categoria = ${pubUpdate.categoria as string | null} WHERE produto_id = ${produtoId}`;
+      await sql`UPDATE public.produtos SET categoria = ${pubUpdate.categoria as string | null} WHERE id_produto = ${produtoId}`;
     }
     if (pubUpdate.situacao !== undefined) {
-      await sql`UPDATE alissonerp.erp_produtos SET situacao = ${pubUpdate.situacao as string} WHERE produto_id = ${produtoId}`;
+      await sql`UPDATE public.produtos SET situacao = ${pubUpdate.situacao as string} WHERE id_produto = ${produtoId}`;
     }
-    // Precificação — campos de entrada. Trigger em public.produtos recalcula preco_sync.
+    // peso_precificado: continua em erp_produtos de proposito — ver comentario acima.
     if (pubUpdate.peso_precificado !== undefined) {
       await sql`UPDATE alissonerp.erp_produtos SET peso_precificado = ${pubUpdate.peso_precificado as number | null} WHERE produto_id = ${produtoId}`;
     }
     if (pubUpdate.markup !== undefined) {
-      await sql`UPDATE alissonerp.erp_produtos SET markup = ${pubUpdate.markup as number | null} WHERE produto_id = ${produtoId}`;
+      await sql`UPDATE public.produtos SET markup = ${pubUpdate.markup as number | null} WHERE id_produto = ${produtoId}`;
     }
     if (pubUpdate.fator !== undefined) {
-      await sql`UPDATE alissonerp.erp_produtos SET fator = ${pubUpdate.fator as number | null} WHERE produto_id = ${produtoId}`;
+      await sql`UPDATE public.produtos SET fator = ${pubUpdate.fator as number | null} WHERE id_produto = ${produtoId}`;
     }
     if (pubUpdate.categoria_precificacao !== undefined) {
-      await sql`UPDATE alissonerp.erp_produtos SET categoria_precificacao = ${pubUpdate.categoria_precificacao as string | null} WHERE produto_id = ${produtoId}`;
+      await sql`UPDATE public.produtos SET categoria_precificacao = ${pubUpdate.categoria_precificacao as string | null} WHERE id_produto = ${produtoId}`;
     }
     if (pubUpdate.preco_tiny !== undefined) {
-      await sql`UPDATE alissonerp.erp_produtos SET preco_tiny = ${pubUpdate.preco_tiny as number | null} WHERE produto_id = ${produtoId}`;
+      await sql`UPDATE public.produtos SET preco_tiny = ${pubUpdate.preco_tiny as number | null} WHERE id_produto = ${produtoId}`;
     }
     if (pubUpdate.preco_pedras !== undefined) {
-      await sql`UPDATE alissonerp.erp_produtos SET preco_pedras = ${pubUpdate.preco_pedras as number | null} WHERE produto_id = ${produtoId}`;
+      await sql`UPDATE public.produtos SET preco_pedras = ${pubUpdate.preco_pedras as number | null} WHERE id_produto = ${produtoId}`;
     }
     // tipo_item: upsert ou delete em alissonerp.produto_tipo_item
     if (tipoItem !== undefined) {
