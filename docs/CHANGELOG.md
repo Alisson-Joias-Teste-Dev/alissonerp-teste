@@ -21,9 +21,11 @@ rollback, simulando o estado real de antes (cópia com fator 1, ERP com 1,94) no
 | site, fórmula nova | 1,94 (ERP) | **R$ 2.000** |
 | preço oficial do ERP (`vw_produto_preco`) | 1,94 | **R$ 2.000** |
 
-**Como:** `COALESCE(<erp>.<col>, <copia>.<col>)` nas duas fórmulas + `LEFT JOIN
-alissonerp.erp_produtos` onde faltava. Na subquery das variações o `filho_e` já **é** a
-`erp_produtos`, então virou `COALESCE(filho_e.<col>, fp.<col>)`.
+**Como:** só o `fator` mudou de fonte nas duas fórmulas do site — `peso_precificado`, `markup` e
+`preco_sync` **continuam vindo da cópia** ali (escopo fechado no fator por decisão do Jonathan,
+21/08/2026: mudá-los mexeria em 480 preços do site, 220 pra cima e 260 pra baixo). Medido depois do
+ajuste: **0 preços do site mudam** com este deploy. Na subquery das variações o `filho_e` já **é** a
+`erp_produtos`, então virou `COALESCE(filho_e.fator, fp.fator, 1)`.
 
 **Fechamento:** não sobrou nenhuma leitura do `fator` na cópia. Grava no ERP → ficha, lista,
 precificação, simulador, compras, gestão de estoque, preço oficial, preço do site e o que vai pro
@@ -31,8 +33,9 @@ Tiny leem o mesmo número. Único ponto restante é o ramo legado do `GET /api/p
 roda se a tabela `erp_produtos` não existir.
 
 **Não incluído (segue lendo a cópia nesses arquivos):** `nome` e `situacao` (exceções decididas —
-ver v2.85.18), e os demais campos das integrações (categoria, tipo de metal, SKU no site/API v1/Woo/
-RFID), que ficam para o lote de integrações.
+ver v2.85.18), `peso_precificado`/`markup`/`preco_sync` nas fórmulas do site, e os demais campos das
+integrações (categoria, tipo de metal, SKU no site/API v1/Woo/RFID) — ficam para o lote de
+integrações, quando o site voltar a rodar.
 
 ## fix(produtos): campos do produto passam a ser lidos da tabela do ERP (v2.85.18)
 
