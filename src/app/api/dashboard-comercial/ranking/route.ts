@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import type { RankingConsultora, TipoMeta } from "@/lib/types/dashboard-comercial";
 import { safeDiv } from "@/lib/dashboard-comercial/utils";
+import { getVendedoresExcluidosDashboard } from "@/lib/dashboard-comercial/vendedores-excluidos";
 import { internalError } from "@/lib/api-error";
 
 // GET /api/dashboard-comercial/ranking?from=YYYY-MM-DD&to=YYYY-MM-DD
@@ -29,6 +30,10 @@ export async function GET(req: NextRequest) {
   const to = params.get("to") ?? hoje.toISOString().slice(0, 10);
 
   try {
+    // Vendedores fora de qualquer cálculo da dashboard (ex.: Loja Alisson).
+    // Regra e motivo em src/lib/dashboard-comercial/vendedores-excluidos.ts.
+    const excluidos = await getVendedoresExcluidosDashboard();
+
     // Vendas agregadas por consultora (legado + ERP), vale-troca pré-computado na view
     const vendas = await sql<
       Array<{
@@ -52,6 +57,7 @@ export async function GET(req: NextRequest) {
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status IS NOT NULL AND v.status != 4
         AND v.vendedor_id IS NOT NULL
+        AND COALESCE(v.vendedor_id, -1) <> ALL(${excluidos}::bigint[])
       GROUP BY v.vendedor_id, vd.nome, vd.foto
     `;
 
@@ -66,6 +72,7 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.vw_dash_metas_por_hora
       WHERE data_hora BETWEEN ${from}::timestamp AND (${to}::date + INTERVAL '1 day - 1 second')::timestamp
         AND valor_meta > 0
+        AND COALESCE(consultora, -1) <> ALL(${excluidos}::bigint[])
       GROUP BY consultora, tipo_meta
     `;
 

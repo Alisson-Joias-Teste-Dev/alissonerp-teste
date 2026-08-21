@@ -42,6 +42,31 @@ export async function getParametroNumber(chave: string): Promise<number> {
   return num;
 }
 
+/**
+ * Retorna um parâmetro do tipo 'json' como lista de números.
+ *
+ * REGRA DE NEGÓCIO
+ * O QUE FAZ: lê um parâmetro cujo valor é um array JSON de IDs (ex.: "[134]")
+ *   e devolve number[]. Valor ausente, vazio ou malformado devolve [].
+ * O PORQUÊ: permite ligar/desligar regras de exclusão por cadastro no banco,
+ *   sem deploy — hoje usado por DASHBOARD_VENDEDORES_EXCLUIDOS.
+ * O IMPACTO SE ALTERAR: fazer esta função lançar erro em valor malformado
+ *   derrubaria a tela que a consome. Por isso ela degrada para [] (comportamento
+ *   original, nada excluído) em vez de quebrar.
+ */
+export async function getParametroNumberArray(chave: string): Promise<number[]> {
+  await ensureLoaded();
+  const entry = cache.get(chave);
+  if (!entry) return [];
+  try {
+    const parsed: unknown = JSON.parse(entry.valor);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((v) => Number(v)).filter((n) => Number.isFinite(n));
+  } catch {
+    return [];
+  }
+}
+
 /** Invalida o cache forçando reload na próxima chamada. */
 export function invalidarCacheParametros(): void {
   cacheLoadedAt = null;
@@ -58,4 +83,5 @@ export const PARAM = {
   OURO_24K_LIGA_INSUMO_ID:  "OURO_24K_LIGA_INSUMO_ID",
   INSUMO_CONVERSAO_PADRAO:  "INSUMO_CONVERSAO_PADRAO",
   INSUMO_SOBRA_CONVERSAO_SKU: "INSUMO_SOBRA_CONVERSAO_SKU",
+  DASHBOARD_VENDEDORES_EXCLUIDOS: "DASHBOARD_VENDEDORES_EXCLUIDOS",
 } as const;

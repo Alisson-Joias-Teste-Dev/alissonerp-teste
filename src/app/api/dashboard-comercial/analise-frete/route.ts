@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import type { AnaliseFreteResponse } from "@/lib/types/dashboard-comercial";
+import { getVendedoresExcluidosDashboard } from "@/lib/dashboard-comercial/vendedores-excluidos";
 import { internalError } from "@/lib/api-error";
 
 // GET /api/dashboard-comercial/analise-frete?from=...&to=...
@@ -32,6 +33,12 @@ export async function GET(req: NextRequest) {
   const to = params.get("to") ?? hoje.toISOString().slice(0, 10);
 
   try {
+    // Vendedores fora de qualquer cálculo da dashboard (ex.: Loja Alisson).
+    // Regra e motivo em src/lib/dashboard-comercial/vendedores-excluidos.ts.
+    // Aqui sai dos DOIS lados do saldo (frete recebido do cliente e frete pago
+    // ao entregador) — filtrar só um lado desequilibraria o saldo.
+    const excluidos = await getVendedoresExcluidosDashboard();
+
     const vendas = await sql<
       Array<{
         fonte: string;
@@ -58,6 +65,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.vw_dash_forma_envio fe ON fe.id = v.forma_envio_id
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status IS NOT NULL AND v.status != 4
+        AND COALESCE(v.vendedor_id, -1) <> ALL(${excluidos}::bigint[])
       ORDER BY v.data_venda DESC
     `;
 
@@ -86,6 +94,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = e.vendedor_responsavel_id
       WHERE e.data_entrega::date BETWEEN ${from}::date AND ${to}::date
         AND e.aprovada = true
+        AND COALESCE(e.vendedor_responsavel_id, -1) <> ALL(${excluidos}::bigint[])
       ORDER BY e.data_entrega DESC
     `;
 

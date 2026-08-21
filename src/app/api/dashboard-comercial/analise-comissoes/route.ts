@@ -9,6 +9,7 @@ import type {
   ResumoComissaoConsultora,
 } from "@/lib/types/dashboard-comercial";
 import { calcularComissaoPorTabela, safeDiv } from "@/lib/dashboard-comercial/utils";
+import { getVendedoresExcluidosDashboard } from "@/lib/dashboard-comercial/vendedores-excluidos";
 import { internalError } from "@/lib/api-error";
 
 // GET /api/dashboard-comercial/analise-comissoes?from=...&to=...
@@ -38,6 +39,10 @@ export async function GET(req: NextRequest) {
   const to = params.get("to") ?? hoje.toISOString().slice(0, 10);
 
   try {
+    // Vendedores fora de qualquer cálculo da dashboard (ex.: Loja Alisson).
+    // Regra e motivo em src/lib/dashboard-comercial/vendedores-excluidos.ts.
+    const excluidos = await getVendedoresExcluidosDashboard();
+
     // 1. Itens de venda com join para vendas (período + status 2) e vendedor
     const itens = await sql<
       Array<{
@@ -77,6 +82,7 @@ export async function GET(req: NextRequest) {
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status IS NOT NULL AND v.status != 4
         AND v.vendedor_id IS NOT NULL
+        AND COALESCE(v.vendedor_id, -1) <> ALL(${excluidos}::bigint[])
 
       UNION ALL
 
@@ -102,6 +108,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = ve.vendedor_id
       WHERE ve.data_venda BETWEEN ${from}::date AND ${to}::date
         AND ve.vendedor_id IS NOT NULL
+        AND COALESCE(ve.vendedor_id, -1) <> ALL(${excluidos}::bigint[])
     `;
 
     /**
@@ -138,6 +145,7 @@ export async function GET(req: NextRequest) {
         AND ve.data_venda >= '2026-04-23'
       WHERE ve.data_venda BETWEEN ${from}::date AND ${to}::date
         AND ve.vendedor_id IS NOT NULL
+        AND COALESCE(ve.vendedor_id, -1) <> ALL(${excluidos}::bigint[])
       GROUP BY pv.venda_id, ve.total_venda
     `;
 
@@ -178,6 +186,7 @@ export async function GET(req: NextRequest) {
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status IS NOT NULL AND v.status != 4
         AND v.vendedor_id IS NOT NULL
+        AND COALESCE(v.vendedor_id, -1) <> ALL(${excluidos}::bigint[])
         AND v.fonte = 'legado'
     `;
 
@@ -216,6 +225,7 @@ export async function GET(req: NextRequest) {
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status IS NOT NULL AND v.status != 4
         AND v.vendedor_id IS NOT NULL
+        AND COALESCE(v.vendedor_id, -1) <> ALL(${excluidos}::bigint[])
       GROUP BY v.vendedor_id
     `;
     const totaisPedidoMap = new Map<number, { bruto: number; vale: number }>();
@@ -241,6 +251,7 @@ export async function GET(req: NextRequest) {
       WHERE data_hora BETWEEN ${from}::timestamp AND (${to}::date + INTERVAL '1 day - 1 second')::timestamp
         AND valor_meta > 0
         AND tipo_meta = 'Prata'
+        AND COALESCE(consultora, -1) <> ALL(${excluidos}::bigint[])
       GROUP BY consultora
     `;
     const metaPrataMap = new Map<number, number>();

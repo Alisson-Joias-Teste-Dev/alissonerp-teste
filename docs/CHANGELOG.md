@@ -1,6 +1,45 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 19/08/2026 — Versão: v2.85.15 <!-- Revisado 19/08/2026 -->
+> 📋 Última atualização automática: 21/08/2026 — Versão: v2.85.16 <!-- Revisado 21/08/2026 -->
+
+## feat(dashboard-comercial): vendedora "Loja Alisson" fora de todos os cálculos (v2.85.16)
+
+**O quê:** a vendedora **"Loja Alisson"** (`id_vendedor` 134) não entra mais em nenhum número da
+dashboard comercial — Geral, Performance, Frete, Comissões e Ranking. Ela desaparece dos cartões,
+das tabelas, do pódio e das listagens.
+
+**Por quê:** "Loja Alisson" não é consultora — é o vendedor genérico usado para lançar venda de
+balcão/institucional que não pertence a ninguém da equipe. Não tem meta cadastrada nem lead, mas o
+faturamento dela somava junto com as consultoras: inflava faturamento e ticket médio, entrava no
+cálculo de comissão/desconto médio e — pior — colocava a Loja disputando o pódio (3º lugar em
+ago/2026 com R$ 71.560). Nos últimos 12 meses eram 139 vendas / R$ 667.660,71 (≈4,3% do total).
+
+**Como:** parâmetro novo `DASHBOARD_VENDEDORES_EXCLUIDOS = [134]` (tipo `json`, migration 374),
+lido por `src/lib/dashboard-comercial/vendedores-excluidos.ts` — ponto único de verdade. Incluir ou
+tirar vendedor da dashboard passa a ser **cadastro no banco, sem deploy**. Os 7 endpoints de
+`/api/dashboard-comercial/*` (exceto `premiacao`, que não calcula nada) aplicam o mesmo filtro:
+`AND COALESCE(<coluna_vendedor>, -1) <> ALL(${excluidos}::bigint[])`. No `comparativo-anual` o filtro
+entra nas DUAS pontas (ano atual no ERP e ano anterior no legado, via `ppd.id_vendedor`), senão o
+comparativo compararia bases diferentes. Na aba Frete sai dos dois lados do saldo (frete recebido do
+cliente e frete pago ao entregador) — filtrar só um lado desequilibraria o saldo.
+
+**A pegadinha do COALESCE:** existem 14 vendas legadas SEM vendedor (R$ 33.564,50) que contam nos
+totais. Em SQL, `NULL = ANY(lista)` é NULL e `NOT NULL` não é verdadeiro — a forma ingênua
+(`NOT (vendedor_id = ANY(...))`) descartaria essas 14 linhas silenciosamente. Medido: 2.555 linhas
+sem filtro → 2.416 com COALESCE (as 14 preservadas) → 2.402 sem COALESCE (as 14 perdidas).
+Lista vazia (`<> ALL('{}')`) é verdadeira para tudo: apagar o parâmetro devolve o comportamento antigo.
+
+**Conferência (01–20/08/2026, medido no driver real):** faturamento líquido R$ 432.239,74 →
+**R$ 360.679,74** (Δ exatamente os R$ 71.560,00 da Loja); vendas 92 → **90**; ticket médio
+R$ 4.698,26 → **R$ 4.007,55**; consultoras no ranking 4 → **3**; itens no cálculo de comissão
+139 → **133** (os 6 itens das 2 vendas da Loja); ano anterior R$ 488.119,37 / 160 →
+**R$ 484.079,37 / 158**; metas **idênticas** (Prata R$ 496.923,08, Ouro R$ 552.500,00, Diamante
+R$ 595.000,00 — a Loja não tem meta). Efeito colateral esperado na tela: com faturamento menor e
+meta igual, o atingimento da meta Prata cai de ~87,0% para ~72,6% — é o número honesto.
+
+**Escopo blindado:** a view `alissonerp.vw_dash_vendas_todas` NÃO foi tocada, porque também é usada
+pelo financeiro (verba de frete grátis, `src/lib/frete-verba.ts`) e pela gestão de estoque. O filtro
+vive só nos endpoints da dashboard comercial.
 
 ## fix(produtos): controla_estoque e tem_pedra_preciosa voltam certos no cadastro de pedra (v2.83.9)
 

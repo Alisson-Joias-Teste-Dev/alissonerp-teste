@@ -241,6 +241,7 @@ inventario comercial: NAO ajusta estoque ao concluir (auditoria pura); roles em 
 inventario comercial: PECA PRONTA filtrada na LEITURA via condPecaPronta() de src/lib/inventario-peca-pronta.ts (GET/concluir/contar/app) — vale ate para inventario aberto antes da regra; snapshot novo tambem exclui (v2.81.4)
 inventario comercial: fechar pendencia como resolvida EXIGE desfecho_tipo (mig 338) — venda_sem_baixa valida a venda e EFETIVA a reserva junto com a saida (senao disponivel cai em dobro); desfecho com movimento nao se desfaz (409, exige estorno)
 baixa manual de estoque NAO EXISTE por cargo (v2.81.3) — /movimentos recusa QUALQUER saida (403, ate admin/dev); movimento so por CONCILIACAO com documento conferido (falta<->venda sem baixa, sobra<->devolucao sem entrada), exclusiva de ROLES_BAIXA_MANUAL (admin/dev) + dupla confirmacao; desfecho 'perda' do INVENTARIO = so registro, SEM baixa
+dashboard comercial: vendedora "Loja Alisson" (id 134) NAO entra em nenhum calculo (21/08/2026) — lista vem de DASHBOARD_VENDEDORES_EXCLUIDOS (mig 374), lida por src/lib/dashboard-comercial/vendedores-excluidos.ts, aplicada nos 7 endpoints de /api/dashboard-comercial/* (premiacao nao calcula). Filtro SEMPRE `COALESCE(<col>, -1) <> ALL(${excluidos}::bigint[])`: sem o COALESCE as 14 vendas legadas sem vendedor (R$ 33.564,50) somem em silencio, porque `NULL = ANY(lista)` e NULL. Comparativo anual filtra as DUAS pontas (ERP + legado ppd.id_vendedor); aba Frete filtra os DOIS lados do saldo (vendas + entregas). vw_dash_vendas_todas NAO foi tocada — tambem alimenta financeiro (frete-verba) e gestao de estoque. Ver docs/regras-negocio/comercial.md §13
 PERDA/EXTRAVIO (354, 21/07/2026): UNICA baixa manual do ERP, endpoint proprio /api/estoque-comercial/perda, gate por IDENTIDADE (isMasterAdmin -> parametros_sistema.MASTER_ADMIN_USER_ID), NUNCA por role — nem admin nem dev; estorno de perda tambem so o master; limitada ao DISPONIVEL; motivo 'perda_extravio' em src/lib/perda-extravio.ts; ver docs/regras-negocio/comercial.md §11
 ```
 
@@ -305,6 +306,7 @@ PARAMETROS SISTEMA (via src/lib/parametros.ts):
   PEDRA_CATEGORIA_ID       = Categoria ID=2 (antes hardcoded)
   LOCAL_ESTOQUE_DEFAULT_ID = Local ID=1 (antes hardcoded)
   OURO_24K_LIGA_INSUMO_ID  = Insumo ID=275 (antes hardcoded)
+  DASHBOARD_VENDEDORES_EXCLUIDOS = [134] "Loja Alisson" — fora de TODOS os calculos da dashboard comercial (mig 374)
 ```
 
 ### Valores Legados (Directus)

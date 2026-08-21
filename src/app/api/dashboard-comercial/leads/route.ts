@@ -3,6 +3,7 @@ import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import type { LeadsDashboardResponse, LeadsConsultoraStats } from "@/lib/types/dashboard-comercial";
 import { safeDiv } from "@/lib/dashboard-comercial/utils";
+import { getVendedoresExcluidosDashboard } from "@/lib/dashboard-comercial/vendedores-excluidos";
 import { internalError } from "@/lib/api-error";
 
 // GET /api/dashboard-comercial/leads?from=...&to=...
@@ -38,6 +39,10 @@ export async function GET(req: NextRequest) {
   const to = params.get("to") ?? hoje.toISOString().slice(0, 10);
 
   try {
+    // Vendedores fora de qualquer cálculo da dashboard (ex.: Loja Alisson).
+    // Regra e motivo em src/lib/dashboard-comercial/vendedores-excluidos.ts.
+    const excluidos = await getVendedoresExcluidosDashboard();
+
     const leads = await sql<
       Array<{
         id_vendedor: number | null;
@@ -66,6 +71,7 @@ export async function GET(req: NextRequest) {
         FROM alissonerp.vw_dash_leads l
         WHERE l.data_entrada BETWEEN ${from}::date AND ${to}::date
           AND COALESCE(l.etapa_lead, '') <> 'Incoming leads'
+          AND COALESCE(l.id_vendedor, -1) <> ALL(${excluidos}::bigint[])
       )
       SELECT
         c.id_vendedor,
@@ -87,6 +93,7 @@ export async function GET(req: NextRequest) {
       WHERE data_venda BETWEEN ${from}::date AND ${to}::date
         AND status IS NOT NULL AND status != 4
         AND vendedor_id IS NOT NULL
+        AND COALESCE(vendedor_id, -1) <> ALL(${excluidos}::bigint[])
       GROUP BY vendedor_id
     `;
     const vendasMap = new Map<number, number>();

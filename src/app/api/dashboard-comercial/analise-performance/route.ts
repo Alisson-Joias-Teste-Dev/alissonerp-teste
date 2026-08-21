@@ -7,6 +7,7 @@ import type {
   TipoMeta,
 } from "@/lib/types/dashboard-comercial";
 import { safeDiv } from "@/lib/dashboard-comercial/utils";
+import { getVendedoresExcluidosDashboard } from "@/lib/dashboard-comercial/vendedores-excluidos";
 import { internalError } from "@/lib/api-error";
 
 // GET /api/dashboard-comercial/analise-performance?from=...&to=...&refDate=YYYY-MM-DD
@@ -45,6 +46,10 @@ export async function GET(req: NextRequest) {
     .slice(0, 10);
 
   try {
+    // Vendedores fora de qualquer cálculo da dashboard (ex.: Loja Alisson).
+    // Regra e motivo em src/lib/dashboard-comercial/vendedores-excluidos.ts.
+    const excluidos = await getVendedoresExcluidosDashboard();
+
     // ---------- Vendas do período (mês) e de hoje (legado + ERP, vale-troca pré-computado) ----------
     const vendasPeriodo = await sql<
       Array<{ vendedor_id: number; nome: string | null; foto: string | null; total: string; qtd: string }>
@@ -56,6 +61,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN alissonerp.vw_dash_vendedores vd ON vd.id_vendedor = v.vendedor_id
       WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
         AND v.status IS NOT NULL AND v.status != 4 AND v.vendedor_id IS NOT NULL
+        AND COALESCE(v.vendedor_id, -1) <> ALL(${excluidos}::bigint[])
       GROUP BY v.vendedor_id, vd.nome, vd.foto
     `;
 
@@ -67,6 +73,7 @@ export async function GET(req: NextRequest) {
       FROM alissonerp.vw_dash_vendas_todas v
       WHERE v.data_venda = ${refDate}::date
         AND v.status IS NOT NULL AND v.status != 4 AND v.vendedor_id IS NOT NULL
+        AND COALESCE(v.vendedor_id, -1) <> ALL(${excluidos}::bigint[])
       GROUP BY v.vendedor_id
     `;
     const vendasHojeMap = new Map<number, number>();
@@ -74,13 +81,13 @@ export async function GET(req: NextRequest) {
 
     // ---------- Metas: 4 agregações ----------
     // 1. Acumulada até refDate (agora) dentro do mês → cenário mensal-acumulado
-    const metasMesAcumulado = await aggMetas(sql, from, to, refDate, "ate_now");
+    const metasMesAcumulado = await aggMetas(sql, from, to, refDate, "ate_now", excluidos);
     // 2. Valor total do mês → cenário projeção mensal (sempre até fim do mês de `from`)
-    const metasMesTotal = await aggMetas(sql, from, fimMesFrom, refDate, "mes_total");
+    const metasMesTotal = await aggMetas(sql, from, fimMesFrom, refDate, "mes_total", excluidos);
     // 3. Acumulada até hora atual do dia refDate → cenário horario-acumulado
-    const metasHojeAcumulado = await aggMetasDia(sql, refDate, "ate_now");
+    const metasHojeAcumulado = await aggMetasDia(sql, refDate, "ate_now", excluidos);
     // 4. Total do dia refDate → cenário horario-diario
-    const metasHojeTotal = await aggMetasDia(sql, refDate, "dia_total");
+    const metasHojeTotal = await aggMetasDia(sql, refDate, "dia_total", excluidos);
 
     // Monta Map base com todas consultoras com vendas OU metas
     // Normaliza para Number() — bigint do postgres.js chega como string
@@ -180,6 +187,7 @@ async function aggMetas(
   to: string,
   refDate: string,
   modo: "ate_now" | "mes_total",
+  excluidos: number[],
 ): Promise<Array<{ consultora: string; tipo_meta: TipoMeta; total: string }>> {
   if (modo === "ate_now") {
     return await sqlFn<Array<{ consultora: string; tipo_meta: TipoMeta; total: string }>>`
@@ -187,6 +195,7 @@ async function aggMetas(
       FROM alissonerp.vw_dash_metas_por_hora
       WHERE data_hora BETWEEN ${from}::timestamp AND ${refDate}::timestamp + INTERVAL '23 hours 59 minutes 59 seconds'
         AND valor_meta > 0
+        AND COALESCE(consultora, -1) <> ALL(${excluidos}::bigint[])
       GROUP BY consultora, tipo_meta
     `;
   }
@@ -195,6 +204,7 @@ async function aggMetas(
     FROM alissonerp.vw_dash_metas_por_hora
     WHERE data_hora BETWEEN ${from}::timestamp AND (${to}::date + INTERVAL '1 day - 1 second')::timestamp
       AND valor_meta > 0
+      AND COALESCE(consultora, -1) <> ALL(${excluidos}::bigint[])
     GROUP BY consultora, tipo_meta
   `;
 }
@@ -203,6 +213,7 @@ async function aggMetasDia(
   sqlFn: typeof sql,
   refDate: string,
   modo: "ate_now" | "dia_total",
+  excluidos: number[],
 ): Promise<Array<{ consultora: string; tipo_meta: TipoMeta; total: string }>> {
   if (modo === "ate_now") {
     return await sqlFn<Array<{ consultora: string; tipo_meta: TipoMeta; total: string }>>`
@@ -211,6 +222,7 @@ async function aggMetasDia(
       WHERE data_hora::date = ${refDate}::date
         AND data_hora <= NOW()
         AND valor_meta > 0
+        AND COALESCE(consultora, -1) <> ALL(${excluidos}::bigint[])
       GROUP BY consultora, tipo_meta
     `;
   }
@@ -219,6 +231,7 @@ async function aggMetasDia(
     FROM alissonerp.vw_dash_metas_por_hora
     WHERE data_hora::date = ${refDate}::date
       AND valor_meta > 0
+      AND COALESCE(consultora, -1) <> ALL(${excluidos}::bigint[])
     GROUP BY consultora, tipo_meta
   `;
 }

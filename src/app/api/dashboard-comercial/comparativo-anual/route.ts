@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { safeDiv } from "@/lib/dashboard-comercial/utils";
+import { getVendedoresExcluidosDashboard } from "@/lib/dashboard-comercial/vendedores-excluidos";
 import { internalError } from "@/lib/api-error";
 
 type PeriodoAgregado = { total: number; qtd: number };
@@ -38,8 +39,14 @@ export async function GET(req: NextRequest) {
     const fromAntIso = fromAnterior.toISOString().slice(0, 10);
     const toAntIso = toAnterior.toISOString().slice(0, 10);
 
-    const atual = await somarPeriodoERP(from, to);
-    const anterior = await somarPeriodoAnoAnteriorLegado(fromAntIso, toAntIso);
+    // Vendedores fora de qualquer cálculo da dashboard (ex.: Loja Alisson).
+    // Regra e motivo em src/lib/dashboard-comercial/vendedores-excluidos.ts.
+    // Aplicado nas DUAS pontas: sem isso o ano atual sairia limpo e o ano
+    // anterior sujo, e o comparativo compararia bases diferentes.
+    const excluidos = await getVendedoresExcluidosDashboard();
+
+    const atual = await somarPeriodoERP(from, to, excluidos);
+    const anterior = await somarPeriodoAnoAnteriorLegado(fromAntIso, toAntIso, excluidos);
 
     const totalAtual = atual.total;
     const qtdAtual = atual.qtd;
@@ -86,7 +93,7 @@ export async function GET(req: NextRequest) {
  * Impacto se alterar/remover: o valor "Atual" pode sair da mesma referência
  * usada nas demais telas do dashboard comercial.
  */
-async function somarPeriodoERP(from: string, to: string): Promise<PeriodoAgregado> {
+async function somarPeriodoERP(from: string, to: string, excluidos: number[]): Promise<PeriodoAgregado> {
   const [row] = await sql<Array<{ total: string; qtd: string }>>`
     SELECT
       COALESCE(SUM(v.total_venda - v.valor_vale_troca), 0)::text AS total,
@@ -94,6 +101,7 @@ async function somarPeriodoERP(from: string, to: string): Promise<PeriodoAgregad
     FROM alissonerp.vw_dash_vendas_todas v
     WHERE v.data_venda BETWEEN ${from}::date AND ${to}::date
       AND v.status IS NOT NULL AND v.status != 4
+      AND COALESCE(v.vendedor_id, -1) <> ALL(${excluidos}::bigint[])
   `;
 
   return {
@@ -112,7 +120,7 @@ async function somarPeriodoERP(from: string, to: string): Promise<PeriodoAgregad
  * Impacto se alterar/remover: o "ano anterior" pode voltar a divergir da régua
  * histórica usada pela operação comercial, quebrando auditoria e comparabilidade.
  */
-async function somarPeriodoAnoAnteriorLegado(from: string, to: string): Promise<PeriodoAgregado> {
+async function somarPeriodoAnoAnteriorLegado(from: string, to: string, excluidos: number[]): Promise<PeriodoAgregado> {
   const [row] = await sql<Array<{ total: string; qtd: string }>>`
     WITH pedidos_consolidados AS (
       SELECT
@@ -131,6 +139,10 @@ async function somarPeriodoAnoAnteriorLegado(from: string, to: string): Promise<
         ) AS valor_pagamentos_validos
       FROM public.pedidos_parcelas_detalhado ppd
       WHERE ppd.data_pedido BETWEEN ${from}::date AND ${to}::date
+        -- Filtro no nível da PARCELA é seguro: nenhum pedido legado tem mais de
+        -- um vendedor (conferido em 21/08/2026), então excluir as parcelas do
+        -- vendedor excluído remove o pedido inteiro, nunca um pedaço dele.
+        AND COALESCE(ppd.id_vendedor, -1) <> ALL(${excluidos}::bigint[])
       GROUP BY ppd.numero_pedido
     ),
     classificados AS (
