@@ -99,8 +99,9 @@ export async function GET(req: NextRequest) {
         p.situacao,
         p.categoria,
         p.categoria_precificacao,
-        p.markup,
-        p.fator,
+        -- Markup/fator da verdade (erp_produtos) — a copia nao recebe edicao.
+        COALESCE(ep.markup, p.markup) AS markup,
+        COALESCE(ep.fator, p.fator) AS fator,
         -- Ficha propria do ERP (alissonerp.erp_produtos): fornecedor habilita o
         -- filtro de Fornecedor da tela; pai/variacao contextualiza a peca.
         -- Fornecedor: ficha do ERP manda; vazia, cai no fornecedor que o ETL do

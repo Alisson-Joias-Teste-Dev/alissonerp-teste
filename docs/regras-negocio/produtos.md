@@ -46,8 +46,12 @@ O preço de venda do produto é **calculado** (curva dinâmica) — não é o `p
   `sku` 107 · `nome` 107 · `categoria` 6 · `preco_pedras` 2 ·
   `tipo_metal`/`preco_sync`/`diferenca_percentual` 1. `fator` e `markup` foram zerados pelo reparo de
   719 produtos do v2.85.17.
-- **Ainda lendo a cópia (pendente):** venda/estoque (~22 arquivos) e integrações (~19: site, API v1,
-  WooCommerce, RFID, gestão de estoque).
+- **`fator` está fechado (v2.85.19):** nenhuma leitura dele vem da cópia. Isso inclui as duas
+  fórmulas de preço do site (`/api/site/produtos` e `/api/site/sync/[id]`), onde `peso_precificado`,
+  `markup` e `preco_sync` foram junto — o site calcula preço com fórmula própria, então precisava das
+  mesmas entradas. Antes o mesmo produto tinha dois preços (site R$ 1.030 × ERP R$ 2.000 no AJ4829).
+- **Ainda lendo a cópia (pendente):** venda/estoque (~22 arquivos) e o resto dos campos das
+  integrações (categoria, tipo de metal, SKU em site/API v1/Woo/RFID).
 - **`fator`:** multiplicador por SKU dentro do preço (`peso × cotação × markup × fator`). Não confundir
   com o `% custo ouro` da curva (`curva_config.gold_cost_percentage`), que só existe no simulador e na
   prévia do "Aplicar em Produtos" — a view oficial **não** usa esse campo.

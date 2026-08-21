@@ -18,14 +18,16 @@ export async function GET(req: NextRequest) {
       p.id_produto,
       p.nome,
       p.sku,
-      p.fator,
-      p.peso_precificado,
+      -- Fator/peso da verdade (erp_produtos) — a copia nao recebe edicao.
+      COALESCE(e.fator, p.fator) AS fator,
+      COALESCE(e.peso_precificado, p.peso_precificado) AS peso_precificado,
       p.categoria,
       p.categoria_precificacao,
       p.tem_pedra_preciosa,
       ppe.peso_ct AS peso_pedra_ct,
       (ppe.produto_id IS NOT NULL) AS tem_registro_pedra_extras
     FROM public.produtos p
+    LEFT JOIN alissonerp.erp_produtos e ON e.produto_id = p.id_produto
     LEFT JOIN alissonerp.produto_pedra_extras ppe ON ppe.produto_id = p.id_produto
     WHERE p.nome IS NOT NULL
       AND (${q}::text = '' OR p.nome ILIKE ${`%${q}%`} OR p.sku ILIKE ${`%${q}%`})

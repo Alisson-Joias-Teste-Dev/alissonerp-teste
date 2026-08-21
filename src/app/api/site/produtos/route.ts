@@ -57,30 +57,35 @@ export async function GET(req: NextRequest) {
         COALESCE(
           NULLIF(p.preco_sync::numeric, 0),
           CASE
-            WHEN p.peso_precificado > 0
-             AND p.markup > 0
+            -- PRECO: peso/markup/fator/preco_sync vem de alissonerp.erp_produtos (a verdade,
+            -- e a mesma fonte de vw_produto_preco). A copia public.produtos só e preenchida
+            -- pelo gatilho no INSERT, entao editar o fator pela ficha nao chegava aqui e o
+            -- SITE ficava com o preco antigo (fix 21/08/2026 — caso AJ4829).
+            WHEN COALESCE(ep.peso_precificado, p.peso_precificado) > 0
+             AND COALESCE(ep.markup, p.markup) > 0
              AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
             THEN ROUND(
-              p.peso_precificado::numeric
+              COALESCE(ep.peso_precificado, p.peso_precificado)::numeric
               * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-              * p.markup::numeric
-              * COALESCE(p.fator::numeric, 1)
+              * COALESCE(ep.markup, p.markup)::numeric
+              * COALESCE(ep.fator, p.fator, 1)::numeric
               / 10
             )::numeric * 10
           END,
           (
             SELECT MIN(
               COALESCE(
-                NULLIF(fp.preco_sync::numeric, 0),
+                NULLIF(COALESCE(filho_e.preco_sync, fp.preco_sync)::numeric, 0),
                 CASE
-                  WHEN fp.peso_precificado > 0
-                   AND fp.markup > 0
+                  -- Variacao: filho_e JA e a alissonerp.erp_produtos (INNER JOIN abaixo).
+                  WHEN COALESCE(filho_e.peso_precificado, fp.peso_precificado) > 0
+                   AND COALESCE(filho_e.markup, fp.markup) > 0
                    AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
                   THEN ROUND(
-                    fp.peso_precificado::numeric
+                    COALESCE(filho_e.peso_precificado, fp.peso_precificado)::numeric
                     * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-                    * fp.markup::numeric
-                    * COALESCE(fp.fator::numeric, 1)
+                    * COALESCE(filho_e.markup, fp.markup)::numeric
+                    * COALESCE(filho_e.fator, fp.fator, 1)::numeric
                     / 10
                   )::numeric * 10
                 END,

@@ -1,6 +1,38 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 21/08/2026 — Versão: v2.85.18 <!-- Revisado 21/08/2026 -->
+> 📋 Última atualização automática: 21/08/2026 — Versão: v2.85.19 <!-- Revisado 21/08/2026 -->
+
+## fix(produtos): fator do produto fecha ponta a ponta — inclusive no preço do site (v2.85.19)
+
+**O quê:** os 4 últimos lugares que liam o `fator` da cópia passaram a ler de
+`alissonerp.erp_produtos`: **preço do site** (`/api/site/produtos`, pai e mínimo das variações),
+**preço enviado no sync do site** (`/api/site/sync/[id]`), **compras comercial** e **gestão de
+estoque**. Nas duas fórmulas de preço do site, `peso_precificado`, `markup` e `preco_sync` foram
+junto — são as outras entradas da mesma conta.
+
+**Por quê:** com o v2.85.18, editar o fator já corrigia a ficha, a lista e o preço oficial
+(`vw_produto_preco`). Mas o site calcula o preço com fórmula própria lendo `public.produtos` — e a
+cópia não recebe edição. Resultado: o mesmo produto ficava com dois preços. Medido no banco com
+rollback, simulando o estado real de antes (cópia com fator 1, ERP com 1,94) no AJ4829:
+
+| | fator lido | preço |
+|---|---|---|
+| site, fórmula antiga | 1 (cópia) | R$ 1.030 |
+| site, fórmula nova | 1,94 (ERP) | **R$ 2.000** |
+| preço oficial do ERP (`vw_produto_preco`) | 1,94 | **R$ 2.000** |
+
+**Como:** `COALESCE(<erp>.<col>, <copia>.<col>)` nas duas fórmulas + `LEFT JOIN
+alissonerp.erp_produtos` onde faltava. Na subquery das variações o `filho_e` já **é** a
+`erp_produtos`, então virou `COALESCE(filho_e.<col>, fp.<col>)`.
+
+**Fechamento:** não sobrou nenhuma leitura do `fator` na cópia. Grava no ERP → ficha, lista,
+precificação, simulador, compras, gestão de estoque, preço oficial, preço do site e o que vai pro
+Tiny leem o mesmo número. Único ponto restante é o ramo legado do `GET /api/produtos/[id]`, que só
+roda se a tabela `erp_produtos` não existir.
+
+**Não incluído (segue lendo a cópia nesses arquivos):** `nome` e `situacao` (exceções decididas —
+ver v2.85.18), e os demais campos das integrações (categoria, tipo de metal, SKU no site/API v1/Woo/
+RFID), que ficam para o lote de integrações.
 
 ## fix(produtos): campos do produto passam a ser lidos da tabela do ERP (v2.85.18)
 

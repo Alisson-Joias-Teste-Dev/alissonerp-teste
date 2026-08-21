@@ -142,15 +142,19 @@ export async function POST(
         const filhos = await sql<{ sku: string; preco: number; saldo: number }[]>`
           SELECT
             p.sku,
+            -- PRECO: peso/markup/fator vem de alissonerp.erp_produtos (a verdade). A copia
+            -- public.produtos só e preenchida no INSERT, entao o fator editado pela ficha
+            -- nao chegava aqui e o site recebia preco antigo (fix 21/08/2026 — AJ4829).
             COALESCE(
-              NULLIF(p.preco_sync::numeric, 0),
+              NULLIF(COALESCE(ep.preco_sync, p.preco_sync)::numeric, 0),
               CASE
-                WHEN p.peso_precificado > 0 AND p.markup > 0
+                WHEN COALESCE(ep.peso_precificado, p.peso_precificado) > 0
+                 AND COALESCE(ep.markup, p.markup) > 0
                  AND (SELECT ouro FROM public.parametros LIMIT 1) > 0
-                THEN ROUND(p.peso_precificado::numeric * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
-                         * p.markup::numeric * COALESCE(p.fator::numeric, 1) / 10)::numeric * 10
+                THEN ROUND(COALESCE(ep.peso_precificado, p.peso_precificado)::numeric * (SELECT ouro FROM public.parametros LIMIT 1)::numeric
+                         * COALESCE(ep.markup, p.markup)::numeric * COALESCE(ep.fator, p.fator, 1)::numeric / 10)::numeric * 10
               END,
-              NULLIF(p.preco_tiny::numeric, 0),
+              NULLIF(COALESCE(ep.preco_tiny, p.preco_tiny)::numeric, 0),
               0
             )::float                                 AS preco,
             COALESCE((
@@ -159,6 +163,7 @@ export async function POST(
               WHERE m.produto_id = p.id_produto AND m.status = 'efetivado'
             ), 0)::int                               AS saldo
           FROM public.produtos p
+          LEFT JOIN alissonerp.erp_produtos ep ON ep.produto_id = p.id_produto
           WHERE p.sku LIKE ${alvo.sku + "-%"}
         `;
         const porSku = new Map(filhos.map(r => [r.sku, { preco: Number(r.preco), saldo: Number(r.saldo) }]));
