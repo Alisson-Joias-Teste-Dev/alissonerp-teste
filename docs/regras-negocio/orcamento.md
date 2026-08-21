@@ -21,3 +21,40 @@ Implementado em `OrcamentoClient.tsx` (`iniciarAprovacao`/`vincularEAprovar`/`ca
 ## Notas
 - A tela de **detalhe** já tinha seletor de cliente (manda `cliente_id` ao aprovar); o furo era só aprovar **pela lista**.
 - Conferido 16/06: 9 orçamentos com nome e sem `cliente_id` — 4 são cliente cadastrado (dá pra vincular), 1 cliente não cadastrado (Victor), 4 são lixo/teste (PENTEST/`DROP TABLE`/CPF solto). As queries são parametrizadas — o `DROP TABLE` ficou só como texto (não executou).
+
+## Peso da aliança Anatômica — volume real do molde 3D (decisão Alisson, 21/08/2026)
+
+Até aqui, o peso de **qualquer** formato de aliança saía de um tubo reto
+(aro + largura + espessura) multiplicado por um "fator de correção" fixo por
+formato (`PROFILE_CORRECTION_FACTOR` em `orcamento/constants.ts`) — um número
+herdado de sistema antigo, sem derivação, igual pra qualquer tamanho.
+
+Uma peça real (Anatômica, aro 28, largura 8,20mm, espessura 1,64mm, ouro
+amarelo 18k) pesou **12,5g** na balança; a fórmula antiga calculava **13,5g**
+(~8% acima).
+
+**O que mudou — só para o formato Anatômica:** o sistema já desenha um molde
+3D real da curva da Anatômica para o visor (`AliancaViewport.tsx`) — reagindo
+ao "Boleamento" (`domePercentage`) — mas o peso nunca olhava para ele. Agora
+`computeWeight` (`orcamento/constants.ts`) mede o **volume real** desse
+sólido (`anatomicaMeshVolume`, em `orcamento/ring-geometry.ts`): soma de
+tetraedros assinados sobre a malha fechada do revolve 360° — o mesmo tipo de
+cálculo que um programa de CAD (Rhino incluso) usa para volume de sólido
+fechado — em vez do tubo × 88% chutado. Com a mesma peça (Boleamento 100%,
+assumido — não registrado na ficha original), o cálculo novo fecha em
+**13,0g**, contra os 13,5g de antes.
+
+**Escopo travado de propósito:** os outros 6 formatos (Reta, Côncava, Bordas
+Elevadas, Boleada, Boleada DF, Chanfrada) continuam exatamente na fórmula
+antiga — nenhum deles foi tocado. Pedra cravada continua com o mesmo desconto
+estimado de sempre (o molde não fura o metal onde a pedra entra). Friso,
+quando a peça Anatômica tem, já sai cortado dentro do molde antes de medir o
+volume — por isso não é descontado de novo.
+
+**Trava nova:** o campo Boleamento da Anatômica, que antes aceitava qualquer
+número (só afetava o desenho), agora trava entre 0% e 100% — fora disso o
+cálculo de peso perderia o sentido.
+
+**Antes de valer pra venda:** 1 peça real não é base segura para confiar no
+número pra sempre — comparar com mais peças pesadas na balança, em aros
+diferentes, antes de tirar da homolog.

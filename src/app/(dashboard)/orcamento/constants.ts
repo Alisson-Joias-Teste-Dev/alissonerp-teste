@@ -1,5 +1,6 @@
 import type { GrooveRule, GrooveType, PricingCategory, PricingResult, ProfileOption, RingParams, RingSize, StoneEntry, StonePrice, StoneType, StoneCut } from "./types";
 import { ProfileType } from "./types";
+import { anatomicaMeshVolume } from "./ring-geometry";
 
 // ── Tamanhos de Aro (1–36) ──────────────────────────────────────────────────
 
@@ -231,10 +232,6 @@ export function computeWeight(
 ): { volume: number; weight: number; weightRaw: number } {
   const rIn = params.diameter / 2;
   const rOut = rIn + params.height;
-  const baseVolume = Math.PI * (rOut ** 2 - rIn ** 2) * params.width;
-
-  // Fonte única da verdade: PROFILE_CORRECTION_FACTOR
-  const factor = PROFILE_CORRECTION_FACTOR[profile] ?? 1.0;
 
   let grooveLoss = 0;
   if (params.hasGroove) {
@@ -245,6 +242,22 @@ export function computeWeight(
     profile === ProfileType.QuadradoCanal
       ? Math.PI * (rOut ** 2 - (rIn + params.canalBorderHeight) ** 2) * params.canalWidth
       : 0;
+
+  // Volume de metal (sem pedra). Anatômica mede o sólido real — o mesmo
+  // molde 3D usado no visor (ring-geometry.ts) — em vez do tubo × fator
+  // empírico. O friso, quando ativo, já sai cortado dentro desse molde,
+  // por isso NÃO desconta grooveLoss de novo aqui (dobraria o desconto).
+  // Os outros 6 formatos continuam no tubo × PROFILE_CORRECTION_FACTOR de
+  // sempre — fora do escopo desta correção (decisão do Alisson, 21/08/2026:
+  // só Anatômica por enquanto — ver docs/regras-negocio/orcamento.md).
+  let metalVolume: number;
+  if (profile === ProfileType.Anatomica) {
+    metalVolume = anatomicaMeshVolume(params);
+  } else {
+    const baseVolume = Math.PI * (rOut ** 2 - rIn ** 2) * params.width;
+    const factor = PROFILE_CORRECTION_FACTOR[profile] ?? 1.0;
+    metalVolume = baseVolume * factor - grooveLoss - canalLoss;
+  }
 
   // Perda de material por cravação de pedras
   // Sem furo: berço cônico = pedra × 90% diâmetro, profundidade = 60% da pedra
@@ -265,7 +278,7 @@ export function computeWeight(
     stoneLoss = holeVolume * stoneCount * ajustePedraMultiplier;
   }
 
-  const adjustedVolume = Math.max(baseVolume * factor - grooveLoss - canalLoss - stoneLoss, 0.1);
+  const adjustedVolume = Math.max(metalVolume - stoneLoss, 0.1);
   const weightRaw = (adjustedVolume * params.goldDensity) / 1000;
   const weight = Math.round(weightRaw * 2) / 2; // passos de 0,5g
   return { volume: adjustedVolume, weight, weightRaw };

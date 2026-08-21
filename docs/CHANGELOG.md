@@ -1,6 +1,38 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 21/08/2026 — Versão: v2.85.19 <!-- Revisado 21/08/2026 -->
+> 📋 Última atualização automática: 21/08/2026 — Versão: v2.85.20 <!-- Revisado 21/08/2026 -->
+
+## fix(orcamento): peso da aliança Anatômica passa a medir o sólido 3D real (v2.85.20)
+
+**O quê:** o peso da aliança **Anatômica** deixa de sair de um tubo reto ×
+88% chutado (`PROFILE_CORRECTION_FACTOR`) e passa a medir o **volume real**
+do molde 3D que o visor já desenha (`AliancaViewport.tsx`) — soma de
+tetraedros assinados sobre a malha fechada do revolve 360°, o mesmo tipo de
+cálculo que um programa de CAD (Rhino incluso) usa para volume de sólido
+fechado. Novo arquivo `orcamento/ring-geometry.ts` (`buildAnatomicaProfile`,
+`anatomicaMeshVolume`) — reaproveitado pelo visor 3D e pelo cálculo de peso,
+uma fonte só. Boleamento da Anatômica passa a travar entre 0-100% (antes
+aceitava qualquer número, só afetava o desenho).
+
+**Por quê:** peça real medida (Anatômica, aro 28, 8,20mm largura, 1,64mm
+espessura, ouro amarelo 18k) pesou 12,5g na balança; a fórmula antiga
+calculava 13,5g (~8% acima) — um fator herdado de sistema legado, sem
+derivação, igual pra qualquer tamanho. O sistema já tinha o molde 3D real da
+curva (usado só pro desenho); faltava o peso olhar pra ele.
+
+**Como:** `computeWeight` (`orcamento/constants.ts`) ramifica por perfil —
+Anatômica usa `anatomicaMeshVolume`, os outros 6 formatos continuam
+byte-a-byte na fórmula de sempre (decisão do Alisson, 21/08/2026: escopo
+travado só em Anatômica). Friso, quando a peça tem, já sai cortado dentro do
+molde antes de medir o volume — por isso não é descontado 2x. Pedra cravada
+continua com o mesmo desconto estimado (o molde não fura o metal da pedra).
+Com a peça do aro 28 (Boleamento 100%, assumido — não registrado na ficha
+original), o cálculo novo fecha em 13,0g. Teste (`ring-geometry.test.ts`)
+trava os outros 6 formatos byte-a-byte e o caso do aro 28.
+
+**Antes de valer pra venda:** só na homolog — 1 peça real não é base segura
+pra confiar de vez; falta comparar com mais peças pesadas na balança, em
+aros diferentes. Ver `docs/regras-negocio/orcamento.md`.
 
 ## fix(produtos): fator do produto fecha ponta a ponta — inclusive no preço do site (v2.85.19)
 

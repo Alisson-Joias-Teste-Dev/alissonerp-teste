@@ -6,7 +6,8 @@ import { OrbitControls, PerspectiveCamera, ContactShadows, Text } from "@react-t
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { ProfileType } from "./types";
-import type { RingParams, GrooveType } from "./types";
+import type { RingParams } from "./types";
+import { applyGroove, buildAnatomicaProfile, LATHE_ANGULAR_SEGMENTS } from "./ring-geometry";
 
 // Environment local — gera PMREM a partir do RoomEnvironment do Three.js (sem
 // dependência de CDN). Sem isso, material com metalness=1 + roughness=0 fica
@@ -27,144 +28,6 @@ function StudioEnv() {
     };
   }, [gl, scene]);
   return null;
-}
-
-// ── Groove helpers ──────────────────────────────────────────────────────────
-
-/** Calcula as bandas Y onde o groove deve ser aplicado */
-function getGrooveBands(
-  grooveType: GrooveType,
-  grooveSide: "UPPER" | "LOWER",
-  grooveWidth: number,
-  grooveOffset: number,
-  wH: number,
-): Array<[number, number]> {
-  switch (grooveType) {
-    case "lateral": {
-      if (grooveSide === "LOWER") {
-        const y1 = -wH + grooveOffset;
-        return [[y1, y1 + grooveWidth]];
-      }
-      const y2 = wH - grooveOffset;
-      return [[y2 - grooveWidth, y2]];
-    }
-    case "centro": {
-      return [[-grooveWidth / 2, grooveWidth / 2]];
-    }
-    case "duplo": {
-      const y1L = -wH + grooveOffset;
-      const y2U = wH - grooveOffset;
-      return [
-        [y1L, y1L + grooveWidth],
-        [y2U - grooveWidth, y2U],
-      ];
-    }
-  }
-}
-
-/** Verifica se um valor Y está dentro de alguma banda de groove */
-function isInGrooveBand(y: number, bands: Array<[number, number]>): boolean {
-  return bands.some(([y1, y2]) => y >= y1 - 0.001 && y <= y2 + 0.001);
-}
-
-/**
- * Aplica groove(s) SOMENTE ao contorno externo do perfil.
- *
- * Estratégia robusta em 2 fases:
- *   1. Separa o contorno em "externo" (Y crescendo, indo de -wH a +wH)
- *      e "interno" (Y decrescendo, voltando de +wH a -wH).
- *   2. Aplica o groove apenas nos segmentos do contorno externo que
- *      estão acima do threshold de raio.
- *
- * Isso garante que a curva interna (ex: Anatômica, Boleada) NUNCA
- * receba cortes de groove, mesmo que tenha pontos com raio alto.
- */
-function applyGroove(
-  pts: THREE.Vector2[],
-  params: RingParams,
-  rIn: number,
-  wH: number,
-): THREE.Vector2[] {
-  if (!params.hasGroove || params.grooveDepth <= 0 || params.grooveWidth <= 0) return pts;
-
-  const bands = getGrooveBands(params.grooveType, params.grooveSide, params.grooveWidth, params.grooveOffset, wH);
-  const depth = Math.min(params.grooveDepth, params.height * 0.4);
-
-  // ── Fase 1: separar contorno externo (0..splitIdx) do interno ────
-  // O contorno externo vai de -wH até +wH (Y crescente).
-  // O ponto de split é onde Y atinge o máximo.
-  let splitIdx = 0;
-  for (let i = 1; i < pts.length; i++) {
-    if (pts[i].y > pts[splitIdx].y) splitIdx = i;
-    else if (pts[i].y === pts[splitIdx].y && pts[i].x > pts[splitIdx].x) splitIdx = i;
-  }
-
-  const outerPts = pts.slice(0, splitIdx + 1);
-  const innerPts = pts.slice(splitIdx + 1);
-
-  // Threshold: 80% do raio máximo externo (exclui transições e bordas)
-  const maxOuterX = Math.max(...outerPts.map(p => p.x));
-  const threshold = rIn + (maxOuterX - rIn) * 0.7;
-
-  // ── Fase 2: aplicar groove apenas ao contorno externo ────────────
-  const result: THREE.Vector2[] = [];
-
-  for (let i = 0; i < outerPts.length; i++) {
-    const p = outerPts[i];
-    const pNext = i < outerPts.length - 1 ? outerPts[i + 1] : null;
-    const pIsOuter = p.x > threshold;
-    const nIsOuter = pNext ? pNext.x > threshold : false;
-
-    if (pIsOuter && nIsOuter && pNext) {
-      const yA = p.y, yB = pNext.y;
-      const goingUp = yB >= yA;
-      const yMin = Math.min(yA, yB);
-      const yMax = Math.max(yA, yB);
-
-      const crossings: Array<{ y: number; entering: boolean }> = [];
-      for (const [bandStart, bandEnd] of bands) {
-        if (bandStart > yMin + 0.001 && bandStart < yMax - 0.001) {
-          crossings.push({ y: bandStart, entering: goingUp });
-        }
-        if (bandEnd > yMin + 0.001 && bandEnd < yMax - 0.001) {
-          crossings.push({ y: bandEnd, entering: !goingUp });
-        }
-      }
-      crossings.sort((a, b) => goingUp ? a.y - b.y : b.y - a.y);
-
-      if (isInGrooveBand(p.y, bands)) {
-        result.push(new THREE.Vector2(p.x - depth, p.y));
-      } else {
-        result.push(p.clone());
-      }
-
-      for (const cr of crossings) {
-        const t = (cr.y - yA) / (yB - yA);
-        const xAt = p.x + t * (pNext.x - p.x);
-        if (cr.entering) {
-          result.push(new THREE.Vector2(xAt, cr.y));
-          result.push(new THREE.Vector2(xAt - depth, cr.y));
-        } else {
-          result.push(new THREE.Vector2(xAt - depth, cr.y));
-          result.push(new THREE.Vector2(xAt, cr.y));
-        }
-      }
-      continue;
-    }
-
-    if (pIsOuter && isInGrooveBand(p.y, bands)) {
-      result.push(new THREE.Vector2(p.x - depth, p.y));
-    } else {
-      result.push(p.clone());
-    }
-  }
-
-  // ── Contorno interno: copiar sem alteração ───────────────────────
-  for (const p of innerPts) {
-    result.push(p.clone());
-  }
-
-  return result;
 }
 
 // ── Ring Mesh ────────────────────────────────────────────────────────────────
@@ -256,20 +119,9 @@ function Ring({
         break;
       }
       case ProfileType.Anatomica: {
-        const rOut = rIn + h;
-        const sagitta = h * 0.7 * (params.domePercentage / 100);
-        pts.push(new THREE.Vector2(rIn + sagitta, -wH));
-        pts.push(new THREE.Vector2(rOut, -wH));
-        pts.push(new THREE.Vector2(rOut, wH));
-        pts.push(new THREE.Vector2(rIn + sagitta, wH));
-        const segments = 48;
-        for (let i = 1; i <= segments; i++) {
-          const ratio = i / segments;
-          const y = wH - params.width * ratio;
-          const yNorm = y / (params.width / 2);
-          const xVal = rIn + sagitta * (1 - Math.sqrt(Math.max(0, 1 - yNorm * yNorm)));
-          pts.push(new THREE.Vector2(xVal, y));
-        }
+        // Molde compartilhado com o cálculo de peso (ring-geometry.ts) —
+        // peça na tela e peso calculado vêm sempre da mesma fonte.
+        pts = buildAnatomicaProfile(params);
         break;
       }
       case ProfileType.Chanfrada: {
@@ -304,7 +156,7 @@ function Ring({
       pts.push(new THREE.Vector2(rIn, -wH));
     }
 
-    let geo: THREE.BufferGeometry = new THREE.LatheGeometry(pts, 360);
+    let geo: THREE.BufferGeometry = new THREE.LatheGeometry(pts, LATHE_ANGULAR_SEGMENTS);
     geo = geo.toNonIndexed();
     geo.computeVertexNormals();
     return geo;
