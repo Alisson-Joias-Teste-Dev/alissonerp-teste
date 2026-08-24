@@ -239,6 +239,22 @@ export async function POST(req: NextRequest) {
            ${infoOrigem.origemReferencia}, ${pesoSaida}, 0)
       `;
 
+      // 4a. GARANTIR a configuração do produto no estoque comercial.
+      // REGRA DE NEGÓCIO: a view vw_saldo_estoque_comercial_v2 faz JOIN OBRIGATÓRIO
+      // com estoque_comercial_config (ativo = true). Sem essa linha, a peça entra no
+      // estoque (movimento gravado e efetivado) mas NÃO APARECE em nenhuma tela —
+      // estoque fantasma. Produto criado como variação não nasce com config (em
+      // 24/08/2026: 1.084 produtos criados desde 20/08, 18 com config), então a
+      // reversa tem de garantir a dela, como a devolução já faz (src/lib/devolucoes.ts).
+      // IMPACTO SE REMOVIDO: volta a acontecer o de 24/08/2026 — 3 peças (35,200 g de
+      // ouro do cofre) invisíveis no Estoque Comercial até alguém configurar à mão.
+      // Vai DENTRO da transação: se a peça entra, ela tem de ser visível.
+      await tx`
+        INSERT INTO alissonerp.estoque_comercial_config (produto_id, ativo, controla_estoque, estoque_minimo)
+        VALUES (${conversao.produto_id}, true, true, 0)
+        ON CONFLICT (produto_id) DO UPDATE SET ativo = true
+      `;
+
       // 4. Entrada no estoque comercial (Loja) — peça pronta
       // quantidade da conversao_reversas é NUMERIC (consistência com o restante do
       // módulo de conversões), mas movimentacoes_estoque_comercial.quantidade é
