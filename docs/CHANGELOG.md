@@ -1,6 +1,30 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 24/08/2026 — Versão: v2.85.20 <!-- Revisado 24/08/2026 -->
+> 📋 Última atualização automática: 24/08/2026 — Versão: v2.85.21 <!-- Revisado 24/08/2026 -->
+
+## fix(conversao-reversa): peca que virou joia entrava no estoque e nao aparecia (v2.85.21)
+
+**O quê:** a aprovação da conversão reversa passou a **garantir a configuração do produto** no
+estoque comercial antes de dar a entrada da peça.
+
+**Por quê:** a view que alimenta todas as telas de estoque (`vw_saldo_estoque_comercial_v2`) faz
+**JOIN obrigatório** com `estoque_comercial_config` (`cfg.ativo = true`). Produto sem essa linha
+**não aparece** — mesmo com o movimento de entrada gravado e efetivado. Como produto criado em
+variação não nasce com config (em 24/08/2026: **1.084 produtos criados desde 20/08, apenas 18 com
+config**), toda reversa de peça nova virava **estoque fantasma**. Aconteceu em 24/08/2026 com as
+**3 peças** que consumiram os 35,200 g devolvidos ao cofre — 1920-19 (CR-3014), 1921-20 (CR-3010) e
+1922-17 (CR-3009): ouro fora do cofre, movimento gravado, peça invisível na tela. Já tinha
+acontecido com as peças de 17/08, cujas configs foram criadas à mão em 19/08 16:30 — sem ninguém
+registrar que era um furo.
+
+**Como:** upsert `ON CONFLICT (produto_id) DO UPDATE SET ativo = true` **dentro da transação** de
+aprovação (se a peça entra, ela tem de ser visível) — mesmo padrão que a devolução já usa
+(`src/lib/devolucoes.ts`). As 3 peças de 24/08 foram destravadas por dado (livro de mudanças
+**#459**): só a linha de config, **nenhum movimento novo e nenhum saldo alterado**.
+
+**Fora de escopo (decisão do Jonathan, 24/08/2026):** NÃO houve backfill dos ~1.066 produtos sem
+config — faria mais de mil produtos aparecerem no Estoque Comercial com saldo zero, mudando tela de
+quem não pediu. Fica como assunto separado.
 
 ## fix(conversao-reversa): "Virou joia" recusava o proprio restante que ela preenche (v2.85.20)
 
