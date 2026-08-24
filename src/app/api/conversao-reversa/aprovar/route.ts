@@ -3,6 +3,7 @@ import { z } from "zod";
 import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { zodError } from "@/lib/schemas/common";
+import { excedeRestante } from "@/lib/cofre-ouro-peso";
 import { podeDecidir } from "@/lib/aprovacoes";
 
 const ConversaoReversaAprovarSchema = z.object({
@@ -203,7 +204,9 @@ export async function POST(req: NextRequest) {
           409,
         );
       }
-      if (infoOrigem.restante < pesoSaida) {
+      // Tolerância de meio miligrama (excedeRestante) — mesma razão da rota de abrir:
+      // sem ela a aprovação do último restante da origem travava por ruído de float.
+      if (excedeRestante(pesoSaida, infoOrigem.restante)) {
         throw new ConversaoReversaValidacaoError(
           `Peso insuficiente no cofre para esta origem. Restante: ${infoOrigem.restante.toFixed(3)}g, saída: ${pesoSaida.toFixed(3)}g`,
           409,

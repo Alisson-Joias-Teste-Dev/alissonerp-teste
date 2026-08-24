@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { uploadFile, ensureBucket } from "@/lib/storage";
 import { zodError } from "@/lib/schemas/common";
+import { excedeRestante } from "@/lib/cofre-ouro-peso";
 import { resolverAprovadores } from "@/lib/aprovacoes";
 
 const ROLES_PERMITIDOS = ["estoquista_loja", "gerente_loja", "admin", "desenvolvedor"];
@@ -151,7 +152,9 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  if (infoOrigem.restante < peso_saida) {
+  // Tolerância de meio miligrama (excedeRestante) — sem ela o próprio restante exato era
+  // recusado por ruído de float, com mensagem absurda ("Restante: 11.970g, saída: 11.970g").
+  if (excedeRestante(peso_saida, infoOrigem.restante)) {
     return NextResponse.json(
       {
         error: `Peso insuficiente no cofre para esta origem. Restante: ${infoOrigem.restante.toFixed(3)}g, saída solicitada: ${peso_saida.toFixed(3)}g`,
