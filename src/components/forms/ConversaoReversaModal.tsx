@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { excedeRestante } from "@/lib/cofre-ouro-peso";
 import { X, Loader2, CheckCircle, AlertCircle, Camera, RotateCcw, Gem } from "lucide-react";
 
 const C = { esmeralda: "#184036", creme: "#F3EADA", cremeBorder: "#E8DCC8", cremeBg: "#FAFAF7", ambar: "#D97706", ambarLt: "#FEF3C7" };
@@ -120,7 +121,9 @@ export default function ConversaoReversaModal({ isOpen, onClose, origem: origemP
     const peso = parseFloat(pesoSaida || pesoDefault);
     if (!peso || peso <= 0) { setError("Peso da joia inválido."); return; }
     // REGRA DE NEGÓCIO: peso da joia nunca pode passar do restante da origem — ver comentário no topo do arquivo.
-    if (peso > origem.restante) {
+    // A comparação usa excedeRestante() (tolerância de meio miligrama): sem ela, o valor que
+    // este modal PRÉ-ENCHE (restante.toFixed(3)) era recusado por ruído de float. Ver src/lib/cofre-ouro-peso.ts.
+    if (excedeRestante(peso, origem.restante)) {
       setError(`Peso da joia não pode ultrapassar o restante disponível: máx ${origem.restante.toFixed(3)}g`);
       return;
     }

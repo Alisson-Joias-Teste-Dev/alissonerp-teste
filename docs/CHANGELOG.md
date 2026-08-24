@@ -1,6 +1,43 @@
 # Changelog — Alisson ERP (fabricaAJ)
 
-> 📋 Última atualização automática: 21/08/2026 — Versão: v2.85.20 <!-- Revisado 21/08/2026 -->
+> 📋 Última atualização automática: 24/08/2026 — Versão: v2.85.20 <!-- Revisado 24/08/2026 -->
+
+## fix(conversao-reversa): "Virou joia" recusava o proprio restante que ela preenche (v2.85.20)
+
+**O quê:** a conversão reversa voltou a aceitar o **restante exato** de uma origem do Caixa de Ouro.
+O modal "Virou joia" pré-enchia o campo com o máximo (ex.: `11.970g`) e, ao enviar, recusava esse
+mesmo valor: *"Peso da joia não pode ultrapassar o restante disponível: máx 11.970g"*.
+
+**Por quê:** o restante é calculado em JavaScript (`Number(peso_origem) − Number(baixado)`) e ponto
+flutuante não fecha em decimal. Caso real, compra **CM-2026-0056**: `95,420 − 83,450` dá
+**11.969999999999999**, que a tela exibe como `11.970`. A comparação crua (`peso > restante`) então
+lia `11.97 > 11.969999999999999` como verdadeiro. Era **impossível** converter o último resto de uma
+origem — o ouro ficava preso no cofre.
+
+**Onde estava (3 camadas, mesmo defeito):**
+
+| Camada | O que fazia |
+|---|---|
+| `ConversaoReversaModal.tsx` | bloqueava antes de enviar (o erro que apareceu na tela) |
+| `POST /api/conversao-reversa` | recusaria com mensagem absurda ("Restante: 11.970g, saída: 11.970g") |
+| `POST /api/conversao-reversa/aprovar` | travaria a **aprovação**, já com a solicitação aberta |
+
+**Como:** novo `src/lib/cofre-ouro-peso.ts` com `EPSILON_GRAMAS = 0.0005` (meio miligrama) e
+`excedeRestante(peso, restante)`, usado nos três pontos. As colunas de peso são `numeric(10,3)`
+(upgrade `10,4`), então o menor peso real é 0,001 g — meio miligrama de tolerância absorve o ruído
+do float e **nunca** libera saída além do saldo. Não mexe na fórmula do restante nem desfaz a
+duplicação intencional do `buscarPesoRestanteOrigem` (DUP-20).
+
+**Verificado:** `11,970` passa; `11,971` (1 mg acima) barra; `12,000` barra; `tsc` limpo.
+
+**Junto neste commit (documentação de um conserto de dado feito em produção hoje):**
+duas conversões reversas **duplicadas por erro humano** foram desfeitas — CR-2968 (anel 1893-18) e
+CR-2972 (corrente AJ5301), ambas repetições de peças já convertidas da mesma compra CM-2026-0056.
+Saíram 2 peças fantasma do estoque da Loja e voltaram **31,010 g (R$ 12.404,00)** ao Caixa de Ouro
+(livro de mudanças **#457**). Regras e procedimento de como desfazer uma reversa em
+`docs/regras-negocio/comercial.md` §9; os dois bugs achados no caminho estão marcados
+**CORRIGIR NO V2** na arqueologia (RN-CD-309, trava de duplicata que só vê reversa pendente;
+RN-CD-147, estorno de estoque que subtrai duas vezes).
 
 ## fix(orcamento): peso da aliança Anatômica passa a medir o sólido 3D real (v2.85.20)
 
