@@ -719,11 +719,20 @@ export async function PATCH(
     }
 
     // ── Controla estoque (alissonerp.estoque_comercial_config) ────────────────
+    // UPSERT, nao UPDATE: produto sem linha de config (ex.: personalizado PZ,
+    // que nasce sob encomenda) nao tinha registro nenhum, entao o UPDATE
+    // antigo afetava 0 linhas e retornava 200 — o toggle da tela dizia que
+    // salvou e nada mudava. Achado 27/08/2026 no PZ0004.
     if (body.controla_estoque !== undefined) {
       await sql`
-        UPDATE alissonerp.estoque_comercial_config
-        SET controla_estoque = ${body.controla_estoque}, updated_at = NOW()
-        WHERE produto_id = ${produtoId}
+        INSERT INTO alissonerp.estoque_comercial_config (
+          produto_id, controla_estoque, estoque_minimo, ativo, created_by
+        ) VALUES (
+          ${produtoId}, ${body.controla_estoque}, 0, true, ${user.id}
+        )
+        ON CONFLICT (produto_id) DO UPDATE SET
+          controla_estoque = EXCLUDED.controla_estoque,
+          updated_at       = NOW()
       `;
     }
 
