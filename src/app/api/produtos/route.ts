@@ -351,6 +351,16 @@ export async function GET(req: NextRequest) {
           --   Produto sem peso → sem preço calculado (intencional).
           -- ═══════════════════════════════════════════════════════════════════
           pp.preco_venda::int AS preco_curva,
+          -- Personalizado (SKU PZ) nao tem preco fixo: o valor e por letra e so
+          -- fecha na venda, quando a consultora digita o nome. Sem isto a coluna
+          -- PRECO VENDA fica vazia e parece cadastro incompleto (achado 27/08/2026).
+          (
+            SELECT pz.preco_por_letra
+            FROM alissonerp.produto_personalizacao pz
+            WHERE pz.produto_id = p.id_produto AND pz.ativo = true
+            ORDER BY pz.id
+            LIMIT 1
+          ) AS preco_por_letra,
           ti.tipo_item,
           ep.id               AS erp_id,
           ep.eh_pai,
@@ -470,6 +480,13 @@ export async function GET(req: NextRequest) {
         vpv.data_fim AS promo_data_fim,
         -- Preço da curva — calculado pela view unificada vw_produtos_geral_preco.
         pp.preco_venda AS preco_curva,
+        (
+          SELECT pz.preco_por_letra
+          FROM alissonerp.produto_personalizacao pz
+          WHERE pz.produto_id = p.id_produto AND pz.ativo = true
+          ORDER BY pz.id
+          LIMIT 1
+        ) AS preco_por_letra,
         ti.tipo_item,
         NULL::integer AS erp_id,
         NULL::boolean AS eh_pai,

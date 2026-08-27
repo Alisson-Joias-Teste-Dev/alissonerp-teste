@@ -30,6 +30,7 @@ export interface Produto {
   preco_tiny: string | null;
   preco_sync: string | null;
   preco_curva: number | null;
+  preco_por_letra: string | number | null;
   preco_filhos_min: number | null;
   preco_pedras: string | null;
   preco_total_sync: string | null;
@@ -804,6 +805,17 @@ export default function ProdutosClient({ podeEditar = true, role = "", camposVis
                                     <span className="text-gray-700" title="Preço mínimo das variações (produto pai)">
                                       {formatPreco(String(p.preco_filhos_min))}
                                       <sup className="ml-0.5 text-[8px] font-bold">V</sup>
+                                    </span>
+                                  );
+                                }
+                                // Personalizado (PZ): preço é por letra, fecha na venda.
+                                // Sem isto a coluna fica vazia e parece cadastro incompleto.
+                                const porLetra = p.preco_por_letra != null ? Number(p.preco_por_letra) : null;
+                                if (porLetra != null && porLetra > 0) {
+                                  return (
+                                    <span className="text-gray-700" title="Produto personalizado — o total fecha na venda, conforme a quantidade de letras">
+                                      {formatPreco(String(porLetra))}
+                                      <span className="ml-1 text-[10px] font-normal text-gray-500">por letra</span>
                                     </span>
                                   );
                                 }
