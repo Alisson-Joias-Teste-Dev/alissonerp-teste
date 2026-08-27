@@ -185,7 +185,20 @@ export async function POST(req: NextRequest) {
         )
       `;
 
-      // 4) INSERT alissonerp.produto_personalizacao
+      // 4) Personalizado e sob encomenda: nao controla estoque.
+      //    Sem esta linha o default e controla_estoque=true e o produto some
+      //    da busca da venda (que exige controla_estoque=false OU saldo>0 OU
+      //    reposicao ativa). Ver migration 375.
+      await tx`
+        INSERT INTO alissonerp.estoque_comercial_config (
+          produto_id, controla_estoque, estoque_minimo, ativo
+        ) VALUES (
+          ${idProduto}, false, 0, true
+        )
+        ON CONFLICT (produto_id) DO NOTHING
+      `;
+
+      // 5) INSERT alissonerp.produto_personalizacao
       await tx`
         INSERT INTO alissonerp.produto_personalizacao (
           produto_id, tipo, obrigatorio,
