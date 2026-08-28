@@ -14,6 +14,7 @@ import {
 import { zodError, IdSchema } from "@/lib/schemas/common";
 import { getUserVendedorId } from "@/lib/auth-vendas";
 import { AuthError } from "@/lib/auth-server";
+import { HttpError } from "@/lib/devolucoes";
 
 // Schemas para POST /api/vendas — itens e pagamentos sao validados em loop
 // dentro da transacao (regras de negocio: produto_id > 0, preco_lista >= 0,
@@ -554,7 +555,7 @@ export async function POST(req: NextRequest) {
           const eleg = elegMap.get(Number(item.produto_id));
           if (!eleg) continue;
           if (eleg.controla_estoque && eleg.saldo <= 0 && !eleg.reposicao_ativa) {
-            throw new Error(
+            throw new HttpError(400, 
               `"${item.nome_produto}" (${item.sku ?? 'sem SKU'}) não pode ser vendido: sem estoque e sem reposição ativa.`,
             );
           }
@@ -564,29 +565,29 @@ export async function POST(req: NextRequest) {
 
     // 3. Inserir itens (trigger recalcula totais automaticamente)
     if (!Array.isArray(body.itens) || body.itens.length === 0) {
-      throw new Error("Venda deve ter pelo menos um item");
+      throw new HttpError(400, "Venda deve ter pelo menos um item");
     }
     // As faixas são lidas UMA vez para a venda toda, não por item — a tabela é
     // pequena e fixa, e uma venda pode ter 5 itens.
     const faixasComissao = await buscarFaixasComissao(tx);
     for (const item of body.itens) {
         if (item.produto_id !== null && item.produto_id !== undefined && Number(item.produto_id) <= 0) {
-          throw new Error("produto_id inválido em item");
+          throw new HttpError(400, "produto_id inválido em item");
         }
         if (!item.nome_produto || typeof item.nome_produto !== "string" || item.nome_produto.trim() === "") {
-          throw new Error("nome_produto obrigatório em item");
+          throw new HttpError(400, "nome_produto obrigatório em item");
         }
         if (item.quantidade == null || item.quantidade < 1) {
-          throw new Error("quantidade deve ser >= 1 em item");
+          throw new HttpError(400, "quantidade deve ser >= 1 em item");
         }
         if (typeof item.preco_lista !== "number" || item.preco_lista < 0) {
-          throw new Error("preco_lista deve ser >= 0 em item");
+          throw new HttpError(400, "preco_lista deve ser >= 0 em item");
         }
         if (typeof item.preco_unitario !== "number" || item.preco_unitario < 0) {
-          throw new Error("preco_unitario deve ser >= 0 em item");
+          throw new HttpError(400, "preco_unitario deve ser >= 0 em item");
         }
         if (typeof item.total_item !== "number" || item.total_item < 0) {
-          throw new Error("total_item deve ser >= 0 em item");
+          throw new HttpError(400, "total_item deve ser >= 0 em item");
         }
 
         // ── Personalizacao: suporta formato LEGADO (1 campo) e MULTI-CAMPOS ──
@@ -633,7 +634,7 @@ export async function POST(req: NextRequest) {
           if (ehServicoRodio) {
             const skuBase = item.personalizacao?.valor?.trim();
             if (!skuBase) {
-              throw new Error(`Servico de rodio exige SKU base da joia no item "${item.sku ?? item.nome_produto}"`);
+              throw new HttpError(400, `Servico de rodio exige SKU base da joia no item "${item.sku ?? item.nome_produto}"`);
             }
 
             const [baseRow] = await tx`
@@ -646,7 +647,7 @@ export async function POST(req: NextRequest) {
             `;
             const precoBase = baseRow?.preco_venda != null ? Number(baseRow.preco_venda) : null;
             if (!baseRow || precoBase == null || !Number.isFinite(precoBase) || precoBase <= 0) {
-              throw new Error(`SKU base "${skuBase}" inválido para serviço de ródio (sem preço vigente)`);
+              throw new HttpError(400, `SKU base "${skuBase}" inválido para serviço de ródio (sem preço vigente)`);
             }
 
             const pctRodio = getPctRodio({ pct_calculo_servico: metaProduto?.pct_calculo_servico });
@@ -688,7 +689,7 @@ export async function POST(req: NextRequest) {
               const upgRaw = (item as unknown as Record<string, unknown>).upgrade;
 
               if (!upgRaw || typeof upgRaw !== "object") {
-                throw new Error(
+                throw new HttpError(400, 
                   `Item upgrade "${item.sku ?? item.nome_produto}" exige dados de upgrade (peso, foto)`
                 );
               }
@@ -700,13 +701,13 @@ export async function POST(req: NextRequest) {
                 : null;
 
               if (!pesoGramas || pesoGramas <= 0) {
-                throw new Error(
+                throw new HttpError(400, 
                   `Peso do metal e obrigatorio para upgrade "${item.sku ?? item.nome_produto}"`
                 );
               }
 
               if (!fotoBalanca || fotoBalanca.length === 0) {
-                throw new Error(
+                throw new HttpError(400, 
                   `Foto da balanca e obrigatoria para upgrade "${item.sku ?? item.nome_produto}"`
                 );
               }
@@ -791,7 +792,7 @@ export async function POST(req: NextRequest) {
                 const valor = typeof recebido?.valor === "string" ? recebido.valor : null;
                 const val = validarPersonalizacao(valor, configCampo);
                 if (!val.ok) {
-                  throw new Error(
+                  throw new HttpError(400, 
                     `Personalizacao invalida no item "${item.sku ?? item.nome_produto}" - ${configCampo.label}: ${val.erro}`,
                   );
                 }
@@ -824,7 +825,7 @@ export async function POST(req: NextRequest) {
               const valor = item.personalizacao?.valor;
               const val = validarPersonalizacao(valor, config);
               if (!val.ok) {
-                throw new Error(
+                throw new HttpError(400, 
                   `Personalizacao invalida no item "${item.sku ?? item.nome_produto}": ${val.erro}`,
                 );
               }
@@ -940,10 +941,10 @@ export async function POST(req: NextRequest) {
     if (Array.isArray(body.pagamentos) && body.pagamentos.length > 0) {
       for (const pag of body.pagamentos) {
         if (!pag.forma || typeof pag.forma !== "string" || pag.forma.trim() === "") {
-          throw new Error("forma obrigatória em pagamento");
+          throw new HttpError(400, "forma obrigatória em pagamento");
         }
         if (typeof pag.valor !== "number" || pag.valor <= 0) {
-          throw new Error("valor deve ser > 0 em pagamento");
+          throw new HttpError(400, "valor deve ser > 0 em pagamento");
         }
         const isDinheiro = pag.forma === 'Dinheiro';
         await tx`
@@ -975,7 +976,7 @@ export async function POST(req: NextRequest) {
 
     // M1: Bloqueia venda com total zero (desconto 100% em todos os itens)
     if (Number(completa.total_venda) <= 0 && body.tipo_venda !== "servico") {
-      throw new Error("Total da venda não pode ser zero. Verifique os preços e descontos dos itens.");
+      throw new HttpError(400, "Total da venda não pode ser zero. Verifique os preços e descontos dos itens.");
     }
 
     await logAudit(tx, {
@@ -1051,6 +1052,14 @@ export async function POST(req: NextRequest) {
     return { ...completa, ordensReposicao };
   });
   } catch (err: unknown) {
+    // Regra de negocio recusada (estoque, personalizacao, desconto, pagamento):
+    // a mensagem foi escrita PARA a consultora e diz o que corrigir. Antes tudo
+    // virava "Erro ao criar venda" e ela ficava sem saida — foi o que aconteceu
+    // no relato de 27/08/2026. Erro nao-controlado continua generico, sem vazar
+    // detalhe de banco.
+    if (err instanceof HttpError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     return internalError("[POST /api/vendas]", err, "Erro ao criar venda", 400);
   }
 
