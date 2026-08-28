@@ -1038,6 +1038,10 @@ export default function ProdutoDrawer({ produtoId, onClose, onSaved, podeEditar 
       // (Esses dois endpoints são separados — UPSERT idempotente, sem dirty-check.)
       const extrasOk = await persistirReposicaoERota(produto.id_produto);
       if (extrasOk) setExtrasDirty(false);
+      // Falha aqui era invisivel: a ficha dizia "salvo" e reposicao/rota/ficha
+      // tecnica ficavam sem gravar. Quem liga a reposicao para destravar uma
+      // venda so descobre quando a venda falha de novo (achado 28/08/2026).
+      else alert("Atenção: reposição, rota de fabricação ou ficha técnica NÃO foram salvas. Tente novamente.");
 
       // Se há pedras-componente: salva subtotal em preco_pedras (para a lista mostrar curva+pedras)
       if (!ehPedra) {
