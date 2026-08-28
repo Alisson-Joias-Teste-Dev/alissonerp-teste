@@ -153,11 +153,42 @@ export async function PUT(
   const body = parsed.data;
   const camposIn = body.campos as CampoIn[];
 
+  // Lista vazia NAO e "apagar tudo": o replace abaixo deletaria a config inteira
+  // do produto (preco por letra, min/max, regras) sem o usuario ter pedido isso.
+  // A UI esconde o botao quando nao ha campo, mas a API precisa se defender.
+  if (camposIn.length === 0) {
+    return NextResponse.json(
+      { error: "Envie ao menos 1 campo. Lista vazia apagaria toda a personalizacao do produto." },
+      { status: 400 },
+    );
+  }
+
+  // alissonerp.produto_personalizacao tem UNIQUE (produto_id) — so cabe UMA
+  // regra por produto. O INSERT do 2o campo viola a trava e o PUT inteiro cai
+  // em "Erro interno", sem salvar nada (confirmado em producao 28/08/2026).
+  // Ate a trava sair, recusamos cedo com mensagem clara em vez de erro 500.
+  if (camposIn.length > 1) {
+    return NextResponse.json(
+      { error: "Hoje o produto aceita apenas 1 campo de personalizacao. Remova os campos extras antes de salvar." },
+      { status: 400 },
+    );
+  }
+
   // Validação prévia
   for (let i = 0; i < camposIn.length; i++) {
     const c = camposIn[i];
     const nome = typeof c.nome === "string" ? c.nome.trim() : "";
     if (!nome) return NextResponse.json({ error: `Campo #${i + 1}: nome é obrigatório` }, { status: 400 });
+    if (c.tipo === "texto") {
+      const minC = c.min_caracteres != null ? Number(c.min_caracteres) : 0;
+      const maxC = c.max_caracteres != null ? Number(c.max_caracteres) : 0;
+      if (maxC > 0 && minC > maxC) {
+        return NextResponse.json(
+          { error: `Campo "${nome}": mínimo (${minC}) não pode ser maior que o máximo (${maxC})` },
+          { status: 400 },
+        );
+      }
+    }
     if (typeof c.tipo !== "string" || !TIPOS_VALIDOS.has(c.tipo)) {
       return NextResponse.json({ error: `Campo "${nome}": tipo inválido (${String(c.tipo)})` }, { status: 400 });
     }
@@ -222,7 +253,17 @@ export async function PUT(
             UPDATE alissonerp.produto_personalizacao SET
               ordem = ${i},
               label = ${nome},
-              tipo = ${tipo},
+              -- O GET normaliza tipo legado ('nome', 'iniciais'...) para 'texto'
+              -- na UI nova. Gravar esse 'texto' de volta apagaria o tipo
+              -- original sem o usuario ter mudado nada (o rotulo padrao da
+              -- observacao da venda depende dele). Só grava quando o usuario
+              -- realmente escolheu outro tipo.
+              tipo = CASE
+                WHEN ${tipo} = 'texto'
+                 AND tipo IN ('nome', 'iniciais', 'simbolo', 'livre', 'data')
+                THEN tipo
+                ELSE ${tipo}
+              END,
               obrigatorio = ${obrigatorio},
               min_caracteres = ${minC},
               max_caracteres = ${maxC},

@@ -229,15 +229,27 @@ export default function CamposPersonalizaveisEditor({ produtoId, reloadKey, onCh
         <p className="text-[11px]" style={{ color: "#6B7280" }}>
           Cadastre os campos que o cliente preencherá. Ex: gravação, cor da pedra, tamanho.
           Cada campo aparece no fluxo de venda.
+          <br />
+          <strong>Preço por letra, mínimo e máximo de letras não são salvos aqui</strong> — use
+          o botão &quot;Salvar alterações&quot;, no rodapé.
         </p>
-        <button
-          type="button"
-          onClick={adicionar}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold"
-          style={{ backgroundColor: C.esmeralda, color: C.creme }}
-        >
-          <Plus size={12} strokeWidth={2.5} /> Adicionar campo
-        </button>
+        {/* O banco só aceita 1 campo por produto (UNIQUE em produto_personalizacao).
+            Deixar o botão sempre visível levava o usuário a montar um 2º campo e
+            receber "Erro interno" ao salvar, perdendo o que digitou. */}
+        {campos.length === 0 ? (
+          <button
+            type="button"
+            onClick={adicionar}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold"
+            style={{ backgroundColor: C.esmeralda, color: C.creme }}
+          >
+            <Plus size={12} strokeWidth={2.5} /> Adicionar campo
+          </button>
+        ) : (
+          <span className="text-[11px] whitespace-nowrap" style={{ color: "#9CA3AF" }}>
+            1 campo por produto
+          </span>
+        )}
       </div>
 
       {loading && <p className="text-[12px]" style={{ color: "#9CA3AF" }}><Loader2 size={11} className="inline animate-spin mr-1" /> Carregando…</p>}
@@ -278,7 +290,7 @@ export default function CamposPersonalizaveisEditor({ produtoId, reloadKey, onCh
             style={{ backgroundColor: C.esmeralda, color: C.creme }}
           >
             {salvando ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-            Salvar campos
+            Salvar só os campos extras
           </button>
         </div>
       )}
