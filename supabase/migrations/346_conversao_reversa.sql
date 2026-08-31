@@ -37,7 +37,11 @@
 --     estritamente necessário.
 -- ─────────────────────────────────────────────────────────────────────────────
 
-SET search_path TO alissonerp;
+-- IMPORTANTE: o `public` PRECISA estar no search_path. As views recriadas em 2.8
+-- fazem JOIN sem schema em `vendedores`, `contatos` e `user_profiles`, que vivem
+-- no schema public. Com `SET search_path TO alissonerp` (sem public) a migration
+-- quebra com: relation "vendedores" does not exist.
+SET search_path TO alissonerp, public;
 
 -- ════════════════════════════════════════════════════════════
 -- PARTE 1 — ALTER TYPE (roda FORA de transação/isolado — ver
