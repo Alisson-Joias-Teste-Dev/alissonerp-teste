@@ -20,6 +20,9 @@
  */
 
 import sql from "@/lib/db";
+import {
+  aplicarFator, chaveResultado, competenciaDaData, resultadosMeta,
+} from "@/lib/comissao-fator";
 import { logAudit } from "@/lib/audit";
 
 export interface DebitoDevolucao {
@@ -31,6 +34,12 @@ export interface DebitoDevolucao {
   valor_debito: number;
   itens: number;
   fracao_recebida: number;
+  /** Data da venda ORIGINAL — define de qual mês-safra vem o fator da meta. */
+  data_venda: string | null;
+  /** Fator da meta do mês da venda devolvida (1 = comissão foi paga integral). */
+  fator_meta: number;
+  /** Débito ANTES do fator, para a linha poder se explicar. */
+  debito_bruto: number;
 }
 
 /**
@@ -70,6 +79,7 @@ export async function calcularDebitoDevolucao(
       v.vendedor_id              AS consultora_id,
       v.id                       AS venda_id,
       v.numero_venda,
+      v.data_venda::text         AS data_venda,
       COUNT(di.id)               AS itens,
       -- CASE em vez de COALESCE(LEAST(...)): no PostgreSQL LEAST IGNORA NULL,
       -- então LEAST(NULL, 1) devolve 1 — uma venda sem nenhum pagamento seria
@@ -92,20 +102,43 @@ export async function calcularDebitoDevolucao(
       ON di.devolucao_id = d.id AND di.condicao = 'aprovado_retorno'
     LEFT JOIN alissonerp.itens_venda_erp iv ON iv.id = di.item_venda_id
     WHERE d.id = ${devolucaoId}
-    GROUP BY d.id, d.numero, v.vendedor_id, v.id, v.numero_venda, v.total_venda, r.valor
+    GROUP BY d.id, d.numero, v.vendedor_id, v.id, v.numero_venda, v.data_venda, v.total_venda, r.valor
   `;
 
   if (!row || !row.consultora_id) return null;
 
+  // REGRA DE NEGÓCIO (migration 376): DEVOLVE-SE SÓ O QUE FOI PAGO.
+  //
+  // O PORQUÊ: se a venda nasceu num mês em que a consultora não bateu a meta, a
+  // comissão dela saiu reduzida pelo fator daquele mês. Debitar o valor cheio na
+  // devolução tiraria dela dinheiro que nunca entrou. É o mesmo princípio da
+  // `fracao_recebida` acima (só o que o cliente pagou), agora também pelo fator.
+  //
+  // O IMPACTO: sem isto, agosto/2026 teria descontado R$ 53,71 a mais da Débora —
+  // três devoluções (DV-00067, DV-00080, DV-00082) de vendas de agosto, mês em que
+  // a comissão saiu pela metade, debitadas pelo valor inteiro.
+  const consultoraId = Number(row.consultora_id);
+  const competencia = competenciaDaData(row.data_venda as string | null);
+  const resultados = competencia
+    ? await resultadosMeta([competencia], [consultoraId])
+    : new Map();
+  const fator = competencia
+    ? (resultados.get(chaveResultado(consultoraId, competencia))?.fator ?? 1)
+    : 1;
+  const bruto = Number(row.valor_debito);
+
   return {
     devolucao_id: Number(row.devolucao_id),
     numero: row.numero,
-    consultora_id: Number(row.consultora_id),
+    consultora_id: consultoraId,
     venda_id: Number(row.venda_id),
     numero_venda: row.numero_venda,
-    valor_debito: Number(row.valor_debito),
+    valor_debito: aplicarFator(bruto, fator),
     itens: Number(row.itens),
     fracao_recebida: Number(row.fracao_recebida ?? 0),
+    data_venda: (row.data_venda as string | null) ?? null,
+    fator_meta: fator,
+    debito_bruto: bruto,
   };
 }
 
@@ -144,13 +177,18 @@ export async function debitarComissaoDevolucao(
         fechamento_id, venda_id, numero_venda_snapshot, consultora_id,
         cliente_nome_snapshot, data_venda, data_recebimento, forma_recebimento,
         valor_venda, comissao_total_venda, comissao_calculada,
-        status, tipo_item, devolucao_id
+        status, tipo_item, devolucao_id,
+        comissao_bruta, fator_meta, motivo_fator
       )
       SELECT
         NULL, v.id, v.numero_venda, v.vendedor_id,
         c.nome, v.data_venda, CURRENT_DATE, ${"Devolução " + calc.numero},
         v.total_venda, v.total_comissao, ${-calc.valor_debito},
-        'liberado', 'estorno', ${devolucaoId}
+        'liberado', 'estorno', ${devolucaoId},
+        ${-calc.debito_bruto}, ${calc.fator_meta},
+        ${calc.fator_meta < 1
+          ? `débito proporcional — a comissão desta venda foi paga a ${(calc.fator_meta * 100).toFixed(2).replace(".", ",")}%`
+          : null}
       FROM alissonerp.vendas_erp v
       LEFT JOIN public.contatos c ON c.id_contato = v.cliente_id
       WHERE v.id = ${calc.venda_id}
@@ -168,6 +206,8 @@ export async function debitarComissaoDevolucao(
         venda: calc.numero_venda,
         consultora_id: calc.consultora_id,
         comissao_debitada: -calc.valor_debito,
+        comissao_debitada_bruta: -calc.debito_bruto,
+        fator_meta: calc.fator_meta,
         fracao_recebida: calc.fracao_recebida,
       },
     });

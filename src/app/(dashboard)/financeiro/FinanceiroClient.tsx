@@ -3421,7 +3421,7 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
   const [modal, setModal] = useState<null | "pagar" | "lancar" | "estornar">(null);
   const [salvando, setSalvando] = useState(false);
   const [formPagar, setFormPagar] = useState({ data: "", valor: "", descricao: "" });
-  const [formLanc, setFormLanc] = useState({ tipo: "ajuste_positivo", valor: "", pedido: "", motivo: "" });
+  const [formLanc, setFormLanc] = useState({ tipo: "ajuste_positivo", natureza: "acerto", valor: "", pedido: "", motivo: "" });
   const [motivoEstorno, setMotivoEstorno] = useState("");
 
   const podePagar = detalhe?.permissoes?.podePagar === true;
@@ -3563,7 +3563,7 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
                         ✓ Realizar pagamento
                       </button>
                     )}
-                    <button onClick={() => { setFormLanc({ tipo: "ajuste_positivo", valor: "", pedido: "", motivo: "" }); setModal("lancar"); setMenuAberto(false); }}
+                    <button onClick={() => { setFormLanc({ tipo: "ajuste_positivo", natureza: "acerto", valor: "", pedido: "", motivo: "" }); setModal("lancar"); setMenuAberto(false); }}
                       className="w-full text-left px-4 py-2 text-sm hover:opacity-70" style={{ color: "#1A1A1A" }}>
                       ＋ Incluir lançamento
                     </button>
@@ -3639,6 +3639,20 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
                           : { borderColor: C.cremeBorder, color: C.cinza }}>{r}</button>
                     ))}
                   </div>
+                  {/* NATUREZA (Jonathan + chefe, 05/09/2026): bônus é bloqueado para
+                      quem não fechou 100% da meta prata; acerto de erro passa sempre.
+                      Sem esta distinção, a trava do bônus impediria corrigir um
+                      cálculo errado nosso — que é o uso mais comum desta tela. */}
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Natureza</label>
+                  <div className="flex gap-2 mb-3">
+                    {([["acerto", "acerto / correção"], ["bonus", "bônus"]] as const).map(([v, r]) => (
+                      <button key={v} onClick={() => setFormLanc(f => ({ ...f, natureza: v }))}
+                        className="px-3 py-1.5 rounded-lg border text-xs font-medium"
+                        style={(formLanc.natureza ?? "acerto") === v
+                          ? { backgroundColor: C.esmeralda, color: "#fff", borderColor: C.esmeralda }
+                          : { borderColor: C.cremeBorder, color: C.cinza }}>{r}</button>
+                    ))}
+                  </div>
                   <label className="block text-[11px] font-medium mb-1" style={{ color: C.cinza }}>Valor</label>
                   <input type="number" step="0.01" value={formLanc.valor}
                     onChange={e => setFormLanc(f => ({ ...f, valor: e.target.value }))}
@@ -3658,6 +3672,7 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
                         method: "POST", headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                           consultora_id: abertaId, competencia, tipo_item: formLanc.tipo,
+                          natureza: formLanc.natureza ?? "acerto",
                           valor: Number(formLanc.valor), justificativa: formLanc.motivo.trim(),
                           venda_id: formLanc.pedido ? Number(formLanc.pedido) : null,
                         }),
@@ -3712,6 +3727,77 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
                 <span className="text-sm font-semibold tabular-nums"
                   style={{ color: detalhe.saldo_anterior < 0 ? C.vermelho : "#1A1A1A" }}>{fmt(detalhe.saldo_anterior)}</span>
               </div>
+
+              {/* META DO MÊS (migration 376): a comissão das vendas do mês vale o
+                  percentual que a consultora fez da meta, com teto de 100%. É este
+                  bloco que explica por que os valores abaixo aparecem reduzidos —
+                  sem ele, a consultora vê um número menor e não sabe o motivo. */}
+              {detalhe.meta && detalhe.meta.meta_valor > 0 && (
+                <div className="mt-3 pt-3 border-t" style={{ borderColor: C.cremeBorder }}>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-sm" style={{ color: C.cinza }}>
+                      Meta do mês · {fmt(detalhe.meta.realizado)} de {fmt(detalhe.meta.meta_valor)}
+                    </span>
+                    <span className="text-sm font-bold tabular-nums"
+                      style={{ color: detalhe.meta.fator >= 1 ? C.esmeralda : C.vermelho }}>
+                      {detalhe.meta.pct_atingido.toFixed(2).replace(".", ",")}%
+                    </span>
+                  </div>
+                  <div className="mt-2 h-2 rounded-full overflow-hidden" style={{ backgroundColor: C.cremeBorder }}>
+                    <div className="h-full rounded-full" style={{
+                      width: `${Math.min(100, detalhe.meta.pct_atingido)}%`,
+                      backgroundColor: detalhe.meta.fator >= 1 ? C.esmeralda : C.vermelho,
+                    }} />
+                  </div>
+                  {/* RITMO (05/09/2026): "faltam R$ 188 mil" é grande e sem prazo.
+                      O que faz a consultora reagir DENTRO do mês é saber se está
+                      atrás do ritmo e quanto precisa por dia — e quanto de comissão
+                      está em jogo. As horas vêm de public.metas_por_hora, gerada
+                      pelo banco no cadastro da meta (já sem folga e sem domingo). */}
+                  {detalhe.meta.ritmo && (
+                    <div className="mt-3 pt-3 border-t grid gap-2 sm:grid-cols-3" style={{ borderColor: C.cremeBorder }}>
+                      <div>
+                        <p className="text-[10px]" style={{ color: C.cinza }}>Ritmo do mês</p>
+                        <p className="text-sm font-semibold tabular-nums"
+                          style={{ color: detalhe.meta.ritmo.diferenca >= 0 ? C.esmeralda : C.vermelho }}>
+                          {detalhe.meta.ritmo.diferenca >= 0 ? "+" : ""}{fmt(detalhe.meta.ritmo.diferenca)}
+                        </p>
+                        <p className="text-[10px]" style={{ color: C.cinza }}>
+                          o mês já pedia {fmt(detalhe.meta.ritmo.meta_ate_agora)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px]" style={{ color: C.cinza }}>Para bater a meta</p>
+                        <p className="text-sm font-semibold tabular-nums" style={{ color: "#1A1A1A" }}>
+                          {fmt(detalhe.meta.ritmo.por_dia)}<span className="text-[10px] font-normal"> /dia</span>
+                        </p>
+                        <p className="text-[10px]" style={{ color: C.cinza }}>
+                          {detalhe.meta.ritmo.dias_restantes} dias · {fmt(detalhe.meta.ritmo.por_hora)}/hora
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px]" style={{ color: C.cinza }}>Em jogo na comissão</p>
+                        <p className="text-sm font-semibold tabular-nums"
+                          style={{ color: detalhe.meta.em_jogo > 0 ? C.ambar : C.esmeralda }}>
+                          {detalhe.meta.em_jogo > 0 ? fmt(detalhe.meta.em_jogo) : "—"}
+                        </p>
+                        <p className="text-[10px]" style={{ color: C.cinza }}>
+                          {detalhe.meta.em_jogo > 0
+                            ? `hoje ${fmt(detalhe.meta.comissao_cheia - detalhe.meta.em_jogo)} · batendo a meta ${fmt(detalhe.meta.comissao_cheia)}`
+                            : "comissão já no valor cheio"}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-[11px] mt-2" style={{ color: detalhe.meta.fator >= 1 ? C.cinza : C.vermelho }}>
+                    {detalhe.meta.fator >= 1
+                      ? "Meta atingida — comissão integral sobre as vendas do mês."
+                      : `Faltam ${fmt(detalhe.meta.falta)} para a meta. Do jeito que está, a comissão das vendas deste mês sai a `
+                        + `${(detalhe.meta.fator * 100).toFixed(2).replace(".", ",")}%`
+                        + (detalhe.meta.congelado ? " (mês fechado)." : ". Bater a meta devolve o valor cheio.")}
+                  </p>
+                </div>
+              )}
             </div>
 
             {secoes.map(sec => {
@@ -3725,6 +3811,16 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
                 <div key={sec.chave} className="rounded-xl bg-white border overflow-hidden" style={{ borderColor: C.cremeBorder }}>
                   <div className="px-4 py-3 border-b" style={{ borderColor: C.cremeBorder }}>
                     <h4 className="text-sm font-bold" style={{ color: "#1A1A1A" }}>{sec.titulo}</h4>
+                    {/* O DESCRITIVO da redução, na própria seção: a consultora
+                        precisa ler por que aquele valor está menor sem perguntar
+                        a ninguém. Vale também para as parcelas de crediário que
+                        chegam meses depois carregando o fator do mês da venda. */}
+                    {sec.chave === "comissao" && detalhe.meta && detalhe.meta.fator < 1 && (
+                      <p className="text-[11px] mt-1" style={{ color: C.vermelho }}>
+                        Valores já com a redução: meta atingida em {detalhe.meta.pct_atingido.toFixed(2).replace(".", ",")}%
+                        {" "}— comissão a {(detalhe.meta.fator * 100).toFixed(2).replace(".", ",")}% sobre as vendas deste mês.
+                      </p>
+                    )}
                   </div>
                   {linhas.length === 0 ? (
                     <p className="px-4 py-4 text-xs" style={{ color: C.cinza }}>Nenhum lançamento no mês.</p>
@@ -4031,7 +4127,28 @@ export function ExtratoComissao({ soConsultoraId }: { soConsultoraId?: number } 
                 {visiveis.map(l => (
                   <tr key={l.consultora_id} className="border-t hover:opacity-80 cursor-pointer"
                     style={{ borderColor: C.cremeBorder }} onClick={() => abrir(l.consultora_id)}>
-                    <td className="px-3 py-2.5 text-xs font-medium whitespace-nowrap" style={{ color: C.esmeralda }}>{l.consultora}</td>
+                    <td className="px-3 py-2.5 text-xs font-medium whitespace-nowrap" style={{ color: C.esmeralda }}>
+                      {l.consultora}
+                      {/* % da meta ao lado do nome: o financeiro precisa ver num
+                          relance quem está abaixo — é o que explica um saldo menor
+                          do que o esperado, sem abrir o detalhe de cada uma. */}
+                      {l.meta_valor > 0 && (
+                        <span className="ml-2 text-[10px] font-semibold"
+                          style={{ color: l.meta_fator >= 1 ? C.cinza : C.vermelho }}>
+                          {Number(l.meta_pct).toFixed(0)}% da meta
+                          {l.meta_fator < 1 && ` · comissão a ${(l.meta_fator * 100).toFixed(0)}%`}
+                        </span>
+                      )}
+                      {/* Ritmo e valor em jogo também na lista: o financeiro vê num
+                          relance quem está atrás e quanto de comissão isso custa. */}
+                      {l.meta_ritmo != null && (
+                        <span className="ml-2 text-[10px]"
+                          style={{ color: l.meta_ritmo >= 0 ? C.esmeralda : C.ambar }}>
+                          {l.meta_ritmo >= 0 ? "no ritmo" : `${fmt(l.meta_ritmo)} do ritmo`}
+                          {l.em_jogo > 0 && ` · ${fmt(l.em_jogo)} em jogo`}
+                        </span>
+                      )}
+                    </td>
                     {COLS.map(([rot, campo, neg]) => (
                       <td key={rot} className="px-3 py-2.5 text-xs text-right tabular-nums"
                         style={{ color: neg && l[campo] > 0 ? C.vermelho : campo === "comissoes_pendentes" ? C.cinza : "#1A1A1A" }}>

@@ -6,6 +6,7 @@ import { resolverEscopoComissao } from "@/lib/comissao-permissao";
 import {
   linhasExtrato, saldoAnterior, comissoesPendentes, somaBalde,
 } from "@/lib/comissao-extrato";
+import { chaveResultado, resultadosMeta, ritmoMeta } from "@/lib/comissao-fator";
 
 /**
  * GET /api/financeiro/comissoes/extrato?competencia=2026-07
@@ -69,6 +70,15 @@ export async function GET(req: NextRequest) {
 
     const nomes = new Map(vendedores.map((v) => [Number(v.id_vendedor), v.nome]));
 
+    // Meta do mês de cada consultora — a lista mostra o atingimento ao lado do
+    // saldo, para o financeiro ver num relance quem está abaixo e quanto isso já
+    // está reduzindo da comissão.
+    const metas = await resultadosMeta([competencia], Array.from(ids));
+    // Ritmo só no mês corrente (ver comentário na rota de detalhe).
+    const ritmos = competencia === new Date().toISOString().slice(0, 7)
+      ? await ritmoMeta(competencia, Array.from(ids))
+      : new Map();
+
     const rows = Array.from(ids).map((id) => {
       const ls = porConsultora.get(id) ?? [];
       const ant = saldos.get(id) ?? 0;
@@ -92,6 +102,19 @@ export async function GET(req: NextRequest) {
         pendentes_atrasado: pend?.atrasado ?? 0,
         saldo: Math.round((ant + comissao + devolucao + outroCredito + outroDebito + pagamento) * 100) / 100,
         tem_movimento: ls.length > 0,
+        meta_valor: metas.get(chaveResultado(id, competencia))?.meta_valor ?? 0,
+        meta_realizado: metas.get(chaveResultado(id, competencia))?.realizado ?? 0,
+        meta_pct: metas.get(chaveResultado(id, competencia))?.pct_atingido ?? 0,
+        meta_fator: metas.get(chaveResultado(id, competencia))?.fator ?? 1,
+        // Atrás (negativo) ou à frente do que o mês já pedia até agora, e quanto
+        // de comissão a consultora deixa na mesa se o mês fechar assim.
+        meta_ritmo: ritmos.get(id)
+          ? Math.round(((metas.get(chaveResultado(id, competencia))?.realizado ?? 0)
+              - ritmos.get(id)!.meta_ate_agora) * 100) / 100
+          : null,
+        em_jogo: Math.round((
+          ls.filter((l) => l.balde === "comissao").reduce((s, l) => s + l.comissao_bruta, 0) - comissao
+        ) * 100) / 100,
       };
     }).sort((a, b) => a.consultora.localeCompare(b.consultora));
 

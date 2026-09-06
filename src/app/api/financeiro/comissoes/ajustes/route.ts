@@ -4,6 +4,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { internalError } from "@/lib/api-error";
 import { logAudit } from "@/lib/audit";
 import { resolverEscopoComissao } from "@/lib/comissao-permissao";
+import { chaveResultado, resultadosMeta } from "@/lib/comissao-fator";
 
 // POST /api/financeiro/comissoes/ajustes
 //
@@ -38,6 +39,13 @@ export async function POST(req: NextRequest) {
     // ele já tinha sido pago. Sem este campo o erro se repete a cada acerto.
     const competencia = String(body.competencia ?? "").trim();
     const vendaId = body.venda_id != null && Number(body.venda_id) > 0 ? Number(body.venda_id) : null;
+    // natureza: 'bonus' (prêmio da empresa) ou 'acerto' (correção de erro nosso).
+    // O padrão é 'acerto' para não travar a correção de um cálculo errado, que é
+    // o uso mais frequente e nunca pode ficar bloqueado.
+    const natureza = String(body.natureza ?? "acerto").trim();
+    if (!["bonus", "acerto"].includes(natureza)) {
+      return NextResponse.json({ error: "natureza deve ser 'bonus' ou 'acerto'" }, { status: 400 });
+    }
 
     if (!consultoraId || !valor || valor <= 0 || !justificativa) {
       return NextResponse.json({ error: "consultora_id, valor (>0) e justificativa obrigatórios" }, { status: 400 });
@@ -48,6 +56,32 @@ export async function POST(req: NextRequest) {
 
     if (!["ajuste_positivo", "ajuste_negativo", "estorno"].includes(tipoItem)) {
       return NextResponse.json({ error: "tipo_item deve ser ajuste_positivo, ajuste_negativo ou estorno" }, { status: 400 });
+    }
+
+    // REGRA DE NEGÓCIO (Jonathan + chefe, 05/09/2026): CONSULTORA QUE NÃO FECHOU
+    // 100% DA META PRATA NÃO RECEBE BÔNUS.
+    //
+    // O QUÊ: bloqueia lançamento de crédito marcado como 'bonus' quando o mês da
+    // competência ficou abaixo da meta.
+    //
+    // O PORQUÊ: o prêmio da empresa (premiação individual/equipe) é combinado fora
+    // do sistema e entra aqui como crédito manual. Sem esta trava, o bônus seria
+    // pago justamente a quem a regra da meta excluiu, e ninguém veria.
+    //
+    // O IMPACTO: 'acerto' NUNCA é bloqueado — corrigir erro de cálculo (como os
+    // R$ 53,71 da Débora em ago/2026) tem que passar sempre, com motivo obrigatório.
+    if (natureza === "bonus" && tipoItem === "ajuste_positivo") {
+      const res = (await resultadosMeta([competencia], [consultoraId]))
+        .get(chaveResultado(consultoraId, competencia));
+      if (res && !res.sem_meta && res.pct_atingido < 100) {
+        return NextResponse.json({
+          error: `Bônus bloqueado: a consultora fechou ${res.pct_atingido.toFixed(2).replace(".", ",")}% da meta em ${competencia} `
+            + "e só recebe bônus quem atinge 100%. Se este lançamento é correção de erro, use natureza 'acerto'.",
+          pct_atingido: res.pct_atingido,
+          meta_valor: res.meta_valor,
+          realizado: res.realizado,
+        }, { status: 409 });
+      }
     }
 
     // O lançamento é datado no ÚLTIMO DIA da competência escolhida. Não usa

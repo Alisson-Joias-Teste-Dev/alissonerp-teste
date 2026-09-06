@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import {
+  aplicarFator, chaveResultado, competenciaDaData,
+  getVendedoresSemComissao, resultadosMeta,
+} from "@/lib/comissao-fator";
 import { SITUACOES_VENDA_ATIVAS } from "@/lib/vendas-situacoes";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
@@ -150,8 +154,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Nenhum pagamento elegível no período para esta consultora" }, { status: 400 });
     }
 
-    // Calcula valor total
-    const valorTotal = elegiveis.reduce((s, e) => s + Number(e.comissao_calculada), 0);
+    // REGRA DE NEGÓCIO (migration 376): cada pagamento entra pelo fator da meta do
+    // mês DA VENDA. Uma parcela de venda de setembro paga em março entra com o
+    // fator de setembro — o mérito é do mês em que a venda foi feita, não do mês
+    // em que o cliente pagou. IMPACTO se este trecho sair: o fechamento grava o
+    // valor cheio e paga a mais, sem ninguém perceber (o extrato mostraria o
+    // valor certo e o pagamento sairia errado).
+    const semComissao = new Set(await getVendedoresSemComissao());
+    if (semComissao.has(consultoraId)) {
+      return NextResponse.json(
+        { error: "Este vendedor não gera comissão (COMISSAO_VENDEDORES_EXCLUIDOS)" },
+        { status: 400 },
+      );
+    }
+    const resultados = await resultadosMeta(
+      [...new Set(elegiveis.map((e) => competenciaDaData(e.data_venda)).filter((c): c is string => c != null))],
+      [consultoraId],
+    );
+    const comFator = elegiveis.map((e) => {
+      const comp = competenciaDaData(e.data_venda);
+      const res = comp ? resultados.get(chaveResultado(consultoraId, comp)) : undefined;
+      const fator = res?.fator ?? 1;
+      const bruta = Number(e.comissao_calculada);
+      return {
+        ...e,
+        comissao_bruta: bruta,
+        fator_meta: fator,
+        motivo_fator: fator < 1 ? (res?.motivo ?? "") : null,
+        comissao_final: aplicarFator(bruta, fator),
+      };
+    });
+
+    // Calcula valor total (já com o fator da meta aplicado)
+    const valorTotal = comFator.reduce((s, e) => s + e.comissao_final, 0);
 
     // Cria fechamento + itens em transação
     const [fechamento] = await sql`
@@ -164,19 +199,21 @@ export async function POST(req: NextRequest) {
       RETURNING id
     `;
 
-    for (const e of elegiveis) {
+    for (const e of comFator) {
       await sql`
         INSERT INTO alissonerp.fechamento_comissao_itens
           (fechamento_id, venda_id, numero_venda_snapshot, pagamento_venda_id,
            consultora_id, cliente_nome_snapshot, data_venda, data_recebimento, forma_recebimento,
            valor_venda, valor_pagamento, valor_comissionavel, percentual_rateio,
-           comissao_total_venda, comissao_calculada, status, tipo_item)
+           comissao_total_venda, comissao_calculada, status, tipo_item,
+           comissao_bruta, fator_meta, motivo_fator)
         VALUES (
           ${fechamento.id}, ${e.venda_id}, ${e.numero_venda}, ${e.pagamento_venda_id},
           ${consultoraId}, ${e.cliente_nome}, ${e.data_venda}::date, ${e.data_recebimento}::date, ${e.forma_recebimento},
           ${Number(e.total_venda)}, ${Number(e.valor_pagamento)}, ${Number(e.valor_pagamento)},
           ${Number(e.percentual_rateio)}, ${Number(e.total_comissao)},
-          ${Number(e.comissao_calculada)}, 'liberado', ${e.comissionavel ? "normal" : "nao_comissionavel"}
+          ${e.comissao_final}, 'liberado', ${e.comissionavel ? "normal" : "nao_comissionavel"},
+          ${e.comissao_bruta}, ${e.fator_meta}, ${e.motivo_fator}
         )
       `;
     }
@@ -205,7 +242,7 @@ export async function POST(req: NextRequest) {
       dados_depois: {
         consultora_id: consultoraId,
         valor_total: valorFinal,
-        qtd_itens: elegiveis.length + adotados.qtd,
+        qtd_itens: comFator.length + adotados.qtd,
         lancamentos_adotados: adotados.qtd,
         valor_adotado: adotados.valor,
       },

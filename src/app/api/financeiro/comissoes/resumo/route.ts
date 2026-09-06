@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import {
+  aplicarFator, chaveResultado, getVendedoresSemComissao, resultadosMeta,
+} from "@/lib/comissao-fator";
 import { SITUACOES_VENDA_ATIVAS } from "@/lib/vendas-situacoes";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
@@ -28,8 +31,14 @@ export async function GET(req: NextRequest) {
   try {
     // Total disponível: pagamentos confirmados elegíveis (A Receber pago comissiona,
     // comissionavel=false — Vale-Troca/Permuta/Ajuste Consultora — não), não fechados
-    const [disponivel] = await sql`
-      SELECT COALESCE(SUM(
+    // Sai por CONSULTORA + COMPETÊNCIA DA VENDA para o fator da meta (migration
+    // 375) poder ser aplicado — o card "disponível" tem que dizer quanto a empresa
+    // realmente vai pagar. IMPACTO se somar cheio: o financeiro provisiona a mais
+    // e o número do card não bate com nenhum extrato.
+    const disponivelLinhas = await sql<Array<{ consultora_id: number; competencia: string | null; valor: string }>>`
+      SELECT ve.vendedor_id::int AS consultora_id,
+             to_char(ve.data_venda, 'YYYY-MM') AS competencia,
+             COALESCE(SUM(
         CASE WHEN pv.status = 'confirmado' AND pv.comissionavel = true
           -- LEAST(...,1): trava o rateio em 100% (ver elegiveis/route.ts)
           THEN ROUND(ve.total_comissao * LEAST(pv.valor / NULLIF(ve.total_venda, 0), 1), 2)
@@ -46,7 +55,21 @@ export async function GET(req: NextRequest) {
           WHERE status NOT IN ('estornado', 'cancelado')
             AND pagamento_venda_id IS NOT NULL
         )
+      GROUP BY 1, 2
     `;
+
+    const semComissao = new Set(await getVendedoresSemComissao());
+    const resultadosDisp = await resultadosMeta(
+      [...new Set(disponivelLinhas.map((d) => d.competencia).filter((c): c is string => c != null))],
+    );
+    const disponivelValor = disponivelLinhas.reduce((soma, d) => {
+      const cid = Number(d.consultora_id);
+      if (semComissao.has(cid)) return soma;
+      const fator = d.competencia
+        ? (resultadosDisp.get(chaveResultado(cid, d.competencia))?.fator ?? 1)
+        : 1;
+      return soma + aplicarFator(Number(d.valor), fator);
+    }, 0);
 
     // Totais por status nos fechamentos
     const porStatus = await sql<Array<{ status: string; qtd: number; valor: string }>>`
@@ -64,7 +87,7 @@ export async function GET(req: NextRequest) {
     }
 
     const resumo = {
-      disponivel: Number(disponivel?.valor ?? 0),
+      disponivel: Math.round(disponivelValor * 100) / 100,
       em_rascunho: mapStatus.get("rascunho")?.valor ?? 0,
       gerado: (mapStatus.get("fechado")?.valor ?? 0) + (mapStatus.get("enviado_financeiro")?.valor ?? 0),
       pago: mapStatus.get("pago")?.valor ?? 0,

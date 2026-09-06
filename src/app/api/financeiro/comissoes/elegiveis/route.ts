@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import {
+  aplicarFator, chaveResultado, competenciaDaData,
+  resultadosMeta,
+} from "@/lib/comissao-fator";
 import { SITUACOES_VENDA_ATIVAS } from "@/lib/vendas-situacoes";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
@@ -79,6 +83,20 @@ export async function GET(req: NextRequest) {
       ORDER BY pv.data_confirmacao DESC
     `;
 
+    // O fator da meta do mês DA VENDA (migration 376) — a prévia tem que mostrar
+    // exatamente o que o fechamento vai gravar. IMPACTO se ficar de fora: a tela
+    // promete um valor e o fechamento paga outro, que foi o tipo de divergência
+    // que obrigou a refazer junho/2026 item a item.
+    const resultados = await resultadosMeta(
+      [...new Set(elegiveis.map((e) => competenciaDaData(e.data_venda as string)).filter((c): c is string => c != null))],
+      [Number(consultoraId)],
+    );
+    const fatorDe = (dataVenda: string | null) => {
+      const comp = competenciaDaData(dataVenda);
+      const res = comp ? resultados.get(chaveResultado(Number(consultoraId), comp)) : undefined;
+      return { fator: res?.fator ?? 1, motivo: res && res.fator < 1 ? res.motivo : "" };
+    };
+
     return NextResponse.json(elegiveis.map((e) => ({
       venda_id: Number(e.venda_id),
       numero_venda: e.numero_venda,
@@ -89,7 +107,10 @@ export async function GET(req: NextRequest) {
       valor_pagamento: Number(e.valor_pagamento),
       valor_comissionavel: Number(e.valor_pagamento),
       percentual_rateio: Number(e.percentual_rateio),
-      comissao_calculada: Number(e.comissao_calculada),
+      comissao_calculada: aplicarFator(Number(e.comissao_calculada), fatorDe(e.data_venda as string).fator),
+      comissao_bruta: Number(e.comissao_calculada),
+      fator_meta: fatorDe(e.data_venda as string).fator,
+      motivo_fator: fatorDe(e.data_venda as string).motivo,
       comissionavel: Boolean(e.comissionavel),
       cliente_nome: e.cliente_nome,
     })));

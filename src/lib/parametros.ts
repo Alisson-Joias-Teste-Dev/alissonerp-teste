@@ -84,4 +84,7 @@ export const PARAM = {
   INSUMO_CONVERSAO_PADRAO:  "INSUMO_CONVERSAO_PADRAO",
   INSUMO_SOBRA_CONVERSAO_SKU: "INSUMO_SOBRA_CONVERSAO_SKU",
   DASHBOARD_VENDEDORES_EXCLUIDOS: "DASHBOARD_VENDEDORES_EXCLUIDOS",
+  // Quem NAO gera comissao (migration 376). Lista separada da dashboard de
+  // proposito: aquela diz quem sai dos graficos, esta diz quem nao RECEBE.
+  COMISSAO_VENDEDORES_EXCLUIDOS: "COMISSAO_VENDEDORES_EXCLUIDOS",
 } as const;

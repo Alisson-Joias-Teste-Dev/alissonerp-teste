@@ -30,6 +30,10 @@
 
 import sql from "@/lib/db";
 import { SITUACOES_VENDA_ATIVAS } from "@/lib/vendas-situacoes";
+import {
+  aplicarFator, chaveResultado, competenciaDaData,
+  getVendedoresSemComissao, resultadosMeta,
+} from "@/lib/comissao-fator";
 
 export type BaldeExtrato =
   | "comissao"
@@ -70,6 +74,12 @@ export interface LinhaExtrato {
   itens: ItemDaVenda[] | null;
   valor: number;
   previsto: boolean;
+  /** Comissão CHEIA, antes do fator da meta. Igual a `valor` quando fator = 1. */
+  comissao_bruta: number;
+  /** Fator da meta do mês DA VENDA (1 = integral). Ver src/lib/comissao-fator.ts. */
+  fator_meta: number;
+  /** Por que a linha foi reduzida — vai escrito na tela. Vazio quando fator = 1. */
+  motivo_fator: string;
 }
 
 export interface ItemDaVenda {
@@ -154,9 +164,12 @@ function baldeDoItem(tipoItem: string, devolucaoId: number | null, forma: string
   if (tipoItem === "ajuste_positivo") return "outro_credito";
   if (tipoItem === "ajuste_negativo") return "outro_debito";
   if (tipoItem === "estorno") return valor < 0 ? "outro_debito" : "outro_credito";
-  // Vale-troca usado numa venda nova é "outro crédito" (mesmo lugar do Tiny),
-  // não "comissão do mês" — o mês é o das vendas pagas em dinheiro novo.
-  if (forma === "Vale-Troca") return "outro_credito";
+  // REGRA (Jonathan, 05/09/2026): venda paga com vale-troca É VENDA — só foi paga
+  // com outro instrumento. Ela mora em "comissões do mês", com etiqueta de vale,
+  // e não mais num balde à parte. ANTES caía em "outros créditos" (espelhando o
+  // Tiny), o que escondia venda de verdade num canto da tela e tirava o vale da
+  // leitura do mês. IMPACTO se voltar atrás: os totais não mudam (o saldo é a
+  // soma dos baldes), mas a venda em vale some da lista principal de novo.
   return "comissao";
 }
 
@@ -177,6 +190,7 @@ export async function linhasExtrato(
     forma: string | null; valor_pagamento: string; valor_venda: string;
     data_venda: string | null;
     valor: string; tipo_item: string; devolucao_id: number | null;
+    comissao_bruta: string | null; fator_meta: string | null; motivo_fator: string | null;
   }>>`
     SELECT fi.consultora_id, ve.nome AS consultora_nome,
            COALESCE(fi.data_recebimento, fi.created_at::date)::text AS data,
@@ -184,7 +198,8 @@ export async function linhasExtrato(
            fi.cliente_nome_snapshot AS cliente, fi.forma_recebimento AS forma,
            fi.valor_pagamento::text, fi.valor_venda::text,
            fi.data_venda::text,
-           fi.comissao_calculada::text AS valor, fi.tipo_item, fi.devolucao_id
+           fi.comissao_calculada::text AS valor, fi.tipo_item, fi.devolucao_id,
+           fi.comissao_bruta::text, fi.fator_meta::text, fi.motivo_fator
     FROM alissonerp.fechamento_comissao_itens fi
     LEFT JOIN public.vendedores ve ON ve.id_vendedor = fi.consultora_id
     WHERE fi.status NOT IN ('estornado', 'cancelado')
@@ -265,9 +280,35 @@ export async function linhasExtrato(
     ORDER BY 3
   `;
 
+  // REGRA DE NEGÓCIO (migration 376): a comissão de uma venda vale o fator da meta
+  // do mês EM QUE A VENDA FOI FEITA — não o do mês em que o dinheiro entrou. Por
+  // isso a competência sai de `data_venda` (e não de `data`), tanto nas linhas já
+  // gravadas quanto nas previstas: uma parcela de setembro paga em março chega com
+  // o fator de setembro. IMPACTO se trocar por `data`: a consultora seria premiada
+  // ou punida pelo mês em que o cliente resolveu pagar.
+  const semComissao = new Set(await getVendedoresSemComissao());
+  const competencias = [...new Set(
+    [...gravados, ...previstos]
+      .map((l) => competenciaDaData(l.data_venda))
+      .filter((c): c is string => c != null),
+  )];
+  const resultados = await resultadosMeta(competencias);
+
+  /** Fator da meta para a venda daquela consultora, com o motivo escrito. */
+  const fatorDaLinha = (consultoraId: number, dataVenda: string | null) => {
+    const comp = competenciaDaData(dataVenda);
+    const res = comp ? resultados.get(chaveResultado(consultoraId, comp)) : undefined;
+    return { fator: res?.fator ?? 1, motivo: res && res.fator < 1 ? res.motivo : "" };
+  };
+
   const linhas: LinhaExtrato[] = [];
 
   for (const g of gravados) {
+    // Quem não comissiona também não aparece — inclusive nas linhas já gravadas.
+    // O PORQUÊ: `saldoAnterior()` já ignora essas consultoras; mostrar as linhas
+    // aqui e não lá deixaria o extrato incoerente (comissões na tela, saldo
+    // anterior zerado). Os itens continuam no banco, auditáveis — só saem da tela.
+    if (semComissao.has(Number(g.consultora_id))) continue;
     const valor = Number(g.valor);
     const balde = baldeDoItem(g.tipo_item, g.devolucao_id, g.forma, valor);
     linhas.push({
@@ -290,16 +331,30 @@ export async function linhasExtrato(
       itens: null,
       valor,
       previsto: false,
+      // Item já gravado NÃO se recalcula — ele é o registro contábil do que foi
+      // apurado. Só recuperamos a memória do fator para a tela poder explicar a
+      // linha. Item anterior à migration 376 não tem essa memória: fator 1.
+      comissao_bruta: g.comissao_bruta != null ? Number(g.comissao_bruta) : valor,
+      fator_meta: g.fator_meta != null ? Number(g.fator_meta) : 1,
+      motivo_fator: g.motivo_fator ?? "",
     });
   }
 
   for (const p of previstos) {
     const ehVale = p.forma === "Vale-Troca";
+    const consultoraId = Number(p.consultora_id);
+    // Loja Alisson (e quem mais estiver na lista) não gera comissão: é vendedor
+    // genérico de balcão, sem meta e sem quem receba. Ver COMISSAO_VENDEDORES_EXCLUIDOS.
+    if (semComissao.has(consultoraId)) continue;
+    const bruto = Number(p.valor);
+    const { fator, motivo } = fatorDaLinha(consultoraId, p.data_venda);
+    const valorComFator = aplicarFator(bruto, fator);
     linhas.push({
-      consultora_id: Number(p.consultora_id),
+      consultora_id: consultoraId,
       consultora_nome: p.consultora_nome,
       data: p.data,
-      balde: ehVale ? "outro_credito" : "comissao",
+      // Venda paga com vale-troca é venda do mês, com etiqueta — não "outro crédito".
+      balde: "comissao",
       descricao: ehVale
         ? `Vale ${p.vale_numero ?? "—"}${p.vale_pedido_origem ? ` do pedido ${p.vale_pedido_origem}` : ""} usado no pedido ${p.pedido}`
         : `${p.cliente ?? "—"} · pedido ${p.pedido} · ${p.forma.toLowerCase()}`,
@@ -311,8 +366,11 @@ export async function linhasExtrato(
       valor_pago: Number(p.valor_pagamento),
       base_comissao: Number(p.total_venda),
       itens: null,
-      valor: Number(p.valor),
+      valor: valorComFator,
       previsto: true,
+      comissao_bruta: bruto,
+      fator_meta: fator,
+      motivo_fator: motivo,
     });
   }
 
@@ -339,6 +397,9 @@ export async function linhasExtrato(
       itens: null,
       valor: -Number(b.valor),
       previsto: false,
+      comissao_bruta: -Number(b.valor),
+      fator_meta: 1,
+      motivo_fator: "",
     });
   }
 
@@ -371,7 +432,10 @@ export async function saldoAnterior(
 ): Promise<Map<number, number>> {
   const cid = consultoraId ?? null;
 
-  const rows = await sql<Array<{ consultora_id: number; saldo: string }>>`
+  const rows = await sql<Array<{
+    consultora_id: number; competencia: string | null;
+    lancado: string; naolancado: string; pago: string;
+  }>>`
     WITH lancado AS (
       SELECT fi.consultora_id, COALESCE(SUM(fi.comissao_calculada), 0) AS v
       FROM alissonerp.fechamento_comissao_itens fi
@@ -383,7 +447,11 @@ export async function saldoAnterior(
     naolancado AS (
       -- ::int: vendedor_id e bigint; sem o cast o UNION com consultora_id (int)
       -- vira bigint e volta como string, quebrando a chave do Map.
+      -- Sai por COMPETÊNCIA DA VENDA (não só por consultora): o fator da meta é
+      -- por mês da venda e é aplicado em TS logo abaixo. Somar tudo aqui dentro
+      -- devolveria o valor CHEIO e o saldo anterior mentiria para cima.
       SELECT v.vendedor_id::int AS consultora_id,
+             to_char(v.data_venda, 'YYYY-MM') AS competencia,
              COALESCE(SUM(ROUND(v.total_comissao * LEAST(pv.valor / NULLIF(v.total_venda, 0), 1), 2)), 0) AS v
       FROM alissonerp.pagamentos_venda pv
       JOIN alissonerp.vendas_erp v ON v.id = pv.venda_id
@@ -409,8 +477,10 @@ export async function saldoAnterior(
         AND f.competencia < to_char(${de}::date, 'YYYY-MM')
       GROUP BY 1
     )
-    SELECT c AS consultora_id,
-           ROUND(COALESCE(l.v, 0) + COALESCE(n.v, 0) - COALESCE(p.v, 0), 2)::text AS saldo
+    SELECT t.c AS consultora_id, n.competencia,
+           COALESCE(l.v, 0)::text AS lancado,
+           COALESCE(n.v, 0)::text AS naolancado,
+           COALESCE(p.v, 0)::text AS pago
     FROM (
       SELECT consultora_id AS c FROM lancado
       UNION SELECT consultora_id FROM naolancado
@@ -421,7 +491,32 @@ export async function saldoAnterior(
     LEFT JOIN pago       p ON p.consultora_id = t.c
   `;
 
-  return new Map(rows.map((r) => [Number(r.consultora_id), Number(r.saldo)]));
+  // O fator da meta entra aqui, sobre a parte AINDA NÃO LANÇADA — o que já está
+  // gravado (`lancado`) é registro contábil e não se recalcula, e o que foi pago
+  // saiu pelo valor que saiu. IMPACTO se o fator não fosse aplicado: o saldo
+  // anterior viria cheio e o mês seguinte começaria com dívida que não existe.
+  const semComissao = new Set(await getVendedoresSemComissao());
+  const competencias = [...new Set(rows.map((r) => r.competencia).filter((c): c is string => c != null))];
+  const resultados = await resultadosMeta(competencias);
+
+  const saldos = new Map<number, number>();
+  const jaContou = new Set<string>();
+  for (const r of rows) {
+    const cidLinha = Number(r.consultora_id);
+    if (semComissao.has(cidLinha)) continue;
+    // lancado e pago são por consultora: entram UMA vez, mesmo que a consultora
+    // apareça em várias competências de `naolancado`.
+    let base = saldos.get(cidLinha) ?? 0;
+    if (!jaContou.has(String(cidLinha))) {
+      base += Number(r.lancado) - Number(r.pago);
+      jaContou.add(String(cidLinha));
+    }
+    const res = r.competencia ? resultados.get(chaveResultado(cidLinha, r.competencia)) : undefined;
+    base += aplicarFator(Number(r.naolancado), res?.fator ?? 1);
+    saldos.set(cidLinha, Math.round(base * 100) / 100);
+  }
+
+  return saldos;
 }
 
 /**
@@ -434,9 +529,14 @@ export async function comissoesPendentes(
   const cid = consultoraId ?? null;
 
   const rows = await sql<Array<{
-    consultora_id: number; parcelas: string; total: string; atrasado: string;
+    consultora_id: number; competencia: string | null; parcelas: string; total: string; atrasado: string;
   }>>`
+    -- Por COMPETÊNCIA DA VENDA: a parcela que ainda vai ser paga já nasce com o
+    -- fator do mês da venda. IMPACTO se somar sem isso: a previsão promete um
+    -- valor que não vai chegar — foi o que a Cristiane e a Débora veriam depois
+    -- de agosto/2026, mês em que a comissão saiu pela metade.
     SELECT v.vendedor_id::int AS consultora_id,
+           to_char(v.data_venda, 'YYYY-MM') AS competencia,
            COUNT(*)::text AS parcelas,
            ROUND(SUM(v.total_comissao * LEAST(cr.valor / NULLIF(v.total_venda, 0), 1)), 2)::text AS total,
            ROUND(SUM(CASE WHEN cr.data_vencimento < CURRENT_DATE
@@ -448,13 +548,28 @@ export async function comissoesPendentes(
     WHERE cr.data_recebimento IS NULL AND cr.situacao = 'pendente'
       AND v.vendedor_id IS NOT NULL
       AND (${cid}::int IS NULL OR v.vendedor_id = ${cid}::int)
-    GROUP BY 1
+    GROUP BY 1, 2
   `;
 
-  return new Map(rows.map((r) => [
-    Number(r.consultora_id),
-    { total: Number(r.total ?? 0), atrasado: Number(r.atrasado ?? 0), parcelas: Number(r.parcelas) },
-  ]));
+  const semComissao = new Set(await getVendedoresSemComissao());
+  const resultados = await resultadosMeta(
+    [...new Set(rows.map((r) => r.competencia).filter((c): c is string => c != null))],
+  );
+
+  const mapa = new Map<number, { total: number; atrasado: number; parcelas: number }>();
+  for (const r of rows) {
+    const cidLinha = Number(r.consultora_id);
+    if (semComissao.has(cidLinha)) continue;
+    const res = r.competencia ? resultados.get(chaveResultado(cidLinha, r.competencia)) : undefined;
+    const fator = res?.fator ?? 1;
+    const atual = mapa.get(cidLinha) ?? { total: 0, atrasado: 0, parcelas: 0 };
+    mapa.set(cidLinha, {
+      total: Math.round((atual.total + aplicarFator(Number(r.total ?? 0), fator)) * 100) / 100,
+      atrasado: Math.round((atual.atrasado + aplicarFator(Number(r.atrasado ?? 0), fator)) * 100) / 100,
+      parcelas: atual.parcelas + Number(r.parcelas),
+    });
+  }
+  return mapa;
 }
 
 export interface ParcelaPendente {
@@ -481,12 +596,14 @@ export async function pendentesDetalhe(consultoraId: number): Promise<ParcelaPen
     conta_id: number; venda_id: number | null; pedido: string | null;
     cliente: string | null; descricao: string | null; vencimento: string | null;
     valor_parcela: string; comissao_prevista: string; atrasado: boolean;
+    data_venda: string | null;
   }>>`
     SELECT cr.id AS conta_id, v.id AS venda_id, v.numero_venda AS pedido,
            COALESCE(c.nome, cr.cliente_nome) AS cliente, cr.descricao,
            cr.data_vencimento::text AS vencimento,
            cr.valor::text AS valor_parcela,
            ROUND(v.total_comissao * LEAST(cr.valor / NULLIF(v.total_venda, 0), 1), 2)::text AS comissao_prevista,
+           v.data_venda::text AS data_venda,
            (cr.data_vencimento < CURRENT_DATE) AS atrasado
     FROM alissonerp.contas_receber cr
     JOIN alissonerp.vendas_erp v ON v.id = cr.venda_erp_id
@@ -497,6 +614,13 @@ export async function pendentesDetalhe(consultoraId: number): Promise<ParcelaPen
     ORDER BY cr.data_vencimento NULLS LAST, cr.id
   `;
 
+  // O fator do mês DA VENDA também aqui — o detalhe tem que somar exatamente o
+  // total de comissoesPendentes(). Se as duas contas divergirem, a tela mente.
+  const resultados = await resultadosMeta(
+    [...new Set(rows.map((r) => competenciaDaData(r.data_venda)).filter((c): c is string => c != null))],
+    [consultoraId],
+  );
+
   return rows.map((r) => ({
     conta_id: Number(r.conta_id),
     venda_id: r.venda_id ? Number(r.venda_id) : null,
@@ -505,7 +629,10 @@ export async function pendentesDetalhe(consultoraId: number): Promise<ParcelaPen
     descricao: r.descricao,
     vencimento: r.vencimento,
     valor_parcela: Number(r.valor_parcela),
-    comissao_prevista: Number(r.comissao_prevista ?? 0),
+    comissao_prevista: aplicarFator(
+      Number(r.comissao_prevista ?? 0),
+      resultados.get(chaveResultado(consultoraId, competenciaDaData(r.data_venda) ?? ""))?.fator ?? 1,
+    ),
     atrasado: r.atrasado === true,
   }));
 }

@@ -2,6 +2,50 @@
 
 > 📋 Última atualização automática: 24/08/2026 — Versão: v2.85.21 <!-- Revisado 24/08/2026 -->
 
+## feat(comissao): comissao proporcional a meta da consultora (v2.86.0)
+
+**O quê:** a comissão das vendas de um mês passou a valer o **fator da meta** daquele mês:
+até julho/2026 fator 1; **agosto/2026** 50% para quem não bateu a meta prata; **setembro/2026
+em diante** o **percentual exato atingido**, com **teto de 100%** e **sem piso**. O fator segue a
+**venda**, não o pagamento — parcela de crediário paga meses depois chega com o fator do mês da
+venda — e **congela** quando o fechamento é fechado.
+
+**Por quê:** a comissão era calculada sem saber se a consultora bateu a meta, então todo mês
+alguém refazia a conta na mão. Em agosto/2026 isso quase custou R$ 53,71 à Débora: três
+devoluções (DV-00067, DV-00080, DV-00082) eram de vendas de agosto — mês com comissão pela
+metade — e estavam sendo debitadas pelo valor cheio. Decisão do Jonathan + chefe em 05/09/2026.
+
+**Junto veio:**
+- **devolução devolve só o que foi pago** — débito com o fator da venda devolvida;
+- **vale-troca virou venda normal** — saiu de "outros créditos" e entrou em "comissões do mês"
+  (totais não mudam; a venda em vale deixa de ficar escondida);
+- **Loja Alisson (134) não comissiona** — parâmetro `COMISSAO_VENDEDORES_EXCLUIDOS`;
+- **bônus bloqueado** para quem fechou abaixo de 100% da meta — o lançamento manual ganhou
+  natureza (`bonus` x `acerto`); acerto de erro nunca é bloqueado;
+- **extrato ao vivo** — meta, realizado, percentual, quanto falta e a que percentual a comissão
+  está saindo, com o motivo escrito nas linhas reduzidas; a previsão de crediário também já sai
+  com o fator.
+
+- **ritmo da meta no extrato** — quanto o mês já pedia até agora, quanto falta por dia/hora e
+  quanto de comissão está em jogo; para a consultora e para o financeiro, só no mês corrente.
+  Vem de `public.metas_por_hora` (a mesma conta que o banco gera no cadastro da meta).
+- **fonte da meta corrigida** — `public.metas_mensais.valor_prata` com `metas_vendedoras` como
+  rede. Ler só o ERP fazia setembro/2026 aparecer sem meta (as metas de setembro foram
+  cadastradas no ERP por engano e deletadas de lá em 01/09 — log 474→476).
+
+**Impacto se alterado:** `src/lib/comissao-fator.ts` é ponto único — a fórmula nunca é copiada,
+é chamada pelos 5 lugares que calculam comissão. Copiar de novo repete o bug de julho/2026, em
+que a regra do "A Receber" ficou certa na prévia e errada em quatro arquivos.
+
+**Pendência conhecida (CORRIGIR NO V2):** a competência ainda vem de `vendas_erp.data_venda`, que
+é a data do **rascunho** e não a da aprovação. Rascunho aberto em 31/08 e aprovado em 02/09 conta
+em agosto — R$ 24,14 em três pedidos de ago/2026.
+
+Arquivos: `supabase/migrations/376_comissao_fator_meta.sql`, `src/lib/comissao-fator.ts`,
+`src/lib/comissao-extrato.ts`, `src/lib/comissao-lancamentos.ts`, `src/lib/parametros.ts`,
+`src/app/api/financeiro/comissoes/{fechamentos,elegiveis,resumo,ajustes,extrato}/…`,
+`src/app/(dashboard)/financeiro/FinanceiroClient.tsx`, `docs/regras-negocio/comercial.md` §2.2.
+
 ## fix(conversao-reversa): peca que virou joia entrava no estoque e nao aparecia (v2.85.21)
 
 **O quê:** a aprovação da conversão reversa passou a **garantir a configuração do produto** no

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sql from "@/lib/db";
+import { congelarResultadoMeta } from "@/lib/comissao-fator";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { internalError } from "@/lib/api-error";
@@ -43,7 +44,8 @@ export async function POST(
     const forcar = body?.forcar === true;
 
     const [atual] = await sql`
-      SELECT status FROM alissonerp.fechamentos_comissao WHERE id = ${id}::uuid
+      SELECT status, consultora_id, competencia
+      FROM alissonerp.fechamentos_comissao WHERE id = ${id}::uuid
     `;
     if (!atual) return NextResponse.json({ error: "Fechamento não encontrado" }, { status: 404 });
     if (atual.status !== "rascunho") {
@@ -97,6 +99,17 @@ export async function POST(
         status = 'fechado'
       WHERE fechamento_id = ${id}::uuid AND status = 'liberado'
     `;
+
+    // CONGELA o resultado da meta daquele mês (migration 376).
+    //
+    // O PORQUÊ: a partir daqui o fator daquele mês não pode mais mudar. Uma venda
+    // cancelada em novembro mexeria no realizado de setembro e, sem o congelamento,
+    // mudaria retroativamente a comissão de um mês JÁ FECHADO — inclusive das
+    // parcelas de crediário que ainda vão chegar carregando esse fator.
+    //
+    // O IMPACTO se sair: o extrato passa a recalcular meses fechados e o valor pago
+    // deixa de bater com o valor apurado.
+    await congelarResultadoMeta(Number(atual.consultora_id), String(atual.competencia));
 
     await logAudit(sql, {
       tabela: "fechamentos_comissao",

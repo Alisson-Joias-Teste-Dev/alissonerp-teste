@@ -30,6 +30,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // NÃO passa pelo fator da meta (migration 376) DE PROPÓSITO: esta rota é
+    // fixa em MAIO/2026 e a regra só começa em agosto/2026 — todo mês anterior
+    // tem fator 1. Se algum dia esta rota virar genérica por período, ela PRECISA
+    // chamar src/lib/comissao-fator.ts, senão volta a pagar valor cheio.
     const periodoInicio = "2026-05-01";
     const periodoFim = "2026-05-31";
     const competencia = "2026-05";

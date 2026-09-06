@@ -6,6 +6,7 @@ import { resolverEscopoComissao, resolverConsultoraAlvo } from "@/lib/comissao-p
 import {
   linhasExtrato, saldoAnterior, comissoesPendentes, pendentesDetalhe, somaBalde,
 } from "@/lib/comissao-extrato";
+import { chaveResultado, resultadosMeta, ritmoMeta } from "@/lib/comissao-fator";
 
 /**
  * GET /api/financeiro/comissoes/extrato/[consultoraId]?competencia=2026-07
@@ -70,9 +71,58 @@ export async function GET(
 
     const balde = (b: string) => linhas.filter((l) => l.balde === b);
 
+    // Resultado da meta DO MÊS do extrato — é o cabeçalho que explica por que os
+    // valores aparecem reduzidos e o que a consultora usa para saber quanto falta.
+    const meta = (await resultadosMeta([competencia], [id])).get(chaveResultado(id, competencia));
+
+    // RITMO: só faz sentido no mês em curso — em mês passado o resultado já é o
+    // que é, e "faltam X por dia" viraria conselho para uma corrida encerrada.
+    const mesCorrente = competencia === new Date().toISOString().slice(0, 7);
+    const ritmo = mesCorrente && meta && !meta.sem_meta
+      ? (await ritmoMeta(competencia, [id])).get(id) ?? null
+      : null;
+
+    // QUANTO ESTÁ EM JOGO: a diferença entre a comissão cheia do mês e a que está
+    // saindo com o fator. É o número que faz a meta virar decisão — em ago/2026,
+    // bater a meta valia R$ 1.418,77 a mais para a Débora.
+    const comissaoBruta = linhas
+      .filter((l) => l.balde === "comissao")
+      .reduce((s, l) => s + l.comissao_bruta, 0);
+    const emJogo = Math.round((comissaoBruta - somaBalde(linhas, "comissao")) * 100) / 100;
+
     return NextResponse.json({
       consultora: { id, nome: cons[0]?.nome ?? `#${id}` },
       competencia, de, ate,
+      meta: meta
+        ? {
+            meta_valor: meta.meta_valor,
+            realizado: meta.realizado,
+            pct_atingido: meta.pct_atingido,
+            fator: meta.fator,
+            motivo: meta.motivo,
+            congelado: meta.congelado,
+            sem_meta: meta.sem_meta,
+            falta: Math.max(0, Math.round((meta.meta_valor - meta.realizado) * 100) / 100),
+            // Atrás (negativo) ou à frente (positivo) do que o mês já pedia.
+            ritmo: ritmo
+              ? {
+                  meta_ate_agora: ritmo.meta_ate_agora,
+                  diferenca: Math.round((meta.realizado - ritmo.meta_ate_agora) * 100) / 100,
+                  meta_restante: Math.max(0, Math.round((meta.meta_valor - meta.realizado) * 100) / 100),
+                  dias_restantes: ritmo.dias_restantes,
+                  horas_restantes: ritmo.horas_restantes,
+                  por_dia: ritmo.dias_restantes > 0
+                    ? Math.round(Math.max(0, meta.meta_valor - meta.realizado) / ritmo.dias_restantes * 100) / 100
+                    : 0,
+                  por_hora: ritmo.horas_restantes > 0
+                    ? Math.round(Math.max(0, meta.meta_valor - meta.realizado) / ritmo.horas_restantes * 100) / 100
+                    : 0,
+                }
+              : null,
+            comissao_cheia: Math.round(comissaoBruta * 100) / 100,
+            em_jogo: emJogo,
+          }
+        : null,
       // A tela usa isto para mostrar ou não o menu "mais ações". É espelho do
       // que o servidor já decidiu — as rotas de ação checam de novo por conta
       // própria, esconder botão não é permissão.
