@@ -464,7 +464,7 @@ export async function saldoAnterior(
           SELECT pagamento_venda_id FROM alissonerp.fechamento_comissao_itens
           WHERE status NOT IN ('estornado', 'cancelado') AND pagamento_venda_id IS NOT NULL
         )
-      GROUP BY 1
+      GROUP BY 1, 2
     ),
     pago AS (
       -- Por COMPETÊNCIA, igual à baixa em linhasExtrato(). Se aqui olhasse
