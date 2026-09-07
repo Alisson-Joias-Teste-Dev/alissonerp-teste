@@ -42,10 +42,18 @@ export default async function ProdutosPage() {
   if (process.env.PRODUTOS_NO_V2 === "1") {
     const urlV2 = process.env.URL_FRONT_V2 ?? "https://homolog-v2.alissonjoias.com.br";
     return (
+      // 🔴 A ALTURA NAO E CHUTE — ela copia os deslocamentos do proprio V1.
+      // O <main> que envolve esta pagina tem `mt-14 md:mt-0` (56px de topo no
+      // celular, zero no desktop). O primeiro palpite foi `calc(100vh - 120px)`,
+      // e o resultado foi tela cortada com espaco morto embaixo: o iframe menor
+      // que a area, e a rolagem acontecendo DENTRO dele.
+      //
+      // `block` tira o espaco de linha-de-texto que o iframe herda por ser
+      // inline por padrao — sem isso sobram alguns pixels no rodape.
       <iframe
         src={`${urlV2}/produtos?embutido=1`}
         title="Produtos (V2)"
-        style={{ width: "100%", height: "calc(100vh - 120px)", border: 0 }}
+        className="block w-full border-0 h-[calc(100vh-3.5rem)] md:h-screen"
       />
     );
   }
