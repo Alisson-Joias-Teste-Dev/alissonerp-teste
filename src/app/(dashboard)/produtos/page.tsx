@@ -27,6 +27,29 @@ export default async function ProdutosPage() {
 
   const podeEditar = await temAcessoModulo(role ?? "", "produtos", "escrever");
 
+  // ── Estrangulamento pela tela ────────────────────────────────────────────
+  // Com PRODUTOS_NO_V2=1, esta pagina passa a mostrar a TELA do V2 dentro de um
+  // iframe, mantendo o menu e o cabecalho do V1 em volta. Sem a variavel nada
+  // muda e a tela antiga continua — e esse o caminho de volta, sem mexer em
+  // codigo.
+  //
+  // 🔴 A permissao ja foi conferida acima (produtos.ler / .escrever). O iframe
+  // NAO herda sessao: quem autentica do outro lado e a ponte do Supabase no
+  // back do V2. Sem SUPABASE_JWT_SECRET la, esta tela pede login de novo.
+  //
+  // O ?embutido=1 faz o V2 esconder o menu dele (src/layout/embutido.ts no
+  // erp_front) — sem isso aparecem dois menus, um dentro do outro.
+  if (process.env.PRODUTOS_NO_V2 === "1") {
+    const urlV2 = process.env.URL_FRONT_V2 ?? "https://homolog.alisson.api.br";
+    return (
+      <iframe
+        src={`${urlV2}/produtos?embutido=1`}
+        title="Produtos (V2)"
+        style={{ width: "100%", height: "calc(100vh - 120px)", border: 0 }}
+      />
+    );
+  }
+
   // Admins veem tudo — não precisa buscar config
   if (isFullAccess(role ?? "")) {
     return <ProdutosClient podeEditar={podeEditar} role={role ?? ""} camposVisiveis={TODOS_VISIVEIS} />;
