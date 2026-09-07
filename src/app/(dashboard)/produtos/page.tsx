@@ -40,7 +40,7 @@ export default async function ProdutosPage() {
   // O ?embutido=1 faz o V2 esconder o menu dele (src/layout/embutido.ts no
   // erp_front) — sem isso aparecem dois menus, um dentro do outro.
   if (process.env.PRODUTOS_NO_V2 === "1") {
-    const urlV2 = process.env.URL_FRONT_V2 ?? "https://homolog.alisson.api.br";
+    const urlV2 = process.env.URL_FRONT_V2 ?? "https://homolog-v2.alissonjoias.com.br";
     return (
       <iframe
         src={`${urlV2}/produtos?embutido=1`}

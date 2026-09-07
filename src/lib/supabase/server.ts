@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import { comDominio } from "./cookie-dominio";
 import { cookies } from "next/headers";
 import type { User } from "@supabase/supabase-js";
 
@@ -32,7 +33,7 @@ export async function createServerSupabase() {
         setAll(cookiesToSet) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
+              cookieStore.set(name, value, comDominio(options ?? {}))
             );
           } catch {
             // Server Component — ignore
