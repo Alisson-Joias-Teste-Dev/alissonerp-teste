@@ -16,7 +16,13 @@
  * Vazio ou ausente = comportamento de antes (cookie só no host atual). É esse
  * o caminho de volta, e é por isso que é variável e não constante no código.
  */
-const bruto = process.env.COOKIE_DOMAIN?.trim();
+// 🔴 NEXT_PUBLIC_ NAO E ENFEITE: quem grava o cookie no LOGIN e o cliente de
+// NAVEGADOR (`(auth)/login/page.tsx:38`), e no navegador so existem as
+// variaveis com esse prefixo — o Next as assa no bundle em tempo de build.
+// Com `COOKIE_DOMAIN` sozinho, o servidor gravava com dominio e o login
+// gravava sem: o cookie do login vencia, e a tela do V2 nao o enxergava.
+// A segunda leitura mantem quem ja usava a variavel antiga no servidor.
+const bruto = (process.env.NEXT_PUBLIC_COOKIE_DOMAIN ?? process.env.COOKIE_DOMAIN)?.trim();
 export const DOMINIO_COOKIE: string | undefined = bruto ? bruto : undefined;
 
 /** Acrescenta o domínio às opções do cookie, quando houver um configurado. */
