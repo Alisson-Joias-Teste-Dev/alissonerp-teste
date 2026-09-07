@@ -27,6 +27,30 @@ export default async function PrecificacaoPage() {
 
   if (!isPrecificacaoAccess(role)) redirect("/");
 
+  // ── Estrangulamento pela tela ────────────────────────────────────────────
+  // Com PRECIFICACAO_NO_V2=1, esta pagina mostra a TELA DO V2 dentro de um
+  // iframe, mantendo o menu do V1 em volta. Sem a variavel nada muda — e esse
+  // o caminho de volta, sem mexer em codigo.
+  //
+  // 🔴 O QUE O V2 NAO TEM, e sai daqui (decisao do Jonathan, 07/09/2026,
+  // depois de ver a lista): as abas "Cotacoes" (existe em tela propria do V2,
+  // /cotacoes), "Regras" e "Pendentes". A ultima e a mais sensivel: e onde
+  // hoje se APROVA alteracao de markup, com historico. O V2 ganha em troca a
+  // aba "Auditoria" (quem mudou preco), que o V1 nao tem.
+  //
+  // A permissao continua conferida aqui pelo V1 (isPrecificacaoAccess). Quem
+  // autentica do outro lado e a ponte do Supabase no back do V2.
+  if (process.env.PRECIFICACAO_NO_V2 === "1") {
+    const urlV2 = process.env.URL_FRONT_V2 ?? "https://homolog-v2.alissonjoias.com.br";
+    return (
+      <iframe
+        src={`${urlV2}/precificacao?embutido=1`}
+        title="Precificação (V2)"
+        className="block w-full border-0 h-[calc(100vh-3.5rem)] md:h-screen"
+      />
+    );
+  }
+
   // REGRA DE NEGÓCIO: quem aprova é o(s) UUID(s) configurado(s) em Configurações ›
   // Aprovadores › "Precificação" (política config-first — 03b-config-first-estrito.md),
   // não mais um cargo fixo. Calculado aqui (server) e passado como prop pro client
