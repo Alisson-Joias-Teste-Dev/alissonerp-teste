@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
+import { invalidarCacheAuth } from "@/lib/auth-server";
 
 const UserPostSchema = z.object({
   nome: z.string().min(1, "obrigatório"),
@@ -160,6 +161,10 @@ export async function POST(req: NextRequest) {
       updated_at = now()
     WHERE id = ${novoUser.id as string}::uuid
   `;
+
+  // INVALIDACAO DE CACHE: defensivo. O id e novo, entao normalmente nao ha nada
+  // em cache — mas garante estado limpo caso o mesmo uuid seja reaproveitado.
+  invalidarCacheAuth(novoUser.id as string);
 
   return NextResponse.json({
     success: true,

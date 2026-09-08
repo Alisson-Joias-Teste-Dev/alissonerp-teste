@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
+import { invalidarCachePermissoesRole } from "@/lib/permissoes";
 
 const PermissoesPatchSchema = z.object({
   changes: z.array(z.object({
@@ -223,6 +224,13 @@ export async function PATCH(req: NextRequest) {
             pode_escrever = EXCLUDED.pode_escrever,
             atualizado_em = now()
     `;
+  }
+
+  // INVALIDACAO DE CACHE: temAcessoModulo guarda a resposta por 60s por (role,modulo).
+  // Limpa so os cargos realmente alterados neste PATCH.
+  // Sem isto, o cargo continuaria com o acesso antigo por ate 60s.
+  for (const role of new Set(updates.map((u) => u.role))) {
+    invalidarCachePermissoesRole(role);
   }
 
   return NextResponse.json({ ok: true, atualizados: updates.length });
