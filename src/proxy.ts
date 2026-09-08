@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import { comDominio } from "./lib/supabase/cookie-dominio";
 import { NextResponse, type NextRequest } from "next/server";
 
 // ─── Tiny OAuth2 keepalive (server-side, independente de admin logado) ──────────
@@ -204,7 +205,7 @@ export async function proxy(request: NextRequest) {
           );
           supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
+            supabaseResponse.cookies.set(name, value, comDominio(options ?? {}))
           );
         },
       },
