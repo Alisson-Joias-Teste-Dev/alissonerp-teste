@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { apagarCookieDeSessaoPresoAoHostNoNavegador } from "@/lib/supabase/cookie-preso-ao-host";
 
 const C = {
   esmeralda: "#184036",
@@ -34,6 +35,12 @@ function LoginForm() {
     setErro("");
     setLoading(true);
 
+    // 🔴 ANTES de autenticar, nao depois: apaga o cookie de sessao preso ao
+    // host, senao ele convive com o do dominio-pai que este login vai gravar
+    // e o `@supabase/ssr` remonta a sessao partida misturando os dois — token
+    // corrompido, 403 no GoTrue e menu vazio. Medido na producao em
+    // 08/09/2026. Ver src/lib/supabase/cookie-preso-ao-host.ts.
+    apagarCookieDeSessaoPresoAoHostNoNavegador();
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithPassword({ email, password: senha });
 
