@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
+import { invalidarCachePermissoesUsuario } from "@/lib/permissoes";
 
 const ACOES_VALIDAS = ["abrir_purificacao", "concluir_purificacao", "abrir_ligacao", "concluir_ligacao", "editar_teor_ligacao"] as const;
 
@@ -69,6 +70,11 @@ export async function PATCH(req: NextRequest) {
       DO UPDATE SET permitido = ${permitido}, updated_at = now()
     `;
   }
+
+  // INVALIDACAO DE CACHE: temPermissao guarda a resposta por 60s (cache-memoria).
+  // Sem esta linha, a permissao recem-salva no painel so valeria depois de 60s
+  // e o operador acharia que o sistema ignorou a mudanca.
+  invalidarCachePermissoesUsuario(user_id);
 
   return NextResponse.json({ ok: true });
 }
