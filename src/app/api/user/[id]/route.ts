@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isFullAccess } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
+import { invalidarCacheAuth } from "@/lib/auth-server";
 
 const UserPatchSchema = z.object({
   nome: z.string().optional(),
@@ -246,6 +247,11 @@ export async function PATCH(
       WHERE id = ${id}::uuid
     `;
   }
+
+  // INVALIDACAO DE CACHE: requireAuth guarda role/ativo por 60s (cache-memoria).
+  // Sem esta linha, promover, rebaixar ou DESATIVAR alguem so faria efeito depois
+  // de 60s — um funcionario demitido continuaria operando o ERP nesse intervalo.
+  invalidarCacheAuth(id);
 
   // Retornar usuário atualizado
   const [updated] = await sql`

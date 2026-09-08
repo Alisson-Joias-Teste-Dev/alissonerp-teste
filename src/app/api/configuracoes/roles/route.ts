@@ -4,6 +4,7 @@ import sql from "@/lib/db";
 import { authOr401 } from "@/lib/auth-server";
 import { isFullAccess } from "@/lib/roles";
 import { zodError } from "@/lib/schemas/common";
+import { invalidarCachePermissoesRole } from "@/lib/permissoes";
 
 const RolePostSchema = z.object({
   nome: z.string().min(1, "obrigatório"),
@@ -84,6 +85,10 @@ export async function POST(req: NextRequest) {
       ON CONFLICT (role, modulo) DO NOTHING
     `;
   }
+
+  // INVALIDACAO DE CACHE: defensivo. O cargo e novo, mas se o mesmo nome ja
+  // existiu antes pode haver resposta velha em cache (temAcessoModulo, 60s).
+  invalidarCachePermissoesRole(nome);
 
   return NextResponse.json({ success: true, role });
 }
