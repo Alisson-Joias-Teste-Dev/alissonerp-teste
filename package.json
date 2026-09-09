@@ -63,7 +63,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "exceljs": "^4.4.0",
-    "fs-extra": "^11.3.4",
+    "fs-extra": "^11.4.0",
     "inquirer": "^13.4.2",
     "pg": "^8.20.0",
     "tailwindcss": "^4",
