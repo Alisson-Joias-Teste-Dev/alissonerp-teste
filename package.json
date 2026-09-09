@@ -38,7 +38,7 @@
     "lucide-react": "^0.577.0",
     "mercadopago": "^2.12.0",
     "next": "16.1.6",
-    "postgres": "^3.4.8",
+    "postgres": "^3.4.9",
     "qrcode": "^1.5.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
